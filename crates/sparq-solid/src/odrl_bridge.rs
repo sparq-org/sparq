@@ -137,17 +137,17 @@
 use crate::authindex::{Mode, PUBLIC};
 use crate::{AUTH_BRIDGED_GRAPH, AUTH_GRAPH, AUTH_NS, SOLIDX_NS};
 use oxrdf::{Literal, NamedNode, Term};
-use sparq_core::dict::Dict;
+use sparq_core::dict::{is_inline, Dict, Id, TermParts};
+use sparq_core::meter::{Dim, TermRef};
 use sparq_core::Graph;
 use sparq_policy::{
-    conflict_admissibility, evaluate, matched_prohibition, parse_policy_str,
+    conflict_admissibility, evaluate, matched_prohibition, parse_policy_metered,
     prohibition_status, Permit, ProhibitionStatus, Request, Rule, ValidatedPolicy,
 };
 use sparq_reason::n3::compiled::{
-    compile, compile_with_cycles, intern_facts, CompiledRuleSet,
+    compile, compile_with_cycles, CompiledRuleSet,
 };
-use sparq_reason::NegationCycles;
-use std::fmt::Write as _;
+use sparq_reason::{ClosureLimits, NegationCycles};
 use std::sync::OnceLock;
 
 /// Stratum A0 — the operand/combinator-arity guard whose `odrlx:shape
@@ -1786,18 +1786,12 @@ pub(crate) mod count {
 /// # Injection safety
 ///
 /// `policy_ttl` is parsed **strictly as Turtle** first (N3 implication rules
-/// `=>`, quoted graphs, and every other Turtle-extension construct are syntax
-/// errors → `Err`), and only the parsed ground terms are re-serialized — with
-/// IRI validation and literal escaping — into the reasoner input. The raw text
-/// never reaches the reasoner — the strata are compiled separately, from `const`
-/// rule text, and the policy/request facts enter through a fact-ONLY interner
-/// (`sparq_reason::n3::compiled::intern_facts`) that rejects outright any document
-/// carrying rules — so a crafted policy cannot smuggle rules or
-/// out-of-band triples that derive `auth:*` grants directly. The request is
-/// serialized the same way, as validated RDF terms (`<urn:odrl-req>` subject,
-/// `odrl:dateTime` for the temporal evidence): a request field that is not a
-/// valid IRI (embedded `>`, quote, whitespace, …) is an `Err`, never an
-/// interpolated triple.
+/// `=>`, formulae and every other Turtle-extension construct are syntax errors),
+/// then validated as ground policy facts. The loaded dictionary and triple ids
+/// enter the compiled reasoner directly; neither policy nor request facts are
+/// parsed as N3 text. The strata are compiled separately from `const` rule text.
+/// Request IRIs are validated with [`NamedNode::new`], and request time retains
+/// the canonical UTC guard below. Policy data cannot introduce reasoner rules.
 ///
 /// Parsing alone does NOT make caller facts trusted: strict Turtle can still
 /// *assert* engine-owned ground facts — an `auth:*` grant triple, an internal
@@ -1845,7 +1839,13 @@ pub fn materialize_odrl_n3(
     policy_ttl: &str,
     request: &Request,
 ) -> Result<BridgeOutcome, String> {
-    materialize_odrl_n3_with_budget(graph, policy_ttl, request, crate::default_auth_budget())
+    #[cfg(test)]
+    let before = bridge_golden::graph_snapshot(graph);
+    let result =
+        materialize_odrl_n3_with_budget(graph, policy_ttl, request, crate::default_auth_budget());
+    #[cfg(test)]
+    bridge_golden::check(policy_ttl, request, before, graph, &result);
+    result
 }
 
 /// [`materialize_odrl_n3`] under the whole-decision budget `budget` rather than
@@ -1857,9 +1857,10 @@ pub fn materialize_odrl_n3(
 /// with ([`crate::PodStore::auth_budget`]), so a lowered budget is honoured on this lane as
 /// it is on the WAC and ACP ones; `materialize_odrl_n3` uses the default.
 ///
-/// The input-byte and resource-enumeration fields of `budget` do not apply here: this lane
-/// assembles its facts from `policy_ttl` and `request` rather than from a pod's control
-/// documents, so it runs no resource enumeration and reads no documents.
+/// Source bytes are charged before Turtle parsing. Policy terms, parser allocations
+/// and assembled policy/request facts share the input-byte and input-fact caps;
+/// individual terms retain `max_input_term_bytes`. No resources are enumerated.
+/// Use [`crate::PodStore::materialize_odrl_n3`] to apply a store's closure limits too.
 ///
 /// # Errors
 ///
@@ -1871,16 +1872,141 @@ pub fn materialize_odrl_n3_with_budget(
     request: &Request,
     budget: crate::AuthBudget,
 ) -> Result<BridgeOutcome, String> {
-    let deadline = crate::budget::MaterializeDeadline::new(budget);
-    deadline.check()?;
-    // 0. STRICT Turtle parse + ground-term re-serialization (injection guard), then
-    //    the canonical-dateTime / prohibition-scope validation (fail-closed).
-    let policy_graph = Graph::load_dataset(policy_ttl, "turtle").map_err(|e| {
-        format!("policy is not strict Turtle (N3/Turtle-extension constructs are rejected): {}", e)
+    materialize_odrl_n3_limited(
+        graph,
+        policy_ttl,
+        request,
+        budget,
+        crate::materialize::default_auth_limits(),
+    )
+    .map(|(outcome, _)| outcome)
+    .map_err(N3BridgeError::message)
+}
+
+impl crate::PodStore {
+    /// Bridge an ODRL policy under this store's input, decision and closure limits.
+    /// Refresh the store's authorization index after a successful materialization.
+    /// # Errors
+    /// As [`materialize_odrl_n3_with_budget`]. A refusal leaves the graph unchanged.
+    pub fn materialize_odrl_n3(
+        &mut self,
+        policy_ttl: &str,
+        request: &Request,
+    ) -> Result<BridgeOutcome, String> {
+        let budget = self.auth_budget;
+        let limits = self.auth_limits;
+        let Some(view) = self.grant_view() else {
+            return Ok(BridgeOutcome::default());
+        };
+        let result = materialize_odrl_n3_limited(view, policy_ttl, request, budget, limits);
+        let (outcome, policy) = match result {
+            Ok(result) => result,
+            Err(N3BridgeError::Prepare(error)) => {
+                return Err(match crate::auth_allowance_refusal(&error) {
+                    Some(
+                        crate::AuthAllowance::TotalJoinRows
+                        | crate::AuthAllowance::JoinRows
+                        | crate::AuthAllowance::RoundsOrFacts
+                        | crate::AuthAllowance::TermBytes,
+                    ) => crate::materialize::allowance_refusal(
+                        crate::AuthAllowance::DecisionWork,
+                        &error,
+                    ),
+                    _ => error,
+                });
+            }
+            Err(N3BridgeError::Write(error)) => return self.grant_write_result(Err(error)),
+        };
+        if outcome.granted || outcome.prohibited {
+            self.bridge_ledger
+                .record(&policy, request, BridgeKind::Policy);
+            self.reindex_with(crate::ReindexScope::Full);
+        }
+        Ok(outcome)
+    }
+}
+
+#[cfg(test)]
+std::thread_local! {
+    static SOURCE_PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn load_policy_metered(
+    source: &str,
+    ledger: &mut crate::budget::AuthLedger,
+) -> Result<Graph, String> {
+    ledger.core().close_document();
+    ledger
+        .core()
+        .charge(Dim::SourceBytes, source.len())
+        .map_err(|e| ledger.refusal(e, Dim::SourceBytes, "ODRL policy"))?;
+    #[cfg(test)]
+    SOURCE_PARSES.with(|count| count.set(count.get() + 1));
+    // Core parsing currently fills its dictionary and row buffer before these
+    // checks. Count every parsed quad, including duplicates, before index building.
+    let (dict, triples) = Graph::parse_to_triples(source, "turtle").map_err(|e| {
+        format!(
+            "policy is not strict Turtle (N3/Turtle-extension constructs are rejected): {}",
+            e
+        )
     })?;
-    deadline.check()?;
-    let policy_triples = crate::loader::graph_triples(&policy_graph);
-    deadline.check()?;
+    ledger.open()?;
+    for triple in &triples {
+        for id in triple {
+            ledger.stored_term("ODRL policy", &dict, *id)?;
+        }
+        ledger
+            .core()
+            .charge(Dim::Facts, 1)
+            .map_err(|e| ledger.refusal(e, Dim::Facts, "ODRL policy"))?;
+    }
+    let graph = Graph::from_parts(dict, triples);
+    Ok(graph)
+}
+
+enum N3BridgeError {
+    Prepare(String),
+    Write(String),
+}
+
+impl N3BridgeError {
+    fn message(self) -> String {
+        match self {
+            Self::Prepare(error) | Self::Write(error) => error,
+        }
+    }
+}
+
+impl From<String> for N3BridgeError {
+    fn from(error: String) -> Self {
+        Self::Prepare(error)
+    }
+}
+
+fn materialize_odrl_n3_limited(
+    graph: &mut Graph,
+    policy_ttl: &str,
+    request: &Request,
+    budget: crate::AuthBudget,
+    limits: ClosureLimits,
+) -> Result<(BridgeOutcome, ValidatedPolicy), N3BridgeError> {
+    let mut ledger = crate::budget::AuthLedger::new(budget);
+    // Configure the policy parser's fixed depth/node guards on the same counters,
+    // before any work is charged. Its query shapes are linear in admitted facts.
+    let policy_limits = sparq_policy::default_policy_limits();
+    let mut core_limits = *ledger.core().limits();
+    core_limits.source_bytes = budget.max_input_bytes;
+    core_limits.depth = policy_limits.depth;
+    core_limits.nodes = policy_limits.nodes;
+    core_limits.query_rows = policy_limits.query_rows;
+    *ledger.core() = sparq_core::meter::Ledger::new(core_limits);
+    ledger.checkpoint()?;
+    // The source charge precedes the only Turtle parser invocation.
+    let policy_graph = load_policy_metered(policy_ttl, &mut ledger)?;
+    ledger.checkpoint()?;
+    let policy_triples =
+        crate::loader::graph_triples_metered(&policy_graph, "ODRL policy", &mut ledger)?;
+    ledger.checkpoint()?;
 
     // 0a. Run the SAME `odrl:conflict` admissibility guard every Rust
     //     materialise entry point runs, FIRST. This call previously skipped it entirely,
@@ -1892,10 +2018,11 @@ pub fn materialize_odrl_n3_with_budget(
     //     same policies — including the CONDITIONAL `odrl:invalid` case, which is
     //     admissible only when no permission/prohibition conflict is detected.
     //
-    //     The policy is re-parsed into the `sparq_policy` model for this: a policy the
+    //     The loaded graph is parsed into the `sparq_policy` model for this: a policy the
     //     Rust evaluator cannot even parse is refused here too (strictly more restrictive
     //     than materialising from a shape only one path understands).
-    let parsed_policy = parse_policy_str(policy_ttl, "turtle").map_err(|e| {
+    ledger.core().close_document();
+    let parsed_policy = parse_policy_metered(&policy_graph, ledger.core()).map_err(|e| {
         format!(
             "policy does not parse as an ODRL policy for the Rust reference evaluator \
              ({}); the N3 path refuses what the reference path cannot read (fail-closed)",
@@ -1903,13 +2030,12 @@ pub fn materialize_odrl_n3_with_budget(
         )
     })?;
     if let Some(refusal) = refuse_unimplementable_conflict(&parsed_policy) {
-        return Err(refusal.reasons.join("; "));
+        return Err(refusal.reasons.join("; ").into());
     }
 
     validate_policy_for_n3(&policy_triples)?;
-    deadline.check()?;
-    let policy_facts = triples_to_n3(&policy_triples);
-    let req_n3 = serialize_request_n3(request)?;
+    ledger.checkpoint()?;
+    validate_request(request)?;
 
     // sq-zgbso.5 — the five strata, in evaluation order:
     //   A0: the operand/combinator-arity guard (odrlx:shape odrlx:Ambiguous) the
@@ -1927,8 +2053,27 @@ pub fn materialize_odrl_n3_with_budget(
     // unchanged: this is a behaviour-identical switch of the evaluation seam, and
     // `tests/odrl_n3_differential.rs` is the oracle that says so.
     let rules = odrl_rules()?;
-    let mut dict = Dict::new();
-    let mut closure = intern_facts(&mut dict, &format!("{}\n{}", policy_facts, req_n3))?;
+    drop(policy_triples);
+    let mut closure = Vec::new();
+    let scan = policy_graph.store().scan(&[None, None, None]);
+    // The former reader completed syntax validation before interning any fact.
+    for row in scan.rows.iter() {
+        for id in scan.to_spo(row) {
+            validate_legacy_input_syntax(policy_graph.dict(), id)?;
+        }
+    }
+    for row in scan.rows.iter() {
+        let triple = scan.to_spo(row);
+        for id in triple {
+            validate_legacy_input_term(policy_graph.dict(), id)?;
+            ledger.stored_term("ODRL policy", policy_graph.dict(), id)?;
+        }
+        ledger.reserve(&mut closure, 1, Dim::Facts)?;
+        closure.push(triple);
+    }
+    drop(scan);
+    let mut dict = policy_graph.into_dict();
+    intern_request(&mut dict, &mut closure, request, &mut ledger)?;
     // Under the authorization reasoning allowance, as the WAC/ACP strata are: these strata
     // derive `auth:*` grants and denies too, and nothing is written to `graph` until every
     // one of them has returned, so a refusal leaves the view in force untouched.
@@ -1937,14 +2082,13 @@ pub fn materialize_odrl_n3_with_budget(
     // charges go into one whole-decision ledger that bounds their aggregate
     // (`crate::AuthBudget`); otherwise this lane could spend five times the allowance a
     // single-stratum WAC view can.
-    let mut work = crate::budget::AuthLedger::with_deadline(budget, deadline);
     for stratum in rules {
         closure = crate::materialize::auth_eval(
             &mut dict,
             &closure,
             stratum,
-            crate::materialize::default_auth_limits(),
-            &mut work,
+            limits,
+            &mut ledger,
         )?;
     }
 
@@ -1994,15 +2138,16 @@ pub fn materialize_odrl_n3_with_budget(
         }
     }
 
-    deadline.check()?;
+    ledger.checkpoint()?;
     if !deny_triples.is_empty() {
-        append_bridged_triples(graph, &deny_triples)?;
+        append_bridged_triples(graph, &deny_triples).map_err(N3BridgeError::Write)?;
     }
     // The rules read a prohibition whose constraint has no evidence (no clock, no
     // purpose) as not applying, so they derive no deny for it. The reference path keeps
     // such a prohibition in force; materialize its deny too, so an existing grant for
     // the same party is carved out here exactly as on the Rust path.
-    let reference = materialize_prohibition(graph, &parsed_policy, request)?;
+    let reference =
+        materialize_prohibition(graph, &parsed_policy, request).map_err(N3BridgeError::Write)?;
     if let Some(found) = reference.deny_triple {
         let t = triple_of(&found.0, &found.1, &found.2);
         if !deny_triples.contains(&t) {
@@ -2011,14 +2156,16 @@ pub fn materialize_odrl_n3_with_budget(
         deny_triple = Some(found);
     }
     let mut out = match permitted {
-        Some((permit, _)) if derived_grant => emit_allow(graph, permit)?,
+        Some((permit, _)) if derived_grant => {
+            emit_allow(graph, permit).map_err(N3BridgeError::Write)?
+        }
         _ => BridgeOutcome::default(),
     };
     out.prohibited = deny_triple.is_some();
     out.deny_triple = deny_triple;
     out.emitted.extend(deny_triples);
     out.reasons.extend(withheld);
-    Ok(out)
+    Ok((out, parsed_policy))
 }
 
 /// The `xsd:dateTime` datatype IRI (canonical-subset validation on the N3 path).
@@ -2083,7 +2230,7 @@ fn objects_of<'a>(
 const RESERVED_IRI_PREFIXES: [&str; 2] =
     ["https://sparq.dev/ns/", "http://www.w3.org/2000/10/swap/"];
 
-/// The reserved request subject IRI `serialize_request_n3` emits — the ONLY
+/// The reserved request subject IRI `intern_request` emits — the ONLY
 /// legitimate source of request facts on the N3 path.
 const REQUEST_IRI: &str = "urn:odrl-req";
 
@@ -2414,41 +2561,81 @@ fn prohibition_atomic_supported(triples: &[[Term; 3]], c: &Term) -> Result<(), S
     }
 }
 
-/// Serialize parsed ground triples as N-Triples-style N3 facts for the reasoner
-/// input — `oxrdf`'s `Display` does the IRI/literal escaping, so no policy-
-/// controlled string reaches the source unescaped.
-fn triples_to_n3(triples: &[[Term; 3]]) -> String {
-    let mut out = String::with_capacity(triples.len() * 64);
-    for t in triples {
-        let _ = writeln!(out, "{} {} {} .", t[0], t[1], t[2]);
+const RDF_NIL_IRI: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#nil";
+
+fn validate_legacy_input_syntax(dict: &Dict, mut id: Id) -> Result<(), String> {
+    loop {
+        if is_inline(id) {
+            return Ok(());
+        }
+        match dict.term_parts(id) {
+            TermParts::Lit {
+                lang: Some(lang), ..
+            } if lang.contains("--") => {
+                return Err(format!("invalid language tag '@{lang}'"));
+            }
+            TermParts::Triple([_, _, object]) => id = object,
+            _ => return Ok(()),
+        }
     }
-    out
 }
 
-/// Serialize a `Request` as N3 ground facts using `<urn:odrl-req>` as the IRI.
-///
-/// Every field is serialized as a VALIDATED RDF term — IRIs through
-/// [`NamedNode::new`] (an embedded `>`, quote, or whitespace is an `Err`, never
-/// an injected triple) and the time as an escaped `xsd:dateTime` literal
-/// restricted to the canonical UTC subset the strata compare correctly.
-fn serialize_request_n3(req: &Request) -> Result<String, String> {
-    fn iri(value: &str, what: &str) -> Result<NamedNode, String> {
-        NamedNode::new(value).map_err(|e| {
-            format!(
-                "request {} {:?} is not a valid IRI ({}); refusing to serialize it \
-                 into N3 (fail-closed)",
-                what, value, e
-            )
-        })
+// The former N3 fact reader interpreted rdf:nil as an unrepresentable first-class
+// empty list. Keep that refusal, including inside triple terms, without text parsing.
+fn validate_legacy_input_term(dict: &Dict, id: Id) -> Result<(), String> {
+    let nil = |id| {
+        !is_inline(id)
+            && matches!(dict.term_parts(id),
+        TermParts::Iri { prefix, suffix } if RDF_NIL_IRI.strip_prefix(prefix) == Some(suffix))
+    };
+    let mut current = id;
+    let mut nested = false;
+    loop {
+        if is_inline(current) {
+            return Ok(());
+        }
+        if nil(current) {
+            return Err(if nested {
+                "intern_facts: term ( ) inside a quoted triple has no dictionary representation"
+            } else {
+                "intern_facts: term ( ) has no dictionary representation"
+            }
+            .into());
+        }
+        match dict.term_parts(current) {
+            TermParts::Triple([s, p, o]) => {
+                if nil(s) {
+                    return Err("intern_facts: quoted-triple subject ( ) is not an IRI or blank node (RDF 1.2 triple terms admit no other subject kind)".into());
+                }
+                if nil(p) {
+                    return Err("intern_facts: quoted-triple predicate ( ) is not an IRI (RDF 1.2 triple terms admit no other predicate kind)".into());
+                }
+                current = o;
+                nested = true;
+            }
+            _ => return Ok(()),
+        }
     }
-    let mut out = String::new();
-    let _ = writeln!(out, "<urn:odrl-req> a <{}Request> ;", ODRL_NS);
-    let _ = writeln!(out, "    <{}action> {} ;", ODRL_NS, iri(&req.action, "action")?);
+}
+
+// Validate in the same action / target / party / time order as the former serializer.
+fn request_iri<'a>(value: &'a str, what: &str) -> Result<oxrdf::NamedNodeRef<'a>, String> {
+    oxrdf::NamedNodeRef::new(value).map_err(|e| {
+        format!(
+            "request {} {:?} is not a valid IRI ({}); refusing to serialize it \
+             into N3 (fail-closed)",
+            what, value, e
+        )
+    })
+}
+
+fn validate_request(req: &Request) -> Result<(), String> {
+    request_iri(&req.action, "action")?;
     if let Some(target) = &req.target {
-        let _ = writeln!(out, "    <{}target> {} ;", ODRL_NS, iri(target, "target")?);
+        request_iri(target, "target")?;
     }
     if let Some(party) = &req.party {
-        let _ = writeln!(out, "    <{}assignee> {} ;", ODRL_NS, iri(party, "party")?);
+        request_iri(party, "party")?;
     }
     if let Some(v) = req.request_time() {
         let s = v.as_str();
@@ -2460,16 +2647,258 @@ fn serialize_request_n3(req: &Request) -> Result<String, String> {
                 s
             ));
         }
-        let lit = Literal::new_typed_literal(s, NamedNode::new_unchecked(XSD_DATETIME_IRI));
-        let _ = writeln!(out, "    <{}dateTime> {} ;", ODRL_NS, lit);
     }
-    let _ = writeln!(out, "    .");
-    Ok(out)
+    Ok(())
+}
+
+#[cfg(test)]
+fn push_input_fact(
+    dict: &mut Dict,
+    facts: &mut Vec<[Id; 3]>,
+    triple: &[Term; 3],
+    ledger: &mut crate::budget::AuthLedger,
+) -> Result<(), String> {
+    for term in triple {
+        ledger
+            .core()
+            .term(TermRef::from(term))
+            .map_err(|e| ledger.refusal(e, Dim::TermBytes, "ODRL input"))?;
+    }
+    ledger.reserve(facts, 1, Dim::Facts)?;
+    facts.push(triple.each_ref().map(|term| dict.intern(term)));
+    Ok(())
+}
+
+fn intern_request(
+    dict: &mut Dict,
+    facts: &mut Vec<[Id; 3]>,
+    req: &Request,
+    ledger: &mut crate::budget::AuthLedger,
+) -> Result<(), String> {
+    let mut push = |predicate: &str, value: &str, datatype: Option<&str>| {
+        if datatype.is_none() && value == RDF_NIL_IRI {
+            return Err("intern_facts: term ( ) has no dictionary representation".into());
+        }
+        let object = match datatype {
+            Some(datatype) => TermRef::Literal {
+                value,
+                datatype,
+                lang: None,
+            },
+            None => TermRef::Iri(value),
+        };
+        for term in [TermRef::Iri(REQUEST_IRI), TermRef::Iri(predicate), object] {
+            ledger
+                .core()
+                .term(term)
+                .map_err(|e| ledger.refusal(e, Dim::TermBytes, "ODRL request"))?;
+        }
+        ledger.reserve(facts, 1, Dim::Facts)?;
+        let object = match datatype {
+            Some(datatype) => dict.intern_lit(value, datatype, None),
+            None => dict.intern_iri(value),
+        };
+        facts.push([
+            dict.intern_iri(REQUEST_IRI),
+            dict.intern_iri(predicate),
+            object,
+        ]);
+        Ok::<(), String>(())
+    };
+    push(
+        "http://www.w3.org/1999/02/22-rdf-syntax-ns#type",
+        "http://www.w3.org/ns/odrl/2/Request",
+        None,
+    )?;
+    for (predicate, value) in [
+        (
+            "http://www.w3.org/ns/odrl/2/action",
+            Some(req.action.as_str()),
+        ),
+        ("http://www.w3.org/ns/odrl/2/target", req.target.as_deref()),
+        ("http://www.w3.org/ns/odrl/2/assignee", req.party.as_deref()),
+    ] {
+        if let Some(value) = value {
+            push(predicate, value, None)?;
+        }
+    }
+    if let Some(value) = req.request_time() {
+        push(
+            "http://www.w3.org/ns/odrl/2/dateTime",
+            value.as_str(),
+            Some(XSD_DATETIME_IRI),
+        )?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const METERED_POLICY: &str = "@prefix o: <http://www.w3.org/ns/odrl/2/> . <urn:p> o:permission <urn:r> . <urn:r> o:action o:read; o:target <urn:t>; o:assignee <urn:alice> .";
+
+    fn metered_request() -> Request {
+        Request::new(format!("{ODRL_NS}read"))
+            .on("urn:t")
+            .by("urn:alice")
+    }
+
+    #[test]
+    fn bridge_source_cap_precedes_the_only_turtle_parse() {
+        let mut graph = Graph::load_str("<urn:old> <urn:p> <urn:o> .", "turtle").unwrap();
+        let before = bridge_golden::graph_snapshot(&graph);
+        let mut budget = crate::default_auth_budget();
+        budget.max_input_bytes = 8;
+        // Invalid Turtle makes post-parse charging observably the wrong refusal.
+        SOURCE_PARSES.with(|count| count.set(0));
+        let err = materialize_odrl_n3_with_budget(
+            &mut graph,
+            "this source is invalid Turtle and past the cap",
+            &metered_request(),
+            budget,
+        )
+        .unwrap_err();
+        assert_eq!(
+            crate::auth_allowance_refusal(&err),
+            Some(crate::AuthAllowance::InputBytes),
+            "{err}"
+        );
+        SOURCE_PARSES.with(|count| assert_eq!(count.get(), 0, "refused source was parsed"));
+        assert_eq!(bridge_golden::graph_snapshot(&graph), before);
+    }
+
+    #[test]
+    fn input_facts_are_charged_per_parsed_quad_including_duplicates() {
+        let mut source = METERED_POLICY.to_owned();
+        for _ in 0..20 {
+            source.push_str(" <urn:unused> <urn:metadata> <urn:value> .");
+        }
+        let mut budget = crate::default_auth_budget();
+        budget.max_input_facts = 16;
+        let mut graph = Graph::new();
+        let result =
+            materialize_odrl_n3_with_budget(&mut graph, &source, &metered_request(), budget);
+        assert!(
+            result.is_err(),
+            "duplicate source quads escaped the fact cap"
+        );
+        assert_eq!(
+            crate::auth_allowance_refusal(&result.unwrap_err()),
+            Some(crate::AuthAllowance::InputFacts)
+        );
+        assert_eq!(graph.len(), 0);
+        assert!(graph.named().is_empty());
+    }
+
+    #[test]
+    fn source_bytes_do_not_consume_the_independent_term_byte_allowance() {
+        let mut budget = crate::default_auth_budget();
+        budget.max_input_bytes = 16 * 1024;
+        let mut source = METERED_POLICY.to_owned();
+        source.push_str("\n#");
+        source.extend(std::iter::repeat_n(
+            'x',
+            budget.max_input_bytes - source.len(),
+        ));
+        assert_eq!(source.len(), budget.max_input_bytes);
+        let result =
+            materialize_odrl_n3_with_budget(&mut Graph::new(), &source, &metered_request(), budget);
+        assert!(
+            result.as_ref().is_ok_and(|out| out.granted),
+            "source text consumed the term-byte allowance: {result:?}"
+        );
+    }
+
+    #[test]
+    fn bridge_policy_source_is_parsed_once() {
+        SOURCE_PARSES.with(|count| count.set(0));
+        let out = materialize_odrl_n3_with_budget(
+            &mut Graph::new(),
+            METERED_POLICY,
+            &metered_request(),
+            crate::default_auth_budget(),
+        )
+        .unwrap();
+        assert!(out.granted);
+        SOURCE_PARSES.with(|count| assert_eq!(count.get(), 1));
+    }
+
+    #[test]
+    fn store_odrl_lane_honours_lowered_closure_limits() {
+        let mut store = crate::PodStore::new(Graph::new());
+        assert!(
+            store
+                .materialize_odrl_n3(METERED_POLICY, &metered_request())
+                .unwrap()
+                .granted
+        );
+        let before = bridge_golden::graph_snapshot(store.graph());
+        let mut limits = store.auth_limits();
+        limits.max_facts = 1;
+        store.set_auth_limits(limits);
+        let result = store.materialize_odrl_n3(METERED_POLICY, &metered_request());
+        assert!(result.is_err(), "lowered store limits were ignored");
+        let err = result.unwrap_err();
+        assert_eq!(
+            crate::auth_allowance_refusal(&err),
+            Some(crate::AuthAllowance::DecisionWork),
+            "{err}"
+        );
+        assert_eq!(bridge_golden::graph_snapshot(store.graph()), before);
+    }
+
+    #[test]
+    fn request_facts_are_charged_before_dictionary_or_row_growth() {
+        for (term_cap, fact_cap, kind) in [
+            (usize::MAX, 0, crate::AuthAllowance::InputFacts),
+            (1, usize::MAX, crate::AuthAllowance::InputTermBytes),
+        ] {
+            let mut budget = crate::default_auth_budget();
+            budget.max_input_term_bytes = term_cap;
+            budget.max_input_facts = fact_cap;
+            let mut ledger = crate::budget::AuthLedger::new(budget);
+            let mut dict = Dict::new();
+            let mut facts = Vec::new();
+            let result = intern_request(&mut dict, &mut facts, &metered_request(), &mut ledger);
+            assert!(result.is_err());
+            assert_eq!(
+                crate::auth_allowance_refusal(&result.unwrap_err()),
+                Some(kind)
+            );
+            assert!(facts.is_empty());
+            assert_eq!(dict.len(), 0, "the refused row must precede interning");
+        }
+    }
+
+    #[test]
+    fn direct_input_interning_preserves_legacy_literal_terms() {
+        let source = r#"@prefix x: <http://www.w3.org/2001/XMLSchema#> .
+            <urn:s> <urn:p> "07"^^x:integer, "+0.50"^^x:decimal,
+                "0"^^x:boolean, "1e0"^^x:double, "hello"@EN,
+                "quote\"slash\\line\n", "2026-01-01T00:00:00Z"^^x:dateTime ."#;
+        let graph = Graph::load_str(source, "turtle").unwrap();
+        let triples = crate::loader::graph_triples(&graph);
+        let text: String = triples
+            .iter()
+            .map(|t| format!("{} {} {} .\n", t[0], t[1], t[2]))
+            .collect();
+        let mut old_dict = Dict::new();
+        let old = sparq_reason::n3::compiled::intern_facts(&mut old_dict, &text).unwrap();
+        let mut new_dict = Dict::new();
+        let mut new = Vec::new();
+        let mut ledger = crate::budget::AuthLedger::new(crate::default_auth_budget());
+        for triple in &triples {
+            push_input_fact(&mut new_dict, &mut new, triple, &mut ledger).unwrap();
+        }
+        let terms = |dict: &Dict, facts: Vec<[Id; 3]>| {
+            facts
+                .into_iter()
+                .map(|t| t.map(|id| dict.term(id).to_string()))
+                .collect::<std::collections::BTreeSet<_>>()
+        };
+        assert_eq!(terms(&old_dict, old), terms(&new_dict, new));
+    }
 
     #[test]
     fn empty_view_removal_clears_all_in_memory_slots() {
@@ -2482,3 +2911,7 @@ mod tests {
         assert!(graph.named().is_empty());
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/support/odrl_bridge_golden.rs"]
+mod bridge_golden;
