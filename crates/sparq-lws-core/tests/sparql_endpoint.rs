@@ -575,6 +575,10 @@ struct ChurningSparq {
 
 #[async_trait::async_trait]
 impl SparqClient for ChurningSparq {
+    fn lifecycle(&self) -> std::sync::Arc<sparq_lws_core::store::Lifecycle> {
+        self.inner.lifecycle()
+    }
+
     fn call_timeout(&self) -> std::time::Duration {
         self.inner.call_timeout()
     }

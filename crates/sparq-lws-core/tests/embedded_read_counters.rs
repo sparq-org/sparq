@@ -379,6 +379,10 @@ impl<S: SparqClient> RawSeamCounter<S> {
 
 #[async_trait]
 impl<S: SparqClient> SparqClient for RawSeamCounter<S> {
+    fn lifecycle(&self) -> std::sync::Arc<sparq_lws_core::store::Lifecycle> {
+        self.inner.lifecycle()
+    }
+
     async fn replace_meta(
         &self,
         iri: &str,

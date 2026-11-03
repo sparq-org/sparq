@@ -315,6 +315,10 @@ impl<S: SparqClient> CountingSparqClient<S> {
 
 #[async_trait]
 impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
+    fn lifecycle(&self) -> std::sync::Arc<super::Lifecycle> {
+        self.inner.lifecycle()
+    }
+
     async fn reset_marker(
         &self,
         iri: &str,

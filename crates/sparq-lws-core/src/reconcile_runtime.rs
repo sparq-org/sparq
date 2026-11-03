@@ -38,6 +38,10 @@ impl<T> Clone for SharedStore<T> {
 
 #[async_trait]
 impl<T: SparqClient> SparqClient for SharedStore<T> {
+    fn lifecycle(&self) -> std::sync::Arc<sparq_lws_core::store::Lifecycle> {
+        self.0.lifecycle()
+    }
+
     async fn replace_meta_retaining(
         &self,
         iri: &str,

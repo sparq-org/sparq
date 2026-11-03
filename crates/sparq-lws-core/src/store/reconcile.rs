@@ -1231,6 +1231,10 @@ mod tests {
     }
     #[async_trait::async_trait]
     impl SparqClient for ToggleReferencedSparq {
+        fn lifecycle(&self) -> std::sync::Arc<crate::store::Lifecycle> {
+            unreachable!()
+        }
+
         async fn get_meta(&self, _: &str) -> Result<ResourceMeta, SparqError> {
             unreachable!()
         }
@@ -1615,6 +1619,10 @@ mod tests {
     }
     #[async_trait::async_trait]
     impl SparqClient for SecondCallFailsSparq {
+        fn lifecycle(&self) -> std::sync::Arc<crate::store::Lifecycle> {
+            unreachable!()
+        }
+
         async fn get_meta(&self, _: &str) -> Result<ResourceMeta, SparqError> {
             unreachable!()
         }
@@ -1801,6 +1809,10 @@ mod tests {
     struct FailingSparq;
     #[async_trait::async_trait]
     impl SparqClient for FailingSparq {
+        fn lifecycle(&self) -> std::sync::Arc<crate::store::Lifecycle> {
+            unreachable!()
+        }
+
         async fn get_meta(&self, _: &str) -> Result<ResourceMeta, SparqError> {
             unreachable!()
         }

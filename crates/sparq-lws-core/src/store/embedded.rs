@@ -264,6 +264,7 @@ pub struct EmbeddedSparqClient {
     /// talking to the same actor, so there is exactly ONE `Graph` and ONE serialisation point per
     /// construction.
     actor: Arc<GraphActor>,
+    lifecycle: Arc<super::Lifecycle>,
     /// The count of ENGINE ROUND-TRIPS this client has dispatched — one increment per
     /// [`Self::dispatch`], i.e. one per engine job sent to the actor. This is the embedded analogue
     /// of the HTTP client's network round-trips and the deterministic observability the beyond-50k
@@ -325,6 +326,7 @@ impl EmbeddedSparqClient {
     fn over(graph: Graph) -> Result<Self, SparqError> {
         Ok(Self {
             actor: Arc::new(GraphActor::spawn(graph)?),
+            lifecycle: Default::default(),
             round_trips: Arc::new(AtomicU64::new(0)),
         })
     }
@@ -633,6 +635,10 @@ impl EmbeddedSparqClient {
 
 #[async_trait]
 impl SparqClient for EmbeddedSparqClient {
+    fn lifecycle(&self) -> Arc<super::Lifecycle> {
+        self.lifecycle.clone()
+    }
+
     /// The graph is this process's: held in its memory, or opened from a directory it holds
     /// locked for as long as the graph lives ([`Graph::open`]).
     fn exclusive(&self) -> Result<(), SparqError> {
@@ -659,8 +665,13 @@ impl SparqClient for EmbeddedSparqClient {
         &self,
         iri: &str,
         value: i64,
-        _: &super::LifecycleGuard,
+        lease: &super::LifecycleGuard,
     ) -> Result<(), SparqError> {
+        if !lease.belongs_to(&self.lifecycle) {
+            return Err(SparqError::Backend(
+                "marker reset requires this backend's lifecycle lease".into(),
+            ));
+        }
         self.put_meta_unchecked(iri, super::sparq::marker_meta(&value.to_string()))
             .await
     }
