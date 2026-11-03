@@ -1059,6 +1059,7 @@ fn a_store_in_a_read_only_parent_opens_and_keeps_one_writer() {
         assert!(dir.join("sparq.lock").is_file(), "upgrade did not create the inside lock");
         assert!(would_block(Graph::open(&dir)), "a second writer got in");
         assert!(would_block(Graph::open_read_only(&dir)), "a reader got in beside the writer");
+        g.compact().expect("a clean compaction needs no outside directory swap");
         g.apply_delta(&[triple("x")], &[]).unwrap();
         for _ in 0..2 {
             let err = g.compact().unwrap_err();

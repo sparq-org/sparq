@@ -27,12 +27,12 @@ pub const SERVICE_MARKER_FRAGMENT: &str = "#high-water";
 
 /// Whether `iri` has the shape of the notification service's marker: an `http` or `https`
 /// origin (a host that is a registered name or a bracketed IPv6 address, no user information,
-/// and a port, if given, of digits alone) followed by exactly the service pool's container and
-/// [`SERVICE_MARKER_FRAGMENT`]. A storage has one marker, and its index entry has a slot of its
-/// own, admitted apart from every ceiling, so storing it never waits on room (no request can name
-/// it: it is a fragment). The in-memory index keeps that slot for one IRI alone, the first new
-/// marker stored while it is free; any other of this shape is admitted as an ordinary pool
-/// record, and stays one.
+/// and a port, if given, of digits alone) followed by a storage-root path without a query or
+/// fragment, the service pool's container and [`SERVICE_MARKER_FRAGMENT`]. A storage has one
+/// marker, and its index entry has a slot of its own, admitted apart from every ceiling, so
+/// storing it never waits on room (no request can name it: it is a fragment). The in-memory
+/// index keeps that slot for one IRI alone, the first new marker stored while it is free; any
+/// other of this shape follows the ordinary entry ceilings for its path.
 pub fn is_service_marker(iri: &str) -> bool {
     let Some(rest) = iri
         .strip_prefix("https://")
@@ -69,7 +69,10 @@ pub fn is_service_marker(iri: &str) -> bool {
         }
     };
     let port_ok = port.is_none_or(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
-    host_ok && port_ok && path.strip_prefix(SERVICE_POOL_PATH) == Some(SERVICE_MARKER_FRAGMENT)
+    let root = path
+        .strip_suffix(SERVICE_MARKER_FRAGMENT)
+        .and_then(|path| path.strip_suffix(SERVICE_POOL_PATH));
+    host_ok && port_ok && root.is_some_and(|root| !root.contains(['?', '#']))
 }
 
 /// Whether `host` is a non-empty RFC 3986 `reg-name`: unreserved characters, percent-encoded

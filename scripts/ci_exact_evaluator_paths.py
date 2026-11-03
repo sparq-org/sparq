@@ -13,7 +13,8 @@ EXACT_PREFIXES = (
     "crates/sparq-substrate/", "crates/sparq-canon/", "crates/sparq-query-protocol/",
     "crates/sparq-engine-serialize/", "crates/sparq-engine-service/", "crates/sparq-introspect/",
     "crates/sparq-jsonld/",
-    "vendor/spargebra/", "vendor/spargebra-shim/", "vendor/zk-sdk/", ".cargo/", "rust-toolchain",
+    "vendor/smallstr-shim/", "vendor/spargebra/", "vendor/spargebra-shim/", "vendor/zk-sdk/", ".cargo/",
+    "rust-toolchain",
 )
 EXACT_FILES = {
     "Cargo.toml", "Cargo.lock", ".github/workflows/zk-exact-evaluator.yml",
