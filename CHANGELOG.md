@@ -191,6 +191,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking — LWS capacity refusals:** subscription and access-request bounds now return the
+  same `429` response; service-pool exhaustion returns that response instead of `507`.
+  General storage refusals retain `507`. The new public `ServerError::ServicePoolFull`,
+  `BlobError::ServicePoolFull` and `SparqError::ServicePoolFull` variants require downstream
+  exhaustive matches to handle them. Notification recipients are selected on
+  a task the write response never awaits, using the subscriptions, grants and resource state
+  captured at commit.
+
 - **Breaking — sparq-lws-core:** LWS resource DELETE requires Read for `If-None-Match: *`.
   A non-reader's data DELETE with `If-Match: *` is treated as unconditional: settled present
   and absent targets answer `204`, subject to the same full-budget and set-aside-parent checks.
@@ -849,6 +857,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   serde_json's `raw_value` feature (#6911); sparq-engine-service drops `rustc-hash` (#6917).
 
 ### Fixed
+
+- LWS content-only PATCH retains metadata from its Read authorization check for
+  notification capture, skips LWS metadata lookups in open mode, and reads metadata for a
+  closed-mode owner only when a non-owner subscription exists or is registering. If the early
+  read was omitted, commit rechecks after capturing registration eligibility, including parent
+  and ancestor subscriptions registered during the write.
+
+- LWS quarantined access requests no longer take places from live requests; held-back and
+  quarantined subscriptions count only against the owner's total. Record settlements reserve
+  places per principal only for unknown outcomes in closed mode, while the shared bound
+  covers each whole change. Principal permit waits release the high-water gate and listing
+  locks; pending-listing claims preserve conditional tag checks through memory confirmation.
+  Subscriptions claim only their subscriber's listing, leaving whole-listing owner creates
+  available. Claims replace released listing guards; only the subscriber record's container
+  publication guard remains, preserving whole-listing conditional-create windows.
+  Notification selection retains request admission through webhook queueing, and delayed
+  record announcements retain a shared or maintenance place through that work. Those places
+  are released before stream publication waits. Pending stream publications have a separate
+  storage-wide delivery bound. Known outcomes release their principal permit before memory
+  confirmation.
+  Principal bookkeeping ends with the last change; withdrawal eligibility uses the state
+  captured at commit.
+  Stream deactivation uses its subscriber's settlement places, preserving the expiry
+  sweeper's maintenance places and closing the stream before durable removal.
 
 - **sparq-lws-core:** marker recognition includes path-based storage roots for generic store and raw index mutations.
 - **sparq-lws-core:** separately assembled composites over clones of an index share its lifecycle lease.

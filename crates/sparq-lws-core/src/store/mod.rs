@@ -153,7 +153,7 @@ use crate::error::{ServerError, ServerResult};
 /// A failed marker write, as the store reports it.
 fn marker_error(e: SparqError) -> ServerError {
     match e {
-        SparqError::QuotaExceeded => ServerError::InsufficientStorage,
+        SparqError::QuotaExceeded | SparqError::ServicePoolFull => ServerError::InsufficientStorage,
         SparqError::Unsettled { detail, fence } => ServerError::Unsettled { detail, fence },
         other => ServerError::Storage(format!("{other}")),
     }
@@ -797,7 +797,9 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
         let body = match self.blob.get_scoped(&scope, &meta.blob_key).await {
             Ok(body) => body,
             Err(BlobError::NotFound) => return Ok(None),
-            Err(BlobError::QuotaExceeded) => return Err(ServerError::InsufficientStorage),
+            Err(BlobError::QuotaExceeded | BlobError::ServicePoolFull) => {
+                return Err(ServerError::InsufficientStorage)
+            }
             Err(BlobError::Backend(msg)) => return Err(ServerError::Storage(msg)),
             Err(BlobError::UnknownDataKey) => {
                 return Err(ServerError::Storage("UnknownDataKey".into()));
@@ -1073,13 +1075,17 @@ impl CompositeStore<InMemorySparqClient, InMemoryBlobStore> {
     pub fn usage(&self) -> ServerResult<StoreUsage> {
         let blob = self.blob.usage().map_err(|error| match error {
             BlobError::NotFound => ServerError::Storage("blob usage lookup failed".into()),
-            BlobError::QuotaExceeded => ServerError::InsufficientStorage,
+            BlobError::QuotaExceeded | BlobError::ServicePoolFull => {
+                ServerError::InsufficientStorage
+            }
             BlobError::Backend(message) => ServerError::Storage(message),
             BlobError::UnknownDataKey => ServerError::Storage("UnknownDataKey".into()),
         })?;
         let indexed = self.sparq.usage().map_err(|error| match error {
             SparqError::NotFound => ServerError::Storage("index usage lookup failed".into()),
-            SparqError::QuotaExceeded => ServerError::InsufficientStorage,
+            SparqError::QuotaExceeded | SparqError::ServicePoolFull => {
+                ServerError::InsufficientStorage
+            }
             SparqError::Unsupported => ServerError::Storage("atomic operation unsupported".into()),
             SparqError::Backend(message) => ServerError::Storage(message),
             SparqError::Unsettled { detail, fence } => ServerError::Unsettled { detail, fence },
@@ -1209,7 +1215,9 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         match self.sparq.get_meta(iri).await {
             Ok(m) => Ok(Some(m)),
             Err(SparqError::NotFound) => Ok(None),
-            Err(SparqError::QuotaExceeded) => Err(ServerError::InsufficientStorage),
+            Err(SparqError::QuotaExceeded | SparqError::ServicePoolFull) => {
+                Err(ServerError::InsufficientStorage)
+            }
             Err(SparqError::Unsupported) => Err(map_sparq(SparqError::Unsupported)),
             Err(SparqError::Backend(e)) => Err(ServerError::Storage(e)),
             Err(SparqError::Unsettled { detail, fence }) => {
@@ -1254,7 +1262,9 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             .put_scoped(&self.blob_scope.scope(iri), &blob_key, body)
             .await
             .map_err(|e| match e {
-                BlobError::QuotaExceeded => ServerError::InsufficientStorage,
+                BlobError::QuotaExceeded | BlobError::ServicePoolFull => {
+                    ServerError::InsufficientStorage
+                }
                 other => ServerError::Storage(format!("{other}")),
             })?;
         let meta = ResourceMeta {
@@ -1324,6 +1334,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             .await
             .map_err(|e| match e {
                 BlobError::QuotaExceeded => ServerError::InsufficientStorage,
+                BlobError::ServicePoolFull => ServerError::ServicePoolFull,
                 other => ServerError::Storage(format!("{other}")),
             })?;
         let meta = ResourceMeta {
@@ -1347,7 +1358,10 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             }
             Err(e) => {
                 self.reclaim_failed_write(&meta.blob_key, &e).await;
-                Err(map_sparq(e))
+                Err(match e {
+                    SparqError::ServicePoolFull => ServerError::ServicePoolFull,
+                    other => map_sparq(other),
+                })
             }
         }
     }
@@ -1366,7 +1380,9 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             .put_scoped(&self.blob_scope.scope(iri), &blob_key, body)
             .await
             .map_err(|e| match e {
-                BlobError::QuotaExceeded => ServerError::InsufficientStorage,
+                BlobError::QuotaExceeded | BlobError::ServicePoolFull => {
+                    ServerError::InsufficientStorage
+                }
                 other => ServerError::Storage(format!("{other}")),
             })?;
         let meta = ResourceMeta {
@@ -1399,7 +1415,9 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
                 }
                 Err(match e {
                     SparqError::NotFound => ServerError::NotFound,
-                    SparqError::QuotaExceeded => ServerError::InsufficientStorage,
+                    SparqError::QuotaExceeded | SparqError::ServicePoolFull => {
+                        ServerError::InsufficientStorage
+                    }
                     SparqError::Unsupported => {
                         ServerError::Storage("atomic operation unsupported".into())
                     }
@@ -1597,7 +1615,9 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         let blob_key = match self.sparq.get_meta(iri).await {
             Ok(m) => Some(m.blob_key),
             Err(SparqError::NotFound) => None,
-            Err(SparqError::QuotaExceeded) => return Err(ServerError::InsufficientStorage),
+            Err(SparqError::QuotaExceeded | SparqError::ServicePoolFull) => {
+                return Err(ServerError::InsufficientStorage)
+            }
             Err(SparqError::Unsupported) => return Err(map_sparq(SparqError::Unsupported)),
             Err(SparqError::Backend(e)) => return Err(ServerError::Storage(e)),
             Err(SparqError::Unsettled { detail, fence }) => {
@@ -1698,7 +1718,9 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             .await
             .map_err(|e| match e {
                 SparqError::NotFound => ServerError::NotFound,
-                SparqError::QuotaExceeded => ServerError::InsufficientStorage,
+                SparqError::QuotaExceeded | SparqError::ServicePoolFull => {
+                    ServerError::InsufficientStorage
+                }
                 SparqError::Unsupported => {
                     ServerError::Storage("atomic operation unsupported".into())
                 }
@@ -1764,7 +1786,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
 fn map_sparq(e: SparqError) -> ServerError {
     match e {
         SparqError::NotFound => ServerError::NotFound,
-        SparqError::QuotaExceeded => ServerError::InsufficientStorage,
+        SparqError::QuotaExceeded | SparqError::ServicePoolFull => ServerError::InsufficientStorage,
         SparqError::Unsupported => ServerError::Storage("atomic operation unsupported".into()),
         SparqError::Backend(e) => ServerError::Storage(e),
         SparqError::Unsettled { detail, fence } => ServerError::Unsettled { detail, fence },

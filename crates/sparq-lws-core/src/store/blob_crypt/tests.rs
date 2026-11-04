@@ -206,8 +206,11 @@ impl SparqClient for ControlledIndex {
             0
         };
         let failure = || SparqError::Backend("private index detail".into());
-        if fault == 1 {
-            return Err(failure());
+        match fault {
+            1 => return Err(failure()),
+            4 => return Err(SparqError::QuotaExceeded),
+            5 => return Err(SparqError::ServicePoolFull),
+            _ => {}
         }
         self.inner.create_child(container, child, meta).await?;
         if fault == 2 {
@@ -279,6 +282,182 @@ impl Fixture {
 const ALICE: &str = "https://pod.example/alice/file";
 const BOB: &str = "https://pod.example/bob/file";
 const BODY: &[u8] = b"the original resource bytes";
+
+#[tokio::test]
+async fn encrypted_pool_capacity_is_typed_only_for_resource_creates() {
+    use crate::{error::ServerError, store::InMemoryStoreLimits};
+
+    for blob_limit in [true, false] {
+        let mut f = Fixture::new();
+        let limits = InMemoryStoreLimits {
+            max_pool_resource_count: 2,
+            ..Default::default()
+        };
+        if blob_limit {
+            f.backend.bytes = Arc::new(InMemoryBlobStore::with_limits(limits));
+        } else {
+            f.index = Arc::new(InMemorySparqClient::with_limits(limits));
+        }
+        let store = f.encrypted().await;
+        let container = "https://pod.example/.lws/subscriptions/";
+        let first = format!("{container}first");
+        let next = format!("{container}next");
+        store
+            .write(container, Bytes::new(), "text/turtle")
+            .await
+            .unwrap();
+        let meta = store
+            .create_in_container(container, &first, Bytes::from_static(BODY), "text/plain")
+            .await
+            .unwrap();
+        assert!(meta.blob_key.starts_with("$pool$e1-"));
+        assert!(is_envelope(
+            &f.backend.bytes.get(&meta.blob_key).await.unwrap()
+        ));
+        assert_eq!(store.read(&first).await.unwrap().body, BODY);
+        assert!(matches!(
+            store
+                .create_in_container(container, &next, Bytes::from_static(BODY), "text/plain")
+                .await,
+            Err(ServerError::ServicePoolFull)
+        ));
+        assert!(matches!(
+            store
+                .write(&next, Bytes::from_static(BODY), "text/plain")
+                .await,
+            Err(ServerError::InsufficientStorage)
+        ));
+        assert!(matches!(
+            store
+                .restore(&next, Some(container), Bytes::from_static(BODY), &meta)
+                .await,
+            Err(ServerError::InsufficientStorage)
+        ));
+        store
+            .write(ALICE, Bytes::from_static(BODY), "text/plain")
+            .await
+            .unwrap();
+        assert_eq!(store.read(ALICE).await.unwrap().body, BODY);
+    }
+}
+
+#[tokio::test]
+async fn lws_subscriptions_encrypt_after_a_plaintext_boot_and_keep_the_pool_signal() {
+    use crate::{
+        error::ServerError,
+        lws::{LwsConfig, LWS_JSON, SUBSCRIPTIONS_PATH},
+        store::InMemoryStoreLimits,
+    };
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use tower::ServiceExt;
+
+    let mut f = Fixture::new();
+    f.backend.bytes = Arc::new(InMemoryBlobStore::with_limits(
+        InMemoryStoreLimits::default().with_pool(2, 1024 * 1024),
+    ));
+    let plain = CompositeStore::with_body_cache(
+        (*f.index).clone(),
+        f.backend.clone(),
+        BodyCache::disabled(),
+    );
+    let mut cfg = LwsConfig::new("https://pod.example");
+    let owner = "https://owner.example/";
+    cfg.owner = Some(owner.into());
+    let container = cfg.absolute(SUBSCRIPTIONS_PATH);
+    let legacy = plain
+        .write(&container, Bytes::new(), LWS_JSON)
+        .await
+        .unwrap();
+    assert!(legacy.blob_key.starts_with("$pool$b1-"));
+    let store = plain
+        .encrypt_blobs(f.provider.clone(), CryptScheme::Lws, f.options())
+        .await
+        .unwrap();
+    let token = crate::lws::tokens::mint(&cfg, owner, "https://app.example/", &cfg.realm());
+    let body = serde_json::json!({"type": "SseSubscription", "topic": [cfg.storage()]}).to_string();
+    let app = crate::lws::router(store.clone(), cfg).await.unwrap();
+    // An encrypted reopen alone leaves the original pool container in legacy form.
+    assert!(!f
+        .backend
+        .bytes
+        .list()
+        .await
+        .unwrap()
+        .iter()
+        .any(|entry| entry.key.starts_with("$pool$e1-")));
+    let request = || {
+        Request::builder()
+            .method("POST")
+            .uri(SUBSCRIPTIONS_PATH)
+            .header("authorization", format!("Bearer {token}"))
+            .header("content-type", LWS_JSON)
+            .body(Body::from(body.clone()))
+            .unwrap()
+    };
+    let created = app.clone().oneshot(request()).await.unwrap();
+    let (parts, body) = created.into_parts();
+    let body = axum::body::to_bytes(body, 65536).await.unwrap();
+    assert_eq!(
+        parts.status,
+        StatusCode::CREATED,
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+    let iri = parts.headers["location"].to_str().unwrap();
+    let meta = f.index.get_meta(iri).await.unwrap();
+    assert!(meta.blob_key.starts_with("$pool$e1-"));
+    assert!(is_envelope(
+        &f.backend.bytes.get(&meta.blob_key).await.unwrap()
+    ));
+    assert!(
+        serde_json::from_slice::<serde_json::Value>(&store.read(iri).await.unwrap().body).is_ok()
+    );
+    assert!(matches!(
+        store
+            .create_in_container(
+                &container,
+                &format!("{container}next"),
+                Bytes::from_static(b"{}"),
+                LWS_JSON
+            )
+            .await,
+        Err(ServerError::ServicePoolFull)
+    ));
+    assert_eq!(
+        app.oneshot(request()).await.unwrap().status(),
+        StatusCode::TOO_MANY_REQUESTS
+    );
+}
+
+#[tokio::test]
+async fn encrypted_key_record_capacity_is_general_storage_capacity() {
+    use crate::error::ServerError;
+
+    let f = Fixture::new();
+    let index = ControlledIndex::default();
+    let store = CompositeStore::new(index.clone(), f.backend.clone())
+        .encrypt_blobs(f.provider.clone(), CryptScheme::Solid, f.options())
+        .await
+        .unwrap();
+    for fault in [4, 5] {
+        index.fault.store(fault, Ordering::SeqCst);
+        assert!(matches!(
+            store
+                .create_in_container(
+                    "https://pod.example/.lws/subscriptions/",
+                    "https://pod.example/.lws/subscriptions/next",
+                    Bytes::from_static(BODY),
+                    "text/plain"
+                )
+                .await,
+            Err(ServerError::InsufficientStorage)
+        ));
+        assert!(f.backend.bytes.list().await.unwrap().is_empty());
+    }
+}
 
 async fn current(store: &Encrypted, pod: &str) -> KeyRecord {
     store

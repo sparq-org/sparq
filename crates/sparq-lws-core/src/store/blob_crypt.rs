@@ -138,8 +138,12 @@ fn invalid_record() -> BlobError {
 fn crypt_error(error: sparq_lws_crypt::Error) -> BlobError {
     BlobError::Backend(error.to_string())
 }
-fn index_error(_: SparqError) -> BlobError {
-    BlobError::Backend("data-key index operation failed".into())
+fn index_error(error: SparqError) -> BlobError {
+    match error {
+        // Key bookkeeping is never a service-pool resource create.
+        SparqError::QuotaExceeded | SparqError::ServicePoolFull => BlobError::QuotaExceeded,
+        _ => BlobError::Backend("data-key index operation failed".into()),
+    }
 }
 fn hex(id: &[u8; 16]) -> String {
     id.iter().map(|b| format!("{b:02x}")).collect()

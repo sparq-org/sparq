@@ -91,6 +91,9 @@ pub enum SparqError {
     /// The configured in-memory resource-count ceiling would be exceeded.
     #[error("in-memory index quota exceeded")]
     QuotaExceeded,
+    /// The service pool's own entry ceiling would be exceeded.
+    #[error("service pool is full")]
+    ServicePoolFull,
     #[error("sparq backend error: {0}")]
     Backend(String),
     /// A write failed in a way after which it may still commit (an HTTP update that timed out),
@@ -772,7 +775,11 @@ impl InMemorySparqClient {
             )
         };
         if held >= ceiling {
-            return Err(SparqError::QuotaExceeded);
+            return Err(if super::in_service_pool(iri) {
+                SparqError::ServicePoolFull
+            } else {
+                SparqError::QuotaExceeded
+            });
         }
         Ok(())
     }
@@ -1424,7 +1431,7 @@ mod tests {
             assert!(
                 matches!(
                     index.raise_marker(other, 5).await,
-                    Err(SparqError::QuotaExceeded)
+                    Err(SparqError::ServicePoolFull)
                 ),
                 "{other}"
             );

@@ -387,6 +387,32 @@ async fn configured_backup_and_restore(mode: Mode, encrypted: bool) -> (Fixture,
     }
     let server = backup_boot(&original, encrypted).await;
     let corpus = Corpus::write(&original).await;
+    // Fixture::new first booted without encryption. Its empty subscription container
+    // remains a readable legacy blob; write an actual pooled record after enabling it.
+    let subscription = if encrypted && mode == Mode::Lws {
+        let response = success(
+            original
+                .request(Method::POST, "/.lws/subscriptions/")
+                .header("Content-Type", LWS_JSON)
+                .json(&json!({
+                    "type": "SseSubscription",
+                    "topic": [format!("{}/corpus/large.bin", original.base)]
+                }))
+                .send()
+                .await
+                .unwrap(),
+            "encrypted subscription",
+        )
+        .await;
+        assert_eq!(response.status(), 201);
+        let iri = response.headers()["location"].to_str().unwrap();
+        let path = iri.strip_prefix(&original.base).unwrap().to_owned();
+        let snapshot = original.snapshot(&path).await;
+        assert_eq!(snapshot.status, 200);
+        Some((path, snapshot))
+    } else {
+        None
+    };
     assert_corpus(&corpus, &original);
     verify(&corpus, &original).await;
     server.stop(); // SIGTERM, exit zero, drained and compacted before tar starts.
@@ -430,6 +456,10 @@ async fn configured_backup_and_restore(mode: Mode, encrypted: bool) -> (Fixture,
     assert_index_locked(&original);
     assert_index_locked(&restored);
     tokio::join!(verify(&corpus, &original), verify(&corpus, &restored));
+    if let Some((path, expected)) = &subscription {
+        assert_eq!(&original.snapshot(path).await, expected);
+        assert_eq!(&restored.snapshot(path).await, expected);
+    }
 
     // Witness that requests reached independent stores, not the original twice.
     let body = payload(23, 16385);
