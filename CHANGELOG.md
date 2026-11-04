@@ -7,8 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-11-04
+
+Patch release carrying the exact SHACL numeric range comparison (#7294) and the changes
+merged since 0.1.6. Publication is not implied by this entry; verify the tagged run and
+every registry and release artifact. crates.io publication still waits on the bootstrap.
+
 ### Added
 
+- **@sparq-org/solid-server:** native Solid (`--native`) and LWS (`--protocol lws`) launch
+  modes that run the `sparq-lws-core` executable from an optional
+  `@sparq-org/solid-server-native-<platform>` package (#7248). Those platform packages are not
+  on npm yet, so in 0.1.7 the npm install serves the WebAssembly mode only and the native
+  modes report the missing package. To run the native server in 0.1.7, run `sparq-lws-core`
+  directly (a source build or the `ghcr.io/sparq-org/sparq-lws-core` image) instead of
+  through the npm CLI.
 - **sparq-core / sparq-engine:** durable UPDATE journals now record named-graph creation and
   removal alongside triple changes, with ordered replay and support for the previous journal
   format. Hardens named-graph layout recovery alongside directory ownership support:
@@ -2064,7 +2077,8 @@ reproduce):
   single-pattern/FILTER comparisons short-circuit via index range-counting and are excluded
   from the claims above.
 
-[Unreleased]: https://github.com/sparq-org/sparq/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/sparq-org/sparq/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/sparq-org/sparq/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/sparq-org/sparq/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/sparq-org/sparq/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/sparq-org/sparq/compare/v0.1.3...v0.1.4

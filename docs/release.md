@@ -139,6 +139,16 @@ Add a `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md` (Keep-a-Changelog form
 Added / Changed / Fixed / Removed). Performance claims go in only with a pointer to the
 measurement (e.g. `bench/qlever-baselines.md`). Add the compare/tag link at the bottom.
 
+### v0.1.7
+
+A routine patch release on the v0.1.6 pipeline: the version PR moves the records that
+the v0.1.6 PR (#6823) moved plus those added since, and the native lock pin is
+re-recorded with `verify.py`'s `lock_delta()`. After the tag's `release.yml` run,
+dispatch `publish.yml` at the tag for the three npm packages and PyPI. The
+`solid-server-native-*` npm packages have no registry bootstrap yet, so
+`publish_solid_server_native` stays off (the npm solid-server serves the WebAssembly
+mode only), and crates.io still waits on the §4 bootstrap.
+
 ### v0.1.6
 
 `v0.1.5` (e6b65b63) published its GitHub Release, container image and all three npm packages
