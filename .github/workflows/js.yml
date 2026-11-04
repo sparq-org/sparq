@@ -65,6 +65,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The publish jobs run `npm ci` with npm >= 11.5.1 (the trusted-publishing floor), which
+  # refuses a package-lock.json that cannot satisfy every manifest, optional dependencies
+  # included; the npm bundled with Node 22 here did not. v0.1.7's npm publish failed on exactly
+  # that. Every PR that touches an npm manifest or the lock (a release version PR always does)
+  # runs this with the publish npm, so the tagged tree is known to install before it is tagged.
+  npm-lock:
+    name: npm ci with the publish npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Pin npm CLI >= 11.5.1 (same floor as publish.yml)
+        run: |
+          npm install -g 'npm@^11.5.1'
+          npm --version
+      # --dry-run still validates the lock against every workspace manifest, without downloads
+      # or lifecycle scripts. js/ is where publish.yml's npm job installs from.
+      - name: npm ci (repo root and js/)
+        run: |
+          npm ci --dry-run --ignore-scripts
+          cd js && npm ci --dry-run --ignore-scripts
+
   js:
     # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
