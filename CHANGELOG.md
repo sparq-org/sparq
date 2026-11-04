@@ -19,7 +19,9 @@ every registry and release artifact. crates.io publication still waits on the bo
   modes that run the `sparq-lws-core` executable from an optional
   `@sparq-org/solid-server-native-<platform>` package (#7248). Those platform packages are not
   on npm yet, so in 0.1.7 the npm install serves the WebAssembly mode only and the native
-  modes report the missing package; build `sparq-lws-core` from source to run them.
+  modes report the missing package. To run the native server in 0.1.7, run `sparq-lws-core`
+  directly (a source build or the `ghcr.io/sparq-org/sparq-lws-core` image) instead of
+  through the npm CLI.
 - **sparq-core / sparq-engine:** durable UPDATE journals now record named-graph creation and
   removal alongside triple changes, with ordered replay and support for the previous journal
   format. Hardens named-graph layout recovery alongside directory ownership support:
