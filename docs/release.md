@@ -141,8 +141,8 @@ measurement (e.g. `bench/qlever-baselines.md`). Add the compare/tag link at the 
 
 ### v0.1.7
 
-A routine patch release on the v0.1.6 pipeline: the version PR moves the same records as
-#6823, and the native lock pin is re-recorded with `verify.py`'s `lock_delta()`. After the
+A routine patch release on the v0.1.6 pipeline: the version PR moves the same records
+as #6823, and the native lock pin is re-recorded with `verify.py`'s `lock_delta()`. After the
 tag's `release.yml` run, dispatch `publish.yml` at the tag for the three npm packages and
 PyPI. The `solid-server-native-*` npm packages have no registry bootstrap yet, so
 `publish_solid_server_native` stays off, and crates.io still waits on the §4 bootstrap.
