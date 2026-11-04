@@ -702,6 +702,13 @@ SHACL-spec-correct conforms/violations).
   validation result, not a silent pass. `sh:in` and `sh:hasValue` are RDF-**term**
   membership (SHACL §§4.8.1–4.8.2), not value equality, so two distinct literals denoting
   one instant are different members.
+- **Numeric comparison is exact for `xsd:decimal` and the integer family (GH #7294).** The
+  same six components compare two decimal / integer values by their lexicals, at any length,
+  so values that differ only beyond `f64` precision (`1.000000000000000015` against
+  `1.00000000000000002`, integers past 2^53) are told apart. A pair with an `xsd:float` or
+  `xsd:double` operand is promoted to the least common floating type, as SPARQL `<` does
+  (`sparq_substrate::numeric::Num::cmp_relational`). `NaN` and an ill-typed numeric lexical
+  (`"1.5"^^xsd:integer`, an out-of-range `xsd:byte`, a padded value) compare as nothing.
 - **Results are NOT deduplicated** across traversal routes / component occurrences — a
   nested shape reached via two parents reports twice (intentional, matches the suite).
 - **Recursion is treated as conforming.** Re-entering the same (focus, shape) pair

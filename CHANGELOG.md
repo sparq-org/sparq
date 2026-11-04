@@ -858,6 +858,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **sparq-shacl:** `sh:minInclusive`, `sh:maxInclusive`, `sh:minExclusive`, `sh:maxExclusive`,
+  `sh:lessThan` and `sh:lessThanOrEquals` compare `xsd:decimal` and integer-family values
+  exactly, at any length, instead of as `f64`, so `1.000000000000000015` no longer passes
+  `sh:minInclusive 1.00000000000000002` and integers past 2^53 no longer pass an exact bound
+  they miss (#7294). A float or double operand promotes the pair as SPARQL does. An ill-typed
+  numeric literal, such as `"1.5"^^xsd:integer`, is now out of range, as it is for a SPARQL
+  comparison.
 - LWS content-only PATCH retains metadata from its Read authorization check for
   notification capture, skips LWS metadata lookups in open mode, and reads metadata for a
   closed-mode owner only when a non-owner subscription exists or is registering. If the early

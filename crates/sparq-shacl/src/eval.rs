@@ -12,7 +12,9 @@ use oxrdf::{Literal, Term};
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{is_inline, split_lang_dir, Id, TermParts};
 use sparq_core::Graph;
+use sparq_core::exact_numeric_literal_valid;
 use sparq_core::temporal::ExactTemporal;
+use sparq_substrate::numeric::{cmp_plain_decimal, Num};
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::rc::Rc;
@@ -2826,9 +2828,7 @@ fn cmp_literals(a: &Literal, b: &Literal) -> Option<Ordering> {
     let (da, db) = (a.datatype(), b.datatype());
     let (da, db) = (da.as_str(), db.as_str());
     if is_numeric(da) && is_numeric(db) {
-        let fa: f64 = a.value().parse().ok()?;
-        let fb: f64 = b.value().parse().ok()?;
-        return fa.partial_cmp(&fb);
+        return cmp_numeric(a.value(), da, b.value(), db);
     }
     if a.language().is_none()
         && b.language().is_none()
@@ -2846,6 +2846,24 @@ fn cmp_literals(a: &Literal, b: &Literal) -> Option<Ordering> {
         return cmp_temporal(a.value(), da, b.value(), db);
     }
     None
+}
+
+/// The one numeric comparison every SHACL constraint uses (`sh:lessThan`,
+/// `sh:lessThanOrEquals`, `sh:min/maxInclusive`, `sh:min/maxExclusive`): SPARQL `<` / `=`
+/// on the values (SHACL Core §4.3).
+///
+/// Two `xsd:decimal` / integer-family values compare EXACTLY, at any length, by their
+/// lexicals: XSD gives both types arbitrary precision, so neither may round through `f64`
+/// (`1.000000000000000015` is below `1.00000000000000002`, and `18446744073709551616` is
+/// above `18446744073709551615`). A pair with an `xsd:float` / `xsd:double` operand takes
+/// XPath's promotion to the least common floating type through the engine's numeric tower.
+/// `None` (incomparable, so a validation result) for an ill-typed lexical, such as
+/// `"1.5"^^xsd:integer` or an out-of-range `xsd:byte`, or a `NaN` operand.
+fn cmp_numeric(a: &str, da: &str, b: &str, db: &str) -> Option<Ordering> {
+    if exact_numeric_literal_valid(a, da) && exact_numeric_literal_valid(b, db) {
+        return cmp_plain_decimal(a, b);
+    }
+    Num::of_parts(a, da)?.cmp_relational(Num::of_parts(b, db)?)
 }
 
 /// The one temporal comparison every SHACL constraint uses (`sh:lessThan`,
