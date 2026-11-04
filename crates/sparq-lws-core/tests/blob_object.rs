@@ -36,7 +36,9 @@ async fn local_filesystem_contract() {
     blob.put(key, Bytes::new()).await.unwrap();
     let entry = blob.stat(key).await.unwrap().unwrap();
     assert!(entry.generation.is_none());
-    assert!(matches!(blob.delete_if_unchanged(key, 0).await, Err(sparq_lws_core::store::BlobError::Backend(message)) if message == "conditional delete unsupported"));
+    assert!(
+        matches!(blob.delete_if_unchanged(key, 0).await, Err(sparq_lws_core::store::BlobError::Backend(message)) if message == "conditional delete unsupported")
+    );
     assert!(entry.last_modified.is_some());
     assert!(blob
         .list()
@@ -44,6 +46,35 @@ async fn local_filesystem_contract() {
         .unwrap()
         .iter()
         .all(|e| e.generation.is_none()));
+}
+
+#[tokio::test]
+async fn envelope_keys_round_trip_through_object_adapter() {
+    let dir = tempfile::tempdir().unwrap();
+    let blob = local(&dir);
+    for key in [
+        "e1-0123456789abcdef0123456789abcdef",
+        "$pool$e1-0123456789abcdef0123456789abcdef",
+    ] {
+        blob.put(key, Bytes::from_static(b"envelope bytes"))
+            .await
+            .unwrap();
+        assert_eq!(blob.get(key).await.unwrap(), b"envelope bytes"[..]);
+        assert!(blob.exists(key).await.unwrap());
+        assert_eq!(blob.stat(key).await.unwrap().unwrap().key, key);
+        assert!(blob
+            .list()
+            .await
+            .unwrap()
+            .iter()
+            .any(|entry| entry.key == key));
+        blob.delete(key).await.unwrap();
+        assert!(!blob.exists(key).await.unwrap());
+    }
+    for key in ["e1-0123", "$pool$e1-0123456789abcdef0123456789abcdeA"] {
+        assert!(blob.put(key, Bytes::new()).await.is_err());
+        assert!(blob.get(key).await.is_err());
+    }
 }
 
 async fn http_round_trip(blob: ObjectBlobAdapter) {

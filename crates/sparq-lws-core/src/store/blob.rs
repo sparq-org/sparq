@@ -16,7 +16,7 @@ use bytes::Bytes;
 use super::{InMemoryStoreLimits, StoreUsage};
 
 /// A blob-store error (kept opaque so it never leaks backend detail to a client).
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum BlobError {
     #[error("blob not found")]
     NotFound,
@@ -26,9 +26,16 @@ pub enum BlobError {
     /// The service pool's own byte or entry ceiling would be exceeded.
     #[error("service pool is full")]
     ServicePoolFull,
+    /// An envelope names no durable wrapped-key record.
+    #[error("UnknownDataKey")]
+    UnknownDataKey,
     #[error("blob backend error: {0}")]
     Backend(String),
 }
+
+/// The stable pod identity supplied by the resource read and write paths.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BlobScope(pub String);
 
 /// One stored blob, as surfaced by [`BlobStore::list`] for the reconciler's orphan sweep.
 ///
@@ -79,14 +86,31 @@ pub struct BlobEntry {
 /// Native object storage is available through the optional `blob-object` adapter.
 #[async_trait]
 pub trait BlobStore: Send + Sync {
+    /// Whether newly minted body keys must identify envelope storage.
+    /// Transparent decorators must forward the inner store's requirement.
+    fn requires_envelope(&self) -> bool {
+        false
+    }
+
     /// Read the bytes for a storage key.
     async fn get(&self, key: &str) -> Result<Bytes, BlobError>;
+
+    /// Read resource bytes for a pod. Ordinary backends ignore the scope;
+    /// decorators must forward it to their inner store.
+    async fn get_scoped(&self, _scope: &BlobScope, key: &str) -> Result<Bytes, BlobError> {
+        self.get(key).await
+    }
 
     /// Write bytes under a fresh storage key. Durable backends may refuse an existing key;
     /// the legacy in-memory double also supports replacement for generation-race tests.
     /// Callers must never reuse a key, including after deletion. CompositeStore mints
-    /// `($pool$)?b1-[0-9a-f]{32}` keys for this purpose.
+    /// `($pool$)?(b1|e1)-[0-9a-f]{32}` keys for this purpose.
     async fn put(&self, key: &str, body: Bytes) -> Result<(), BlobError>;
+
+    /// Write resource bytes for a pod. Ordinary backends ignore the scope.
+    async fn put_scoped(&self, _scope: &BlobScope, key: &str, body: Bytes) -> Result<(), BlobError> {
+        self.put(key, body).await
+    }
 
     /// Whether a key exists.
     async fn exists(&self, key: &str) -> Result<bool, BlobError>;

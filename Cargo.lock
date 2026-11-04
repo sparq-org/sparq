@@ -5489,6 +5489,7 @@ dependencies = [
  "sparq-lws-blob-fs",
  "sparq-lws-blob-key",
  "sparq-lws-blob-object",
+ "sparq-lws-crypt",
  "sparq-lws-ysync",
  "sparq-policy",
  "sparq-shacl",
@@ -5504,6 +5505,8 @@ dependencies = [
  "tokio-tungstenite",
  "tower",
  "tower-http 0.7.1",
+ "tracing",
+ "tracing-subscriber",
  "url",
 ]
 

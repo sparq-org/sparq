@@ -72,8 +72,8 @@ instance metadata; supply explicit credentials to avoid ambient discovery. URL u
 Use a dedicated local directory or a provisioned bucket/container and an isolated
 prefix. Errors contain fixed descriptions, without backend diagnostics or URLs.
 
-Keys use `($pool$)?b1-[0-9a-f]{32}`. Normal objects are stored as
-`<prefix>/b1-…`; pooled keys as `<prefix>/pool/b1-…`. Every write uses create mode
+Keys use `($pool$)?(b1|e1)-[0-9a-f]{32}`. Normal objects are stored as
+`<prefix>/b1-…`; pooled keys as `<prefix>/pool/b1-…`. `e1-` keys identify encrypted envelopes and retain the same pool layout. Every write uses create mode
 and must use a fresh key. Never reuse a key even after deletion. HEAD supplies
 existence and metadata; a missing key is absent, while other backend errors
 propagate. Delete is idempotent and unconditional.

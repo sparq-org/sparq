@@ -217,8 +217,9 @@ filesystem blob backend.
 
 The dependency-free `sparq-lws-blob-key` crate shares `POOL_MARK`, `PREFIX`,
 `parse(&str) -> Option<(&str, bool)>` (bare key and pool flag), and
-`format([u8; 16], bool) -> String` across key minting and validation in both
-filesystem and object backends. The object adapter advertises no generation and rejects `delete_if_unchanged`; the
+`format([u8; 16], bool, bool) -> String` (random suffix, pool flag, envelope flag)
+across key minting and validation in both filesystem and object backends.
+The object adapter advertises no generation and rejects `delete_if_unchanged`; the
 reconciler uses `BlobStore::delete` for these entries. Its `file://` backend is
 for tests and development only; see the reference for local durability limits.
 The native backend wrapper and periodic reconciler's shared handle forward
@@ -271,6 +272,12 @@ configuration/signing keys. Online or hot backup is unsupported; copying a
 running data directory is unsafe. A backup is only as consistent as the stop
 that preceded it.
 
+With encryption enabled, the same offline procedure preserves `e1-` blobs,
+wrapped keys in the index, and the major-2 `format.json` marker. Back up the local
+KEK separately with restricted permissions and restore it before starting with
+`crypt` and `SOLID_SERVER_CRYPT_PROVIDER=local`. Retain the protocol and pod scope;
+provider `none` refuses a major-2 restore. The archive does not contain an external KEK.
+
 Archive the whole directory rather than picking files: a crash can leave
 unreferenced blob files until the reconciler runs, and they belong in the copy.
 
@@ -310,7 +317,7 @@ operations: open sweeps `tmp/`. The caller must control this directory.
 
 Construct `CompositeStore::new(index, blobs)` with that store. The standalone API
 is synchronous; qualify async calls as `BlobStore::get(&blobs, key).await` so they
-use the blocking pool. Keys must match `($pool$)?b1-[0-9a-f]{32}` and never be
+use the blocking pool. Keys must match `($pool$)?(b1|e1)-[0-9a-f]{32}` and never be
 rewritten or reused, even after deletion; composite writes mint opaque keys with
 no resource IRI embedded. Existing keys fail. The filesystem must support hard
 links and directory sync. Fan-out initialization is synced on first use per open
@@ -334,20 +341,83 @@ They are refused on non-memory backends unless
 `SOLID_SERVER_ALLOW_SEED_NONMEMORY=1` is explicitly set. Use that escape hatch
 only for an ephemeral test instance.
 
-## Encryption at rest (in progress)
+## Encryption at rest
 
-`sparq-lws-crypt` is the native, unpublished P1-1 crate for key providers and the
-versioned `e1` blob envelope. It provides a local KEK provider with context-bound
-AES-256-GCM wrapping, zeroizing secret keys and a per-DEK seal counter. See its
-[format and API reference](../../crates/sparq-lws-crypt/README.md).
-Nothing is wired into the server yet; the blob-store decorator and environment
-configuration belong to P1-2 of [#7189](https://github.com/sparq-org/sparq/issues/7189).
+Build the native server with `cargo build -p sparq-lws-core --features crypt`
+and set `SOLID_SERVER_CRYPT_PROVIDER=local` to enable the P1-2 decorator
+`store::blob_crypt::EncryptingBlobStore` over the P1-1
+[envelope and key-provider API](../../crates/sparq-lws-crypt/README.md).
+`BlobStore::put_scoped(&BlobScope, key, body)` defaults to `put` for ordinary
+backends; `CompositeStore` uses it for every body write. The decorator refuses
+plain `put`. `BlobStore::get_scoped(&BlobScope, key)` defaults to `get` for ordinary
+backends; resource reads use it to require the authenticated DEK pod to match the
+resource pod. Unscoped `get` opens by blob key and the record's context; callers
+reading a resource use `get_scoped` to supply its pod.
+`BlobStore::requires_envelope()` defaults to `false`; encryption
+returns `true`, so body writes mint `e1-` keys (after any `$pool$` marker).
+The shared `sparq-lws-blob-key::parse` grammar accepts
+`($pool$)?(b1|e1)-[0-9a-f]{32}` for both filesystem and object backends.
+`format(suffix, pooled, envelope)` selects `e1-` when its final boolean is true,
+otherwise `b1-`; callers provide the suffix bytes.
+The encryption decorator requires these marked keys for `put_scoped`.
+Transparent decorators must forward this requirement and scoped reads and writes.
+Body-cache entries retain that pod; a different pod refuses the read
+and evicts the entry. Each DEK-cache insert sweeps expired entries. Completed
+failed lookups release idle cache slots while queued callers share their result.
+Parsed ACL reuse requires the current blob pointer as well as its ETag in both
+sequential and planned authorization. A new pointer is read through the store.
+`BlobScopePolicy` selects the storage root for LWS, the first path
+segment for Solid, or a fixed Solid identity. Wrapped keys and conservative
+seal reservations live in reserved index records, outside HTTP resources.
+Native LWS assembly uses its configured storage URL, including any path prefix.
+Library callers with such a prefix select `BlobScopePolicy::LwsStorage(BlobScope(root))`
+before `encrypt_blobs`; `BlobScopePolicy::Lws` infers an origin root.
+Resource read plans refuse this namespace in both target and ACL-candidate
+positions. With native `crypt,blob-fs`, the decorator encrypts bytes before the
+filesystem adapter publishes them; its default scoped methods store and read
+those supplied bytes. Reopen the index and blobs with the same KEK to read
+existing bodies; plaintext-derived ETags are preserved.
+Queued requests share a key-provider result, including a failed unwrap or initial
+generation. A later independent request can retry after a failed call.
 
-Once integrated, blob encryption protects lost/stolen volumes and snapshots,
-cloud/backup operators with byte-plane access and no KMS grant, and storage admins
-without the KEK. It does not protect a root admin dumping process memory or reading
-the mmap'd index on the running host (P3 scope). The sparq index directory holds
-the RDF graph in plaintext on disk; P1 requires a CMK-encrypted block volume
+| Variable | Default | Effect |
+|---|---|---|
+| `SOLID_SERVER_CRYPT_PROVIDER` | `none` | `none` keeps plaintext writes. `local` requires the default-off native `crypt` feature. `aws-kms` and `azure-kv` refuse startup as not built. |
+| `SOLID_SERVER_CRYPT_LOCAL_KEK_FILE` | unset | Required for `local`: a regular file of exactly 32 raw bytes, with no group/other permissions (for example `0600`). |
+| `SOLID_SERVER_CRYPT_DEK_TTL_SECS` | `600` | Non-negative integer seconds for every unwrapped DEK, including the current write key. `0` expires immediately; expiry re-unwraps and skips the unused reservation. |
+| `SOLID_SERVER_CRYPT_POD_SCOPE` | unset | Non-empty fixed Solid pod identity, otherwise the first path segment. LWS and subscription pools use the storage root and ignore this override. |
+
+The other encryption variables are read only when the provider is `local`.
+Native boot constructs one decorator per exclusive index, before sharing it with
+the router and reconciler. Boot checks every record's provider and local KEK
+identity, then unwraps one existing DEK plus every current DEK,
+without repeating the probe if it is current. Other DEKs unwrap lazily on first
+read through the same TTL cache and single-flight. A different local KEK fails
+startup with `WrongKek` (reported as `wrong KEK`).
+The protocol's fixed wrapping-context `scheme` is `solid` or `lws`.
+
+Opening a data directory with encryption atomically changes `format.json` to
+`"blobs":{"major":2,"encryption":"envelope-v1"}`. This is a **one-way major
+bump**: older binaries reject it, and provider `none` refuses to open it.
+Existing plaintext remains readable; subsequent writes are encrypted.
+Bodies written with encryption enabled must be envelopes; non-envelope bytes
+for them are refused, including after restart.
+**Back up the KEK independently with the index and blobs: losing the KEK makes
+encrypted data unrecoverable.** Legacy plaintext beginning with `SQLB` is treated
+as an envelope and fails closed; it is never retried as plaintext.
+See the [encryption reference](references/blob-encryption.md) for the on-disk
+contract. The wasm graph excludes this feature.
+
+Reinstate restores a held record only to its original resource, with or without
+`crypt`. Holds record that IRI in their internal directory metadata. Older holds
+without a recorded original IRI fail with a storage error when reinstated;
+they remain available for release.
+
+Blob encryption protects lost/stolen volumes and snapshots, cloud/backup
+operators with byte-plane access and no KMS grant, and storage admins without
+the KEK. It does not protect a root admin dumping process memory or reading the
+mmap'd index on the running host (P3 scope). The sparq index directory holds the
+RDF graph in plaintext on disk; P1 requires a CMK-encrypted block volume
 (EBS/Azure Disk/dm-crypt). Application-level index encryption is research
 ([#2567](https://github.com/sparq-org/sparq/issues/2567)).
 ETags derive from plaintext, so equal bodies get equal ETags across pods.
@@ -1159,6 +1229,8 @@ What the server exposes, all discoverable from the storage description
   In-memory blob/index ceilings emit `BlobError::ServicePoolFull` or `SparqError::ServicePoolFull`;
   record creates preserve them as `ServerError::ServicePoolFull`. That typed signal maps to a
   quota `429` for subscriptions and access requests; general `InsufficientStorage` refusals retain `507`.
+  Encrypted service-pool creates preserve that signal too; writes, restores, reads and
+  wrapped-key bookkeeping map capacity refusals to `507`.
   A recursive delete too large to put back is refused before any of its
   notifications is prepared.
 - Writes and deletes are **whole or not at all**: a PUT that changes metadata, a linkset PATCH or PUT and a `DELETE`
@@ -1458,3 +1530,7 @@ History follows the resource through trash. Solid restore also requires Write on
 POST to the trash endpoint with `{"resource":"<absolute-resource-URL>"}` moves a resource to trash and returns `201 Created` with the member URL in `Location`. DELETE-to-trash remains available. In LWS mode it returns a bare `204 No Content`, including for a caller with Delete but without Read; a settled-absent DELETE for that caller has the same response. POST retains its member `Location` response. POST with `{"restore":"<trash-member-URL>"}` restores; provide exactly one of `resource` or `restore`. Enabled services advertise `ssd:Versioning` / `ssd:Trash`; the version service has an IRI endpoint and a separate literal `ssd:listingTemplate`. RDF listings use the IANA `original` relation.
 
 See [version/trash requests, authorization, retention and storage API](references/history.md) for routes, catalog terms and client restore examples.
+
+Encrypted retained bodies use the original resource's pod scope for cached and
+decoded reads. Cloning or encrypting a `CompositeStore` preserves its history settings
+and shared lifecycle lease.

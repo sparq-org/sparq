@@ -276,6 +276,14 @@ pub struct StoreUsage {
     pub resource_count: usize,
 }
 
+/// The internal wrapped-data-key namespace. It is outside every HTTP storage.
+pub const DATA_KEY_CONTAINER: &str = "urn:x-sparq-lws:data-keys/";
+
+/// Whether an index IRI belongs to the reserved wrapped-data-key namespace.
+pub fn is_data_key_record(iri: &str) -> bool {
+    iri.starts_with(DATA_KEY_CONTAINER)
+}
+
 /// Refuse generic index mutations of the notification marker.
 pub(crate) fn refuse_marker_operands(iris: &[Option<&str>]) -> Result<(), super::SparqError> {
     if iris.iter().flatten().any(|iri| is_service_marker(iri)) {

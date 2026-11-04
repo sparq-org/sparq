@@ -11,8 +11,7 @@ use solid_oidc_verifier::replay::InMemoryReplayStore;
 use solid_oidc_verifier::verifier::Verifier;
 use tower::ServiceExt;
 
-#[path = "../../../tests/common/mod.rs"]
-mod common;
+use super::common;
 
 const BASE: &str = common::BASE_URL;
 const RDF: &str = "<urn:subject> <urn:predicate> <urn:object> .";
