@@ -77,7 +77,7 @@ spargebra = { path = "vendor/spargebra-shim" }
 smallstr = { path = "vendor/smallstr-shim" }
 
 [workspace.package]
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 license = "MIT"
 # (sq-qmth) MSRV floor 1.88. Upstream-driven: `geo@0.33.1` (a transitive dep

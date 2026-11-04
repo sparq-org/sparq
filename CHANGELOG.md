@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-11-04
+
+Patch release carrying the exact SHACL numeric range comparison (#7294) and the changes
+merged since 0.1.6. Publication is not implied by this entry; verify the tagged run and
+every registry and release artifact. crates.io publication still waits on the bootstrap.
+
 ### Added
 
 - **sparq-core / sparq-engine:** durable UPDATE journals now record named-graph creation and
@@ -2064,7 +2070,8 @@ reproduce):
   single-pattern/FILTER comparisons short-circuit via index range-counting and are excluded
   from the claims above.
 
-[Unreleased]: https://github.com/sparq-org/sparq/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/sparq-org/sparq/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/sparq-org/sparq/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/sparq-org/sparq/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/sparq-org/sparq/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/sparq-org/sparq/compare/v0.1.3...v0.1.4
