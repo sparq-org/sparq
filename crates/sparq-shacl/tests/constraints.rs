@@ -248,6 +248,11 @@ fn range_decimal_and_integer_compare_exactly() {
             "\"340282366920938463463374607431768211456001\"^^xsd:integer",
             false,
         ),
+        (
+            "sh:maxInclusive \"340282366920938463463374607431768211456001\"^^xsd:integer",
+            "\"340282366920938463463374607431768211456000\"^^xsd:integer",
+            true,
+        ),
         ("sh:minInclusive \"-1.0000000000000000000000000000000000000000001\"^^xsd:decimal", "-1.0", true),
     ];
     for &(constraints, value, want) in cases {
@@ -269,6 +274,16 @@ fn range_float_and_double_keep_xpath_promotion() {
     assert!(!range_conforms("sh:minInclusive 0", "\"NaN\"^^xsd:double"));
     assert!(range_conforms("sh:minInclusive 0", "\"INF\"^^xsd:double"));
     assert!(!range_conforms("sh:minInclusive 0", "\"-INF\"^^xsd:float"));
+    // An exact value past i128 still promotes to the floating type.
+    let huge = "\"340282366920938463463374607431768211456000\"^^xsd:integer";
+    assert!(range_conforms("sh:minInclusive \"0\"^^xsd:double", huge));
+    assert!(range_conforms("sh:maxInclusive \"INF\"^^xsd:double", huge));
+    assert!(!range_conforms("sh:maxInclusive \"1e38\"^^xsd:double", huge));
+    assert!(range_conforms("sh:minInclusive \"1\"^^xsd:float", huge));
+    assert!(range_conforms(
+        "sh:maxInclusive \"0\"^^xsd:double",
+        "\"-1.0000000000000000000000000000000000000000001\"^^xsd:decimal"
+    ));
 }
 
 #[test]
@@ -293,10 +308,33 @@ fn less_than_compares_decimals_exactly() {
     );
     assert!(r.conforms, "{}", r.to_text());
     let r = run(
+        r#"ex:n ex:a "18446744073709551614"^^xsd:integer ; ex:b "18446744073709551615"^^xsd:integer ."#,
+        shapes,
+    );
+    assert!(r.conforms, "{}", r.to_text());
+    let r = run(
         r#"ex:n ex:a "18446744073709551616"^^xsd:integer ; ex:b "18446744073709551615"^^xsd:integer ."#,
         shapes,
     );
     assert_eq!(count_component(&r, "LessThanConstraintComponent"), 1, "{}", r.to_text());
+}
+
+#[test]
+fn less_than_or_equals_compares_decimals_exactly() {
+    let shapes = r#"
+        ex:S a sh:NodeShape ; sh:targetNode ex:n ;
+          sh:property [ sh:path ex:a ; sh:lessThanOrEquals ex:b ] .
+    "#;
+    let r = run(
+        r#"ex:n ex:a "1.00000000000000002"^^xsd:decimal ; ex:b "1.000000000000000015"^^xsd:decimal ."#,
+        shapes,
+    );
+    assert_eq!(count_component(&r, "LessThanOrEqualsConstraintComponent"), 1, "{}", r.to_text());
+    let r = run(
+        r#"ex:n ex:a "9007199254740993"^^xsd:integer ; ex:b "9007199254740993.0"^^xsd:decimal ."#,
+        shapes,
+    );
+    assert!(r.conforms, "{}", r.to_text());
 }
 
 // ---- sh:minLength / sh:maxLength (char count, IRI vs literal vs blank) ----

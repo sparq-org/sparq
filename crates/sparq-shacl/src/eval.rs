@@ -11,10 +11,10 @@ use crate::view::GraphView;
 use oxrdf::{Literal, Term};
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{is_inline, split_lang_dir, Id, TermParts};
-use sparq_core::Graph;
-use sparq_core::exact_numeric_literal_valid;
+use sparq_core::parse_xsd_f64;
 use sparq_core::temporal::ExactTemporal;
-use sparq_substrate::numeric::{cmp_plain_decimal, Num};
+use sparq_core::Graph;
+use sparq_substrate::numeric::{cmp_decimal_parts, parse_xsd_f32};
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::rc::Rc;
@@ -242,6 +242,9 @@ struct Validator<'a> {
     /// (the constraint needs every target node of the shape, but is evaluated once
     /// per focus node — compute the target scan once).
     uvf_targets: FxHashMap<usize, Vec<Term>>,
+    /// Each numeric `sh:min/max{In,Ex}clusive` bound, read once per run and keyed by
+    /// `(shape id, component index)`; `None` for a non-numeric bound.
+    num_bounds: FxHashMap<(usize, usize), Option<Rc<NumBound>>>,
     /// (sq-lz99x) Non-fatal author-time diagnostics for constraints
     /// that were SKIPPED because they could not be evaluated (currently: an
     /// uncompilable `sh:pattern` regex). De-duplicated per (shape, pattern, flags)
@@ -340,6 +343,7 @@ impl<'a> Validator<'a> {
             min_reentry: usize::MAX,
             regexes: FxHashMap::default(),
             uvf_targets: FxHashMap::default(),
+            num_bounds: FxHashMap::default(),
             diagnostics: Vec::new(),
             active_meta: None,
             sparql_batch: FxHashMap::default(),
@@ -1334,6 +1338,7 @@ impl<'a> Validator<'a> {
             }
             Component::MinExclusive(b) => self.range(
                 sid,
+                comp_idx,
                 focus,
                 values,
                 b,
@@ -1343,6 +1348,7 @@ impl<'a> Validator<'a> {
             ),
             Component::MinInclusive(b) => self.range(
                 sid,
+                comp_idx,
                 focus,
                 values,
                 b,
@@ -1352,6 +1358,7 @@ impl<'a> Validator<'a> {
             ),
             Component::MaxExclusive(b) => self.range(
                 sid,
+                comp_idx,
                 focus,
                 values,
                 b,
@@ -1361,6 +1368,7 @@ impl<'a> Validator<'a> {
             ),
             Component::MaxInclusive(b) => self.range(
                 sid,
+                comp_idx,
                 focus,
                 values,
                 b,
@@ -2459,6 +2467,7 @@ impl<'a> Validator<'a> {
     fn range(
         &mut self,
         sid: usize,
+        comp_idx: usize,
         focus: &Term,
         values: &[Term],
         bound: &Term,
@@ -2466,8 +2475,23 @@ impl<'a> Validator<'a> {
         component: &str,
         out: &mut Vec<ValidationResult>,
     ) {
+        // A numeric bound is read once per validation run, not once per value.
+        let numeric = self
+            .num_bounds
+            .entry((sid, comp_idx))
+            .or_insert_with(|| NumBound::of(bound).map(Rc::new))
+            .clone();
         for v in values {
-            let ok = match cmp_terms(v, bound) {
+            let ord = match (&numeric, v) {
+                (Some(nb), Term::Literal(l)) => {
+                    let dt = l.datatype().as_str();
+                    num_kind(dt).and_then(|kind| nb.cmp_value(l.value(), kind, dt))
+                }
+                // A non-literal never compares with a number.
+                (Some(_), _) => None,
+                (None, _) => cmp_terms(v, bound),
+            };
+            let ok = match ord {
                 Some(ord) => accept.contains(&ord),
                 None => false, // not comparable: constraint not satisfied
             };
@@ -2827,8 +2851,8 @@ fn cmp_terms(a: &Term, b: &Term) -> Option<Ordering> {
 fn cmp_literals(a: &Literal, b: &Literal) -> Option<Ordering> {
     let (da, db) = (a.datatype(), b.datatype());
     let (da, db) = (da.as_str(), db.as_str());
-    if is_numeric(da) && is_numeric(db) {
-        return cmp_numeric(a.value(), da, b.value(), db);
+    if let (Some(ka), Some(kb)) = (num_kind(da), num_kind(db)) {
+        return cmp_numeric(a.value(), ka, da, b.value(), kb, db);
     }
     if a.language().is_none()
         && b.language().is_none()
@@ -2850,20 +2874,159 @@ fn cmp_literals(a: &Literal, b: &Literal) -> Option<Ordering> {
 
 /// The one numeric comparison every SHACL constraint uses (`sh:lessThan`,
 /// `sh:lessThanOrEquals`, `sh:min/maxInclusive`, `sh:min/maxExclusive`): SPARQL `<` / `=`
-/// on the values (SHACL Core §4.3).
+/// on the values (SHACL Core §4.3), with XPath's promotion to the least common type.
 ///
 /// Two `xsd:decimal` / integer-family values compare EXACTLY, at any length, by their
 /// lexicals: XSD gives both types arbitrary precision, so neither may round through `f64`
 /// (`1.000000000000000015` is below `1.00000000000000002`, and `18446744073709551616` is
-/// above `18446744073709551615`). A pair with an `xsd:float` / `xsd:double` operand takes
-/// XPath's promotion to the least common floating type through the engine's numeric tower.
+/// above `18446744073709551615`). Otherwise an `xsd:double` operand promotes the pair to
+/// `f64`, and an `xsd:float` operand (with no double) to `f32`, each operand converted from
+/// its lexical with one correctly-rounded conversion, whatever its length.
 /// `None` (incomparable, so a validation result) for an ill-typed lexical, such as
 /// `"1.5"^^xsd:integer` or an out-of-range `xsd:byte`, or a `NaN` operand.
-fn cmp_numeric(a: &str, da: &str, b: &str, db: &str) -> Option<Ordering> {
-    if exact_numeric_literal_valid(a, da) && exact_numeric_literal_valid(b, db) {
-        return cmp_plain_decimal(a, b);
+fn cmp_numeric(a: &str, ka: NumKind, da: &str, b: &str, kb: NumKind, db: &str) -> Option<Ordering> {
+    match ka.max(kb) {
+        NumKind::Double => floating::<f64>(a, ka, da)?.partial_cmp(&floating::<f64>(b, kb, db)?),
+        NumKind::Float => floating::<f32>(a, ka, da)?.partial_cmp(&floating::<f32>(b, kb, db)?),
+        _ => Some(cmp_decimal_parts(
+            exact_parts(a, ka, da)?,
+            exact_parts(b, kb, db)?,
+        )),
     }
-    Num::of_parts(a, da)?.cmp_relational(Num::of_parts(b, db)?)
+}
+
+/// The XSD numeric datatypes, in XPath promotion order: a pair compares in the greater kind.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum NumKind {
+    /// `xsd:integer`.
+    Integer,
+    /// An `xsd:integer` subtype, whose lexical carries a facet range.
+    IntegerSubtype,
+    Decimal,
+    Float,
+    Double,
+}
+
+/// A valid exact (integer-family or decimal) lexical, split for [`cmp_decimal_parts`]:
+/// `(negative, integer digits without leading zeros, fraction digits without trailing
+/// zeros)`. `None` if `v` is not a valid lexical of its datatype. A raw RDF lexical gets no
+/// XSD whitespace processing, so a padded value is ill-typed.
+fn exact_parts<'a>(v: &'a str, kind: NumKind, dt: &str) -> Option<(bool, &'a str, &'a str)> {
+    let b = v.as_bytes();
+    let n = b.len();
+    let (neg, start) = match b.first()? {
+        b'-' => (true, 1),
+        b'+' => (false, 1),
+        _ => (false, 0),
+    };
+    // One pass: ASCII digits, plus at most one `.` in a decimal.
+    let mut point = n;
+    for (j, &c) in b.iter().enumerate().skip(start) {
+        if !c.is_ascii_digit() {
+            if c != b'.' || kind != NumKind::Decimal || point != n {
+                return None;
+            }
+            point = j;
+        }
+    }
+    if n - start == usize::from(point != n) {
+        return None; // no digit at all
+    }
+    if kind == NumKind::IntegerSubtype && !sparq_core::numeric_literal_valid(v, dt) {
+        return None;
+    }
+    let mut int_start = start;
+    while int_start < point && b[int_start] == b'0' {
+        int_start += 1;
+    }
+    let (frac_start, mut frac_end) = if point == n { (n, n) } else { (point + 1, n) };
+    while frac_end > frac_start && b[frac_end - 1] == b'0' {
+        frac_end -= 1;
+    }
+    Some((neg, &v[int_start..point], &v[frac_start..frac_end]))
+}
+
+/// An operand promoted to the floating type `F` from its lexical: an XSD float/double
+/// spelling (`INF`, `-INF`, `NaN`, exponents) for a float/double operand, or the decimal
+/// lexical of an exact operand once [`exact_parts`] accepts it. An `xsd:float` read into
+/// `f64` is its `f32` value widened, as XPath promotes the float value, not the lexical.
+fn floating<F: XsdFloat>(v: &str, kind: NumKind, dt: &str) -> Option<F> {
+    match kind {
+        NumKind::Double => F::from_f64(parse_xsd_f64(v)?),
+        NumKind::Float => Some(F::from_f32(parse_xsd_f32(v)?)),
+        _ => {
+            exact_parts(v, kind, dt)?;
+            v.parse().ok()
+        }
+    }
+}
+
+/// The two floating promotion targets.
+trait XsdFloat: std::str::FromStr + PartialOrd {
+    /// `None` when narrowing a double would be needed: a double operand always puts the pair
+    /// in the `f64` tier, so this never narrows.
+    fn from_f64(v: f64) -> Option<Self>;
+    fn from_f32(v: f32) -> Self;
+}
+
+impl XsdFloat for f64 {
+    fn from_f64(v: f64) -> Option<f64> {
+        Some(v)
+    }
+    fn from_f32(v: f32) -> f64 {
+        f64::from(v)
+    }
+}
+
+impl XsdFloat for f32 {
+    fn from_f64(_: f64) -> Option<f32> {
+        None
+    }
+    fn from_f32(v: f32) -> f32 {
+        v
+    }
+}
+
+/// A numeric range bound, prepared for [`cmp_numeric`]'s comparison against many values.
+struct NumBound {
+    kind: NumKind,
+    /// The split lexical of a valid exact bound.
+    exact: Option<(bool, Box<str>, Box<str>)>,
+    /// The bound promoted to each floating type (`f32` is unused for a double bound, which
+    /// always puts the pair in the `f64` tier).
+    f64: Option<f64>,
+    f32: Option<f32>,
+}
+
+impl NumBound {
+    /// `None` for a non-numeric bound. An ill-typed numeric bound compares with nothing.
+    fn of(bound: &Term) -> Option<NumBound> {
+        let Term::Literal(l) = bound else { return None };
+        let (v, dt) = (l.value(), l.datatype().as_str());
+        let kind = num_kind(dt)?;
+        let exact = match kind {
+            NumKind::Float | NumKind::Double => None,
+            _ => exact_parts(v, kind, dt).map(|(n, i, f)| (n, i.into(), f.into())),
+        };
+        Some(NumBound {
+            kind,
+            exact,
+            f64: floating::<f64>(v, kind, dt),
+            f32: floating::<f32>(v, kind, dt),
+        })
+    }
+
+    /// [`cmp_numeric`] of a value against this bound.
+    fn cmp_value(&self, v: &str, kind: NumKind, dt: &str) -> Option<Ordering> {
+        match kind.max(self.kind) {
+            NumKind::Double => floating::<f64>(v, kind, dt)?.partial_cmp(&self.f64?),
+            NumKind::Float => floating::<f32>(v, kind, dt)?.partial_cmp(&self.f32?),
+            _ => {
+                let (n, i, f) = self.exact.as_ref()?;
+                Some(cmp_decimal_parts(exact_parts(v, kind, dt)?, (*n, i, f)))
+            }
+        }
+    }
 }
 
 /// The one temporal comparison every SHACL constraint uses (`sh:lessThan`,
@@ -2906,29 +3069,17 @@ fn xsd(local: &str) -> String {
     format!("{XSD}{local}")
 }
 
-fn is_numeric(dt: &str) -> bool {
-    let Some(local) = dt.strip_prefix(XSD) else {
-        return false;
-    };
-    matches!(
-        local,
-        "integer"
-            | "decimal"
-            | "double"
-            | "float"
-            | "long"
-            | "int"
-            | "short"
-            | "byte"
-            | "nonNegativeInteger"
-            | "positiveInteger"
-            | "nonPositiveInteger"
-            | "negativeInteger"
-            | "unsignedLong"
-            | "unsignedInt"
-            | "unsignedShort"
-            | "unsignedByte"
-    )
+fn num_kind(dt: &str) -> Option<NumKind> {
+    Some(match dt.strip_prefix(XSD)? {
+        "integer" => NumKind::Integer,
+        "decimal" => NumKind::Decimal,
+        "double" => NumKind::Double,
+        "float" => NumKind::Float,
+        "long" | "int" | "short" | "byte" | "nonNegativeInteger" | "positiveInteger"
+        | "nonPositiveInteger" | "negativeInteger" | "unsignedLong" | "unsignedInt"
+        | "unsignedShort" | "unsignedByte" => NumKind::IntegerSubtype,
+        _ => return None,
+    })
 }
 
 fn is_exact_temporal(dt: &str) -> bool {
