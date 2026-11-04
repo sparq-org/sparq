@@ -68,6 +68,10 @@ uses only installed files. A missing platform package produces an error naming
 that package. Installed package versions must match the host. The CLI forwards
 SIGINT/SIGTERM, bounds shutdown, and exits with the native process.
 
+The platform packages are not yet published to npm (as of 0.1.7), so an npm
+install runs the WebAssembly mode only; the native modes need a source build of
+`sparq-lws-core` until they are.
+
 Native mode binds loopback and maps `--port` to `SOLID_SERVER_BIND`, and
 `--base-url` to `SOLID_SERVER_BASE_URL`, with memory as the native default.
 Users can pass the binary's documented `SOLID_SERVER_*` and `PSS_SPARQ_*`
