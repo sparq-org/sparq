@@ -2884,7 +2884,14 @@ fn cmp_literals(a: &Literal, b: &Literal) -> Option<Ordering> {
 /// its lexical with one correctly-rounded conversion, whatever its length.
 /// `None` (incomparable, so a validation result) for an ill-typed lexical, such as
 /// `"1.5"^^xsd:integer` or an out-of-range `xsd:byte`, or a `NaN` operand.
-fn cmp_numeric(a: &str, ka: NumKind, da: &str, b: &str, kb: NumKind, db: &str) -> Option<Ordering> {
+fn cmp_numeric(
+    a: &str,
+    ka: NumKind,
+    da: &str,
+    b: &str,
+    kb: NumKind,
+    db: &str,
+) -> Option<Ordering> {
     match ka.max(kb) {
         NumKind::Double => floating::<f64>(a, ka, da)?.partial_cmp(&floating::<f64>(b, kb, db)?),
         NumKind::Float => floating::<f32>(a, ka, da)?.partial_cmp(&floating::<f32>(b, kb, db)?),

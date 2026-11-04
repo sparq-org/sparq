@@ -326,7 +326,10 @@ pub fn cmp_plain_decimal(a: &str, b: &str) -> Option<Ordering> {
 /// validating scan): `(negative, integer digits without leading zeros, fraction digits
 /// without trailing zeros)`, both digit strings ASCII digits only.
 #[inline]
-pub fn cmp_decimal_parts((na, ia, fa): (bool, &str, &str), (nb, ib, fb): (bool, &str, &str)) -> Ordering {
+pub fn cmp_decimal_parts(
+    (na, ia, fa): (bool, &str, &str),
+    (nb, ib, fb): (bool, &str, &str),
+) -> Ordering {
     let a_zero = ia.is_empty() && fa.is_empty();
     let b_zero = ib.is_empty() && fb.is_empty();
     if a_zero && b_zero {

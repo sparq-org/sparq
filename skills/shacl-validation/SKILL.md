@@ -706,7 +706,7 @@ SHACL-spec-correct conforms/violations).
   same six components compare two decimal / integer values by their lexicals, at any length,
   so values that differ only beyond `f64` precision (`1.000000000000000015` against
   `1.00000000000000002`, integers past 2^53) are told apart. A pair with an `xsd:float` or
-  `xsd:double` operand is promoted to the least common floating type, as SPARQL `<` does,
+  `xsd:double` operand is promoted to the least common floating type, as SPARQL `<` is specified,
   each operand converted once from its lexical whatever its length. `NaN` and an ill-typed
   numeric lexical (`"1.5"^^xsd:integer`, an out-of-range `xsd:byte`, a padded value) compare
   as nothing. A numeric bound is read once per validation run.

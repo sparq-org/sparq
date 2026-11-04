@@ -261,6 +261,22 @@ fn range_decimal_and_integer_compare_exactly() {
 }
 
 #[test]
+fn range_bounds_of_one_shape_stay_distinct() {
+    // Each numeric bound is prepared once per run; two bounds on one shape (and a nested
+    // shape's own bound) must not be confused.
+    let shapes = r#"
+        ex:S a sh:NodeShape ; sh:targetNode ex:n ;
+          sh:property [ sh:path ex:v ; sh:minInclusive 0 ; sh:maxInclusive 10 ;
+                        sh:node [ sh:maxExclusive 8 ] ] .
+    "#;
+    let r = run("ex:n ex:v -1 , 5 , 9 , 11 .", shapes);
+    assert_eq!(count_component(&r, "MinInclusiveConstraintComponent"), 1, "{}", r.to_text());
+    assert_eq!(count_component(&r, "MaxInclusiveConstraintComponent"), 1, "{}", r.to_text());
+    // -1 and 5 pass the nested maxExclusive 8; 9 and 11 fail it.
+    assert_eq!(count_component(&r, "NodeConstraintComponent"), 2, "{}", r.to_text());
+}
+
+#[test]
 fn range_float_and_double_keep_xpath_promotion() {
     // A double operand promotes the pair to double: 1.00000000000000002 IS 1.0 as a double,
     // so it is not above a decimal bound of 1.0.
