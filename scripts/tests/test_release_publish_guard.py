@@ -1008,6 +1008,109 @@ class TestV013RecoveryException(unittest.TestCase):
             interval_guard._run_git(self.root, ["status"])
 
 
+class TestV018FollowUpException(unittest.TestCase):
+    """The one-off v0.1.8 exception (PR #7301) admits only its pinned evidence."""
+
+    def setUp(self):
+        from unittest.mock import patch
+        self.tmp = tempfile.TemporaryDirectory(prefix="sparq-v018-follow-up-")
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        for name in ("a", "b"):
+            (self.root / f"crates/{name}").mkdir(parents=True)
+            (self.root / f"crates/{name}/Cargo.toml").write_text(
+                f'[package]\nname = "{name}"\nversion.workspace = true\n')
+        (self.root / "release-plz.toml").write_text(
+            '[workspace]\npublish = false\n'
+            '[[package]]\nname = "a"\nversion_group = "sparq"\n'
+            '[[package]]\nname = "b"\nversion_group = "sparq"\n')
+        self.set_version("0.1.8")
+        self.at = dt.datetime(2026, 11, 4, 21, 59, 10, tzinfo=dt.timezone.utc)
+        self.now = self.at + dt.timedelta(hours=3)
+        self.tags = [("v0.1.7", self.at), ("v0.1.6", self.at - dt.timedelta(days=22))]
+        self.remote = dict(interval_guard.V018_PREDECESSOR_REFS)
+        self.local = {"refs/tags/v0.1.7": "1c0290bfd789d81464530a0c96d73c8bbcb2e5cd",
+                      "refs/tags/v0.1.7^{commit}": "60114baca3b22fe5719237e1b4a6ab837269629a"}
+        self.fetch_calls = []
+        self.logs = []
+        for target in ("urllib.request.urlopen", "subprocess.run"):
+            poison = patch(target, side_effect=AssertionError("real external runner reached"))
+            poison.start()
+            self.addCleanup(poison.stop)
+
+    def set_version(self, version):
+        (self.root / "Cargo.toml").write_text(
+            '[workspace]\nmembers = ["crates/a", "crates/b"]\n'
+            f'[workspace.package]\nversion = "{version}"\n')
+
+    def git(self, root, args):
+        self.assertEqual(root, self.root)
+        if args == ["rev-parse", "--is-shallow-repository"]:
+            return "false\n"
+        if args[0] == "for-each-ref":
+            return "".join(f"{name}\t{stamp.isoformat()}\n" for name, stamp in self.tags)
+        if args[:2] == ["rev-parse", "--verify"]:
+            return self.local[args[2]] + "\n"
+        self.assertEqual(args, ["ls-remote", "--tags",
+                               "https://github.com/sparq-org/sparq.git", "refs/tags/v0.1.7*"])
+        return "".join(f"{oid}\t{ref}\n" for ref, oid in self.remote.items())
+
+    def absent(self, url):
+        self.fetch_calls.append(url)
+        return None, None
+
+    def run_guard(self, *, released_tag=None, fetch=None):
+        self.logs.clear()
+        return interval_guard.run(
+            self.root, dry_run=False, now=self.now, released_tag=released_tag,
+            git_runner=self.git, fetch=fetch or self.absent, log=self.logs.append)
+
+    def add_target(self):
+        self.tags.insert(0, ("v0.1.8", self.now))
+
+    def test_exact_pre_tag_and_tag_push_admit_inside_the_interval(self):
+        for tag in (None, "v0.1.8"):
+            with self.subTest(tag=tag):
+                if tag:
+                    self.add_target()
+                self.fetch_calls.clear()
+                self.assertEqual(self.run_guard(released_tag=tag), 0, self.logs)
+                self.assertEqual(len(self.fetch_calls), 2)
+                self.assertIn("maintainer-authorized v0.1.8 follow-up", "\n".join(self.logs))
+
+    def test_other_versions_keep_the_interval(self):
+        for version in ("0.1.9", "0.1.8-dev.1", "0.2.0"):
+            with self.subTest(version=version):
+                self.set_version(version)
+                self.assertEqual(self.run_guard(), 1)
+                self.assertNotIn("v0.1.8 follow-up", "\n".join(self.logs))
+
+    def test_changed_predecessor_evidence_refuses(self):
+        mutations = (
+            lambda: self.tags.__setitem__(0, ("v0.1.7", self.at + dt.timedelta(seconds=1))),
+            lambda: self.tags.insert(0, ("v0.1.7-hotfix", self.at + dt.timedelta(hours=1))),
+            lambda: self.local.__setitem__("refs/tags/v0.1.7", "c" * 40),
+            lambda: self.local.__setitem__("refs/tags/v0.1.7^{commit}", "c" * 40),
+            lambda: self.remote.__setitem__("refs/tags/v0.1.7^{}", "c" * 40),
+            lambda: self.remote.__setitem__("refs/tags/v0.1.7-x", "d" * 40),
+        )
+        for index, mutate in enumerate(mutations):
+            with self.subTest(mutation=index):
+                self.setUp()
+                mutate()
+                self.assertEqual(self.run_guard(), 1, self.logs)
+
+    def test_any_crates_io_publication_refuses(self):
+        published = lambda url: ({"versions": [{"num": "0.1.7", "created_at": self.at.isoformat()}]}, None)
+        self.assertEqual(self.run_guard(fetch=published), 1)
+        self.assertIn("definitive crates.io 404", "\n".join(self.logs))
+
+    def test_a_future_dated_tag_refuses(self):
+        self.add_target()
+        self.tags[0] = ("v0.1.8", self.now + dt.timedelta(minutes=5))
+        self.assertEqual(self.run_guard(released_tag="v0.1.8"), 1)
+
+
 class TestMinimumIntervalIsEnforced(unittest.TestCase):
     NOW = dt.datetime(2026, 7, 26, 12, 0, tzinfo=dt.timezone.utc)
 
