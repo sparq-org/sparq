@@ -40,13 +40,13 @@ streaming-serialization = ["serialize-rdf"]
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
 # (the path is used locally and the version is used on crates.io).
-sparq-core = { path = "../sparq-core", version = "0.1.7", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.8", default-features = false }
 oxrdf.workspace = true
 # The JSON-LD writers are built on the zero-dependency `sparq-jsonld` crate: its `Json` AST
 # (re-exported) and its Compaction and Framing algorithms, which `graph_to_jsonld_compact`
 # and `graph_to_jsonld_framed` call. OPTIONAL + pulled in ONLY by `serialize-rdf`, so an
 # empty (feature-off) build never compiles it — preserving the writer's dep-free contract.
-sparq-jsonld = { path = "../sparq-jsonld", version = "0.1.7", optional = true, default-features = false }
+sparq-jsonld = { path = "../sparq-jsonld", version = "0.1.8", optional = true, default-features = false }
 # (#4898) Fx hashing for the id-level Turtle writer's per-id render caches.
 # OPTIONAL + pulled in ONLY by `serialize-rdf` (feature-off stays dependency-free); already
 # in the tree via sparq-core.
@@ -57,7 +57,7 @@ rustc-hash = { workspace = true, optional = true }
 # sparq-core's parser (`Graph::load_str` / `load_dataset`) with default features on.
 # (sq-lzaw6) JSON-LD is needed only by the round-trip integration tests:
 # the production dependency above remains default-feature-free and lean.
-sparq-core = { path = "../sparq-core", version = "0.1.7", features = ["jsonld"] }
+sparq-core = { path = "../sparq-core", version = "0.1.8", features = ["jsonld"] }
 # The JSON-LD writer's round-trip tests parse the emitted JSON DOM with serde_json — a
 # DEV-only dependency, so the opt-in `serialize-rdf` feature itself stays dependency-free
 # (the native writer emits JSON by hand). serde_json is already in the workspace tree.

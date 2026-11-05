@@ -139,6 +139,13 @@ Add a `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md` (Keep-a-Changelog form
 Added / Changed / Fixed / Removed). Performance claims go in only with a pointer to the
 measurement (e.g. `bench/qlever-baselines.md`). Add the compare/tag link at the bottom.
 
+### v0.1.8
+
+Same pipeline as v0.1.7. Before merging the version PR, confirm the `npm ci with the
+publish npm` job in `js.yml` is green on its head. After the tag's `release.yml` run,
+dispatch `publish.yml` at the tag for the three npm packages and PyPI;
+`publish_solid_server_native` stays off.
+
 ### v0.1.7
 
 A routine patch release on the v0.1.6 pipeline: the version PR moves the records that

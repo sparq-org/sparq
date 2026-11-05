@@ -4940,7 +4940,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-acbench"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "hex",
  "oxrdf 0.3.3",
@@ -4951,7 +4951,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-algos"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "proptest",
@@ -4961,7 +4961,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-arrow"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -4977,7 +4977,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-bench"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "libc",
  "oxigraph",
@@ -4991,7 +4991,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-canon"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "base16ct 1.0.0",
  "digest 0.10.7",
@@ -5011,7 +5011,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-cli"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "bzip2",
  "flate2",
@@ -5034,7 +5034,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-conformance"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "oxjsonld",
  "oxrdf 0.3.3",
@@ -5060,11 +5060,11 @@ dependencies = [
 
 [[package]]
 name = "sparq-conformance-floors"
-version = "0.1.7"
+version = "0.1.8"
 
 [[package]]
 name = "sparq-core"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "fs4",
  "hashbrown 0.17.1",
@@ -5086,7 +5086,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-crdt"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -5097,7 +5097,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-difftest"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "bigdecimal",
  "num-bigint 0.5.1",
@@ -5109,7 +5109,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-dl-wasm"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "getrandom 0.3.4",
  "oxrdf 0.3.3",
@@ -5121,7 +5121,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-e2ee-ng"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "chacha20poly1305",
  "ed25519-dalek",
@@ -5137,7 +5137,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "md-5 0.11.0",
  "oxiri",
@@ -5162,7 +5162,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine-serialize"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -5175,7 +5175,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine-service"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "proptest",
@@ -5188,7 +5188,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-fedclient"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -5205,7 +5205,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-fedplan"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "criterion",
  "foldhash 0.2.0",
@@ -5216,7 +5216,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-fedplan-mpc"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "sparq-fedplan",
  "sparq-mpc",
@@ -5224,7 +5224,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-forms"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "getrandom 0.3.4",
  "oxrdf 0.3.3",
@@ -5238,7 +5238,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-geo"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "crs-definitions",
  "geo",
@@ -5261,7 +5261,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-gpu"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "bytemuck",
  "pollster",
@@ -5271,7 +5271,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-hdt"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "bzip2",
  "crc",
@@ -5288,7 +5288,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-http3"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "axum",
  "bytes",
@@ -5307,7 +5307,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-introspect"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "getrandom 0.3.4",
  "oxrdf 0.3.3",
@@ -5322,21 +5322,21 @@ dependencies = [
 
 [[package]]
 name = "sparq-jsonld"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "oxiri",
 ]
 
 [[package]]
 name = "sparq-jsonld-registry"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "sparq-jsonld",
 ]
 
 [[package]]
 name = "sparq-kb"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -5525,7 +5525,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-lws-wasm"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "async-trait",
  "axum",
@@ -5557,7 +5557,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-mcp"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -5576,7 +5576,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-metamorph"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "criterion",
  "percent-encoding",
@@ -5590,7 +5590,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-mpc"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "getrandom 0.4.2",
  "oxrdf 0.3.3",
@@ -5605,7 +5605,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-nlq"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "proptest",
@@ -5621,7 +5621,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-parse"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "flate2",
  "proptest",
@@ -5631,7 +5631,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-policy"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "sparq-conformance-floors",
@@ -5642,7 +5642,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-prov"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -5655,7 +5655,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-py"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -5672,11 +5672,11 @@ dependencies = [
 
 [[package]]
 name = "sparq-query-protocol"
-version = "0.1.7"
+version = "0.1.8"
 
 [[package]]
 name = "sparq-reason"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "oxiri",
  "oxrdf 0.3.3",
@@ -5694,7 +5694,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-reason-diff"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "sparq-core",
  "sparq-reason",
@@ -5702,7 +5702,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-reason-dl"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "criterion",
  "num-bigint 0.5.1",
@@ -5720,7 +5720,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-reason-el"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "rustc-hash 2.1.3",
@@ -5730,7 +5730,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-reason-ql"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -5743,7 +5743,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-reason-wasm"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "getrandom 0.3.4",
  "oxrdf 0.3.3",
@@ -5756,7 +5756,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-rsp"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "proptest",
@@ -5771,7 +5771,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-rsp-wasm"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "getrandom 0.3.4",
  "oxrdf 0.3.3",
@@ -5784,7 +5784,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-secprop-vocab"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -5792,7 +5792,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-serve"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "arc-swap",
  "oxrdf 0.3.3",
@@ -5804,7 +5804,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-server"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "arc-swap",
  "axum",
@@ -5850,7 +5850,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-shacl"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -5867,7 +5867,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-shacl-wasm"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "getrandom 0.3.4",
  "oxrdf 0.3.3",
@@ -5879,7 +5879,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-shaclc"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -5889,7 +5889,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-sim"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "proptest",
@@ -5900,7 +5900,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-solid"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "getrandom 0.3.4",
  "oxrdf 0.3.3",
@@ -5932,7 +5932,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-substrate"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "criterion",
  "hashbrown 0.17.1",
@@ -5945,7 +5945,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-terse"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "proptest",
@@ -5957,7 +5957,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-text"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "proptest",
@@ -5974,7 +5974,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-text-wasm"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "getrandom 0.3.4",
  "sparq-core",
@@ -5986,7 +5986,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-trust"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "flate2",
  "getrandom 0.4.2",
@@ -6005,7 +6005,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-vc"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "bs58",
  "ed25519-dalek",
@@ -6022,7 +6022,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-vectors"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "getrandom 0.3.4",
  "instant-distance",
@@ -6044,7 +6044,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-wac-oracle"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "sparq-core",
  "sparq-policy",
@@ -6053,7 +6053,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-wasm"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "getrandom 0.2.17",
  "getrandom 0.3.4",
@@ -6073,7 +6073,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-wrapper"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "sparq-core",
@@ -6081,7 +6081,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-zk"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "ark-bn254",
  "ark-ec",
@@ -6111,7 +6111,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-zk-compose"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "blake3",
  "libc",

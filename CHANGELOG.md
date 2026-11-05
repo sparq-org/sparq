@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-11-05
+
+Patch release that publishes `@sparq-org/sparq` with `checkOwlDl` (its 0.1.7 npm publish
+stopped at `npm ci`) and fixes that release path. Publication is not implied by this entry;
+verify the tagged run and every registry and release artifact. crates.io publication still
+waits on the bootstrap.
+
 ### Fixed
 
 - **npm release:** v0.1.7's `@sparq-org/sparq` npm publish stopped at `npm ci`
@@ -2089,7 +2096,8 @@ reproduce):
   single-pattern/FILTER comparisons short-circuit via index range-counting and are excluded
   from the claims above.
 
-[Unreleased]: https://github.com/sparq-org/sparq/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/sparq-org/sparq/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/sparq-org/sparq/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/sparq-org/sparq/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/sparq-org/sparq/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/sparq-org/sparq/compare/v0.1.4...v0.1.5
