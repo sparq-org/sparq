@@ -12,7 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Patch release that publishes `@sparq-org/sparq` with `checkOwlDl` (its 0.1.7 npm publish
 stopped at `npm ci`) and fixes that release path. Publication is not implied by this entry;
 verify the tagged run and every registry and release artifact. crates.io publication still
-waits on the bootstrap.
+waits on the bootstrap. npm users of `@sparq-org/sparq` move from 0.1.6, so they also get
+every 0.1.7 change listed below.
+
+### Added
+
+- **@sparq-org/sparq:** `checkOwlDl(tbox, abox?, options?)`, `store.checkOwlDl` and
+  `openOwlDlSession()` for OWL 2 DL consistency, profile checking and classification, backed by
+  a separate `wasm-dl/` bundle loaded on first use. They were in the 0.1.7 source but reach npm
+  first in this release.
 
 ### Fixed
 

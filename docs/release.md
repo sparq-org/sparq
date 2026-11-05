@@ -142,7 +142,9 @@ measurement (e.g. `bench/qlever-baselines.md`). Add the compare/tag link at the 
 ### v0.1.8
 
 Same pipeline as v0.1.7. Before merging the version PR, confirm the `npm ci with the
-publish npm` job in `js.yml` is green on its head. After the tag's `release.yml` run,
+publish npm` job in `js.yml` is green on its head, and that 24 hours have passed since the
+v0.1.7 tag (2026-11-04T21:59:10Z): the release-interval guard in the tag job and in
+`release.yml` refuses an earlier release. After the tag's `release.yml` run,
 dispatch `publish.yml` at the tag for the three npm packages and PyPI;
 `publish_solid_server_native` stays off.
 
