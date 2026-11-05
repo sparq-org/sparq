@@ -1790,7 +1790,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-canon"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "base16ct",
  "digest 0.10.7",
@@ -1806,7 +1806,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-core"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "fs4",
  "hashbrown 0.17.1",
@@ -1824,7 +1824,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "md-5",
  "oxiri",
@@ -1843,7 +1843,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine-service"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "quick-xml",
@@ -1875,7 +1875,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-geo"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "geo",
  "geo-types",
@@ -1890,7 +1890,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-hdt"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "bzip2",
  "crc",
@@ -1903,11 +1903,11 @@ dependencies = [
 
 [[package]]
 name = "sparq-jsonld"
-version = "0.1.7"
+version = "0.1.8"
 
 [[package]]
 name = "sparq-reason"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "oxiri",
  "oxrdf 0.3.3",
@@ -1924,7 +1924,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-shacl"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -1938,7 +1938,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-solid"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "rustc-hash",
@@ -1962,7 +1962,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-substrate"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "hashbrown 0.17.1",
  "oxrdf 0.3.3",
@@ -1973,7 +1973,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-terse"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "sparq-spargebra",
 ]
