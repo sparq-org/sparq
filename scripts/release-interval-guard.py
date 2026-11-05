@@ -11,8 +11,7 @@ The **belt** to the Release-PR arming exclusion's braces (scripts/release_pr_gua
 That exclusion stops the Release PR being merged automatically. This guard sits in the
 release path ITSELF, so even a mistaken merge — by a human, by a future automation, by a
 path nobody enumerated — cannot cut a release more often than ``MIN_RELEASE_INTERVAL``,
-except for the fixed maintainer-authorized v0.1.3 recovery and v0.1.8 follow-up
-predicates below.
+except for the fixed maintainer-authorized v0.1.3 recovery predicate below.
 
 It runs at BOTH points where a release can begin:
 
@@ -88,10 +87,6 @@ PR #6573 carries one maintainer-authorized exception: v0.1.3 may recover the
 exact incomplete v0.1.2 predecessor while every public crate remains absent. The
 fixed local/remote tag evidence is re-read on both pre-tag and tag-push paths. No
 other version inherits this exception; MIN_RELEASE_INTERVAL remains 24 hours.
-PR #7301 carries a second, equally fixed one: v0.1.8 may follow the exact v0.1.7
-tag inside the interval (v0.1.7's @sparq-org/sparq npm publish failed), while
-every public crate remains absent from crates.io. The maintainer authorized it
-for that one release only.
 
 MODES
 =====
@@ -161,16 +156,6 @@ V013_PREDECESSOR_REFS = {
     "refs/tags/v0.1.1^{}": "1a63aa7c638bd80da55f1811d5fb97e8d014f631",
     "refs/tags/v0.1.2": "05efded769a745d5b0e8d6d076425c171732ab1d",
     "refs/tags/v0.1.2^{}": "4b37254efe502f8a0aeba36076130ed9b44853ef",
-}
-
-# Maintainer-authorized v0.1.8 follow-up only (PR #7301): the v0.1.7 npm publish of
-# @sparq-org/sparq failed at `npm ci`, and the maintainer asked for v0.1.8 inside the
-# interval, for this release only. Evidence, not configuration: the exact predecessor tag,
-# its object and commit, locally and on the remote, and no crate ever on crates.io.
-V018_PREDECESSOR = ("v0.1.7", dt.datetime(2026, 11, 4, 21, 59, 10, tzinfo=dt.timezone.utc))
-V018_PREDECESSOR_REFS = {
-    "refs/tags/v0.1.7": "1c0290bfd789d81464530a0c96d73c8bbcb2e5cd",
-    "refs/tags/v0.1.7^{}": "60114baca3b22fe5719237e1b4a6ab837269629a",
 }
 
 CRATES_IO_API = "https://crates.io/api/v1/crates/{name}"
@@ -550,7 +535,7 @@ def crates_io_last_publish(
             continue  # definitive 404: never published
         if require_absent:
             raise GuardRefusal(
-                f"a maintainer-authorized exception requires a definitive crates.io 404 for {name!r}; "
+                f"v0.1.3 recovery requires a definitive crates.io 404 for {name!r}; "
                 "an existing registry response is unexpected — refusing"
             )
         versions = payload.get("versions")
@@ -612,30 +597,6 @@ def verify_v013_recovery(
     # Exact record comparison rejects missing, changed, extra or malformed refs.
     if sorted(remote.splitlines()) != sorted(f"{oid}\t{ref}" for ref, oid in expected_refs.items()):
         raise GuardRefusal("v0.1.3 recovery remote tag inventory/identity changed or is indeterminate")
-
-
-def verify_v018_follow_up(
-    repo_root: Path, tags: list[tuple[str, dt.datetime]], now: dt.datetime,
-    released_tag: str | None, run_git,
-) -> None:
-    """Verify the fixed v0.1.8 evidence; never replace unknowns with defaults."""
-    if released_tag not in (None, "v0.1.8"):
-        raise GuardRefusal("v0.1.8 follow-up applies only to the v0.1.8 tag")
-    predecessors = [(name, when) for name, when in tags if name != "v0.1.8"]
-    if (not predecessors or predecessors[0] != V018_PREDECESSOR
-            or any(when > now for _, when in tags)):
-        raise GuardRefusal("v0.1.8 follow-up predecessor tag/timestamp is not the authorized state")
-    for ref, expected in (
-        ("refs/tags/v0.1.7", V018_PREDECESSOR_REFS["refs/tags/v0.1.7"]),
-        ("refs/tags/v0.1.7^{commit}", V018_PREDECESSOR_REFS["refs/tags/v0.1.7^{}"]),
-    ):
-        if run_git(repo_root, ["rev-parse", "--verify", ref]).strip() != expected:
-            raise GuardRefusal("v0.1.8 follow-up predecessor object/commit changed")
-    remote = run_git(repo_root, ["ls-remote", "--tags",
-                               "https://github.com/sparq-org/sparq.git", "refs/tags/v0.1.7*"])
-    if sorted(remote.splitlines()) != sorted(
-            f"{oid}\t{ref}" for ref, oid in V018_PREDECESSOR_REFS.items()):
-        raise GuardRefusal("v0.1.8 follow-up remote predecessor tag changed or is indeterminate")
 
 
 def decide(
@@ -837,20 +798,15 @@ def run(
         recovery = workspace_version == "0.1.3" and (
             released_tag is not None or not any(name == "v0.1.3" for name, _ in tags)
         )
-        follow_up = workspace_version == "0.1.8" and (
-            released_tag is not None or not any(name == "v0.1.8" for name, _ in tags)
-        )
         if released_tag is not None or not any(
             name == f"v{workspace_version}" for name, _ in tags
         ):
             crates_io_at = crates_io_last_publish(
-                [c.name for c in crates], fetch=fetch, require_absent=recovery or follow_up,
+                [c.name for c in crates], fetch=fetch, require_absent=recovery,
                 exclude_version=released_tag[1:] if released_tag else None,
             )
         if recovery:
             verify_v013_recovery(repo_root, tags, now, released_tag, git_runner)
-        if follow_up:
-            verify_v018_follow_up(repo_root, tags, now, released_tag, git_runner)
         verdict = decide(
             now=now,
             workspace_version=workspace_version,
@@ -867,15 +823,6 @@ def run(
                 "(PR #6573); pinned tag evidence verified and every public crate absent",
                 last_tag="v0.1.2", last_release_at=V013_PREDECESSOR_AT,
                 source="v0.1.3 recovery exception",
-            )
-        if follow_up and not verdict.allowed:
-            # As above: the fixed evidence excludes future dates and any crates.io
-            # publication, so only the elapsed interval can still refuse this target.
-            verdict = Verdict(
-                True, "maintainer-authorized v0.1.8 follow-up to v0.1.7 (PR #7301); "
-                "pinned tag evidence verified and every public crate absent",
-                last_tag="v0.1.7", last_release_at=V018_PREDECESSOR[1],
-                source="v0.1.8 follow-up exception",
             )
     except GuardRefusal as refusal:
         log(f"::error title={PROGRAM} REFUSED to publish::{refusal}")

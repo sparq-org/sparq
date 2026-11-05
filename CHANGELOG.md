@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Release cadence guard:** the one-release v0.1.8 exception is removed now that v0.1.8 is
+  out; only the v0.1.3 recovery evidence can shorten the 24-hour minimum again.
+
 ## [0.1.8] - 2026-11-05
 
 Patch release that publishes `@sparq-org/sparq` with `checkOwlDl` (its 0.1.7 npm publish
