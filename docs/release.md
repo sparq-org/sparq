@@ -233,7 +233,7 @@ Pushing the tag triggers `.github/workflows/release.yml`:
    match. A branch dispatch naming an older tag refuses before any build or publication.
    Then the job runs
    `scripts/release-interval-guard.py --enforce --released-tag vX.Y.Z` before anything is
-   built. Outside the fixed v0.1.3 recovery exception (§8d), if the previous release
+   built. Outside the fixed v0.1.3 and v0.1.8 exceptions (§8d), if the previous release
    was less than 24h ago the job fails and **every** job
    below it is blocked (they all depend on `setup`). See §8d — this is the tag-push half
    of the at-most-one-release-per-day policy. Keep the tag immutable. After the window,
@@ -704,8 +704,10 @@ you flip.
    crates.io publication)`. It refuses on any indeterminacy — shallow checkout, unreadable
    tag list, unparseable date, unreachable crates.io, a future-dated last release. A
    definitive crates.io 404 is the only accepted "never published" answer. There is no
-   override flag; only the fixed v0.1.3 recovery evidence above can admit a shorter
-   interval. Ordinary publication still requires the full 24 hours.
+   override flag; only the fixed v0.1.3 recovery evidence above, or the fixed v0.1.8
+   follow-up evidence (PR #7301: v0.1.8 directly after the exact v0.1.7 tag, every public
+   crate absent), can admit a shorter interval. Ordinary publication still requires the
+   full 24 hours.
 3. **The same interval, on the tag-push path** (issue #2552). Protection 2 only covers
    releases that go through the Release PR. §3's canonical instruction — push a `vX.Y.Z`
    tag — fires `release.yml` **directly**, which was previously uncadenced: a hand-pushed

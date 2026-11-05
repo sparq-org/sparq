@@ -11,7 +11,8 @@ The **belt** to the Release-PR arming exclusion's braces (scripts/release_pr_gua
 That exclusion stops the Release PR being merged automatically. This guard sits in the
 release path ITSELF, so even a mistaken merge — by a human, by a future automation, by a
 path nobody enumerated — cannot cut a release more often than ``MIN_RELEASE_INTERVAL``,
-except for the fixed maintainer-authorized v0.1.3 recovery predicate below.
+except for the fixed maintainer-authorized v0.1.3 recovery and v0.1.8 follow-up
+predicates below.
 
 It runs at BOTH points where a release can begin:
 
