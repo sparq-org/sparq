@@ -149,6 +149,13 @@ dispatch `publish.yml` at the tag for the three npm packages and PyPI. The
 `publish_solid_server_native` stays off (the npm solid-server serves the WebAssembly
 mode only), and crates.io still waits on the §4 bootstrap.
 
+The v0.1.7 `@sparq-org/sparq` npm publish failed at `npm ci` (solid-server,
+eyereasoner-compat and PyPI did publish): npm 11 refused the lock because the solid-server
+manifest pinned native packages that were not on npm. v0.1.8 carries the fix (pins are
+added at publish time by `native/pin.mjs`) and the `npm ci with the publish npm` job in
+`js.yml`, which runs on every version PR; check it is green before merging, since only
+`ci-fast` is required.
+
 ### v0.1.6
 
 `v0.1.5` (e6b65b63) published its GitHub Release, container image and all three npm packages

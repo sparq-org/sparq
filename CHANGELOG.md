@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **npm release:** v0.1.7's `@sparq-org/sparq` npm publish stopped at `npm ci`
+  (`@sparq-org/solid-server`, `@sparq-org/eyereasoner-compat` and PyPI `sparq-rdf` 0.1.7 did
+  publish). The publish npm (11.x) refuses a `package-lock.json` that cannot satisfy every
+  manifest, and `@sparq-org/solid-server` pinned its native platform packages at a version npm
+  did not have, so the lock could not record them. The source manifest no longer pins them;
+  `publish.yml` adds the pins only in a dispatch that publishes those packages first. The `js`
+  workflow now runs `npm ci` with the publish npm on PRs that touch an npm workspace manifest
+  or the lock. `@sparq-org/solid-server@0.1.7` carries those unsatisfiable pins: it installs,
+  but an npm 11 `npm ci` of a project locked to it fails, so use 0.1.8.
+
 ## [0.1.7] - 2026-11-04
 
 Patch release carrying the exact SHACL numeric range comparison (#7294) and the changes

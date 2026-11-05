@@ -18,3 +18,10 @@ when explicitly dispatched with `publish_solid_server_native=true`, at the
 verified release tag. Each platform package needs its own registry bootstrap
 and trusted-publisher registration for `publish.yml` before that dispatch.
 The maintainer controls publication.
+
+The host manifest does not pin the platform packages in source: their lockstep
+version is on npm only after the release publishes it, so `package-lock.json`
+could never record the pins and `npm ci` would refuse the tagged tree. The same
+dispatch runs `native/pin.mjs` in the `@sparq-org/solid-server` publish job,
+after the platform packages are published, to add them as exact optional
+dependencies.
