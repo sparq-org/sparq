@@ -29,9 +29,10 @@ npx @sparq-org/solid-server --native --port 3000 --base-url http://127.0.0.1:300
 ```
 
 `--protocol` is `solid` by default and also accepts `lws`; LWS always selects the
-native executable. npm supplies optional platform packages for Linux x64/arm64,
-Darwin x64/arm64 and Windows x64, at exactly the host version. They install with
-`ignore-scripts=true`. Runtime resolution uses installed files; a missing
+native executable. A release that publishes the platform packages (Linux x64/arm64,
+Darwin x64/arm64, Windows x64) pins them as optional dependencies at exactly the host
+version; they are not on npm yet, so until then run `sparq-lws-core` directly. They
+install with `ignore-scripts=true`. Runtime resolution uses installed files; a missing
 package is an error naming the required package, and an installed version must
 match the host. Signals reach the native child and shutdown has a deadline.
 
