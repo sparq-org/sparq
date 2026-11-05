@@ -22,6 +22,13 @@ every 0.1.7 change listed below.
   a separate `wasm-dl/` bundle loaded on first use. They were in the 0.1.7 source but reach npm
   first in this release.
 
+### Changed
+
+- **Release cadence guard:** a maintainer-authorized, one-release exception admits v0.1.8
+  directly after the exact v0.1.7 tag, with pinned tag evidence and definitive crates.io
+  absence, because v0.1.7's `@sparq-org/sparq` npm publish failed. All other versions keep
+  the 24-hour minimum.
+
 ### Fixed
 
 - **npm release:** v0.1.7's `@sparq-org/sparq` npm publish stopped at `npm ci`
