@@ -547,8 +547,12 @@ successful results carrying `BridgeOutcome.refused`; they are distinct from I/O 
 - `odrl_bridge::materialize_odrl_n3(&mut Graph, policy_ttl: &str, &Request) -> Result<BridgeOutcome, String>`
   (and `materialize_odrl_n3_with_budget(…, AuthBudget)`, the twin that takes the
   whole-decision budget its five closures are charged against instead of
-  `default_auth_budget()` — pass the store's own `auth_budget()` so a lowered budget is
-  honoured on this lane as it is on the WAC and ACP ones)
+  `default_auth_budget()`). `PodStore::materialize_odrl_n3(policy_ttl, &Request)`
+  uses the store's `auth_budget()` and `auth_limits()`, tracks its resulting policy
+  grants and refreshes the session index. Lowered closure limits refuse with
+  the per-closure kind (such as `AuthAllowance::TotalJoinRows`), whose hint names
+  the lowered setting; admission refusals preserve the existing graph.
+  The free functions retain the default per-closure limits.
   — **opt-in** (`odrl-bridge`; sq-zgbso.2, sq-zgbso.2): an alternative
   materialization path that runs the stateless ODRL core as **five stratified `reason_n3` calls**
   (`rules/odrl-{a0,a,b,c,d}.n3`), mirroring the WAC/ACP N3-stratification pattern instead of the
@@ -567,7 +571,7 @@ successful results carrying `BridgeOutcome.refused`; they are distinct from I/O 
     a `use` permission permit a `read` request while the strata match action IRIs exactly).
   **Fail-closed & injection-safe**: `policy_ttl` is parsed
   **strictly as Turtle** (N3 `=>` rules and every Turtle-extension are a syntax `Err`) and only the
-  validated ground terms are re-serialized into the reasoner input, so a crafted policy cannot smuggle
+  validated ground facts enter the compiled reasoner by id, so a crafted policy cannot smuggle
   rules or derive `auth:*` directly; a triple mentioning a reserved/engine-owned IRI term, a
   non-canonical `xsd:dateTime` lexical form (only `YYYY-MM-DDTHH:MM:SSZ` compares correctly
   lexically), an **ambiguous constraint node** (several operand triples in one position, or several
@@ -580,6 +584,19 @@ successful results carrying `BridgeOutcome.refused`; they are distinct from I/O 
   silently ignoring it would drop a deny and WIDEN access), or an invalid request-field IRI all return
   `Err` and materialize **nothing**. Grants/denies land in `<urn:sparq:auth>` +
   `<urn:sparq:auth-bridged>` exactly as the Rust bridge writes them.
+  One ledger covers source admission, policy extraction, input facts and all five
+  closures. The source length is bounded by `max_input_bytes` before strict Turtle
+  parsing, using the source-byte ledger dimension. Independently, each policy
+  term occurrence contributes its lexical bytes once to the aggregate input-byte
+  allowance; policy model allocations share that allowance. Every parsed quad,
+  including duplicates, charges `max_input_facts` once. Request facts and lexical
+  bytes are admitted before interning. Control-document byte and per-input-term
+  caps do not apply to policy or request facts on this lane. The one new refusal
+  is a source over `max_input_bytes`, reported as `InputBytes` before parsing.
+  Resource enumeration is absent.
+  The core Turtle parser currently fills its dictionary and row buffer before the
+  bridge checks each parsed quad, including duplicates. These checks precede index
+  construction; source-byte admission already precedes parsing.
 - `store.refresh_odrl_grant(&Policy, &Request, BridgeKind)` / `refresh_odrl_grants()` —
   **opt-in** (`odrl-bridge`; sq-dpk4): re-evaluate **bridged** ODRL grants when
   the policy changes and **retract** the ones that no longer hold (a withdrawn permission, a

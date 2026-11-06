@@ -1431,20 +1431,12 @@ fn compare_subsumed(actual: &Value, op: Operator, bound: &Value, request: &Reque
     match op {
         Operator::Eq | Operator::IsA => request.purpose_subsumed_by(a, bound.as_str()),
         Operator::Neq => !request.purpose_subsumed_by(a, bound.as_str()),
-        Operator::IsPartOf | Operator::IsAnyOf => bound
-            .as_str()
-            .split(['|', ' ', ','])
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .any(|member| request.purpose_subsumed_by(a, member)),
+        Operator::IsPartOf | Operator::IsAnyOf => {
+            bound.any_set_member(|member| request.purpose_subsumed_by(a, member))
+        }
         Operator::IsNoneOf => {
             set_negation_representable(actual, bound)
-                && !bound
-                    .as_str()
-                    .split(['|', ' ', ','])
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .any(|member| request.purpose_subsumed_by(a, member))
+                && !bound.any_set_member(|member| request.purpose_subsumed_by(a, member))
         }
         Operator::Lt | Operator::Lteq | Operator::Gt | Operator::Gteq => compare(actual, op, bound),
     }
@@ -1484,12 +1476,7 @@ fn compare_recipient(actual: &Value, op: Operator, bound: &Value, request: &Requ
                 .contains(&(r.to_owned(), m.to_owned()))
     };
     let any_in_set = |bound: &Value| -> bool {
-        bound
-            .as_str()
-            .split(['|', ' ', ','])
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .any(&member_match)
+        bound.any_set_member(&member_match)
     };
     match op {
         Operator::Eq | Operator::IsA => member_match(bound.as_str()),
@@ -1703,7 +1690,7 @@ fn value_eq(a: &Value, b: &Value) -> bool {
         }
         // Cross-type: compare by canonical string (an IRI right-operand vs an IRI
         // actual, a string code vs a string code).
-        _ => a.as_str() == b.as_str(),
+        _ => a.text_eq(b),
     }
 }
 
@@ -1716,12 +1703,7 @@ fn value_eq(a: &Value, b: &Value) -> bool {
 /// request's caller-supplied subsumption closure — see [`Request::with_purpose_subsumption`].
 fn is_part_of(actual: &Value, bound: &Value) -> bool {
     let a = actual.as_str();
-    bound
-        .as_str()
-        .split(['|', ' ', ','])
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .any(|member| member == a)
+    bound.set_contains(a)
 }
 
 /// `odrl:isNoneOf` (flat base case): the actual value equals **no** member of the
