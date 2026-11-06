@@ -28,8 +28,8 @@
 //! The two steps — swap the control graph, rebuild the auth view — succeed together or
 //! leave the store byte-for-byte as it was:
 //!
-//! 1. the supplied content is PARSED first (a malformed document is rejected before
-//!    anything is mutated);
+//! 1. one admission ledger checks serialized bytes before parsing, then parsed rows,
+//!    stored terms and ACP dependencies before anything is mutated;
 //! 2. the prior control-graph slot is captured, then the new content is swapped in (or the
 //!    slot removed, for `delete_acl`);
 //! 3. the auth view is re-materialized. On success the store reflects the new rules.
@@ -112,8 +112,9 @@ impl PodStore {
     /// # Errors
     ///
     /// `Err` if `acl_iri` is not an `.acl`/`.acr` document IRI, if `content` does not parse
-    /// in `format` or states a triple the document may not, or if re-materializing the resulting view fails (the store is rolled back
-    /// to its prior state first).
+    /// in `format` or states a triple the document may not, if admission exceeds the store's
+    /// [`crate::AuthBudget`] (nothing is changed), or if re-materializing the resulting view
+    /// fails (the store is rolled back to its prior state first).
     ///
     /// # Examples
     ///
@@ -245,6 +246,9 @@ impl PodStore {
             .map_err(|e| format!("put_acl denied: {}", e))?;
         let name = NamedNode::new(acl_iri)
             .map_err(|e| format!("put_acl denied: malformed ACL IRI <{}>: {}", acl_iri, e))?;
+        let mut admission = crate::budget::AuthLedger::new(self.auth_budget);
+        crate::loader::admit_write_document(&mut admission, acl_iri, content.len())
+            .map_err(|e| format!("put_acl denied: {e}"))?;
         // PARSE FIRST — a malformed document is rejected before anything mutates.
         let new_graph = Graph::load_str_with_base(content, format, acl_iri).map_err(|e| {
             format!(
@@ -252,9 +256,13 @@ impl PodStore {
                 acl_iri, format, e
             )
         })?;
-        let content = crate::loader::graph_triples(&new_graph);
-        crate::loader::ControlWrites::replacing(&self.graph, acp, acl_iri, content.clone())
-            .check(acl_iri, &content)
+        let content = crate::loader::write_triples_metered(&new_graph, acl_iri, &mut admission)
+            .map_err(|e| format!("put_acl denied: {e}"))?;
+        crate::loader::ControlWrites::replacing(&self.graph, acp, acl_iri, &content)
+            .check(acl_iri, content.iter(), &mut admission)
+            .map_err(|e| format!("put_acl denied: {e}"))?;
+        admission
+            .checkpoint()
             .map_err(|e| format!("put_acl denied: {e}"))?;
         let new_len = graph_len(&new_graph);
 
@@ -406,6 +414,298 @@ impl PodStore {
             self.rematerialize_acp_scoped(scope).map(|_| ())
         } else {
             self.materialize_wac_scoped(scope).map(|_| ())
+        }
+    }
+}
+
+#[cfg(test)]
+mod admission_tests {
+    use super::*;
+    use crate::default_auth_budget;
+    #[cfg(not(target_arch = "wasm32"))]
+    use crate::{auth_allowance_refusal, AuthAllowance, Mode, Session};
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn snapshot(
+        graph: &Graph,
+    ) -> (
+        String,
+        std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>,
+    ) {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "sparq-write-admission-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&dir).unwrap();
+        let mut bytes = std::collections::BTreeMap::new();
+        graph.save(&dir).unwrap();
+        fn collect(
+            root: &std::path::Path,
+            dir: &std::path::Path,
+            bytes: &mut std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>,
+        ) {
+            for file in std::fs::read_dir(dir).unwrap() {
+                let path = file.unwrap().path();
+                if path.is_dir() {
+                    collect(root, &path, bytes);
+                } else if path.file_name().unwrap() != "sparq-store" {
+                    // Saving a copy mints fresh store identities. Compare every payload
+                    // byte, excluding only these newly generated identity markers.
+                    bytes.insert(
+                        path.strip_prefix(root).unwrap().to_owned(),
+                        std::fs::read(&path).unwrap(),
+                    );
+                }
+            }
+        }
+        collect(&dir, &dir, &mut bytes);
+        std::fs::remove_dir_all(&dir).unwrap();
+        fn one(graph: &Graph) -> String {
+            let scan = graph.store().scan(&[None, None, None]);
+            let rows: Vec<_> = scan.rows.iter().map(|r| scan.to_spo(r)).collect();
+            format!(
+                "{:?}/{rows:?}",
+                graph
+                    .dict()
+                    .iter()
+                    .map(|(id, _)| (id, graph.dict().term(id)))
+                    .collect::<Vec<_>>()
+            )
+        }
+        let mut out = one(graph);
+        for (name, sub) in graph.named() {
+            out += &format!("/{name}/{}", one(sub));
+        }
+        (out, bytes)
+    }
+
+    fn document(acp: bool) -> String {
+        if acp {
+            "@prefix acp: <http://www.w3.org/ns/solid/acp#> .
+             @prefix acl: <http://www.w3.org/ns/auth/acl#> .
+             <https://pod.ex/.acr> acp:memberAccessControl <https://pod.ex/.acr#c> .
+             <https://pod.ex/.acr#c> acp:apply <https://pod.ex/.acr#p> .
+             <https://pod.ex/.acr#p> acp:allow acl:Read; acp:allOf <https://pod.ex/.acr#m> .
+             <https://pod.ex/.acr#m> acp:agent <https://alice.ex/me> ."
+                .into()
+        } else {
+            "@prefix acl: <http://www.w3.org/ns/auth/acl#> .
+             <https://pod.ex/.acl#a> a acl:Authorization; acl:default <https://pod.ex/>;
+                 acl:agent <https://alice.ex/me>; acl:mode acl:Read ."
+                .into()
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn refused_put_preserves_dictionary_slots_view_and_acr_controlled() {
+        for acp in [false, true] {
+            for missing in [false, true] {
+                for cap in [
+                    "document",
+                    "facts",
+                    "term",
+                    "dependency",
+                    "duplicate-dependencies",
+                    "dependency-term",
+                    "dependency-facts",
+                ] {
+                    if cap.contains("dependenc") && !acp {
+                        continue;
+                    }
+                    let mut store = crate::PodStore::new(
+                        Graph::load_dataset(
+                            "<https://pod.ex/d#s> <urn:p> <urn:o> <https://pod.ex/d> .",
+                            "nquads",
+                        )
+                        .unwrap(),
+                    );
+                    let root = if acp {
+                        "https://pod.ex/.acr"
+                    } else {
+                        "https://pod.ex/.acl"
+                    };
+                    let body = document(acp);
+                    if acp {
+                        store.materialize_acp().unwrap();
+                        store.put_acl_acp(root, &body, "turtle").unwrap();
+                    } else {
+                        store.materialize_wac().unwrap();
+                        store.put_acl(root, &body, "turtle").unwrap();
+                    }
+                    let doc = if missing {
+                        if acp {
+                            "https://pod.ex/new.acr"
+                        } else {
+                            "https://pod.ex/new.acl"
+                        }
+                    } else {
+                        root
+                    };
+                    let mut replacement = format!("<{doc}#p> <urn:pad> \"{}\" .", "x".repeat(256));
+                    if cap.contains("dependenc") {
+                        replacement = format!("<{doc}#p> <http://www.w3.org/ns/solid/acp#apply> <https://pod.ex/policy.acr#p> .");
+                        let large = "x".repeat(512);
+                        let policy = Graph::load_str(
+                            &format!("<https://pod.ex/policy.acr#p> <urn:pad> \"{large}\" ."),
+                            "ntriples",
+                        )
+                        .unwrap();
+                        store
+                            .graph_unchecked_mut()
+                            .add_named(
+                                NamedNode::new("https://pod.ex/policy.acr").unwrap().into(),
+                                policy,
+                            )
+                            .unwrap();
+                        if cap == "duplicate-dependencies" {
+                            let duplicate = Graph::load_str(
+                                &format!(
+                                    "<https://pod.ex/policy.acr#p> <urn:pad> \"{}\" .",
+                                    "y".repeat(512)
+                                ),
+                                "ntriples",
+                            )
+                            .unwrap();
+                            store
+                                .graph_unchecked_mut()
+                                .add_named(
+                                    NamedNode::new("https://pod.ex/policy.acr").unwrap().into(),
+                                    duplicate,
+                                )
+                                .unwrap();
+                        }
+                        store.materialize_acp().unwrap();
+                    }
+                    // A newly inserted ACR would clear this tracked resource. Refusal must
+                    // preserve it, including when the target slot did not previously exist.
+                    store.acr_controlled.insert("https://pod.ex/new".into());
+                    let before = snapshot(store.graph());
+                    let controlled = store.acr_controlled.clone();
+                    let session = Session {
+                        agent: Some("https://alice.ex/me"),
+                        ..Session::default()
+                    };
+                    assert!(store.decide(&session, "https://pod.ex/d", Mode::Read).allow);
+                    let decisions: Vec<_> = [Mode::Read, Mode::Write, Mode::Append, Mode::Control]
+                        .map(|m| store.decide(&session, "https://pod.ex/d", m))
+                        .into();
+                    let mut budget = default_auth_budget();
+                    let expected = match cap {
+                        "document" => {
+                            budget.max_document_bytes = replacement.len() - 1;
+                            AuthAllowance::InputBytes
+                        }
+                        "facts" => {
+                            budget.max_input_facts = 0;
+                            AuthAllowance::InputFacts
+                        }
+                        "term" => {
+                            budget.max_input_term_bytes = 128;
+                            AuthAllowance::InputTermBytes
+                        }
+                        "dependency" => {
+                            budget.max_input_bytes = 512;
+                            AuthAllowance::InputBytes
+                        }
+                        "duplicate-dependencies" => {
+                            budget.max_input_bytes = 1280;
+                            AuthAllowance::InputBytes
+                        }
+                        "dependency-term" => {
+                            budget.max_input_term_bytes = 256;
+                            AuthAllowance::InputTermBytes
+                        }
+                        "dependency-facts" => {
+                            budget.max_input_facts = 1;
+                            AuthAllowance::InputFacts
+                        }
+                        _ => unreachable!(),
+                    };
+                    store.set_auth_budget(budget);
+                    let error = if acp {
+                        store.put_acl_acp(doc, &replacement, "ntriples")
+                    } else {
+                        store.put_acl(doc, &replacement, "ntriples")
+                    }
+                    .unwrap_err();
+                    assert_eq!(
+                        auth_allowance_refusal(&error),
+                        Some(expected),
+                        "{cap}: {error}"
+                    );
+                    if cap.contains("dependenc") {
+                        assert!(
+                            !error.contains("policy.acr"),
+                            "dependency admission disclosed another document: {error}"
+                        );
+                        if cap == "dependency-term" {
+                            let private_size = 512
+                                + sparq_core::meter::TERM_NODE_BYTES
+                                + oxrdf::vocab::xsd::STRING.as_str().len();
+                            assert!(
+                                !error.contains(&private_size.to_string()),
+                                "dependency admission disclosed a stored term size: {error}"
+                            );
+                        }
+                    }
+                    assert_eq!(
+                        snapshot(store.graph()),
+                        before,
+                        "{cap}: stored bytes or slots changed"
+                    );
+                    assert_eq!(
+                        store.acr_controlled, controlled,
+                        "{cap}: ACR tracking changed"
+                    );
+                    let after: Vec<_> = [Mode::Read, Mode::Write, Mode::Append, Mode::Control]
+                        .map(|m| store.decide(&session, "https://pod.ex/d", m))
+                        .into();
+                    assert_eq!(
+                        format!("{after:?}"),
+                        format!("{decisions:?}"),
+                        "{cap}: view changed"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn deleting_the_last_control_document_accepts_zero_document_and_term_caps() {
+        for acp in [false, true] {
+            let mut store = crate::PodStore::new(Graph::new());
+            let doc = if acp {
+                "https://pod.ex/.acr"
+            } else {
+                "https://pod.ex/.acl"
+            };
+            if acp {
+                store.materialize_acp().unwrap();
+                store.put_acl_acp(doc, &document(acp), "turtle").unwrap();
+            } else {
+                store.materialize_wac().unwrap();
+                store.put_acl(doc, &document(acp), "turtle").unwrap();
+            }
+            let mut budget = default_auth_budget();
+            budget.max_document_bytes = 0;
+            budget.max_input_term_bytes = 0;
+            budget.max_input_facts = 0;
+            budget.max_input_bytes = 0;
+            store.set_auth_budget(budget);
+            let result = if acp {
+                store.delete_acl_acp(doc)
+            } else {
+                store.delete_acl(doc)
+            };
+            assert!(result.unwrap().existed);
+            assert!(store
+                .graph()
+                .named()
+                .iter()
+                .all(|(n, _)| n.to_string() != format!("<{doc}>")));
         }
     }
 }
