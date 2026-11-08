@@ -499,6 +499,97 @@ fn sameterm_literal_hash_path_equivalence() {
     assert!(fired && bindings > 64, "expected hash path on literal sameTerm keys: {}", bindings);
 }
 
+fn assert_small_term_seed(first: &str, second: &str, identical: bool) {
+    let mut ttl = format!(
+        "ex:d0 ex:selected true; ex:key {first}; ex:rank 5 .
+         ex:d1 ex:selected true; ex:key {second}; ex:rank 3 .\n"
+    );
+    for i in 0..20 {
+        ttl.push_str(&format!("ex:noise{i} ex:key \"noise{i}\"; ex:rank 1 .\n"));
+    }
+    let g = load(&ttl);
+    let q = "SELECT ?d WHERE {
+        ?d ex:selected true; ex:key ?k; ex:rank ?r
+        OPTIONAL {
+          ?d2 ex:key ?k2; ex:rank ?r2
+          FILTER (sameTerm(?k, ?k2) && ?r2 < ?r && (isLiteral(?k2) || isBlank(?k2)))
+        } FILTER(!bound(?k2))
+    }";
+    theta_antijoin_testing::reset_stats();
+    let (off, on) = on_off(&g, q);
+    assert_eq!(off, on, "sameTerm seed differs for {first} / {second}");
+    let expected = if identical {
+        vec![vec![Some("<http://example.org/d1>".to_string())]]
+    } else {
+        vec![
+            vec![Some("<http://example.org/d0>".to_string())],
+            vec![Some("<http://example.org/d1>".to_string())],
+        ]
+    };
+    assert_eq!(on, expected, "term identity changed for {first} / {second}");
+    // Each seed returns only its own documents; an unseeded B returns all
+    // 22 documents per group. Exact counts also witness RDF 1.1 normalization.
+    assert_eq!(theta_antijoin_testing::stats(), (true, 2, if identical { 1 } else { 2 }));
+}
+
+#[test]
+fn sameterm_small_literal_seed_preserves_term_identity() {
+    for (first, second, identical) in [
+        ("\"1\"^^xsd:integer", "\"01\"^^xsd:integer", false),
+        ("\"1\"^^xsd:integer", "\"1.0\"^^xsd:decimal", false),
+        ("\"hello\"", "\"hello\"^^xsd:string", true),
+        ("\"hello\"@EN", "\"hello\"@en", true),
+        ("\"hello\"@en", "\"hello\"@fr", false),
+    ] {
+        assert_small_term_seed(first, second, identical);
+    }
+}
+
+#[test]
+fn sameterm_small_blank_seed_preserves_term_identity() {
+    assert_small_term_seed("_:shared", "_:shared", true);
+    assert_small_term_seed("_:first", "_:second", false);
+}
+
+#[test]
+fn sameterm_small_blank_subject_seed_keeps_query_blank_scope() {
+    let g = load(
+        "_:a ex:selected true; ex:rank 5; ex:next _:b .
+         _:b ex:selected true; ex:rank 3; ex:next _:a .
+         _:other ex:rank 1; ex:next _:a .",
+    );
+    let q = "SELECT ?r WHERE {
+        ?k ex:selected true; ex:rank ?r
+        OPTIONAL {
+          ?k2 ex:rank ?r2; ex:next _:queryBlank .
+          _:queryBlank ex:rank ?r3
+          FILTER (sameTerm(?k, ?k2) && ?r2 < ?r)
+        } FILTER(!bound(?k2))
+    }";
+    theta_antijoin_testing::reset_stats();
+    let (off, on) = on_off(&g, q);
+    assert_eq!(off, on);
+    assert_eq!(on.len(), 2, "both distinct blank subjects must survive");
+    assert_eq!(theta_antijoin_testing::stats(), (true, 2, 2));
+}
+
+#[test]
+fn sameterm_small_seed_declines_unsupported_scope() {
+    let g = load("ex:d0 ex:key \"hello\"; ex:rank 5 . ex:d1 ex:key \"hello\"; ex:rank 3 .");
+    let q = "SELECT ?d WHERE {
+        ?d ex:key ?k; ex:rank ?r
+        OPTIONAL {
+          { SELECT ?k2 ?r2 WHERE { ?d2 ex:key ?k2; ex:rank ?r2 } ORDER BY ?r2 LIMIT 1 }
+          FILTER (sameTerm(?k, ?k2) && ?r2 < ?r)
+        } FILTER(!bound(?k2))
+    }";
+    theta_antijoin_testing::reset_stats();
+    let (off, on) = on_off(&g, q);
+    assert_eq!(off, on);
+    assert_eq!(on, vec![vec![Some("<http://example.org/d1>".to_string())]]);
+    assert_eq!(theta_antijoin_testing::stats(), (true, 1, 1));
+}
+
 #[test]
 fn in_single_var_correlation_equivalence_and_fires() {
     // `?author IN (?author2)` desugars to `?author = ?author2` — a value-equality
