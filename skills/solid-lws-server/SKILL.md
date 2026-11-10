@@ -655,8 +655,9 @@ with `sparql-endpoint`, independent of the requester's readable resources.
 LWS serves its CID description at `/` with `Accept: application/lws+cid`, preserving
 its verification key and validators. It includes the storage-description service,
 protocol conformance URI, JSON Patch formats and recursive deletion; `MoveResource`
-is absent because `up` is server-managed. Notification subscription types come from
-the catalog (currently webhooks). Draft extension terms use an inline context.
+is absent; a request to change a resource's own `up` link gets `409 Conflict`.
+Notification subscription types come from the catalog (currently webhooks).
+Draft extension terms use an inline context.
 See [catalog entries and embedding](references/service-description.md) for the
 RDF terms, media maps and the `describe::ServiceCatalog` registration API.
 
@@ -907,8 +908,12 @@ What the server exposes, all discoverable from the storage description
   the patch is charged and refuses it (`413`) past what keeps parsing it (the same reader again,
   keeping what it reads) within the linkset cost budget beyond the body itself; a number in it
   gets `422`, text that is not JSON (or nests past what the parser reads) `400`, a partial `PUT` (`Content-Range`) `400`. A linkset `PATCH` or `PUT` changes only user-managed links: the
-  server-managed `up`, `type`, `self` and `linkset` relations of the resource keep the server's
-  values, and a result that is not a linkset document gets `422`. Its relative `anchor` and
+  server-managed `type`, `self` and `linkset` relations of the resource keep the server's
+  values. A result naming an `up` for the resource's own context other than its exact
+  parent container gets `409 Conflict`, after authorization and preconditions and before
+  any write. This applies to linkset `PATCH` and `PUT`, and to `Link` headers on content
+  replacement; the same parent is accepted. The storage offers no `MoveResource` capability.
+  A result that is not a linkset document gets `422`. Its relative `anchor` and
   `href` values are resolved against the linkset's own URI (RFC 9264 section 4) and stored
   absolute; one that is not a URI reference gets `422`, as does a target attribute not shaped as
   RFC 9264 section 4.2.4 says (`title`, `type`, `media` strings; `hreflang` and extension
@@ -991,11 +996,15 @@ What the server exposes, all discoverable from the storage description
   identifier types. `SOLID_SERVER_LWS_AUTHN` picks among the suites built in.
   Storage requests take `Authorization: Bearer <access token>`; a missing or bad token
   gets `401` with `WWW-Authenticate: Bearer resource_metadata="…", realm="…", as_uri="…"`.
-  RFC 9728 discovery is public at `<base>/.well-known/oauth-protected-resource`,
-  obtained by inserting the well-known path before the storage root path. Only that
-  computed path is served; other suffixes return `404`. GET and HEAD return JSON
-  with an ETag and `Cache-Control: public, max-age=300`; `If-None-Match` revalidates it.
-  The document has `resource` and `jlws_storage_description` equal to `<base>/`,
+  Each challenge names RFC 9728 metadata for the exact requested resource URI, with
+  its query removed: insert `/.well-known/oauth-protected-resource` before its path.
+  Preserve percent-encoding and trailing slashes: `/c` and `/c/` have distinct metadata
+  URLs. The origin root uses `/.well-known/oauth-protected-resource` without a suffix.
+  GET and HEAD serve metadata for every path within the storage and for service endpoints,
+  including `/.lws/subscriptions/`; paths outside these scopes return `404`.
+  They return JSON with an ETag and `Cache-Control: public, max-age=300`;
+  `If-None-Match` revalidates it. The document has `resource` equal to the exact resource
+  URI and `jlws_storage_description` equal to `<base>/`,
   `authorization_servers: ["<base>"]` (exactly the AS metadata issuer, without a
   trailing slash), and `bearer_methods_supported: ["header"]`. It omits `resource_name`
   and DPoP algorithm metadata: storage access uses bearer tokens; a DPoP proof on the
@@ -1007,8 +1016,9 @@ What the server exposes, all discoverable from the storage description
   The first auth parameter is `resource_metadata`; `realm` equals the storage root and
   access-token audience, and `as_uri` is retained for transitioning clients. An anonymous
   challenge has no `error`; a rejected bearer token adds `error="invalid_token"`.
-  For child resource requests, validate containment within the PRM's storage-root
-  `resource`, rather than string equality with the child's URL.
+  Validate that `resource` equals the requested resource URI character for character.
+  Metadata depends only on the request path and fixed server configuration; its body and
+  ETag are identical for every caller regardless of whether the resource exists.
 - **Access grants and requests** (Access Profile) under `/.lws/grants/` and
   `/.lws/requests/`. Documents need an `@context` that includes
   `https://www.w3.org/ns/lws/v1` (otherwise `400`). Grants are ODRL-style policies with

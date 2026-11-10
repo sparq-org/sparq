@@ -1763,6 +1763,50 @@ fn prefers_set_linkset(req: &LwsRequest) -> bool {
         .any(|p| p.trim().eq_ignore_ascii_case("set-linkset"))
 }
 
+/// Moving is not offered. Only the resource's IRI determines its parent; no destination
+/// lookup or stored metadata participates in this decision.
+fn refuse_up_change<'a>(
+    uri: &str,
+    storage: &str,
+    mut targets: impl Iterator<Item = &'a str>,
+) -> Option<Response> {
+    let parent = parent_of(uri, storage);
+    targets
+        .any(|target| Some(target) != parent.as_deref())
+        .then(|| {
+            problem(
+                StatusCode::CONFLICT,
+                Some("changing the up link is not supported"),
+            )
+        })
+}
+
+/// Check Link headers before their server-managed relations are discarded. An explicit
+/// anchor changes the context; an up link about some other resource does not move this one.
+fn refuse_up_headers(req: &LwsRequest, uri: &str, storage: &str) -> Option<Response> {
+    for link in parse_links(&req.header_all(header::LINK)) {
+        if !link
+            .param("rel")
+            .is_some_and(|rel| rel.split_whitespace().any(|r| relation_key(r) == "up"))
+        {
+            continue;
+        }
+        if link
+            .param("anchor")
+            .is_some_and(|anchor| resolve_reference(uri, &anchor).as_deref() != Some(uri))
+        {
+            continue;
+        }
+        if let Some(target) = resolve_reference(uri, link.target) {
+            if let Some(refused) = refuse_up_change(uri, storage, std::iter::once(target.as_str()))
+            {
+                return Some(refused);
+            }
+        }
+    }
+    None
+}
+
 /// The linkset a new resource starts with: its declared user-managed links.
 fn initial_linkset(uri: &str, links: &Links) -> Option<Value> {
     if links.is_empty() {
@@ -2855,6 +2899,9 @@ async fn update<S: Store + 'static>(
         Ok(declared) => declared,
         Err(r) => return r,
     };
+    if let Some(refused) = refuse_up_headers(req, uri, &state.cfg.storage()) {
+        return refused;
+    }
     let declared = if set_linkset {
         rmeta.linkset = initial_linkset(uri, &links);
         rmeta.links = links;
@@ -4818,7 +4865,7 @@ fn absolute_linkset(doc: &Value, base: &str, budget: usize) -> Result<Resolved, 
 
 /// The user-managed part of a linkset document: every server-managed relation dropped from the
 /// entries about `uri`. A client cannot write those relations; whatever a patch puts there is
-/// ignored and the server's own values stand.
+/// discarded and the server's own values stand. Unsupported up changes are refused first.
 fn user_linkset(doc: &Resolved, uri: &str) -> Resolved {
     let entries = doc
         .0
@@ -5402,6 +5449,20 @@ where
             Some("the linkset would be too large"),
         ),
     };
+    let targets = patched.0["linkset"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|entry| anchored_at(entry, uri))
+        .filter_map(Value::as_object)
+        .flat_map(|entry| entry.iter())
+        .filter(|(relation, _)| relation_key(relation) == "up")
+        .filter_map(|(_, targets)| targets.as_array())
+        .flatten()
+        .filter_map(|target| target["href"].as_str());
+    if let Some(refused) = refuse_up_change(uri, &state.cfg.storage(), targets) {
+        return refused;
+    }
     // Only the user-managed part is kept; the links the type index matches are taken from
     // it, so the two never drift apart.
     let user = user_linkset(&patched, uri);
@@ -6564,7 +6625,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn linkset_patch_ignores_server_managed_relations_and_keeps_links_in_step() {
+    async fn linkset_patch_keeps_fixed_relations_and_user_links_in_step() {
         let st = state().await;
         let uri = post(
             &st,
@@ -6575,8 +6636,8 @@ mod tests {
         )
         .await;
         let meta = format!("{}{META_SUFFIX}", path_of(&uri));
-        // A patch replacing the whole array: a forged parent and type, and a new link only.
-        let patch = json!({"linkset": [{"anchor": uri, "up": [{"href": "https://forged/"}],
+        // A patch replacing the whole array: the fixed parent, a forged type and a new link.
+        let patch = json!({"linkset": [{"anchor": uri, "up": [{"href": format!("{BASE}/")}],
             "type": [{"href": "https://forged/T"}], "describedby": [{"href": "https://ex.org/schema"}]}]});
         let r = call(
             &st,

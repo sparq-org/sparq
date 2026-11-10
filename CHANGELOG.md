@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **sparq-lws-core (LWS):** authentication challenges name RFC 9728 metadata for the
+  requested resource or service endpoint, preserving encoded paths and trailing slashes.
+  Metadata is served independently of resource existence and caller identity. Linkset
+  edits and content replacements declaring a different parent through `up` now return
+  `409 Conflict` before writing; the storage continues to offer no `MoveResource` capability.
+
 ### Changed
 
 - **Release cadence guard:** the one-release v0.1.8 exception is removed now that v0.1.8 is

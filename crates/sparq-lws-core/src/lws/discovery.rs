@@ -1,4 +1,4 @@
-//! RFC 9728 protected resource metadata for the LWS storage root.
+//! RFC 9728 protected resource metadata for storage resources and services.
 
 use axum::http::{header, Method, StatusCode};
 use axum::response::Response;
@@ -12,31 +12,64 @@ use crate::store::Store;
 
 /// Insert the RFC 9728 well-known path before the resource path, omitting its query.
 /// Fragments are forbidden in resource identifiers (RFC 9728 section 2).
-pub(super) fn prm_url(resource: &str) -> Result<Url, String> {
-    let mut url = Url::parse(resource).map_err(|e| e.to_string())?;
+pub(super) fn prm_url(resource: &str) -> Result<String, String> {
+    let url = Url::parse(resource).map_err(|e| e.to_string())?;
     if url.fragment().is_some()
         || !matches!(url.scheme(), "https" | "http")
         || url.host_str().is_none()
     {
         return Err("a resource must be an HTTP(S) URL without a fragment".into());
     }
-    let path = format!(
-        "/.well-known/oauth-protected-resource{}",
-        url.path().trim_end_matches('/')
-    );
-    url.set_path(&path);
-    url.set_query(None);
-    Ok(url)
+    // Read the HTTP path without URL normalization: encoded octets and the trailing slash
+    // distinguish resources. Only the origin root has an empty well-known suffix.
+    let uri: axum::http::Uri = resource
+        .parse()
+        .map_err(|e: axum::http::uri::InvalidUri| e.to_string())?;
+    let path = if uri.path() == "/" { "" } else { uri.path() };
+    Ok(format!(
+        "{}/.well-known/oauth-protected-resource{path}",
+        url.origin().ascii_serialization()
+    ))
 }
 
-pub(super) fn handle<S: Store>(state: &LwsState<S>, req: &LwsRequest) -> Response {
+/// The configured origin and the HTTP path as sent, without a query or path normalization.
+pub(super) fn resource_uri(cfg: &super::LwsConfig, path: &str) -> Option<String> {
+    let url = Url::parse(&cfg.base_url).ok()?;
+    if !matches!(url.scheme(), "https" | "http") || url.host_str().is_none() {
+        return None;
+    }
+    let uri: axum::http::Uri = cfg.base_url.parse().ok()?;
+    Some(format!(
+        "{}://{}{path}",
+        uri.scheme_str()?,
+        uri.authority()?
+    ))
+}
+
+/// Recognize metadata using only the request path and fixed configuration, never stored state.
+pub(super) fn resource(cfg: &super::LwsConfig, path: &str) -> Option<String> {
+    let suffix = path.strip_prefix("/.well-known/oauth-protected-resource")?;
+    if !suffix.is_empty() && !suffix.starts_with('/') {
+        return None;
+    }
+    let path = if suffix.is_empty() { "/" } else { suffix };
+    let resource = resource_uri(cfg, path)?;
+    let service = path.starts_with(super::SUBSCRIPTIONS_PATH)
+        || path.starts_with(super::GRANTS_PATH)
+        || path.starts_with(super::REQUESTS_PATH)
+        || matches!(path, super::TYPE_INDEX_PATH | super::TYPE_SEARCH_PATH);
+    let storage: axum::http::Uri = cfg.storage().parse().ok()?;
+    (path.starts_with(storage.path()) || service).then_some(resource)
+}
+
+pub(super) fn handle<S: Store>(state: &LwsState<S>, req: &LwsRequest, resource: &str) -> Response {
     if !matches!(req.method, Method::GET | Method::HEAD) {
         return method_not_allowed("GET, HEAD");
     }
     // Storage requests accept bearer presentation only. The OpenID subject-token exchange's
     // DPoP proof does not make this resource server a DPoP-bound access-token verifier.
     let doc = json!({
-        "resource": state.cfg.storage(),
+        "resource": resource,
         "authorization_servers": [state.cfg.issuer()],
         "jlws_storage_description": state.cfg.storage(),
         "bearer_methods_supported": ["header"],
@@ -73,15 +106,15 @@ mod tests {
             ),
             (
                 "https://h/alice/",
-                "https://h/.well-known/oauth-protected-resource/alice",
+                "https://h/.well-known/oauth-protected-resource/alice/",
             ),
             (
                 "https://h/alice/?view=private",
-                "https://h/.well-known/oauth-protected-resource/alice",
+                "https://h/.well-known/oauth-protected-resource/alice/",
             ),
             (
                 "https://h/a%20b/",
-                "https://h/.well-known/oauth-protected-resource/a%20b",
+                "https://h/.well-known/oauth-protected-resource/a%20b/",
             ),
         ] {
             assert_eq!(prm_url(resource).unwrap().as_str(), expected);
@@ -205,7 +238,7 @@ mod tests {
                     .unwrap();
                 assert!(challenge.starts_with("Bearer resource_metadata="));
                 let params = challenge_params(challenge);
-                assert_eq!(params["resource_metadata"], PRM);
+                assert_eq!(params["resource_metadata"], format!("{PRM}{path}"));
                 assert_eq!(params["realm"], STORAGE);
                 assert_eq!(params["as_uri"], BASE);
                 assert_eq!(
@@ -242,7 +275,7 @@ mod tests {
                 "bearer_methods_supported": ["header"],
             })
         );
-        let challenge = call(&app, "GET", "/private", &[], "").await;
+        let challenge = call(&app, "GET", "/", &[], "").await;
         assert_eq!(
             prm["resource"],
             challenge_params(
@@ -290,11 +323,7 @@ mod tests {
             call(&app, "POST", PRM, &[], "").await.status(),
             StatusCode::METHOD_NOT_ALLOWED
         );
-        for path in [
-            "/.well-known/oauth-protected-resource/",
-            "/.well-known/oauth-protected-resource/alice",
-            "/.well-known/oauth-protected-resource-extra",
-        ] {
+        for path in ["/.well-known/oauth-protected-resource-extra"] {
             assert_eq!(
                 call(&app, "GET", path, &[], "").await.status(),
                 StatusCode::NOT_FOUND
@@ -303,7 +332,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn only_the_computed_metadata_path_is_routed_for_a_storage_with_a_path() {
+    async fn touchstone_metadata_paths_are_scoped_to_storage_and_services() {
         let app = router(
             FlakyStore::new(),
             LwsConfig::new("https://storage.example/alice"),
@@ -314,7 +343,7 @@ mod tests {
             call(
                 &app,
                 "GET",
-                "/.well-known/oauth-protected-resource/alice",
+                "/.well-known/oauth-protected-resource/alice/",
                 &[],
                 "",
             )
@@ -325,13 +354,290 @@ mod tests {
         for path in [
             "/.well-known/oauth-protected-resource",
             "/.well-known/oauth-protected-resource/bob",
-            "/.well-known/oauth-protected-resource/alice/",
+            "/.well-known/oauth-protected-resource/alice",
+            "/.well-known/oauth-protected-resource/alice-other/",
+            "/.well-known/oauth-protected-resource/%61lice/",
+            "/.well-known/oauth-protected-resource/.lws/unknown",
         ] {
             assert_eq!(
                 call(&app, "GET", path, &[], "").await.status(),
                 StatusCode::NOT_FOUND
             );
         }
+        for (path, resource) in [
+            ("/alice/", "https://storage.example/alice/"),
+            ("/alice/absent", "https://storage.example/alice/absent"),
+            (
+                "/.lws/subscriptions/",
+                "https://storage.example/.lws/subscriptions/",
+            ),
+        ] {
+            let doc = document(
+                call(
+                    &app,
+                    "GET",
+                    &format!("/.well-known/oauth-protected-resource{path}"),
+                    &[],
+                    "",
+                )
+                .await,
+            )
+            .await;
+            assert_eq!(doc["resource"], resource);
+            assert_eq!(
+                doc["jlws_storage_description"],
+                "https://storage.example/alice/"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn touchstone_root_metadata_keeps_the_configured_resource_identifier() {
+        let app = router(
+            FlakyStore::new(),
+            LwsConfig::new("https://STORAGE.example:443"),
+        )
+        .await
+        .unwrap();
+        let response = call(&app, "GET", "/", &[], "").await;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let params = challenge_params(
+            response.headers()[header::WWW_AUTHENTICATE]
+                .to_str()
+                .unwrap(),
+        );
+        assert_eq!(params["resource_metadata"], PRM);
+        let doc = document(call(&app, "GET", PRM, &[], "").await).await;
+        assert_eq!(doc["resource"], "https://STORAGE.example:443/");
+        assert_eq!(
+            doc["jlws_storage_description"],
+            "https://STORAGE.example:443/"
+        );
+    }
+
+    #[tokio::test]
+    async fn touchstone_per_resource_metadata_matches_the_exact_requested_uri() {
+        let store = FlakyStore::new();
+        let mut cfg = LwsConfig::new(BASE);
+        cfg.owner = Some("https://owner.example/#me".into());
+        let token = super::super::tokens::mint(
+            &cfg,
+            "https://owner.example/#me",
+            "https://app.example/",
+            STORAGE,
+        );
+        let bearer = format!("Bearer {token}");
+        let app = router(store.clone(), cfg).await.unwrap();
+        for (slug, content, link) in [
+            (
+                "c",
+                "",
+                "<https://www.w3.org/ns/lws#Container>; rel=\"type\"",
+            ),
+            ("c", "protected", ""),
+        ] {
+            let created = call(
+                &app,
+                "POST",
+                "/",
+                &[
+                    ("authorization", &bearer),
+                    ("slug", slug),
+                    ("content-type", "text/plain"),
+                    ("link", link),
+                ],
+                content,
+            )
+            .await;
+            assert_eq!(created.status(), StatusCode::CREATED);
+        }
+        // Touchstone challenges a container and a created text/plain resource separately.
+        // Also pin root, query removal, encoded octets and a resource that was never created.
+        for (path, metadata_path) in [
+            ("/", ""),
+            ("/c/", "/c/"),
+            ("/c", "/c"),
+            ("/c?view=private", "/c"),
+            ("/absent", "/absent"),
+            ("/a%2fb%2F%20/", "/a%2fb%2F%20/"),
+            ("/a/%2e%2e/", "/a/%2e%2e/"),
+        ] {
+            let response = call(&app, "GET", path, &[("accept", super::super::LWS_JSON)], "").await;
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{path}");
+            assert_eq!(storage_link(&response), STORAGE);
+            let params = challenge_params(
+                response.headers()[header::WWW_AUTHENTICATE]
+                    .to_str()
+                    .unwrap(),
+            );
+            assert_eq!(params["resource_metadata"], format!("{PRM}{metadata_path}"));
+            let metadata = call(
+                &app,
+                "GET",
+                &params["resource_metadata"],
+                &[("accept", JSON)],
+                "",
+            )
+            .await;
+            assert_eq!(metadata.status(), StatusCode::OK);
+            let etag = metadata.headers()[header::ETAG].clone();
+            assert_eq!(metadata.headers()[header::CONTENT_TYPE], JSON);
+            assert_eq!(
+                metadata.headers()[header::CACHE_CONTROL],
+                "public, max-age=300"
+            );
+            let expected = json!({
+                "resource": format!("{BASE}{}", path.split('?').next().unwrap()),
+                "authorization_servers": [BASE],
+                "jlws_storage_description": STORAGE,
+                "bearer_methods_supported": ["header"],
+            });
+            assert_eq!(document(metadata).await, expected);
+            for authorization in ["Bearer invalid", bearer.as_str()] {
+                let response = call(
+                    &app,
+                    "GET",
+                    &params["resource_metadata"],
+                    &[("authorization", authorization)],
+                    "",
+                )
+                .await;
+                assert_eq!(response.status(), StatusCode::OK);
+                assert_eq!(response.headers()[header::ETAG], etag);
+                assert_eq!(document(response).await, expected);
+            }
+            let head = call(&app, "HEAD", &params["resource_metadata"], &[], "").await;
+            assert_eq!(head.status(), StatusCode::OK);
+            assert_eq!(head.headers()[header::ETAG], etag);
+            assert!(axum::body::to_bytes(head.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .is_empty());
+            let cached = call(
+                &app,
+                "GET",
+                &params["resource_metadata"],
+                &[("if-none-match", etag.to_str().unwrap())],
+                "",
+            )
+            .await;
+            assert_eq!(cached.status(), StatusCode::NOT_MODIFIED);
+        }
+        // Metadata is served without consulting the store, even during a backend outage.
+        *store.trace.lock().unwrap() = Some(Vec::new());
+        store
+            .fail_meta
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        store
+            .fail_list
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        for path in ["/c", "/absent"] {
+            let doc = document(call(&app, "GET", &format!("{PRM}{path}"), &[], "").await).await;
+            assert_eq!(doc["resource"], format!("{BASE}{path}"));
+        }
+        assert!(store.trace.lock().unwrap().as_ref().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn touchstone_notification_post_challenges_for_the_service_then_accepts_storage_token() {
+        let mut cfg = LwsConfig::new(BASE);
+        cfg.owner = Some("https://owner.example/#me".into());
+        let token = super::super::tokens::mint(
+            &cfg,
+            "https://owner.example/#me",
+            "https://app.example/",
+            STORAGE,
+        );
+        let bearer = format!("Bearer {token}");
+        let app = router(FlakyStore::new(), cfg).await.unwrap();
+        let description = document(call(&app, "GET", "/", &[("accept", LWS_CID)], "").await).await;
+        let service = description["service"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|service| service["type"] == "NotificationService")
+            .unwrap();
+        let endpoint = service["serviceEndpoint"].as_str().unwrap();
+        assert_eq!(endpoint, "https://storage.example/.lws/subscriptions/");
+        assert_eq!(
+            call(
+                &app,
+                "POST",
+                "/",
+                &[
+                    ("authorization", &bearer),
+                    ("slug", "topic"),
+                    (
+                        "link",
+                        "<https://www.w3.org/ns/lws#Container>; rel=\"type\""
+                    )
+                ],
+                ""
+            )
+            .await
+            .status(),
+            StatusCode::CREATED
+        );
+        let body = json!({"@context": ["https://www.w3.org/ns/lws/v1"], "type": "WebhookSubscription", "topic": ["https://storage.example/topic/"], "inbox": "https://inbox.example/in"}).to_string();
+        let response = call(
+            &app,
+            "POST",
+            endpoint,
+            &[("content-type", super::super::LWS_JSON)],
+            &body,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(storage_link(&response), STORAGE);
+        let params = challenge_params(
+            response.headers()[header::WWW_AUTHENTICATE]
+                .to_str()
+                .unwrap(),
+        );
+        assert_eq!(
+            params["resource_metadata"],
+            format!("{PRM}/.lws/subscriptions/")
+        );
+        let doc = document(
+            call(
+                &app,
+                "GET",
+                &params["resource_metadata"],
+                &[("accept", JSON)],
+                "",
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(doc["resource"], endpoint);
+        assert_eq!(doc["authorization_servers"], json!([BASE]));
+        let accepted = call(
+            &app,
+            "POST",
+            endpoint,
+            &[
+                ("content-type", super::super::LWS_JSON),
+                ("authorization", &bearer),
+            ],
+            &body,
+        )
+        .await;
+        assert!(accepted.status().is_success());
+        let bytes = axum::body::to_bytes(accepted.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let doc: Value = serde_json::from_slice(&bytes).unwrap();
+        let subscription = doc["subscription"].as_str().unwrap();
+        assert!(call(
+            &app,
+            "DELETE",
+            subscription,
+            &[("authorization", &bearer)],
+            ""
+        )
+        .await
+        .status()
+        .is_success());
     }
 
     #[tokio::test]
@@ -444,12 +750,10 @@ mod tests {
         let metadata_url = Url::parse(&params["resource_metadata"]).unwrap();
         assert_eq!(metadata_url.origin(), request_url.origin());
         let prm = document(call(&app, "GET", metadata_url.as_str(), &[], "").await).await;
-        // D4 check 2: the brief deliberately uses storage-root containment for a child request.
+        // RFC 9728 requires the exact resource requested, while the token realm is the storage.
         let resource = prm["resource"].as_str().unwrap();
-        assert_eq!(resource, storage);
-        assert_eq!(resource, params["realm"]);
-        assert!(resource.ends_with('/'));
-        assert!(request_url.as_str().starts_with(resource));
+        assert_eq!(resource, request_url.as_str());
+        assert_eq!(storage, params["realm"]);
         let description = document(
             call(
                 &app,
@@ -474,7 +778,7 @@ mod tests {
             Url::parse(storage_root).unwrap().origin(),
             request_url.origin()
         );
-        assert_eq!(storage_root, resource);
+        assert_eq!(storage_root, storage);
         // RFC 8414 insertion, rather than appending a well-known segment to an issuer path.
         let mut as_metadata_url =
             Url::parse(prm["authorization_servers"][0].as_str().unwrap()).unwrap();
@@ -515,7 +819,7 @@ mod tests {
         let access_token = token["access_token"].as_str().unwrap();
         assert_eq!(
             jose::Jws::parse(access_token).unwrap().claims["aud"],
-            resource
+            storage
         );
         let response = call(
             &app,
