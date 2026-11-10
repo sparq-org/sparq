@@ -38,9 +38,9 @@ permissions:
   contents: read
 
 env:
-  TOUCHSTONE_REF: 6a3206eb97d173a89b3ffeb790f2d1a3337cf535
-  LWS_NET_REF: e0cdc973ee2a63d810764aa025f80b6fa2bb0fff
-  LWS_TESTS_REF: 72cfc0a80c718dddbcf43ea6bea98a13a3c14e99
+  TOUCHSTONE_REF: 20b5d58607355aae2a59b64a21d1c85a1d510d60
+  LWS_NET_REF: 65a7c1420a76c1bbf3df60a28f7d103d5e7f06f9
+  LWS_TESTS_REF: 3315c0241ce513970923fc33d39c8f3881d1ded0
 
 jobs:
   blob-object:
