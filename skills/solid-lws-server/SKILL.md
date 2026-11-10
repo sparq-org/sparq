@@ -1329,11 +1329,13 @@ What the server exposes, all discoverable from the storage description
   settled the same way from its intent, and its container touched after. A
   create needs none: its metadata is written before its content and removed after it, so no
   stop leaves content without its metadata. A container listing never shows a change in
-  flight to a member: it holds the container exclusively until the listing is complete.
-  Member changes hold that container through commit or put-back. The fair lock queue lets
-  listings finish while new changes keep arriving, without a churn-based `503`. A resource
-  set aside for recovery still answers `503`. A container whose modification time has not yet
-  been, or could not be, moved on after a change has no `Last-Modified` until it is, so `If-Modified-Since` never answers `304`
+  flight to a member: quiet listings share the container lock and only try member locks.
+  A busy member or a generation change discards that attempt and queues one exclusive
+  listing, which takes no member locks. Member changes hold that container through commit
+  or put-back; the fair queue lets the fallback finish while new changes keep arriving,
+  without a churn-based `503`. A resource set aside for recovery still answers `503`. A
+  container whose modification time has not yet been, or could not be, moved on after a
+  change has no `Last-Modified` until it is, so `If-Modified-Since` never answers `304`
   on a stale date. A listing's `Last-Modified` is the latest of the container's own time and
   every member's, so a change whose touch a stop lost still moves it on; a member whose time the
   backend does not record is listed without `modified`, and the listing then has no

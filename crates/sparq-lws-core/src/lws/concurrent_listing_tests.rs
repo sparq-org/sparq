@@ -137,6 +137,10 @@ async fn listings_finish_during_continuous_creates_updates_and_deletes() {
     .await
     .expect("writers finish too");
     assert!(counts.iter().all(|n| n.load(Ordering::SeqCst) > 0));
+    assert!(
+        state.locks.listing_fallbacks.load(Ordering::SeqCst) > 0,
+        "continuous member changes must exercise the exclusive fallback"
+    );
     assert_eq!(listing(&app).await["totalItems"], 0);
 }
 
@@ -152,18 +156,28 @@ async fn listing_does_not_wait_for_a_member_waiting_for_its_parent() {
     );
     // A writer takes the member before the parent. It has not changed stored state yet.
     let _member = state.locks.lock(&state.cfg.absolute("/x")).await.unwrap();
-    let _parent = state.locks.lock(&state.cfg.storage()).await.unwrap();
+    let parent = state.locks.read(&state.cfg.storage()).await.unwrap();
     let read = tokio::spawn({
         let app = app.clone();
         async move { listing(&app).await }
     });
-    tokio::task::yield_now().await;
-    // Queue a writer for the parent after the listing, while it still owns the member.
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while state.locks.listing_fallbacks.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("busy member queues the exclusive fallback");
+    assert!(
+        !read.is_finished(),
+        "fallback waits for existing shared holders"
+    );
+    // Queue a writer for the parent after the fallback, while it still owns the member.
     let writer = tokio::spawn({
         let state = state.clone();
         async move { state.locks.read(&state.cfg.storage()).await.unwrap() }
     });
-    drop(_parent);
+    drop(parent);
     let doc = tokio::time::timeout(Duration::from_secs(2), read)
         .await
         .expect("no member lock acquired under container")
@@ -360,4 +374,98 @@ async fn listing_never_shows_a_removal_that_is_put_back() {
             .unwrap(),
         before
     );
+}
+
+async fn wait_for_read_gate(store: &FlakyStore) {
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while store.hold_next_read_reply_of.lock().unwrap().is_some() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("listing reached the held metadata read");
+}
+
+#[tokio::test]
+async fn quiet_listings_overlap_under_a_shared_container_lock() {
+    let (state, store) = test_store::state(100).await;
+    state.notify.pause_sweeper();
+    let app = app(&state);
+    assert_eq!(
+        call(&app, "POST", "/", &[("slug", "x")], "old")
+            .await
+            .status(),
+        StatusCode::CREATED
+    );
+    let root = state.cfg.storage();
+    let _third_party = state.locks.read(&root).await.unwrap();
+    let release = Arc::new(Semaphore::new(0));
+    *store.hold_next_read_reply_of.lock().unwrap() = Some((meta_key(&root), release.clone()));
+    let first = tokio::spawn({
+        let app = app.clone();
+        async move { listing(&app).await }
+    });
+    wait_for_read_gate(&store).await;
+    let second = tokio::time::timeout(Duration::from_secs(2), listing(&app))
+        .await
+        .expect("second listing completes while first and third party hold shared locks");
+    assert!(
+        !first.is_finished(),
+        "first listing remains paused during the second"
+    );
+    release.add_permits(1);
+    let first = tokio::time::timeout(Duration::from_secs(2), first)
+        .await
+        .expect("first listing completes while third party still holds shared lock")
+        .unwrap();
+    assert_eq!(first, second);
+    assert_eq!(state.locks.listing_fallbacks.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn a_generation_move_discards_the_optimistic_listing_and_falls_back() {
+    let (state, store) = test_store::state(100).await;
+    state.notify.pause_sweeper();
+    let app = app(&state);
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/",
+            &[("slug", "x"), ("content-type", "text/plain")],
+            "old"
+        )
+        .await
+        .status(),
+        StatusCode::CREATED
+    );
+    let release = Arc::new(Semaphore::new(0));
+    *store.hold_next_read_reply_of.lock().unwrap() =
+        Some((meta_key(&state.cfg.storage()), release.clone()));
+    let read = tokio::spawn({
+        let app = app.clone();
+        async move { listing(&app).await }
+    });
+    // The root metadata read in listing() follows members(): the member's try_read has
+    // already ended, and the generation was captured before it. The write can now proceed.
+    wait_for_read_gate(&store).await;
+    assert_eq!(
+        call(
+            &app,
+            "PUT",
+            "/x",
+            &[("content-type", "text/plain")],
+            "changed"
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    release.add_permits(1);
+    let doc = tokio::time::timeout(Duration::from_secs(2), read)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(doc["items"][0]["size"], 7);
+    assert_eq!(state.locks.listing_fallbacks.load(Ordering::SeqCst), 1);
 }

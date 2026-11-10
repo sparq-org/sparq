@@ -31,19 +31,20 @@ mod discovery;
 pub mod index;
 mod intents;
 pub use sparq_lws_authn::jose;
-#[cfg(test)]
-mod concurrent_listing_tests;
 pub mod notify;
 mod records;
 pub mod resources;
 #[cfg(feature = "sparql-endpoint")]
-mod snapshot;
-#[cfg(feature = "sparql-endpoint")]
 mod sparql;
+#[cfg(feature = "sparql-endpoint")]
+mod snapshot;
 pub mod tokens;
+pub mod tracked;
 #[cfg(test)]
 mod touchstone_tests;
-pub mod tracked;
+
+#[cfg(test)]
+mod concurrent_listing_tests;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -987,7 +988,7 @@ impl<S: Store + 'static> LwsState<S> {
         }
     }
 
-    #[cfg(test)]
+    /// See [`tracked::Generations::generation`].
     pub(crate) fn generation(&self, uri: &str) -> u64 {
         self.store.generations().generation(uri)
     }
@@ -3628,12 +3629,7 @@ pub(crate) mod test_store {
             let cycles = self.write_cycles.lock().unwrap().clone();
             if let Some(cycles) = cycles.filter(|cycles| cycles.uris.iter().any(|key| key == iri)) {
                 cycles.entered.add_permits(1);
-                cycles
-                    .release
-                    .acquire()
-                    .await
-                    .expect("write cycle")
-                    .forget();
+                cycles.release.acquire().await.expect("write cycle").forget();
             }
             if self.fail_write_of.lock().unwrap().as_deref() == Some(iri)
                 || self

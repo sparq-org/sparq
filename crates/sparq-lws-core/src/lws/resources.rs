@@ -1022,21 +1022,12 @@ async fn read<S: Store + 'static>(
             return resp;
         }
     }
-    // A container is held exclusively through its listing. Every member mutation holds
-    // this lock shared (a removal exclusively) until it commits or is put back. The fair
-    // queue lets a listing finish even while new creates keep arriving. Take no member
-    // locks under it: a writer may already hold one while waiting for this container.
-    // Data reads keep their shared lock from the permission check through the bytes served.
-    let _guard = if uri.ends_with('/') {
-        match state.locks.lock(uri).await {
-            Some(guard) => (Some(guard), None),
-            None => return set_aside_meanwhile(),
-        }
-    } else {
-        match state.locks.read(uri).await {
-            Some(guard) => (None, Some(guard)),
-            None => return set_aside_meanwhile(),
-        }
+    // Quiet listings retain the shared-lock path: members are only tried, never waited
+    // for under the container. A busy member or a changed generation discards that attempt
+    // and queues one exclusive read. Later creates cannot overtake the fair queue, and no
+    // member lock is taken beneath the exclusive container lock.
+    let Some(guard) = state.locks.read(uri).await else {
+        return set_aside_meanwhile();
     };
     let meta = match current(state, uri).await {
         Ok(m) => m,
@@ -1046,7 +1037,29 @@ async fn read<S: Store + 'static>(
         return r;
     }
     if uri.ends_with('/') {
-        return read_container(state, req, uri, &meta).await;
+        if let Ok(listing) = read_container(state, req, uri, &meta, false).await {
+            return listing;
+        }
+        drop(guard);
+        drop(meta);
+        #[cfg(test)]
+        state
+            .locks
+            .listing_fallbacks
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let Some(_guard) = state.locks.lock(uri).await else {
+            return set_aside_meanwhile();
+        };
+        let meta = match current(state, uri).await {
+            Ok(m) => m,
+            Err(r) => return r,
+        };
+        if let Err(r) = recheck(state, Action::Read, uri, agent).await {
+            return r;
+        }
+        return read_container(state, req, uri, &meta, true)
+            .await
+            .unwrap_or_else(|_| set_aside_meanwhile());
     }
     let types = match state.resource_meta(uri).await {
         Ok(m) => m.types,
@@ -1212,14 +1225,34 @@ async fn with_sizes<S: Store + 'static>(
     }
 }
 
+/// Why an optimistic listing must be retried under the exclusive container lock.
+struct Busy;
+
+/// Why [`members`] could not list a container.
+enum Unlisted {
+    Store(ServerError),
+    Busy(Busy),
+}
+
+impl From<ServerError> for Unlisted {
+    fn from(e: ServerError) -> Self {
+        Unlisted::Store(e)
+    }
+}
+
 /// A container's members, sorted, with what a listing shows about each but a data resource's
 /// size (which [`with_sizes`] adds for the members shown). Each member's own entity tag stands
-/// for its content. The caller holds the container exclusively, so member mutations and
-/// touches cannot change these fields until the listing is complete.
+/// for its content.
+///
+/// On the optimistic path each member's shared lock is only tried. A busy lock discards
+/// the attempt; the caller retries once under the exclusive container lock. That fallback
+/// takes no member locks, since each mutation already holds the container until it commits
+/// or is put back.
 async fn members<S: Store + 'static>(
     state: &LwsState<S>,
     uri: &str,
-) -> Result<Vec<(Value, crate::store::sparq::ResourceMeta)>, ServerError> {
+    exclusive: bool,
+) -> Result<Vec<(Value, crate::store::sparq::ResourceMeta)>, Unlisted> {
     let mut children: Vec<String> = state
         .store
         .list_children(uri)
@@ -1233,6 +1266,13 @@ async fn members<S: Store + 'static>(
     children.dedup();
     let mut out = Vec::with_capacity(children.len());
     for child in children {
+        let _member = match exclusive {
+            true => None,
+            false => match state.locks.try_read(&child) {
+                Some(guard) => Some(guard),
+                None => return Err(Unlisted::Busy(Busy)),
+            },
+        };
         let Some(meta) = state.store.meta(&child).await? else {
             continue;
         };
@@ -1270,22 +1310,35 @@ async fn members<S: Store + 'static>(
     Ok(out)
 }
 
-/// The listing of the container `uri`, held exclusively by the caller (see [`members`]).
+/// The listing of the container `uri` ([`members`], `exclusive` as there).
 async fn read_container<S: Store + 'static>(
     state: &LwsState<S>,
     req: &LwsRequest,
     uri: &str,
     meta: &crate::store::sparq::ResourceMeta,
-) -> Response {
+    exclusive: bool,
+) -> Result<Response, Busy> {
     let Some(media_type) = negotiate_container(req.header(header::ACCEPT)) else {
-        return problem(StatusCode::NOT_ACCEPTABLE, None);
+        return Ok(problem(StatusCode::NOT_ACCEPTABLE, None));
     };
+    // Whether the container's date is behind is read before anything the date is computed
+    // from: a touch that lands while the listing is made must not make a date from before it
+    // count. And a listing made while a change to the container was published, or a touch of
+    // it landed, is made again: it could pair members from before with a date from after.
+    let generation = state.generation(uri);
     let untouched = state.is_untouched(uri) || state.in_flight(uri);
-    let all = match members(state, uri).await {
+    let all = match members(state, uri, exclusive).await {
         Ok(m) => m,
-        Err(e) => return store_error(e),
+        Err(Unlisted::Store(e)) => return Ok(store_error(e)),
+        Err(Unlisted::Busy(busy)) => return Err(busy),
     };
-    listing(state, req, uri, meta, media_type, all, untouched).await
+    let resp = listing(state, req, uri, meta, media_type, all, untouched).await;
+    // Held exclusively, the container cannot change meanwhile (a counter it shares with
+    // others may move, which says nothing about it).
+    if !exclusive && state.generation(uri) != generation {
+        return Err(Busy);
+    }
+    Ok(resp)
 }
 
 async fn listing<S: Store + 'static>(
@@ -1945,7 +1998,9 @@ async fn create<S: Store + 'static>(
                 (Some(EXISTS.to_string()), None)
             } else {
                 // Held exclusively: no change to a member is in flight.
-                let listing = read_container(state, &get, parent, &meta).await;
+                let listing = read_container(state, &get, parent, &meta, true)
+                    .await
+                    .unwrap_or_else(|_| set_aside_meanwhile());
                 if !listing.status().is_success() {
                     return listing;
                 }
@@ -2261,6 +2316,8 @@ async fn current<S: Store + 'static>(
 /// other's locks; that deployment needs a conditional write in the store itself.
 #[derive(Default)]
 pub struct IriLocks {
+    #[cfg(test)]
+    pub(super) listing_fallbacks: std::sync::atomic::AtomicUsize,
     map: std::sync::Mutex<LockMap>,
     /// The IRIs set aside ([`LwsState::set_aside`](super::LwsState::set_aside)), each with how
     /// many set-aside changes are to it.
@@ -3999,7 +4056,9 @@ async fn delete<S: Store + 'static>(
         (Some(EXISTS.to_string()), None)
     } else if is_conditional(req) {
         // The whole subtree is held: no change to a member is in flight.
-        let listing = read_container(state, &plain_get(req), uri, &meta).await;
+        let listing = read_container(state, &plain_get(req), uri, &meta, true)
+            .await
+            .unwrap_or_else(|_| set_aside_meanwhile());
         if !listing.status().is_success() {
             return listing;
         }
@@ -7164,7 +7223,13 @@ mod tests {
         let status = send(dave.clone(), "POST", page.clone(), other()).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
         store.counters.take_methods();
-        let status = send(dave.clone(), "POST", page, vec![("if-match", "*".into())]).await;
+        let status = send(
+            dave.clone(),
+            "POST",
+            page,
+            vec![("if-match", "*".into())],
+        )
+        .await;
         assert_eq!(status, StatusCode::CREATED);
         assert!(
             !store
@@ -8441,7 +8506,7 @@ mod tests {
         let text = [("content-type", "text/plain"), ("slug", "m.txt")];
         let r = call(&st, "POST", "/", &text, "four").await;
         assert_eq!(r.status(), StatusCode::CREATED);
-        let Ok(all) = members(&st, &st.cfg.storage()).await else {
+        let Ok(all) = members(&st, &st.cfg.storage(), false).await else {
             panic!("listed");
         };
         let r = call(
@@ -10441,10 +10506,7 @@ mod tests {
         *store.refuse_delete_of.lock().unwrap() = Some(record.clone());
         let began = tokio::time::Instant::now();
         touch_container(&st, &container).await;
-        assert!(
-            began.elapsed() >= LOCK_WAIT,
-            "cleanup did not keep retrying"
-        );
+        assert!(began.elapsed() >= LOCK_WAIT, "cleanup did not keep retrying");
         assert!(store.exists(&record).await.unwrap());
         // Reuse the tracked backend: the faulting store itself has no shared lease.
         let backend = st.store.clone();
@@ -10529,7 +10591,7 @@ mod tests {
             r.headers().contains_key(header::LAST_MODIFIED)
         };
         assert!(dated().await);
-        // The parent's listing waits until the member's date is fully written.
+        // While the member's date is being written, the parent's listing has no date.
         let gate = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
         *store.hold_next_write_of.lock().unwrap() = Some((meta_key(&a), gate.clone()));
         let before = st.generation(&c);
@@ -10545,27 +10607,13 @@ mod tests {
             before,
             "a member's touch moves its parent"
         );
-        let listing = {
-            let st = st.clone();
-            tokio::spawn(async move {
-                let h = [("accept", "application/lws+json")];
-                handle(&st, &req(Method::GET, "/c/", &h, ""), &Agent::anonymous()).await
-            })
-        };
-        tokio::time::sleep(Duration::from_millis(30)).await;
         assert!(
-            !listing.is_finished(),
-            "listing waits for the member's touch"
+            !dated().await,
+            "no date while a member's date is being written"
         );
         let during = st.generation(&c);
         gate.add_permits(1);
         touching.await.unwrap();
-        let response = tokio::time::timeout(Duration::from_secs(2), listing)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        assert!(response.headers().contains_key(header::LAST_MODIFIED));
         assert_ne!(st.generation(&c), during);
         assert!(dated().await);
         // A real touch does the same.
@@ -13835,10 +13883,7 @@ mod tests {
                     std::slice::from_ref(&there),
                     std::collections::HashMap::from([(
                         there.clone(),
-                        Prior {
-                            existed: Some(true),
-                            ..Default::default()
-                        },
+                        Prior { existed: Some(true), ..Default::default() },
                     )]),
                 );
             }
@@ -14019,9 +14064,7 @@ mod tests {
                         "{headers:?} {path}"
                     );
                     assert!(
-                        trace
-                            .iter()
-                            .all(|call| call == &format!("read {}", meta_key(&uri))),
+                        trace.iter().all(|call| call == &format!("read {}", meta_key(&uri))),
                         "a denied precondition probed the target: {headers:?} {trace:?}"
                     );
                     answers.push(answer);
@@ -14068,14 +14111,8 @@ mod tests {
                 ],
                 StatusCode::NO_CONTENT,
             ),
-            (
-                vec![("if-none-match", "*")],
-                StatusCode::PRECONDITION_FAILED,
-            ),
-            (
-                vec![("if-match", "*, \"tag\"")],
-                StatusCode::PRECONDITION_FAILED,
-            ),
+            (vec![("if-none-match", "*")], StatusCode::PRECONDITION_FAILED),
+            (vec![("if-match", "*, \"tag\"")], StatusCode::PRECONDITION_FAILED),
             (vec![("if-match", "")], StatusCode::PRECONDITION_FAILED),
             (
                 vec![("if-unmodified-since", "Sun, 06 Nov 1994 08:49:37 GMT")],
@@ -14112,15 +14149,8 @@ mod tests {
             .unwrap(),
         );
         let container = format!("{root}c/");
-        state
-            .store
-            .write(&container, Bytes::new(), LWS_JSON)
-            .await
-            .unwrap();
-        assert!(!state
-            .check(Action::Read, &container, &writer)
-            .await
-            .unwrap());
+        state.store.write(&container, Bytes::new(), LWS_JSON).await.unwrap();
+        assert!(!state.check(Action::Read, &container, &writer).await.unwrap());
         for (field, path, expected) in [
             ("if-match", "/c/", StatusCode::CREATED),
             ("if-none-match", "/c/", StatusCode::PRECONDITION_FAILED),
@@ -14159,17 +14189,10 @@ mod tests {
                     &writer,
                 )
                 .await;
-                assert_eq!(
-                    response.status(),
-                    StatusCode::FORBIDDEN,
-                    "{path} {headers:?}"
-                );
+                assert_eq!(response.status(), StatusCode::FORBIDDEN, "{path} {headers:?}");
             }
         }
-        assert_eq!(
-            state.store.list_children(&container).await.unwrap().len(),
-            1
-        );
+        assert_eq!(state.store.list_children(&container).await.unwrap().len(), 1);
     }
 
     #[tokio::test]
@@ -14200,10 +14223,7 @@ mod tests {
                 std::slice::from_ref(&root),
                 std::collections::HashMap::from([(
                     root.clone(),
-                    Prior {
-                        existed: Some(true),
-                        ..Default::default()
-                    },
+                    Prior { existed: Some(true), ..Default::default() },
                 )]),
             );
             let mut answers = Vec::new();
@@ -14669,10 +14689,7 @@ mod tests {
                     std::slice::from_ref(&root),
                     std::collections::HashMap::from([(
                         root.clone(),
-                        super::super::Prior {
-                            existed: Some(true),
-                            ..Default::default()
-                        },
+                        super::super::Prior { existed: Some(true), ..Default::default() },
                     )]),
                 );
             }

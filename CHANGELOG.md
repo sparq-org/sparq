@@ -14,9 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Metadata is served independently of resource existence and caller identity. Linkset
   edits that change `up`, and content replacements with `Prefer: set-linkset` that change it,
   return `409 Conflict` before writing when they declare a different parent; plain content
-  replacements leave `up` unchanged. Container listings finish under concurrent member changes and wait for commit
-  or put-back. Storage descriptions also link the root container type. The builtin LWS.net
-  ratchet checks exact expected failure names and requires their removal when they pass.
+  replacements leave `up` unchanged. Quiet container listings run concurrently; a busy
+  member or generation change falls back once through the fair exclusive queue, waiting
+  for commit or put-back. Storage descriptions also link the root container type. The builtin
+  LWS.net ratchet checks exact expected failure names and requires their removal when they pass.
 
 ### Changed
 
