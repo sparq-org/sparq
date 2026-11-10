@@ -6,10 +6,10 @@
 //! must not go out under a date (a later `If-Modified-Since` could match it, and a different page
 //! answer `304`). Every mutating [`Store`] method of [`Tracked`] runs inside
 //! `Generations::mutating`, whatever made the call (a request's own steps, a touch, a rollback
-//! or a retried undo): it moves the [generation](Generations::generation) of the resource changed
-//! and of the container listing it, before and after the change, and marks both
-//! [in flight](Generations::in_flight) meanwhile. A listing made while either holds has no date,
-//! and one during which the generation moved is made again.
+//! or a retried undo): it advances counters for the resource changed and the container listing
+//! it before and after the change, and marks both [in flight](Generations::in_flight) meanwhile.
+//! Listings hold the container exclusively against member mutations and touches. The in-flight
+//! counters also conservatively suppress dates when another resource shares a counter.
 //!
 //! The wrapped store is reachable only through [`Store`] in non-test code: there is no other way
 //! to change it.
@@ -53,8 +53,7 @@ impl Generations {
     /// A count that moves whenever what the container `uri`'s listing shows may have changed:
     /// before and after every change to it or to a member of it, and when a change to its listing
     /// is published or its touch ends (see `LwsState::touching`). Resources share
-    /// counters, so an unrelated change can make a listing be made again, never a change go
-    /// unnoticed.
+    /// counters, so this is a conservative observation of changes.
     pub fn generation(&self, uri: &str) -> u64 {
         self.generations[slot(uri)].load(Ordering::Acquire)
     }

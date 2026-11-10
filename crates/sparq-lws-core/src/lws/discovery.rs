@@ -33,7 +33,7 @@ pub(super) fn prm_url(resource: &str) -> Result<String, String> {
 }
 
 /// The configured origin and the HTTP path as sent, without a query or path normalization.
-pub(super) fn resource_uri(cfg: &super::LwsConfig, path: &str) -> Option<String> {
+fn resource_uri(cfg: &super::LwsConfig, path: &str) -> Option<String> {
     let url = Url::parse(&cfg.base_url).ok()?;
     if !matches!(url.scheme(), "https" | "http") || url.host_str().is_none() {
         return None;
@@ -54,12 +54,9 @@ pub(super) fn resource(cfg: &super::LwsConfig, path: &str) -> Option<String> {
     }
     let path = if suffix.is_empty() { "/" } else { suffix };
     let resource = resource_uri(cfg, path)?;
-    let service = path.starts_with(super::SUBSCRIPTIONS_PATH)
-        || path.starts_with(super::GRANTS_PATH)
-        || path.starts_with(super::REQUESTS_PATH)
-        || matches!(path, super::TYPE_INDEX_PATH | super::TYPE_SEARCH_PATH);
     let storage: axum::http::Uri = cfg.storage().parse().ok()?;
-    (path.starts_with(storage.path()) || service).then_some(resource)
+    path.strip_prefix(storage.path())?;
+    Some(resource)
 }
 
 pub(super) fn handle<S: Store>(state: &LwsState<S>, req: &LwsRequest, resource: &str) -> Response {
@@ -128,7 +125,9 @@ mod tests {
             assert!(prm_url(resource).is_err(), "{resource}");
         }
     }
-    use super::super::{parse_links, router, test_store::FlakyStore, LwsConfig, LWS_CID, LWS_NS};
+    use super::super::{
+        parse_links, router, test_store::FlakyStore, LwsConfig, LWS_CID, LWS_JSON, LWS_NS,
+    };
     use axum::{body::Body, http::Request, Router};
     use serde_json::Value;
     use std::collections::BTreeMap;
@@ -358,6 +357,7 @@ mod tests {
             "/.well-known/oauth-protected-resource/alice-other/",
             "/.well-known/oauth-protected-resource/%61lice/",
             "/.well-known/oauth-protected-resource/.lws/unknown",
+            "/.well-known/oauth-protected-resource/.lws/subscriptions/",
         ] {
             assert_eq!(
                 call(&app, "GET", path, &[], "").await.status(),
@@ -368,8 +368,8 @@ mod tests {
             ("/alice/", "https://storage.example/alice/"),
             ("/alice/absent", "https://storage.example/alice/absent"),
             (
-                "/.lws/subscriptions/",
-                "https://storage.example/.lws/subscriptions/",
+                "/alice/.lws/subscriptions/",
+                "https://storage.example/alice/.lws/subscriptions/",
             ),
         ] {
             let doc = document(
@@ -387,6 +387,38 @@ mod tests {
             assert_eq!(
                 doc["jlws_storage_description"],
                 "https://storage.example/alice/"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn path_based_storage_challenges_name_fetchable_resource_metadata() {
+        let mut cfg = LwsConfig::new("https://storage.example/alice");
+        cfg.owner = Some("https://owner.example/#me".into());
+        let app = router(FlakyStore::new(), cfg.clone()).await.unwrap();
+        for (method, path) in [
+            ("GET", "/"),
+            ("GET", "/child"),
+            ("GET", "/container/"),
+            ("POST", "/.lws/subscriptions/"),
+        ] {
+            let response = call(&app, method, path, &[("accept", LWS_JSON)], "").await;
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{method} {path}"
+            );
+            let params = challenge_params(
+                response.headers()[header::WWW_AUTHENTICATE]
+                    .to_str()
+                    .unwrap(),
+            );
+            let doc =
+                document(call(&app, "GET", &params["resource_metadata"], &[], "").await).await;
+            assert_eq!(doc["resource"], cfg.absolute(path), "{method} {path}");
+            assert_eq!(
+                params["resource_metadata"],
+                prm_url(&cfg.absolute(path)).unwrap()
             );
         }
     }
@@ -638,6 +670,45 @@ mod tests {
         .await
         .status()
         .is_success());
+    }
+
+    #[tokio::test]
+    async fn storage_description_also_links_the_root_container_type() {
+        let mut cfg = LwsConfig::new(BASE);
+        cfg.open = true;
+        let app = router(FlakyStore::new(), cfg).await.unwrap();
+        for method in ["GET", "HEAD"] {
+            for headers in [vec![], vec![("accept", LWS_CID)]] {
+                let response = call(&app, method, "/", &headers, "").await;
+                assert_eq!(response.status(), StatusCode::OK);
+                assert_eq!(response.headers()[header::CONTENT_TYPE], LWS_CID);
+                assert_eq!(storage_link(&response), STORAGE);
+                assert!(super::super::test_store::links(&response, "type")
+                    .contains(&format!("{LWS_NS}Container")));
+                assert_eq!(
+                    super::super::test_store::links(&response, "linkset"),
+                    vec![format!("{STORAGE}.meta")]
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn token_endpoint_is_discovered_from_metadata() {
+        let app = app().await;
+        let metadata =
+            document(call(&app, "GET", "/.well-known/lws-configuration", &[], "").await).await;
+        let endpoint = metadata["token_endpoint"].as_str().unwrap();
+        assert_eq!(endpoint, "https://storage.example/.well-known/lws/token");
+        let response = call(&app, "POST", endpoint,
+            &[("content-type", "application/x-www-form-urlencoded")],
+            "grant_type=urn:ietf:params:oauth:grant-type:token-exchange&resource=https%3A%2F%2Fstorage.example%2F").await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(response.headers()[header::CONTENT_TYPE], JSON);
+        assert_eq!(
+            super::super::test_store::body_json(response).await["error"],
+            "invalid_request"
+        );
     }
 
     #[tokio::test]

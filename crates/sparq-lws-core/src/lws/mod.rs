@@ -31,17 +31,19 @@ mod discovery;
 pub mod index;
 mod intents;
 pub use sparq_lws_authn::jose;
+#[cfg(test)]
+mod concurrent_listing_tests;
 pub mod notify;
 mod records;
 pub mod resources;
 #[cfg(feature = "sparql-endpoint")]
-mod sparql;
-#[cfg(feature = "sparql-endpoint")]
 mod snapshot;
+#[cfg(feature = "sparql-endpoint")]
+mod sparql;
 pub mod tokens;
-pub mod tracked;
 #[cfg(test)]
 mod touchstone_tests;
+pub mod tracked;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -985,7 +987,7 @@ impl<S: Store + 'static> LwsState<S> {
         }
     }
 
-    /// See [`tracked::Generations::generation`].
+    #[cfg(test)]
     pub(crate) fn generation(&self, uri: &str) -> u64 {
         self.store.generations().generation(uri)
     }
@@ -2603,10 +2605,9 @@ async fn dispatch<S: Store + 'static>(State(state): State<LwsState<S>>, req: Req
             .get(header::WWW_AUTHENTICATE)
             .and_then(|v| v.to_str().ok())
         {
-            if let (Ok(root), Some(target)) = (
+            if let (Ok(root), Ok(target)) = (
                 discovery::prm_url(&state.cfg.storage()),
-                discovery::resource_uri(&state.cfg, &path)
-                    .and_then(|resource| discovery::prm_url(&resource).ok()),
+                discovery::prm_url(&state.cfg.absolute(&path)),
             ) {
                 let challenge = challenge.replacen(
                     &format!("resource_metadata=\"{root}\""),
@@ -3627,7 +3628,12 @@ pub(crate) mod test_store {
             let cycles = self.write_cycles.lock().unwrap().clone();
             if let Some(cycles) = cycles.filter(|cycles| cycles.uris.iter().any(|key| key == iri)) {
                 cycles.entered.add_permits(1);
-                cycles.release.acquire().await.expect("write cycle").forget();
+                cycles
+                    .release
+                    .acquire()
+                    .await
+                    .expect("write cycle")
+                    .forget();
             }
             if self.fail_write_of.lock().unwrap().as_deref() == Some(iri)
                 || self

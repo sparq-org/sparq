@@ -195,7 +195,6 @@ async fn up_refusal_covers_whole_linksets_and_link_headers_before_any_write() {
         // A second own-context entry and case-insensitive relation must not bypass the check.
         ("PATCH", "/c/moved.meta", JSON_PATCH, json!([{"op": "add", "path": "/linkset/-", "value": {"anchor": RESOURCE, "UP": [{"href": DESTINATION}]}}]).to_string(), vec![]),
         ("PUT", "/c/moved", "text/plain", "replacement".into(), vec![("link", "<https://storage.example/c/destination/>; rel=\"up license\""), ("prefer", "set-linkset")]),
-        ("PUT", "/c/moved", "text/plain", "replacement".into(), vec![("link", "<https://storage.example/c/destination/>; rel=\"up\"")]),
     ] {
         let before = f.snapshot().await;
         let counters = f.store.counters.snapshot();
@@ -355,4 +354,33 @@ async fn up_conflict_is_decided_after_authorization_and_preconditions() {
         );
         f.assert_no_writes(counters);
     }
+}
+
+#[tokio::test]
+async fn plain_put_ignores_up_link_headers() {
+    let f = Fixture::new().await;
+    let mut before = body_json(f.get("/c/moved.meta").await).await;
+    before["linkset"][0].as_object_mut().unwrap().remove("self");
+    let response = f
+        .call(
+            "PUT",
+            "/c/moved",
+            Some(&f.owner),
+            &[
+                ("content-type", "text/plain"),
+                (
+                    "link",
+                    "<https://storage.example/c/destination/>; rel=\"up\"",
+                ),
+            ],
+            "replacement",
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    let resource = f.get("/c/moved").await;
+    assert_eq!(links(&resource, "up"), vec![PARENT]);
+    assert_eq!(response_bytes(resource).await.2, "replacement");
+    let mut after = body_json(f.get("/c/moved.meta").await).await;
+    after["linkset"][0].as_object_mut().unwrap().remove("self");
+    assert_eq!(after, before);
 }

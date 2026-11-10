@@ -1,25 +1,60 @@
 #!/usr/bin/env python3
-"""Read an LWS.net TRX report: print each test that did not pass, and with --min-passed hold the
-run to a floor. A run counts only when the report parses, every expected test ran, and the harness
-exited with a test outcome (0 or a test failure), not an abort or an infrastructure error.
+"""Read an LWS.net TRX report and optionally require exactly the named expected failures.
 
-    lws-net-report.py REPORT.trx --status N [--min-passed P --expected-total T] [--gha]
+    lws-net-report.py REPORT.trx --status N [--expected-failures FILE --expected-total T] [--gha]
     lws-net-report.py --self-test
+
+A ratcheted run fails on an unlisted failure, an expected failure passing or missing, an
+incomplete/inconsistent report, or a harness infrastructure error. Without the ratchet, the
+harness's own exit status stands (the lws-test-suite tests.yaml run).
 """
 
 import argparse
+import json
 import sys
 import xml.etree.ElementTree as ET
 
 NS = "{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}"
-# LWS.net runs on Microsoft.Testing.Platform, which exits 0 when every test passed and 2 when some
-# failed. Anything else (1 a generic failure, 3 aborted, 5 invalid arguments, 7 session failure,
-# 8 no tests, ...) means the run itself went wrong.
+# Microsoft.Testing.Platform exits 2 for test failures. Other nonzero codes mean the run failed.
 TEST_OUTCOME_STATUSES = {0, 2}
 
 
-def read(path):
-    """(executed, passed, failures) from the report, raising ValueError when it is unusable."""
+def unique_keys(pairs):
+    out = {}
+    for key, value in pairs:
+        if key in out:
+            raise ValueError(f"duplicate JSON key: {key}")
+        out[key] = value
+    return out
+
+
+def expected_failures(path):
+    """Load exact names with a category and evidence; reject malformed or duplicate entries."""
+    try:
+        with open(path) as f:
+            doc = json.load(f, object_pairs_hook=unique_keys)
+        if not isinstance(doc, dict) or set(doc) != {"_doc", "expected_failures"}:
+            raise ValueError("expected _doc and expected_failures")
+        if not isinstance(doc["expected_failures"], list):
+            raise ValueError("expected_failures must be a list")
+        names = set()
+        for entry in doc["expected_failures"]:
+            if not isinstance(entry, dict) or set(entry) != {"name", "category", "reason"}:
+                raise ValueError("each entry needs name, category and reason")
+            if any(not isinstance(entry[k], str) or not entry[k].strip() for k in entry):
+                raise ValueError("entry fields must be nonempty strings")
+            if entry["category"] not in {"intentional", "runner"}:
+                raise ValueError("a server defect cannot be an expected failure")
+            if entry["name"] in names:
+                raise ValueError(f"duplicate expected failure: {entry['name']}")
+            names.add(entry["name"])
+        return names
+    except (OSError, ValueError) as e:
+        raise ValueError(f"unusable expected-failures list: {e}") from None
+
+
+def read(path, strict=False):
+    """(executed, passed, results by exact name), or ValueError for an unusable report."""
     try:
         root = ET.parse(path).getroot()
     except (OSError, ET.ParseError) as e:
@@ -31,43 +66,55 @@ def read(path):
         executed, passed = int(counters.get("executed")), int(counters.get("passed"))
     except (TypeError, ValueError):
         raise ValueError("the report's counters are not numbers") from None
-    failures = []
+    results = {}
     # Leaf results only: a data-driven test's parent repeats its rows' outcome.
     for r in root.iter(NS + "UnitTestResult"):
-        if r.find(NS + "InnerResults") is None and r.get("outcome") != "Passed":
-            msg = r.findtext(f"{NS}Output/{NS}ErrorInfo/{NS}Message") or ""
-            failures.append(
-                f"{r.get('testName')} ({r.get('outcome')}): {' '.join(msg.split())[:300]}"
-            )
-    return executed, passed, failures
+        if r.find(NS + "InnerResults") is not None:
+            continue
+        name, outcome = r.get("testName"), r.get("outcome")
+        if strict and (not name or name in results):
+            raise ValueError(f"missing or duplicate test name: {name!r}")
+        if strict and outcome not in {"Passed", "Failed"}:
+            raise ValueError(f"test did not finish: {name} ({outcome})")
+        msg = r.findtext(f"{NS}Output/{NS}ErrorInfo/{NS}Message") or ""
+        results[name] = (outcome, " ".join(msg.split())[:300])
+    if strict and (executed != len(results) or passed != sum(o == "Passed" for o, _ in results.values())):
+        raise ValueError("the report's counters disagree with its leaf results")
+    return executed, passed, results
 
 
 def exit_code(status):
-    """`status` as a process exit code: an out-of-range one is a failure, not its low byte."""
+    """An out-of-range process exit code is a failure, not its low byte."""
     return status if 0 <= status <= 255 else 1
 
 
-def problems(path, status, min_passed=None, expected_total=None):
-    """(summary, failed tests, why the run does not count): the last is empty when it does."""
+def problems(path, status, expected=None, expected_total=None):
+    """(summary, failed tests, reasons the run does not count)."""
     try:
-        executed, passed, failures = read(path)
+        executed, passed, results = read(path, strict=expected is not None)
     except ValueError as e:
         return f"{e} (exit {status})", [], ["unreadable report"]
+    failed = {name for name, (outcome, _) in results.items() if outcome != "Passed"}
+    failures = [f"{name} ({results[name][0]}): {results[name][1]}" for name in sorted(failed)]
     summary = f"{passed} of {executed} passed (exit {status})"
     why = []
-    if min_passed is not None:
+    if expected is not None:
         if status not in TEST_OUTCOME_STATUSES:
             why.append(f"the harness exited {status}, not with a test outcome")
-        if expected_total is not None and executed != expected_total:
+        if expected_total is None or expected_total < 1:
+            why.append("a named ratchet requires a positive expected total")
+        elif executed != expected_total:
             why.append(f"{executed} tests ran, {expected_total} expected")
-        if passed < min_passed:
-            why.append(f"{passed} passed, below the floor of {min_passed}")
+        for name in sorted(failed - expected):
+            why.append(f"unlisted failure: {name}")
+        for name in sorted(expected - failed):
+            outcome = "passed: remove it from the list" if name in results else "did not run"
+            why.append(f"expected failure {outcome}: {name}")
     return summary, failures, why
 
 
-def check(path, status, min_passed=None, expected_total=None, gha=False):
-    """The process exit code for this run, printing what it found."""
-    summary, failures, why = problems(path, status, min_passed, expected_total)
+def check(path, status, expected=None, expected_total=None, gha=False):
+    summary, failures, why = problems(path, status, expected, expected_total)
     print(f"{'::notice title=lws-net::' if gha else ''}lws-net {summary}")
     for line in failures:
         print(f"::error title=lws-net failed::{line}" if gha else line)
@@ -75,8 +122,7 @@ def check(path, status, min_passed=None, expected_total=None, gha=False):
         print(f"{'::error title=lws-net::' if gha else ''}lws-net: {w}")
     if why:
         return 1
-    # Without a floor the harness's own status stands, unless the report is unreadable.
-    return 0 if min_passed is not None else exit_code(status)
+    return 0 if expected is not None else exit_code(status)
 
 
 def trx(outcomes):
@@ -89,67 +135,76 @@ def trx(outcomes):
 
 
 def self_test():
+    import contextlib
+    import io
     import os
+    import subprocess
     import tempfile
 
-    def run(text, status, **kw):
-        with tempfile.NamedTemporaryFile("w", suffix=".trx", delete=False) as f:
-            f.write(text)
+    with tempfile.TemporaryDirectory() as tmp:
+        report = os.path.join(tmp, "report.trx")
+
+        def why(text, status=2, **kw):
+            with open(report, "w") as f:
+                f.write(text)
+            return problems(report, status, **kw)[2]
+
+        ratchet = dict(expected={"t2"}, expected_total=3)
+        complete = trx(["Passed", "Passed", "Failed"])
+        assert why(complete, **ratchet) == [], "exact listed set"
+        assert why(trx(["Passed", "Failed", "Failed"]), **ratchet) == ["unlisted failure: t1"]
+        assert why(trx(["Passed"] * 3), 0, **ratchet) == [
+            "expected failure passed: remove it from the list: t2"
+        ]
+        assert why(trx(["Passed", "Failed", "Passed"]), **ratchet) == [
+            "unlisted failure: t1", "expected failure passed: remove it from the list: t2"
+        ], "a new failure cannot replace a passing exception"
+        assert why(trx(["Passed"] * 2), **ratchet) == [
+            "2 tests ran, 3 expected", "expected failure did not run: t2"
+        ]
+        for status in (1, 3, 7, 8, 256, -256):
+            assert why(complete, status, **ratchet) == [f"the harness exited {status}, not with a test outcome"]
+        assert why(complete, 0, **ratchet) == [], "valid test outcome"
+        assert why(complete, expected={"t2"}) == ["a named ratchet requires a positive expected total"]
+        for bad in ("", complete[:-10], complete.replace('testName="t2"', 'testName="t1"'),
+                    complete.replace('executed="3"', 'executed="9"'),
+                    complete.replace('passed="2"', 'passed="3"'),
+                    complete.replace('outcome="Failed"', 'outcome="NotExecuted"'),
+                    f'<TestRun xmlns="{NS[1:-1]}"><Results/></TestRun>'):
+            assert why(bad, **ratchet) == ["unreadable report"]
+        assert problems("/nonexistent/lws-net.trx", 0, **ratchet)[2] == ["unreadable report"]
+        with contextlib.redirect_stdout(io.StringIO()):
+            why(complete)
+            assert check(report, 2, **ratchet) == 0
+            assert check(report, 2) == 2, "unratcheted run keeps its status"
+            assert check(report, 256) == 1
+            why(trx(["Passed", "NotExecuted"]))
+            assert check(report, 0) == 0, "unratcheted run retains skipped-test handling"
+            why("")
+            for status in (0, 2, 256, -256):
+                assert check(report, status) == 1 and check(report, status, **ratchet) == 1
+        entries = os.path.join(tmp, "expected.json")
+        entry = dict(name="t2", category="runner", reason="fixture")
+        for value, valid in [([entry], True), ([entry, entry], False),
+                             ([dict(entry, category="server")], False),
+                             ([dict(entry, reason="")], False)]:
+            with open(entries, "w") as f:
+                json.dump(dict(_doc="fixture", expected_failures=value), f)
+            try:
+                assert expected_failures(entries) == {"t2"}
+                assert valid
+            except ValueError:
+                assert not valid
+        with open(entries, "w") as f:
+            f.write('{"_doc":"x","expected_failures":[],"expected_failures":[]}')
         try:
-            return check(f.name, status, **kw)
-        finally:
-            os.unlink(f.name)
-
-    floor = dict(min_passed=2, expected_total=3)
-
-    def why(text, status, **kw):
-        with tempfile.NamedTemporaryFile("w", suffix=".trx", delete=False) as f:
-            f.write(text)
-        try:
-            return problems(f.name, status, **kw)[2]
-        finally:
-            os.unlink(f.name)
-
-    complete = trx(["Passed", "Passed", "Failed"])
-    assert why(complete, 2, **floor) == [], "a failing test above the floor"
-    assert why(complete, 0, **floor) == [], "status 0"
-    assert why(complete, 1, **floor) == ["the harness exited 1, not with a test outcome"], (
-        "a generic failure"
-    )
-    assert why(trx(["Passed", "Passed"]), 3, **floor) == [
-        "the harness exited 3, not with a test outcome",
-        "2 tests ran, 3 expected",
-    ], "an aborted run"
-    assert why(trx(["Passed", "Passed"]), 2, **floor) == ["2 tests ran, 3 expected"], "a short run"
-    assert why(trx(["Passed"] * 3), 7, **floor) == [
-        "the harness exited 7, not with a test outcome"
-    ], "an infrastructure status"
-    assert why(trx(["Passed", "Failed", "Failed"]), 2, **floor) == [
-        "1 passed, below the floor of 2"
-    ], "below the floor"
-    malformed = trx(["Passed"] * 3)[: -len("</TestRun>")]
-    no_counters = f'<TestRun xmlns="{NS[1:-1]}"><Results/></TestRun>'
-    for text, case in [(malformed, "malformed"), ("", "empty"), (no_counters, "no counters")]:
-        assert why(text, 0, **floor) == ["unreadable report"], case
-        assert run(text, 0, **floor) == 1, case
-    assert problems("/nonexistent/lws-net.trx", 0, **floor)[2] == ["unreadable report"], "missing"
-    assert run(complete, 2, **floor) == 0 and run(complete, 1, **floor) == 1, "exit codes"
-    assert run(trx(["Passed", "Failed"]), 2) == 2, "no floor: the harness's own status"
-    # An unreadable report fails whatever the status, even one whose low byte is 0.
-    for status in (0, 2, 256, 512, -256):
-        assert run("", status) == 1 and run("", status, **floor) == 1, status
-    assert run(complete, 256) == 1 and run(complete, -256) == 1, "out-of-range status"
-    # The command line, as lws-net.sh runs it.
-    import subprocess
-
-    for args in (["--status", "256"], ["--status", "512", "--min-passed", "1"]):
-        r = subprocess.run(
-            [sys.executable, "-B", __file__, "/nonexistent/lws-net.trx", *args],
-            capture_output=True,
-            text=True,
-        )
-        assert r.returncode == 1, (args, r.returncode, r.stdout)
-        assert "no readable report" in r.stdout, r.stdout
+            expected_failures(entries)
+            raise AssertionError("duplicate JSON keys accepted")
+        except ValueError:
+            pass
+        for args in (["--status", "256"], ["--status", "512", "--expected-failures", entries, "--expected-total", "3"]):
+            r = subprocess.run([sys.executable, "-B", __file__, "/nonexistent/lws-net.trx", *args], capture_output=True, text=True)
+            assert r.returncode == 1, (args, r.returncode, r.stdout)
     print("lws-net-report self-test passed")
 
 
@@ -157,7 +212,7 @@ if __name__ == "__main__":
     a = argparse.ArgumentParser()
     a.add_argument("report", nargs="?")
     a.add_argument("--status", type=int, default=0)
-    a.add_argument("--min-passed", type=int)
+    a.add_argument("--expected-failures")
     a.add_argument("--expected-total", type=int)
     a.add_argument("--gha", action="store_true")
     a.add_argument("--self-test", action="store_true")
@@ -165,4 +220,11 @@ if __name__ == "__main__":
     if o.self_test:
         self_test()
         sys.exit(0)
-    sys.exit(check(o.report, o.status, o.min_passed, o.expected_total, o.gha))
+    try:
+        expected = expected_failures(o.expected_failures) if o.expected_failures else None
+    except ValueError as e:
+        print(f"lws-net: {e}")
+        sys.exit(1)
+    if o.expected_total is not None and expected is None:
+        a.error("--expected-total requires --expected-failures")
+    sys.exit(check(o.report, o.status, expected, o.expected_total, o.gha))

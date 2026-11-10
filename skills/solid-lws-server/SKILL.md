@@ -1329,18 +1329,18 @@ What the server exposes, all discoverable from the storage description
   settled the same way from its intent, and its container touched after. A
   create needs none: its metadata is written before its content and removed after it, so no
   stop leaves content without its metadata. A container listing never shows a change in
-  flight to a member: it reads each member under that member's lock, and is read again once the
-  change is over (`503` if its members keep changing); removing a member holds its container
-  exclusively. A container whose modification time has not yet been, or could not be, moved on
-  after a change has no `Last-Modified` until it is, so `If-Modified-Since` never answers `304`
+  flight to a member: it holds the container exclusively until the listing is complete.
+  Member changes hold that container through commit or put-back. The fair lock queue lets
+  listings finish while new changes keep arriving, without a churn-based `503`. A resource
+  set aside for recovery still answers `503`. A container whose modification time has not yet
+  been, or could not be, moved on after a change has no `Last-Modified` until it is, so `If-Modified-Since` never answers `304`
   on a stale date. A listing's `Last-Modified` is the latest of the container's own time and
   every member's, so a change whose touch a stop lost still moves it on; a member whose time the
   backend does not record is listed without `modified`, and the listing then has no
   `Last-Modified`; so has one whose container's own time is not recorded. An unknown time is never
   stated as the epoch: a linkset's `self` entry then omits `modified`. Every change to the store (a request's own steps, a touch, a rollback or a
   retried undo) goes through one tracked path, and a listing made while a change to the
-  container or a member is in flight has no `Last-Modified`; one that overlapped a change is
-  made again. A PUT with `Content-Range`
+  container or a member is in flight has no `Last-Modified`. A PUT with `Content-Range`
   (a partial PUT) is refused with `400`.
 - A `Link` target that is not a URI reference is refused with `400`; entity tags in
   `If-Match`/`If-None-Match` compare byte for byte, obs-text included, and an empty list matches
@@ -1464,6 +1464,11 @@ What the server exposes, all discoverable from the storage description
 Conformance runs against the public suites; the scripts and the CI floor live in
 `crates/sparq-lws-core/conformance/lws/` (`touchstone.sh <module>`, `lws-net.sh`,
 `floor.json`) and run in `.github/workflows/lws-conformance.yml`.
+The builtin LWS.net step checks exact test names against
+`lws-net-expected-failures.json`, whose entries give a category and reason. An unlisted
+failure, a listed test passing or missing, an unexpected total, or an unusable report fails
+CI. Remove an entry when its test passes. The separate `tests.yaml` step keeps the harness's
+own exit status.
 Both Touchstone and the Solid CTH driver accept `PSS_SPARQ_BACKEND=durable` to test
 an ephemeral `SOLID_SERVER_DATA_DIR` across graceful and idle hard-kill restarts.
 See the [conformance harness guide](../../crates/sparq-lws-core/conformance/README.md#durable-restart-checks)
