@@ -40,6 +40,11 @@ mod sparql;
 mod snapshot;
 pub mod tokens;
 pub mod tracked;
+#[cfg(test)]
+mod touchstone_tests;
+
+#[cfg(test)]
+mod concurrent_listing_tests;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -2591,15 +2596,42 @@ fn body_limit(path: &str, max_body: usize) -> usize {
 }
 
 async fn dispatch<S: Store + 'static>(State(state): State<LwsState<S>>, req: Request) -> Response {
+    let path = req.uri().path().to_owned();
+    let mut response = dispatch_request(&state, req).await;
+    // Resource and service challenges without dot segments acquire the actual target at
+    // the HTTP boundary. Keep the realm, token error and storage Link supplied by the handler.
+    if response.status() == StatusCode::UNAUTHORIZED && !discovery::has_dot_segments(&path) {
+        if let Some(challenge) = response
+            .headers()
+            .get(header::WWW_AUTHENTICATE)
+            .and_then(|v| v.to_str().ok())
+        {
+            if let (Ok(root), Ok(target)) = (
+                discovery::prm_url(&state.cfg.storage()),
+                discovery::prm_url(&state.cfg.absolute(&path)),
+            ) {
+                let challenge = challenge.replacen(
+                    &format!("resource_metadata=\"{root}\""),
+                    &format!("resource_metadata=\"{target}\""),
+                    1,
+                );
+                set(response.headers_mut(), header::WWW_AUTHENTICATE, &challenge);
+            }
+        }
+    }
+    response
+}
+
+async fn dispatch_request<S: Store + 'static>(state: &LwsState<S>, req: Request) -> Response {
     #[cfg(feature = "crdt-sync")]
     if crate::crdt::is_socket(req.uri().path()) {
-        return crate::crdt::lws_socket(&state, req).await;
+        return crate::crdt::lws_socket(state, req).await;
     }
     if notify::stream_path(req.uri().path()) {
         if let Err(refused) = check_headers(req.headers()) {
             return refused;
         }
-        return notify::connect(&state, req).await;
+        return notify::connect(state, req).await;
     }
     let (parts, body) = req.into_parts();
     if let Err(refused) = check_headers(&parts.headers) {
@@ -2622,7 +2654,7 @@ async fn dispatch<S: Store + 'static>(State(state): State<LwsState<S>>, req: Req
         body,
     };
     let is_head = req.is_head();
-    let mut resp = route(&state, req).await;
+    let mut resp = route(state, req).await;
     // A 304 or 204 has no content, and no length to declare: a 304's Content-Length would have
     // to be the 200's (RFC 9110 section 8.6), which an empty body is not. Its body declares no
     // length, so none is derived from it on the way out either.
@@ -2689,8 +2721,8 @@ async fn route<S: Store + 'static>(state: &LwsState<S>, req: LwsRequest) -> Resp
         return authz_server::handle(state, &req).await;
     }
     if path.starts_with("/.well-known/") {
-        if discovery::prm_url(&state.cfg.storage()).is_ok_and(|url| url.path() == path) {
-            return discovery::handle(state, &req);
+        if let Some(resource) = discovery::resource(&state.cfg, path) {
+            return discovery::handle(state, &req, &resource);
         }
         return problem(StatusCode::NOT_FOUND, None);
     }

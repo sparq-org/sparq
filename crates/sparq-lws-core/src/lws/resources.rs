@@ -1018,20 +1018,36 @@ async fn read<S: Store + 'static>(
             };
             set(resp.headers_mut(), header::ETAG, &etag);
             set(resp.headers_mut(), header::VARY, "Accept");
-            add_link(
-                resp.headers_mut(),
-                &storage,
-                &format!("{LWS_NS}storage"),
-                None,
-            );
+            resource_links(state, resp.headers_mut(), &storage, &[]);
             return resp;
         }
     }
-    // The shared lock is held from the permission check through the bytes served, so what is
-    // served is the state the decision was made on: every write holds the exclusive lock.
-    let mut tries = 0;
-    let (_guard, meta) = loop {
-        let Some(guard) = state.locks.read(uri).await else {
+    // Quiet listings retain the shared-lock path: members are only tried, never waited
+    // for under the container. A busy member or a changed generation discards that attempt
+    // and queues one exclusive read. Later creates cannot overtake the fair queue, and no
+    // member lock is taken beneath the exclusive container lock.
+    let Some(guard) = state.locks.read(uri).await else {
+        return set_aside_meanwhile();
+    };
+    let meta = match current(state, uri).await {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    if let Err(r) = recheck(state, Action::Read, uri, agent).await {
+        return r;
+    }
+    if uri.ends_with('/') {
+        if let Ok(listing) = read_container(state, req, uri, &meta, false).await {
+            return listing;
+        }
+        drop(guard);
+        drop(meta);
+        #[cfg(test)]
+        state
+            .locks
+            .listing_fallbacks
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let Some(_guard) = state.locks.lock(uri).await else {
             return set_aside_meanwhile();
         };
         let meta = match current(state, uri).await {
@@ -1041,25 +1057,10 @@ async fn read<S: Store + 'static>(
         if let Err(r) = recheck(state, Action::Read, uri, agent).await {
             return r;
         }
-        if !uri.ends_with('/') {
-            break (guard, meta);
-        }
-        let Busy(member) = match read_container(state, req, uri, &meta, false).await {
-            Ok(listing) => return listing,
-            Err(busy) => busy,
-        };
-        // A change to a member is in flight: the listing is read again once it is over, so
-        // nothing it may yet put back is shown. Waited for without the container's lock, which
-        // the change may take after the member's.
-        drop(guard);
-        tries += 1;
-        if tries == LISTING_TRIES {
-            return retry_later("the container's members kept changing while it was listed");
-        }
-        if state.locks.read(&member).await.is_none() {
-            return set_aside_meanwhile();
-        }
-    };
+        return read_container(state, req, uri, &meta, true)
+            .await
+            .unwrap_or_else(|_| set_aside_meanwhile());
+    }
     let types = match state.resource_meta(uri).await {
         Ok(m) => m.types,
         Err(e) => return store_error(e),
@@ -1224,12 +1225,8 @@ async fn with_sizes<S: Store + 'static>(
     }
 }
 
-/// How many times a listing is read again when changes to its members are in flight, before it
-/// is answered `503`.
-const LISTING_TRIES: usize = 8;
-
-/// Why a container could not be listed: a change to this member is in flight.
-struct Busy(String);
+/// Why an optimistic listing must be retried under the exclusive container lock.
+struct Busy;
 
 /// Why [`members`] could not list a container.
 enum Unlisted {
@@ -1247,10 +1244,10 @@ impl From<ServerError> for Unlisted {
 /// size (which [`with_sizes`] adds for the members shown). Each member's own entity tag stands
 /// for its content.
 ///
-/// Each member is read under its shared lock, so what is listed of it is what it was before or
-/// after a change to it, never in between: a change in flight to one (its lock busy) makes the
-/// listing [`Busy`] instead, unless the caller holds the container `exclusive`ly (then no change
-/// to a member is in flight: each holds the container's lock, shared, while it runs).
+/// On the optimistic path each member's shared lock is only tried. A busy lock discards
+/// the attempt; the caller retries once under the exclusive container lock. That fallback
+/// takes no member locks, since each mutation already holds the container until it commits
+/// or is put back.
 async fn members<S: Store + 'static>(
     state: &LwsState<S>,
     uri: &str,
@@ -1273,7 +1270,7 @@ async fn members<S: Store + 'static>(
             true => None,
             false => match state.locks.try_read(&child) {
                 Some(guard) => Some(guard),
-                None => return Err(Unlisted::Busy(Busy(child))),
+                None => return Err(Unlisted::Busy(Busy)),
             },
         };
         let Some(meta) = state.store.meta(&child).await? else {
@@ -1339,7 +1336,7 @@ async fn read_container<S: Store + 'static>(
     // Held exclusively, the container cannot change meanwhile (a counter it shares with
     // others may move, which says nothing about it).
     if !exclusive && state.generation(uri) != generation {
-        return Err(Busy(uri.to_string()));
+        return Err(Busy);
     }
     Ok(resp)
 }
@@ -1761,6 +1758,50 @@ fn prefers_set_linkset(req: &LwsRequest) -> bool {
     req.header_all(header::HeaderName::from_static("prefer"))
         .split([',', ';'])
         .any(|p| p.trim().eq_ignore_ascii_case("set-linkset"))
+}
+
+/// Moving is not offered. Only the resource's IRI determines its parent; no destination
+/// lookup or stored metadata participates in this decision.
+fn refuse_up_change<'a>(
+    uri: &str,
+    storage: &str,
+    mut targets: impl Iterator<Item = &'a str>,
+) -> Option<Response> {
+    let parent = parent_of(uri, storage);
+    targets
+        .any(|target| Some(target) != parent.as_deref())
+        .then(|| {
+            problem(
+                StatusCode::CONFLICT,
+                Some("changing the up link is not supported"),
+            )
+        })
+}
+
+/// Check Link headers before their server-managed relations are discarded. An explicit
+/// anchor changes the context; an up link about some other resource does not move this one.
+fn refuse_up_headers(req: &LwsRequest, uri: &str, storage: &str) -> Option<Response> {
+    for link in parse_links(&req.header_all(header::LINK)) {
+        if !link
+            .param("rel")
+            .is_some_and(|rel| rel.split_whitespace().any(|r| relation_key(r) == "up"))
+        {
+            continue;
+        }
+        if link
+            .param("anchor")
+            .is_some_and(|anchor| resolve_reference(uri, &anchor).as_deref() != Some(uri))
+        {
+            continue;
+        }
+        if let Some(target) = resolve_reference(uri, link.target) {
+            if let Some(refused) = refuse_up_change(uri, storage, std::iter::once(target.as_str()))
+            {
+                return Some(refused);
+            }
+        }
+    }
+    None
 }
 
 /// The linkset a new resource starts with: its declared user-managed links.
@@ -2275,6 +2316,8 @@ async fn current<S: Store + 'static>(
 /// other's locks; that deployment needs a conditional write in the store itself.
 #[derive(Default)]
 pub struct IriLocks {
+    #[cfg(test)]
+    pub(super) listing_fallbacks: std::sync::atomic::AtomicUsize,
     map: std::sync::Mutex<LockMap>,
     /// The IRIs set aside ([`LwsState::set_aside`](super::LwsState::set_aside)), each with how
     /// many set-aside changes are to it.
@@ -2855,6 +2898,11 @@ async fn update<S: Store + 'static>(
         Ok(declared) => declared,
         Err(r) => return r,
     };
+    if set_linkset {
+        if let Some(refused) = refuse_up_headers(req, uri, &state.cfg.storage()) {
+            return refused;
+        }
+    }
     let declared = if set_linkset {
         rmeta.linkset = initial_linkset(uri, &links);
         rmeta.links = links;
@@ -4818,7 +4866,7 @@ fn absolute_linkset(doc: &Value, base: &str, budget: usize) -> Result<Resolved, 
 
 /// The user-managed part of a linkset document: every server-managed relation dropped from the
 /// entries about `uri`. A client cannot write those relations; whatever a patch puts there is
-/// ignored and the server's own values stand.
+/// discarded and the server's own values stand. Unsupported up changes are refused first.
 fn user_linkset(doc: &Resolved, uri: &str) -> Resolved {
     let entries = doc
         .0
@@ -5402,6 +5450,20 @@ where
             Some("the linkset would be too large"),
         ),
     };
+    let targets = patched.0["linkset"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|entry| anchored_at(entry, uri))
+        .filter_map(Value::as_object)
+        .flat_map(|entry| entry.iter())
+        .filter(|(relation, _)| relation_key(relation) == "up")
+        .filter_map(|(_, targets)| targets.as_array())
+        .flatten()
+        .filter_map(|target| target["href"].as_str());
+    if let Some(refused) = refuse_up_change(uri, &state.cfg.storage(), targets) {
+        return refused;
+    }
     // Only the user-managed part is kept; the links the type index matches are taken from
     // it, so the two never drift apart.
     let user = user_linkset(&patched, uri);
@@ -6564,7 +6626,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn linkset_patch_ignores_server_managed_relations_and_keeps_links_in_step() {
+    async fn linkset_patch_keeps_fixed_relations_and_user_links_in_step() {
         let st = state().await;
         let uri = post(
             &st,
@@ -6575,8 +6637,8 @@ mod tests {
         )
         .await;
         let meta = format!("{}{META_SUFFIX}", path_of(&uri));
-        // A patch replacing the whole array: a forged parent and type, and a new link only.
-        let patch = json!({"linkset": [{"anchor": uri, "up": [{"href": "https://forged/"}],
+        // A patch replacing the whole array: the fixed parent, a forged type and a new link.
+        let patch = json!({"linkset": [{"anchor": uri, "up": [{"href": format!("{BASE}/")}],
             "type": [{"href": "https://forged/T"}], "describedby": [{"href": "https://ex.org/schema"}]}]});
         let r = call(
             &st,
@@ -10207,12 +10269,7 @@ mod tests {
         }
     }
 
-    /// Review finding: a listing read its members without their locks, so a change in flight
-    /// (content written, its metadata not yet) showed in it, though the change might yet be put
-    /// back; and a member's removal, which held its container only shared, could be listed
-    /// as gone before it was put back. A listing reads each member under its shared lock, and
-    /// is read again once a change in flight to one is over; a removal holds its container
-    /// exclusively.
+    /// Listings wait for mutations holding their container, including removals.
     #[tokio::test]
     async fn a_listing_waits_out_changes_in_flight_to_its_members() {
         use super::super::test_store::{request as req, state};
@@ -10230,9 +10287,11 @@ mod tests {
             })
         };
         let held = st.locks.lock(&x).await.expect("visible");
+        let parent = st.locks.read(&st.cfg.storage()).await.expect("visible");
         let listing = list();
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert!(!listing.is_finished(), "listed during a change to a member");
+        drop(parent);
         drop(held);
         let r = tokio::time::timeout(Duration::from_secs(1), listing)
             .await
@@ -10275,7 +10334,7 @@ mod tests {
     #[tokio::test]
     async fn a_listing_has_no_date_until_the_touch_after_a_change_lands() {
         use super::super::test_store::{request as req, state};
-        let (st, _store) = state(100).await;
+        let (st, store) = state(100).await;
         let anon = Agent::anonymous();
         for slug in ["a", "b"] {
             let h = [("slug", slug), ("content-type", "text/plain")];
@@ -10287,7 +10346,6 @@ mod tests {
             std::time::SystemTime::now() + std::time::Duration::from_secs(3600),
         )
         .unwrap();
-        // Every touch of the root waits.
         let touch = st.locks.lock(&format!("{root}\0touch")).await.unwrap();
         let removal = {
             let st = st.clone();
@@ -10315,8 +10373,20 @@ mod tests {
         let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anon).await;
         assert_eq!(r.status(), StatusCode::OK);
         assert!(!r.headers().contains_key(header::LAST_MODIFIED));
+        assert!(!removal.is_finished());
         drop(touch);
         assert!(removal.await.unwrap().status().is_success());
+        let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anon).await;
+        assert!(r.headers().contains_key(header::LAST_MODIFIED));
+        // A failed touch also leaves the listing undated until a later touch lands.
+        *store.fail_write_of.lock().unwrap() = Some(meta_key(&root));
+        let r = handle(&st, &req(Method::DELETE, "/a", &[], ""), &anon).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anon).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert!(!r.headers().contains_key(header::LAST_MODIFIED));
+        *store.fail_write_of.lock().unwrap() = None;
+        touch_container(&st, &root).await;
         let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anon).await;
         assert!(r.headers().contains_key(header::LAST_MODIFIED));
     }

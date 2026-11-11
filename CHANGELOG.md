@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **sparq-lws-core (LWS):** authentication challenges for paths without dot segments
+  name RFC 9728 metadata for the requested resource or service endpoint, preserving
+  encoded paths and trailing slashes.
+  Paths with literal or percent-encoded dot segments retain storage-root metadata in
+  challenges, and their derived metadata paths return `404`. Metadata is served
+  independently of resource existence and caller identity. Linkset
+  edits that change `up`, and content replacements with `Prefer: set-linkset` that change it,
+  return `409 Conflict` before writing when they declare a different parent; plain content
+  replacements leave `up` unchanged. Quiet container listings run concurrently; a busy
+  member or generation change falls back once through the fair exclusive queue, waiting
+  for commit or put-back. Storage descriptions also link the root container type. The builtin
+  LWS.net ratchet checks exact expected failure names and requires their removal when they pass.
+
 ### Changed
 
 - **Release cadence guard:** the one-release v0.1.8 exception is removed now that v0.1.8 is
