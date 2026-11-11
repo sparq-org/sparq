@@ -228,8 +228,7 @@ count under the actual `index/` after SIGKILL, and replacement-process spawn to
 post-readiness byte checks, and has a generous failure timeout. Setup is untimed;
 first, middle and last resource bytes are checked after restart. Repeat invocations
 for independent samples and retain JSON and machine details outside the repository.
-The current store retains per-resource journal handles; check the process descriptor
-limit for large runs. A failed create aborts rather than reporting partial percentiles.
+Check the process descriptor limit for large runs. A failed create aborts rather than reporting partial percentiles.
 
 ### Object-store blob plane
 
