@@ -16,8 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **sparq-lws-core:** metadata writes, resource deletes and containment removals use
-  fenced HTTP updates. Resource deletion detaches its parent edge in the same write.
+- **sparq-lws-core:** metadata writes, resource deletes, containment removals and
+  append/fold publication use fenced HTTP updates. Resource deletion detaches its
+  parent edge in the same write.
   Journals retain unsettled write and metadata-delete fences through rollback and
   commit, including removal of legacy membership edges. Regression coverage checks
   that unsettled rewrites retain their fence and candidate bytes.

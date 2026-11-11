@@ -672,7 +672,6 @@ impl SparqClient for HttpSparqClient {
             .map_err(SparqHttpError::into_sparq)?;
         let result = parse_select_json(&body).map_err(SparqHttpError::into_sparq)?;
         if result.rows.is_empty() {
-            self.require_epoch(epoch).await?;
             return Err(if fenced {
                 SparqError::Backend("append publication did not commit".into())
             } else {
