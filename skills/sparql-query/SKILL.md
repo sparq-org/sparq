@@ -769,10 +769,11 @@ SPARQL Update `USING` identity behavior.
   O(1) f64 `numerics` cache (`extract_sargable`). Because an f64 cannot represent a decimal with
   `> 15` significant digits exactly (e.g. `"1.000000000000000001"^^xsd:decimal` shares the f64 `1.0`
   with the integer `1`), that fast path is **declined** whenever the graph holds such a decimal
-  (`Graph::has_high_precision_decimal`) OR the constant itself has `> 15` significant digits — the
+  or any valid integer/decimal literal missing from the numeric cache
+  (`Graph::has_high_precision_decimal`), OR the constant itself has `> 15` significant digits — the
   comparison then falls back to the exact evaluator (`=`/`<`/`>`/`<=`/`>=` decided by exact decimal
   string arithmetic, matching the `BIND((?v = c) AS ?b)` expression path). The decline is
-  graph-wide/conservative (correctness first): a graph carrying one high-precision decimal skips the
+  graph-wide/conservative: a graph carrying one high-precision decimal or uncached exact numeric skips the
   numeric-pushdown optimisation for all its numeric FILTERs, never the wrong answer.
 - **`SELECT *`** never exposes blank-node "variables" (`_:x` in a pattern is an existential var).
 - **Non-deterministic builtins** (`sq-98w7z.1`) — `NOW()` is **query-constant** per SPARQL 1.1
