@@ -51,6 +51,13 @@ impl<T: SparqClient> SparqClient for SharedStore<T> {
         self.0.publish_append(iri, key, blob_key).await
     }
 
+    async fn begin_epoch(
+        &self,
+        lease: &sparq_lws_core::store::LifecycleGuard,
+    ) -> Result<u64, SparqError> {
+        self.0.begin_epoch(lease).await
+    }
+
     fn lifecycle(&self) -> std::sync::Arc<sparq_lws_core::store::Lifecycle> {
         self.0.lifecycle()
     }

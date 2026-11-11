@@ -624,7 +624,7 @@ impl EmbeddedSparqClient {
             .then(|| sparql::select_meta(child))
             .transpose()?;
         let nonce = next_nonce();
-        let create_u = sparql::update_create_child_meta(container, child, &meta, &nonce, false)?;
+        let create_u = sparql::update_create_child_meta(container, child, &meta, &nonce, None)?;
         self.dispatch(move |graph| {
             // Container must exist (else 404). Checked inside the same job as the insert, so no
             // concurrent delete can race between this check and the insert.
@@ -866,7 +866,7 @@ impl SparqClient for EmbeddedSparqClient {
                 .last_modified
                 .and_then(timestamp::to_xsd_datetime)
                 .ok_or_else(|| SparqError::Backend("invalid append timestamp".into()))?;
-            let u = sparql::update_publish_append(&iri, &key, &blob_key, &nonce, &modified, false)?;
+            let u = sparql::update_publish_append(&iri, &key, &blob_key, &nonce, &modified, None)?;
             let cleanup =
                 sparql::update_delete_resource(&format!("urn:x-sparq-lws:append-results/{nonce}"))?;
             commit(graph, &format!("{u}; {cleanup}"), "publish_append")
