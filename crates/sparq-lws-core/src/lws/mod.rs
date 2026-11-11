@@ -28,6 +28,7 @@
 pub mod access;
 pub mod authz_server;
 mod discovery;
+pub mod native_routing;
 pub mod index;
 mod intents;
 pub use sparq_lws_authn::jose;

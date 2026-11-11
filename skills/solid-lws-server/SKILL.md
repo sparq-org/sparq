@@ -899,7 +899,7 @@ cargo run -p sparq-lws-core
 
 | Variable | Meaning |
 |---|---|
-| `SOLID_SERVER_LWS_MOUNT_BASE_PATH` | Native LWS mode only: `1`, `true`, `True`, `TRUE` mount the router at the path in `SOLID_SERVER_BASE_URL`; unset or any other value is off (proxy-relative request paths). See [request mapping](#native-lws-request-mapping). |
+| `SOLID_SERVER_LWS_MOUNT_BASE_PATH` | Native LWS mode only: `1`, `true`, `True`, `TRUE` mount the router at the path in `SOLID_SERVER_BASE_URL`; unset, empty, `0`, `false`, `False`, `FALSE` are off (default, proxy-relative request paths). Whitespace is trimmed; any other value fails startup. See [request mapping](#native-lws-request-mapping). |
 | `SOLID_SERVER_LWS_OWNER` | Agent IRI allowed every action on the storage, and the only one who may list or issue grants. |
 | `SOLID_SERVER_LWS_OPEN` (or `SOLID_SERVER_OPEN_MODE`) | `1` disables authorization entirely and implies `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH`. Test-suite use only. |
 | `SOLID_SERVER_LWS_SPARQL_MAX_RESOURCES` | Positive integer; default 10000. With `sparql-endpoint`, bounds readable resources assembled by one LWS query; exceeding it returns `507` with problem details. |
@@ -1521,14 +1521,17 @@ one of these setups; both base spellings select the same storage root:
 
 | Public request | Default, through a prefix-stripping proxy | Native mount (`SOLID_SERVER_LWS_MOUNT_BASE_PATH=1`) |
 |---|---|---|
-| `/alice` or `/alice/` | Proxy forwards `/` | Native forwards `/` to LWS |
+| `/alice` | Proxy forwards `/` | Native returns `308 Location: /alice/`, preserving any query |
+| `/alice/` | Proxy forwards `/` | Native forwards `/` to LWS |
 | `/alice/child` | Proxy forwards `/child` | Native forwards `/child` to LWS |
 | `/alice/alice/child` | Proxy forwards `/alice/child` | Native forwards `/alice/child` to LWS |
 | `/alice/.lws/subscriptions/` | Proxy forwards `/.lws/subscriptions/` | Native forwards `/.lws/subscriptions/` to LWS |
 | `/child` or `/alice-other/child` | Proxy should reject outside its mount | Native returns `404` |
 
-Native mount mode accepts `1`, `true`, `True`, or `TRUE`; unset and all other
-values leave it off. It affects only the native LWS binary composition, not the
+Native mount mode accepts `1`, `true`, `True`, or `TRUE` to enable it, and
+`0`, `false`, `False`, or `FALSE` to disable it. Unset or empty is off by default;
+whitespace is trimmed, and any other value (including `on` or `yes`) fails startup.
+It affects only the native LWS binary composition, not the
 library router or Solid mode. Enable it for direct serving, or behind a proxy
 that preserves the full public path:
 
@@ -1544,7 +1547,8 @@ listener never strips: a direct `/alice/child` request then maps to
 `https://storage.example/alice/alice/child`. In native mount mode a stripped
 `/child` request gets `404`; it is not retried as storage-relative. Each setup
 strips once and preserves query strings, percent-encoded octets and inner slashes.
-Both root forms select the canonical storage URL `https://storage.example/alice/`.
+In native mount mode the bare root `/alice` redirects with `308` to `/alice/`,
+preserving any query; `/alice/` selects the canonical storage URL directly.
 Follow resource `Location` and service URLs exactly as advertised.
 
 Origin-level protected-resource discovery is a separate mapping:
@@ -1556,6 +1560,13 @@ use `/.well-known/oauth-protected-resource/alice/` (retain its trailing slash).
 native mount's outside-path `404` rule. The existing advertised authorization-server
 metadata, keys and token URLs remain beneath `/alice/.well-known/` and pass through
 the storage mapping; the native mount does not add origin-level aliases for them.
+After stripping the mount prefix, paths starting with
+`/.well-known/oauth-protected-resource` and paths containing literal or
+percent-encoded dot segments return `404`.
+The library router stays storage-relative; native integrations opt in through
+`lws::native_routing::mount_lws_router(app, base_url, enabled)`.
+`lws::native_routing::parse_mount_base_path(value)` parses the optional switch
+using the accepted values above and returns an error for an unrecognized value.
 
 ## Follow the normative specs, not this server
 

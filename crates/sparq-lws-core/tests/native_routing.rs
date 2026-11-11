@@ -35,7 +35,11 @@ impl Server {
         let bind = listener.local_addr().unwrap().to_string();
         drop(listener);
         let endpoint = format!("http://{bind}");
-        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
         let mut values = vec![
             ("SOLID_SERVER_BIND", bind.as_str()),
             ("SOLID_SERVER_BASE_URL", base),
@@ -136,22 +140,35 @@ async fn json(response: Response) -> Value {
     serde_json::from_slice(&to_bytes(response.into_body(), 1 << 20).await.unwrap()).unwrap()
 }
 
-async fn exercise_advertised_urls(server: &Server) {
+async fn exercise_advertised_urls(server: &Server, native_mount: bool) {
     let root = format!("{}/", server.base);
     let auth = format!("Bearer {}", server.token);
     let description = json(server.call("GET", &root, &[("accept", LWS_CID)], "").await).await;
     assert_eq!(description["id"], root);
     if server.base != ORIGIN {
-        let bare = json(
-            server
-                .call("GET", &server.base, &[("accept", LWS_CID)], "")
-                .await,
-        )
-        .await;
-        assert_eq!(
-            bare, description,
-            "both root forms select the storage description"
-        );
+        let bare = server
+            .call("GET", &server.base, &[("accept", LWS_CID)], "")
+            .await;
+        if native_mount {
+            assert_eq!(bare.status(), StatusCode::PERMANENT_REDIRECT);
+            assert_eq!(
+                bare.headers()[header::LOCATION],
+                root.strip_prefix(ORIGIN).unwrap()
+            );
+            for query in ["q", "q=a%2Fb&view=private"] {
+                let response = server
+                    .call("GET", &format!("{}?{query}", server.base), &[], "")
+                    .await;
+                assert_eq!(response.status(), StatusCode::PERMANENT_REDIRECT);
+                assert_eq!(
+                    response.headers()[header::LOCATION],
+                    format!("{}?{query}", root.strip_prefix(ORIGIN).unwrap())
+                );
+                assert!(!response.headers().contains_key(header::WWW_AUTHENTICATE));
+            }
+        } else {
+            assert_eq!(json(bare).await, description);
+        }
     }
     let subscriptions = description["service"]
         .as_array()
@@ -182,7 +199,7 @@ async fn exercise_advertised_urls(server: &Server) {
         let response = server
             .call(
                 "POST",
-                &server.base,
+                &root,
                 &headers,
                 if container { "" } else { "outer" },
             )
@@ -248,11 +265,15 @@ async fn exercise_advertised_urls(server: &Server) {
         "the query must reach the listing handler"
     );
 
-    for target in [
+    let mut targets = vec![
         subscriptions.to_owned(),
         format!("{root}a%2fb%20/"),
         format!("{root}a//b/?view=private"),
-    ] {
+    ];
+    if native_mount {
+        targets.push(format!("{root}/child"));
+    }
+    for target in targets {
         let response = server.call("GET", &target, &[], "").await;
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
         let challenge = response.headers()[header::WWW_AUTHENTICATE]
@@ -344,12 +365,14 @@ async fn native_mount_follows_public_urls_and_rejects_outside_paths() {
         (format!("{ORIGIN}/team/alice/"), "TRUE"),
     ] {
         let server = Server::start(&base, Some(mount), false).await;
-        exercise_advertised_urls(&server).await;
+        exercise_advertised_urls(&server, true).await;
         if server.base != ORIGIN {
             for path in [
                 "/",
                 "/child",
                 "/alice-other/child",
+                "/alicex",
+                "/%61lice/child",
                 "/.lws/subscriptions/",
                 "/.well-known/lws-configuration",
                 "/.well-known/oauth-protected-resource/elsewhere/",
@@ -368,6 +391,18 @@ async fn native_mount_follows_public_urls_and_rejects_outside_paths() {
                     "outside mount: {base}{path}"
                 );
             }
+            let prefix = server.base.strip_prefix(ORIGIN).unwrap();
+            for suffix in [
+                "/.well-known/oauth-protected-resource",
+                "/.well-known/oauth-protected-resource/alice/child",
+                "/.well-known/oauth-protected-resource-other",
+            ] {
+                let response = server
+                    .call("GET", &format!("{prefix}{suffix}"), &[], "")
+                    .await;
+                assert_eq!(response.status(), StatusCode::NOT_FOUND, "{prefix}{suffix}");
+                assert!(!response.headers().contains_key(header::WWW_AUTHENTICATE));
+            }
         }
         for probe in ["/livez", "/readyz"] {
             assert_eq!(
@@ -380,7 +415,14 @@ async fn native_mount_follows_public_urls_and_rejects_outside_paths() {
 
 #[tokio::test]
 async fn default_native_mapping_follows_urls_through_a_stripping_proxy() {
-    for mount in [None, Some("0"), Some("false")] {
+    for mount in [
+        None,
+        Some(""),
+        Some("0"),
+        Some("false"),
+        Some("False"),
+        Some("FALSE"),
+    ] {
         for base in [
             ORIGIN.to_string(),
             format!("{ORIGIN}/"),
@@ -388,7 +430,7 @@ async fn default_native_mapping_follows_urls_through_a_stripping_proxy() {
             format!("{ORIGIN}/alice/"),
         ] {
             let server = Server::start(&base, mount, true).await;
-            exercise_advertised_urls(&server).await;
+            exercise_advertised_urls(&server, false).await;
             if server.base != ORIGIN {
                 // Bypass the proxy: default mode MUST NOT strip even a matching path prefix.
                 let response = server
@@ -406,5 +448,27 @@ async fn default_native_mapping_follows_urls_through_a_stripping_proxy() {
                 );
             }
         }
+    }
+}
+
+#[test]
+fn native_mount_rejects_unrecognized_switch_values_at_boot() {
+    for value in ["on", "yes", "tru", "tRuE"] {
+        let output = Process::start(
+            env!("CARGO_BIN_EXE_sparq-lws-core"),
+            &[
+                ("SOLID_SERVER_PROTOCOL", "lws"),
+                ("SOLID_SERVER_LWS_MOUNT_BASE_PATH", value),
+            ],
+        )
+        .finish();
+        assert!(!output.status.success(), "accepted {value:?}");
+        let message = String::from_utf8(output.stderr).unwrap();
+        assert!(
+            message.contains("SOLID_SERVER_LWS_MOUNT_BASE_PATH"),
+            "{message}"
+        );
+        assert!(message.contains(value), "{message}");
+        assert!(message.contains("expected"), "{message}");
     }
 }
