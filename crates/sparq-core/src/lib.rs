@@ -8536,7 +8536,7 @@ fn decode_slot(bytes: &[u8], pos: usize) -> Result<(Option<Term>, usize), String
 #[cfg(feature = "mmap")]
 struct TxnJournal {
     file: std::fs::File,
-    needs_entry_sync: std::sync::Arc<std::sync::Mutex<bool>>,
+    needs_entry_sync: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// The store directory this journal belongs to — needed to announce the journal's format to
     /// older binaries (see [`TxnJournal::mark_store_format`]).
     dir: std::path::PathBuf,
@@ -8571,7 +8571,7 @@ impl TxnJournal {
         let file = open_log(&Self::path(dir))?;
         Ok(TxnJournal {
             file,
-            needs_entry_sync: std::sync::Arc::new(std::sync::Mutex::new(true)),
+            needs_entry_sync: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
             dir: dir.to_path_buf(),
             poisoned: false,
             format_marked: false,
@@ -8706,8 +8706,12 @@ impl TxnJournal {
             .and_then(|_| self.file.write_all(buf))
             .and_then(|()| sync_log_data(&self.file, &Self::path(&self.dir)))
             .and_then(|()| {
-                sync_log_entry(&self.file, &Self::path(&self.dir),
-                    &mut self.needs_entry_sync.lock().unwrap_or_else(|e| e.into_inner()))
+                if self.needs_entry_sync.load(std::sync::atomic::Ordering::Acquire) {
+                    let mut pending = true;
+                    sync_log_entry(&self.file, &Self::path(&self.dir), &mut pending)?;
+                    self.needs_entry_sync.store(false, std::sync::atomic::Ordering::Release);
+                }
+                Ok(())
             });
         if written.is_err() {
             self.poisoned = true;

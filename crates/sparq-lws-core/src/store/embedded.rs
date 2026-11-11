@@ -99,9 +99,72 @@ const ACTOR_THREAD_NAME: &str = "sparq-embedded-graph";
 /// Reopen the graph before serving any further operations.
 const ACTOR_STOPPED: &str = "fatal: embedded graph actor stopped; restart to recover";
 
-/// A computed result released after its group's durability barrier.
-type Reply = Box<dyn FnOnce(Option<SparqError>) + Send + 'static>;
-type Run = Box<dyn FnOnce(&mut ActorGraph) -> Reply + Send + 'static>;
+type ReplyFn = Box<dyn FnOnce(Option<SparqError>) + Send + 'static>;
+
+trait DeferredCall: Send {
+    fn run(&mut self, graph: &mut ActorGraph);
+    fn reply(self: Box<Self>, error: Option<SparqError>);
+}
+
+struct Call<F, T> {
+    operation: Option<F>,
+    result: Option<Result<T, SparqError>>,
+    sender: oneshot::Sender<Result<T, SparqError>>,
+}
+
+impl<F, T> DeferredCall for Call<F, T>
+where
+    F: FnOnce(&mut ActorGraph) -> Result<T, SparqError> + Send + 'static,
+    T: Send + 'static,
+{
+    fn run(&mut self, graph: &mut ActorGraph) {
+        self.result = Some(self.operation.take().expect("job runs once")(graph));
+    }
+
+    fn reply(self: Box<Self>, error: Option<SparqError>) {
+        let Self { result, sender, .. } = *self;
+        let _ = sender.send(match error {
+            Some(error) => Err(error),
+            None => result.expect("job finishes before replying"),
+        });
+    }
+}
+
+enum Run {
+    Call(Box<dyn DeferredCall>),
+    Closure(Box<dyn FnOnce(&mut ActorGraph) -> ReplyFn + Send + 'static>),
+}
+
+impl Run {
+    fn closure(f: impl FnOnce(&mut ActorGraph) -> ReplyFn + Send + 'static) -> Self {
+        Self::Closure(Box::new(f))
+    }
+
+    fn execute(self, graph: &mut ActorGraph) -> Reply {
+        match self {
+            Self::Call(mut call) => {
+                call.run(graph);
+                Reply::Call(call)
+            }
+            Self::Closure(f) => Reply::Closure(f(graph)),
+        }
+    }
+}
+
+/// Reuse the job's allocation for its result until the group's durability barrier.
+enum Reply {
+    Call(Box<dyn DeferredCall>),
+    Closure(ReplyFn),
+}
+
+impl Reply {
+    fn send(self, error: Option<SparqError>) {
+        match self {
+            Self::Call(call) => call.reply(error),
+            Self::Closure(f) => f(error),
+        }
+    }
+}
 
 struct Job {
     run: Run,
@@ -199,15 +262,11 @@ impl GraphActor {
     {
         let (reply_tx, reply_rx) = oneshot::channel();
         let job = Job {
-            run: Box::new(move |graph| {
-                let result = f(graph);
-                Box::new(move |error| {
-                    let _ = reply_tx.send(match error {
-                        Some(error) => Err(error),
-                        None => result,
-                    });
-                })
-            }),
+            run: Run::Call(Box::new(Call {
+                operation: Some(f),
+                result: None,
+                sender: reply_tx,
+            })),
             barrier,
         };
         self.tx
@@ -222,7 +281,7 @@ impl GraphActor {
 impl Drop for GraphActor {
     fn drop(&mut self) {
         let _ = self.tx.send(Job {
-            run: Box::new(|graph| {
+            run: Run::closure(|graph| {
                 graph.stopped = true;
                 Box::new(|_| {})
             }),
@@ -309,7 +368,7 @@ fn actor_loop(graph: Graph, mut rx: mpsc::UnboundedReceiver<Job>) {
                     .map_err(|e| engine_err("begin_group", e))?;
             }
             for job in std::iter::once(first).chain(jobs) {
-                let reply = (job.run)(&mut graph);
+                let reply = job.run.execute(&mut graph);
                 if first_reply.is_none() {
                     first_reply = Some(reply);
                 } else {
@@ -340,7 +399,7 @@ fn actor_loop(graph: Graph, mut rx: mpsc::UnboundedReceiver<Job>) {
             graph.poison_txn();
         }
         for reply in first_reply.into_iter().chain(replies) {
-            reply(error.as_ref().map(|e| SparqError::Backend(e.clone())));
+            reply.send(error.as_ref().map(|e| SparqError::Backend(e.clone())));
         }
         if error.is_some() || graph.stopped {
             break;

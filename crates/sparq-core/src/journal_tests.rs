@@ -597,6 +597,7 @@ fn queued_updates_share_one_sync_and_keep_wals_in_memory_until_commit() {
     assert_eq!(crash::syncs(), 1);
     println!("sync-count: 8 queued multi-slot writes, 1 journal sync");
     crash::stop();
+    graph.clear_txn().unwrap();
     graph.poison_txn();
     drop(graph);
     assert_eq!(state(&Graph::open(&tmp.0).unwrap()), expected(&model));
@@ -619,14 +620,16 @@ fn failed_group_sync_freezes_without_writing_any_wal_bytes() {
     let wal = Wal::path(&tmp.0);
     let before = std::fs::read(&wal).unwrap();
     let journal = TxnJournal::path(&tmp.0);
-    fault::fail_when(move |step, path| step == "sync-data" && path == journal);
+    fault::fail_every(move |step, path| step == "sync-data" && path == journal);
     assert!(graph.commit_group().is_err());
-    fault::disarm();
     assert!(graph.is_frozen());
     assert_eq!(std::fs::read(wal).unwrap(), before);
     assert!(graph.begin_group().is_err());
     assert!(graph.commit_group().is_err());
+    assert!(graph.apply_delta(&[triple(3)], &[]).is_err());
+    assert!(graph.clear_txn().is_err());
     drop(graph);
+    assert_eq!(fault::disarm(), 1, "a failed sync must never be retried");
     // A complete failed-sync frame may survive; it is never materialized partially.
     model.get_mut(&0).unwrap().insert(2);
     assert_eq!(state(&Graph::open(&tmp.0).unwrap()), expected(&model));
@@ -694,5 +697,84 @@ fn default_replacement_cannot_discard_an_active_group() {
     graph.commit_group().unwrap();
     graph.poison_txn();
     drop(graph);
+    assert_eq!(state(&Graph::open(&tmp.0).unwrap()), expected(&model));
+}
+
+#[test]
+fn torn_group_journal_keeps_only_complete_frames_and_never_writes_wals() {
+    let _lock = io_fault::lock();
+    let tmp = TempDir::new();
+    let (mut graph, mut model) = seed(&tmp.0);
+    let before: Vec<_> = (0..4)
+        .map(|i| {
+            let dir = if i == 0 {
+                tmp.0.clone()
+            } else {
+                tmp.0.join(NAMED_SUBDIR).join((i - 1).to_string())
+            };
+            let path = Wal::path(&dir);
+            let bytes = std::fs::read(&path).unwrap();
+            (path, bytes)
+        })
+        .collect();
+    graph.begin_group().unwrap();
+    for i in 1..3 {
+        let ops = resolve(&mut model, &[(0, 0, i), (0, 1, i), (5, 2, i)]);
+        commit(&mut graph, &ops);
+    }
+    let complete = model.clone();
+    let ops = resolve(&mut model, &[(0, 0, 3), (0, 1, 3), (5, 2, 3)]);
+    commit(&mut graph, &ops);
+    io_fault::JOURNAL_DROP_TAIL.with(|tail| tail.set(1));
+    assert!(graph.commit_group().is_err());
+    assert!(graph.is_frozen());
+    for (path, bytes) in before {
+        assert_eq!(std::fs::read(path).unwrap(), bytes);
+    }
+    assert!(graph.commit_group().is_err());
+    drop(graph);
+    assert_eq!(state(&Graph::open(&tmp.0).unwrap()), expected(&complete));
+}
+
+#[test]
+fn grouped_first_entry_sync_failure_stays_pending_and_is_never_retried() {
+    let tmp = TempDir::new();
+    let (mut graph, mut model) = seed(&tmp.0);
+    graph.begin_group().unwrap();
+    let ops = resolve(&mut model, &[(0, 0, 1), (0, 1, 1)]);
+    commit(&mut graph, &ops);
+    let journal = TxnJournal::path(&tmp.0);
+    fault::fail_every(move |step, path| step == "log-file-synced" && path == journal);
+    assert!(graph.commit_group().is_err());
+    assert!(graph.txn.as_ref().unwrap().needs_entry_sync.load(std::sync::atomic::Ordering::Acquire));
+    assert!(graph.is_frozen());
+    assert!(graph.commit_group().is_err());
+    drop(graph);
+    assert_eq!(fault::disarm(), 1);
+    assert_eq!(state(&Graph::open(&tmp.0).unwrap()), expected(&model));
+}
+
+#[test]
+fn successful_groups_share_the_completed_entry_barrier() {
+    let tmp = TempDir::new();
+    let (mut graph, mut model) = seed(&tmp.0);
+    let entries = std::rc::Rc::new(std::cell::Cell::new(0));
+    let observed = entries.clone();
+    let journal = TxnJournal::path(&tmp.0);
+    fault::observe(move |step, path| {
+        if step == "log-file-synced" && path == journal {
+            observed.set(observed.get() + 1);
+        }
+    });
+    for i in 1..3 {
+        graph.begin_group().unwrap();
+        let ops = resolve(&mut model, &[(0, 0, i), (0, 1, i)]);
+        commit(&mut graph, &ops);
+        graph.commit_group().unwrap();
+        assert!(!graph.txn.as_ref().unwrap().needs_entry_sync.load(std::sync::atomic::Ordering::Acquire));
+    }
+    assert_eq!(entries.get(), 1);
+    fault::disarm();
+    graph.close().unwrap();
     assert_eq!(state(&Graph::open(&tmp.0).unwrap()), expected(&model));
 }
