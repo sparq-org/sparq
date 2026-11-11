@@ -23,6 +23,9 @@ pub enum Fault {
     Capacity,
     #[error("invalid protocol frame")]
     Malformed,
+    /// An authorized storage operation found no resource at the target.
+    #[error("room resource not found")]
+    NotFound,
     #[error("room storage unavailable")]
     Store,
 }
@@ -35,7 +38,7 @@ impl Fault {
             Self::TooLarge => 4413,
             Self::Capacity => 4429,
             Self::Malformed => 1002,
-            Self::Store => 1011,
+            Self::NotFound | Self::Store => 1011,
         }
     }
 }
