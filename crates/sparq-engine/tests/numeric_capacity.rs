@@ -189,6 +189,162 @@ fn exact_comparisons_past_i128() {
     }
 }
 
+// Short constants must exercise the numeric scan eligibility decision, rather than
+// declining solely because the constant itself exceeds floating precision.
+#[test]
+fn small_constant_filters_match_bind_for_uncached_exact_values() {
+    use std::cmp::Ordering;
+    let huge = "340282366920938463463374607431768211456001";
+    for datatype in ["integer", "decimal"] {
+        // Written fractional zeros can overflow the mantissa while the value
+        // still equals a short constant; equality must retain those rows too.
+        let seven = if datatype == "decimal" {
+            format!("7.{}", "0".repeat(50))
+        } else {
+            "7".to_owned()
+        };
+        let values = [
+            format!("-{huge}"),
+            format!("-{seven}"),
+            "0".into(),
+            seven,
+            huge.into(),
+        ];
+        let data = values.iter().enumerate().map(|(i, value)| {
+            format!("<http://ex/{i}> <http://ex/p> \"{value}\"^^<http://www.w3.org/2001/XMLSchema#{datatype}> .\n")
+        }).collect::<String>();
+        let graph = Graph::load_str(&data, "n-triples").unwrap();
+        let compressed = Graph::load_str(&data, "n-triples")
+            .unwrap()
+            .into_compressed();
+        for graph in [&graph, &compressed] {
+            for budget in [QueryBudget::unlimited(), bounded()] {
+                for (constant, rank) in [
+                    ("-7", 1),
+                    ("0", 2),
+                    ("7", 3),
+                    ("-7.0", 1),
+                    ("0.0", 2),
+                    ("7.0", 3),
+                ] {
+                    for op in ["<", "<=", ">", ">=", "=", "!="] {
+                        for reversed in [false, true] {
+                            let expr = if reversed {
+                                format!("{constant} {op} ?v")
+                            } else {
+                                format!("?v {op} {constant}")
+                            };
+                            let expected: Vec<_> = values
+                                .iter()
+                                .enumerate()
+                                .filter_map(|(i, value)| {
+                                    let order = if reversed { rank.cmp(&i) } else { i.cmp(&rank) };
+                                    let pass = match op {
+                                        "<" => order == Ordering::Less,
+                                        "<=" => order != Ordering::Greater,
+                                        ">" => order == Ordering::Greater,
+                                        ">=" => order != Ordering::Less,
+                                        "=" => order == Ordering::Equal,
+                                        "!=" => order != Ordering::Equal,
+                                        _ => unreachable!(),
+                                    };
+                                    pass.then(|| {
+                                        vec![Some(
+                                            oxrdf::Literal::new_typed_literal(
+                                                value.clone(),
+                                                oxrdf::NamedNode::new_unchecked(format!(
+                                                    "http://www.w3.org/2001/XMLSchema#{datatype}"
+                                                )),
+                                            )
+                                            .into(),
+                                        )]
+                                    })
+                                })
+                                .collect();
+                            let q = format!(
+                                "SELECT ?v {{?s <http://ex/p> ?v FILTER({expr})}} ORDER BY ?v"
+                            );
+                            let bind = format!("SELECT ?v {{?s <http://ex/p> ?v BIND(({expr}) AS ?b) FILTER(?b)}} ORDER BY ?v");
+                            let result =
+                                sparq_engine::query_with_budget(graph, &q, &budget).unwrap();
+                            let oracle =
+                                sparq_engine::query_with_budget(graph, &bind, &budget).unwrap();
+                            assert_eq!(oracle.rows, expected, "BIND oracle: {bind}");
+                            assert_eq!(result.rows, expected, "{datatype}: {q}");
+                            // COUNT and streaming have independent cache-only scan shortcuts.
+                            let q = format!("SELECT ?v {{?s <http://ex/p> ?v FILTER({expr})}}");
+                            assert_eq!(
+                                sparq_engine::count_with_budget(graph, &q, &budget).unwrap(),
+                                expected.len(),
+                                "COUNT: {q}"
+                            );
+                            let mut json = String::new();
+                            sparq_engine::query_json_stream_with_budget(
+                                graph,
+                                &q,
+                                &budget,
+                                |chunk| {
+                                    json.push_str(&chunk);
+                                    std::ops::ControlFlow::Continue(())
+                                },
+                            )
+                            .unwrap();
+                            let json: serde_json::Value = serde_json::from_str(&json).unwrap();
+                            let mut actual: Vec<_> = json["results"]["bindings"]
+                                .as_array()
+                                .unwrap()
+                                .iter()
+                                .map(|row| {
+                                    (
+                                        row["v"]["value"].as_str().unwrap().to_owned(),
+                                        row["v"]["datatype"].as_str().unwrap().to_owned(),
+                                    )
+                                })
+                                .collect();
+                            let mut expected: Vec<_> = expected
+                                .iter()
+                                .map(|row| match row[0].as_ref().unwrap() {
+                                    oxrdf::Term::Literal(l) => {
+                                        (l.value().to_owned(), l.datatype().as_str().to_owned())
+                                    }
+                                    _ => unreachable!(),
+                                })
+                                .collect();
+                            actual.sort();
+                            expected.sort();
+                            assert_eq!(actual, expected, "stream: {q}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn small_constant_filters_see_uncached_values_after_dictionary_growth() {
+    let mut parent = Graph::load_str("<http://ex/s> <http://ex/p> 7 .", "turtle").unwrap();
+    let q = "SELECT ?v {?s <http://ex/p> ?v FILTER(?v > 7)}";
+    assert!(sparq_engine::query(&parent, q).unwrap().rows.is_empty());
+    let snapshot = parent.fork();
+    let value = oxrdf::Literal::new_typed_literal(
+        "340282366920938463463374607431768211456001",
+        oxrdf::vocab::xsd::INTEGER,
+    );
+    parent
+        .insert_triple(
+            oxrdf::NamedNode::new_unchecked("http://ex/big"),
+            oxrdf::NamedNode::new_unchecked("http://ex/p"),
+            value.clone(),
+        )
+        .unwrap();
+    assert_eq!(
+        sparq_engine::query(&parent, q).unwrap().rows,
+        vec![vec![Some(value.into())]]
+    );
+    assert!(sparq_engine::query(&snapshot, q).unwrap().rows.is_empty());
+}
+
 #[test]
 fn order_by_past_i128_is_exact_in_both_sort_paths() {
     let mut ordered: Vec<String> = [
