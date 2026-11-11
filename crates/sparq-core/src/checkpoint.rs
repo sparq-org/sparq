@@ -12,14 +12,13 @@ pub(crate) const JOURNAL_CHECKPOINT_BYTES: u64 = 128 * 1024;
 #[derive(Default)]
 pub(super) struct Pending {
     wals: BTreeMap<PathBuf, DirtyWal>,
-    journals: BTreeMap<PathBuf, std::fs::File>,
+    journals: BTreeSet<PathBuf>,
     manifests: BTreeMap<PathBuf, NamedManifest>,
     created: BTreeSet<PathBuf>,
     removed: BTreeSet<PathBuf>,
 }
 
 struct DirtyWal {
-    file: std::fs::File,
     needs_entry_sync: std::sync::Arc<std::sync::Mutex<bool>>,
 }
 
@@ -31,7 +30,7 @@ impl TreeState {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .journals
-            .keys()
+            .iter()
             .any(|pending| *pending != path);
         if different {
             if self.materializing() {
@@ -51,25 +50,19 @@ impl TreeState {
             .load(std::sync::atomic::Ordering::Acquire)
     }
 
-    pub(super) fn dirty_wal(&self, wal: &Wal) -> std::io::Result<()> {
+    pub(super) fn dirty_wal(&self, wal: &Wal) {
         let mut pending = self.checkpoint.lock().unwrap_or_else(|e| e.into_inner());
         let path = Wal::path(&wal.dir);
         if let std::collections::btree_map::Entry::Vacant(entry) = pending.wals.entry(path) {
             entry.insert(DirtyWal {
-                file: wal.file.try_clone()?,
                 needs_entry_sync: std::sync::Arc::clone(&wal.needs_entry_sync),
             });
         }
-        Ok(())
     }
 
-    pub(super) fn retain_journal(&self, journal: &TxnJournal) -> std::io::Result<()> {
+    pub(super) fn retain_journal(&self, journal: &TxnJournal) {
         let mut pending = self.checkpoint.lock().unwrap_or_else(|e| e.into_inner());
-        let path = TxnJournal::path(&journal.dir);
-        if let std::collections::btree_map::Entry::Vacant(entry) = pending.journals.entry(path) {
-            entry.insert(journal.file.try_clone()?);
-        }
-        Ok(())
+        pending.journals.insert(TxnJournal::path(&journal.dir));
     }
 
     pub(super) fn defer_create(
@@ -107,9 +100,9 @@ impl TreeState {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .journals
-            .values()
-            .try_fold(false, |due, file| {
-                Ok::<_, std::io::Error>(due || file.metadata()?.len() >= JOURNAL_CHECKPOINT_BYTES)
+            .iter()
+            .try_fold(false, |due, path| {
+                Ok::<_, std::io::Error>(due || std::fs::metadata(path)?.len() >= JOURNAL_CHECKPOINT_BYTES)
             })?;
         if due {
             self.checkpoint()?;
@@ -190,9 +183,10 @@ impl Pending {
             }
         }
         for (path, wal) in &self.wals {
-            sync_log_data(&wal.file, path)?;
+            let file = open_log(path)?;
+            sync_log_data(&file, path)?;
             sync_log_entry(
-                &wal.file,
+                &file,
                 path,
                 &mut wal
                     .needs_entry_sync
@@ -206,7 +200,7 @@ impl Pending {
         for (dir, manifest) in manifests {
             publish_named_manifest(dir, &[], &manifest.entries, manifest.next_slot)?;
         }
-        // Release cloned WAL descriptors before removing slots (also required on Windows).
+        // WAL synchronization is complete before removing slots.
         self.wals.clear();
         for dir in &self.removed {
             if dir.exists() {
@@ -215,11 +209,12 @@ impl Pending {
             }
         }
         // All materialization is durable. Only now may the recovery records disappear.
-        for (path, file) in &mut self.journals {
+        for path in &self.journals {
+            let mut file = open_log(path)?;
             let bytes = std::fs::read(path)?;
             file.set_len(0)?;
             file.seek(SeekFrom::Start(0))?;
-            if let Err(error) = sync_log_data(file, path) {
+            if let Err(error) = sync_log_data(&file, path) {
                 // Publish a complete copy through a fresh descriptor. Rewriting this
                 // truncated file in place could expose only an old frame-prefix after
                 // another crash, overwriting the already-checkpointed WAL state.

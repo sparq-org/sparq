@@ -72,9 +72,13 @@ locks while replacing the default graph with an in-memory view; that view's late
 updates are not logged. See [named accessors and durable layout operations](named-accessors.md)
 for slot persistence, journal operations and recovery methods.
 
-Writable `wal.log` and `txn.log` handles defer entry sync until their first append: after
-syncing the frame data, they sync the file and, on Unix, its parent directory before
-acknowledging that append. This also covers existing entries left by an interrupted open;
+Writable `wal.log` and `txn.log` files open on demand for appends and checkpoint work,
+then close when that operation finishes. Attached named graphs and pending checkpoints
+retain paths and sync state, keeping journal descriptor use independent of the named-graph
+population. Entry-sync state survives closing a descriptor. Direct WAL appends and journal
+commits sync frame data, then sync the file and, on Unix, its parent directory on the
+first append before acknowledgement. Journal-covered WAL appends defer that barrier
+until checkpoint. This also covers existing entries left by an interrupted open;
 opening a clean tree without writes does not sync logs or directories.
 Atomic updates use `commit_txn_ops(&ops)`, materialize through the durable methods,
 then call `finish_txn()`. The journal frame is synced before materialization; per-slot
