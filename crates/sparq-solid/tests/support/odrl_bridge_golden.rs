@@ -260,3 +260,110 @@ fn large_policy_inputs_match_main() {
     .unwrap();
     assert!(out.granted);
 }
+
+const SOURCE_POLICY: &str = "@prefix o: <http://www.w3.org/ns/odrl/2/> . <urn:p> o:permission <urn:r> . <urn:r> o:action o:read; o:target <urn:t>; o:assignee <urn:alice> .\n";
+
+fn policy_object_list(prefix: &str, count: usize, object: impl Fn(usize) -> String) -> String {
+    let mut source = format!("{SOURCE_POLICY}{prefix}");
+    for i in 0..count {
+        if i > 0 {
+            source.push_str(", ");
+        }
+        source.push_str(&object(i));
+    }
+    source.push_str(" .");
+    source
+}
+
+fn pad_policy_source(mut source: String, bytes: usize, language: bool) -> String {
+    source.push_str("\n<urn:padding> <urn:metadata> ");
+    source.push('"');
+    source.extend(std::iter::repeat_n(
+        'x',
+        bytes - source.len() - if language { 6 } else { 3 },
+    ));
+    source.push('"');
+    if language {
+        source.push_str("@en");
+    }
+    source.push_str(" .");
+    source
+}
+
+pub(crate) fn many_literal_policy_source() -> String {
+    let source = policy_object_list(
+        &format!("@prefix l: <urn:long:{}:> . l:s l:p ", "x".repeat(200)),
+        1000,
+        |i| format!("\"{i:05}\""),
+    );
+    pad_policy_source(
+        source,
+        sparq_solid::default_auth_budget().max_input_bytes - 1,
+        false,
+    )
+}
+
+fn source_only_policy_cases() -> Vec<(&'static str, String)> {
+    let objects = "<urn:unused> <urn:metadata> ";
+    let cases = vec![
+        ("many short literals", many_literal_policy_source()),
+        (
+            "integers",
+            policy_object_list(objects, 19_800, |i| {
+                format!("10000000000000000000000000000000{:08}", i % 256)
+            }),
+        ),
+        (
+            "language literals",
+            pad_policy_source(
+                policy_object_list(
+                    &format!("@prefix l: <urn:long:{}:> . l:s l:p ", "x".repeat(200)),
+                    1000,
+                    |i| format!("\"{i:05}\"@en"),
+                ),
+                833_000,
+                true,
+            ),
+        ),
+        (
+            "prefixed names",
+            policy_object_list(
+                &format!("@prefix l: <urn:long:{}:> . l:s l:p ", "x".repeat(120)),
+                19_000,
+                |i| format!("l:o{:05}", i % 1024),
+            ),
+        ),
+        (
+            "distinct objects",
+            policy_object_list(objects, 40_000, |i| format!("<urn:o{i}>")),
+        ),
+        (
+            "duplicate triples",
+            policy_object_list(objects, 40_000, |_| "<urn:o0>".into()),
+        ),
+    ];
+    let cap = sparq_solid::default_auth_budget().max_input_bytes;
+    assert_eq!(cases[0].1.len(), cap - 1);
+    for (_, source) in &cases[1..=2] {
+        assert!((820_000..850_000).contains(&source.len()));
+    }
+    assert!((180_000..200_000).contains(&cases[3].1.len()));
+    assert!(cases.iter().all(|(_, source)| source.len() <= cap));
+    cases
+}
+
+#[test]
+fn source_only_policy_inputs_match_main() {
+    let request = Request::new("http://www.w3.org/ns/odrl/2/read")
+        .on("urn:t")
+        .by("urn:alice");
+    let failures: Vec<_> = source_only_policy_cases()
+        .into_iter()
+        .filter_map(|(name, source)| {
+            let result =
+                sparq_solid::odrl_bridge::materialize_odrl_n3(&mut Graph::new(), &source, &request);
+            (!result.as_ref().is_ok_and(|out| out.granted)).then(|| format!("{name}: {result:?}"))
+        })
+        .collect();
+    assert!(failures.is_empty(), "{failures:#?}");
+}

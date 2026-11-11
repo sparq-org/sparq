@@ -6,6 +6,7 @@ Generation archives the pinned main revision and installs the current observer.
 --check archives the committed HEAD, regenerates its observations, and compares
 those with its committed fixture. Neither mode edits the baseline checkout.
 The cargo subprocess inherits the environment and repository toolchain pin.
+RUST_TEST_THREADS is respected, with two threads used when it is unset.
 """
 import difflib
 import json
@@ -18,7 +19,7 @@ import tarfile
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[3]
-SOURCE = "1c600eb34e5721950472915115533f56eb84041e"
+SOURCE = "c5d9b0387ced6f81e471463e18c08f8bf2f9ba5c"
 OBSERVER = '''    #[cfg(test)]
     let before = bridge_golden::graph_snapshot(graph);
     let result = materialize_odrl_n3_with_budget(graph, policy_ttl, request, crate::default_auth_budget());
@@ -56,7 +57,8 @@ def main():
         target.write_text(code)
         captures = scratch / "captures"
         captures.mkdir()
-        env = dict(os.environ, ODRL_BRIDGE_GOLDEN_DIR=str(captures), RUST_TEST_THREADS="2")
+        env = dict(os.environ, ODRL_BRIDGE_GOLDEN_DIR=str(captures))
+        env.setdefault("RUST_TEST_THREADS", "2")
         subprocess.run(["cargo", "test", "-p", "sparq-solid", "--all-features", "--lib", "bridge_golden"], cwd=source, env=env, check=True)
         entries = [json.loads(path.read_text()) for path in sorted(captures.glob("*.json"))]
         entries.sort(key=lambda entry: json.dumps(entry["input"], sort_keys=True))
