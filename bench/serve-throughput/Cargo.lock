@@ -1066,7 +1066,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-core"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "fs4",
  "hashbrown",
@@ -1084,7 +1084,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "md-5",
  "oxiri",
@@ -1104,7 +1104,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine-serialize"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "oxrdf",
  "rustc-hash",
@@ -1114,11 +1114,11 @@ dependencies = [
 
 [[package]]
 name = "sparq-jsonld"
-version = "0.1.6"
+version = "0.1.8"
 
 [[package]]
 name = "sparq-serve"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "arc-swap",
  "oxrdf",
@@ -1130,7 +1130,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-server"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "axum",
  "flate2",
@@ -1168,7 +1168,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-substrate"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "hashbrown",
  "oxrdf",

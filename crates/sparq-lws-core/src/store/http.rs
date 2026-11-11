@@ -184,6 +184,7 @@ pub struct HttpSparqClient {
     client: Client<HttpConnector, Full<Bytes>>,
     /// The absolute `/sparql` endpoint URL (operator-configured, trusted internal service).
     endpoint: String,
+    lifecycle: std::sync::Arc<super::Lifecycle>,
     timeout: Duration,
 }
 
@@ -206,6 +207,7 @@ impl HttpSparqClient {
         Self {
             client,
             endpoint: endpoint.into(),
+            lifecycle: Default::default(),
             timeout,
         }
     }
@@ -488,6 +490,10 @@ impl HttpSparqClient {
 
 #[async_trait]
 impl SparqClient for HttpSparqClient {
+    fn lifecycle(&self) -> std::sync::Arc<super::Lifecycle> {
+        self.lifecycle.clone()
+    }
+
     async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
         let q = sparql::select_meta(iri)?;
         let (body, _ct) = self
@@ -535,8 +541,13 @@ impl SparqClient for HttpSparqClient {
         &self,
         iri: &str,
         value: i64,
-        _: &super::LifecycleGuard,
+        lease: &super::LifecycleGuard,
     ) -> Result<(), SparqError> {
+        if !lease.belongs_to(&self.lifecycle) {
+            return Err(SparqError::Backend(
+                "marker reset requires this backend's lifecycle lease".into(),
+            ));
+        }
         self.put_meta_unchecked(iri, super::sparq::marker_meta(&value.to_string()))
             .await
     }

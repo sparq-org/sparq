@@ -316,6 +316,10 @@ impl<S: SparqClient> CountingSparqClient<S> {
 
 #[async_trait]
 impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
+    fn lifecycle(&self) -> std::sync::Arc<super::Lifecycle> {
+        self.inner.lifecycle()
+    }
+
     async fn reset_marker(
         &self,
         iri: &str,
@@ -714,6 +718,10 @@ impl<B: BlobStore> CountingBlobStore<B> {
 
 #[async_trait]
 impl<B: BlobStore> BlobStore for CountingBlobStore<B> {
+    fn requires_envelope(&self) -> bool {
+        self.inner.requires_envelope()
+    }
+
     async fn get(&self, key: &str) -> Result<Bytes, BlobError> {
         #[cfg(test)]
         self.counters.record_method("blob.get");
@@ -722,12 +730,29 @@ impl<B: BlobStore> BlobStore for CountingBlobStore<B> {
         self.inner.get(key).await
     }
 
+    async fn get_scoped(&self, scope: &super::BlobScope, key: &str) -> Result<Bytes, BlobError> {
+        let _g = self.counters.op_guard();
+        self.counters.blob_gets.fetch_add(1, Ordering::Relaxed);
+        self.inner.get_scoped(scope, key).await
+    }
+
     async fn put(&self, key: &str, body: Bytes) -> Result<(), BlobError> {
         #[cfg(test)]
         self.counters.record_method("blob.put");
         let _g = self.counters.op_guard();
         self.counters.blob_puts.fetch_add(1, Ordering::Relaxed);
         self.inner.put(key, body).await
+    }
+
+    async fn put_scoped(
+        &self,
+        scope: &super::BlobScope,
+        key: &str,
+        body: Bytes,
+    ) -> Result<(), BlobError> {
+        let _g = self.counters.op_guard();
+        self.counters.blob_puts.fetch_add(1, Ordering::Relaxed);
+        self.inner.put_scoped(scope, key, body).await
     }
 
     async fn exists(&self, key: &str) -> Result<bool, BlobError> {
@@ -752,6 +777,23 @@ impl<B: BlobStore> BlobStore for CountingBlobStore<B> {
         let _g = self.counters.op_guard();
         self.counters.blob_others.fetch_add(1, Ordering::Relaxed);
         self.inner.list().await
+    }
+
+    async fn list_stream(
+        &self,
+    ) -> Result<futures_util::stream::BoxStream<'_, Result<BlobEntry, BlobError>>, BlobError> {
+        use futures_util::StreamExt;
+        let guard = self.counters.op_guard();
+        self.counters.blob_others.fetch_add(1, Ordering::Relaxed);
+        let stream = self.inner.list_stream().await?;
+        Ok(futures_util::stream::unfold(
+            (stream, guard),
+            |(mut stream, guard)| async move {
+                let entry = stream.next().await?;
+                Some((entry, (stream, guard)))
+            },
+        )
+        .boxed())
     }
 
     async fn stat(&self, key: &str) -> Result<Option<BlobEntry>, BlobError> {
@@ -788,6 +830,24 @@ impl CountingSparqClient<super::InMemorySparqClient> {
 mod tests {
     use super::*;
     use crate::store::{InMemoryBlobStore, InMemorySparqClient};
+
+    #[tokio::test]
+    async fn listing_guard_lives_until_exhaustion_or_drop() {
+        use futures_util::StreamExt;
+        let counters = BackendCounters::new();
+        let blob = CountingBlobStore::new(InMemoryBlobStore::new(), Arc::clone(&counters));
+        blob.put("key", Bytes::new()).await.unwrap();
+        let mut stream = blob.list_stream().await.unwrap();
+        assert_eq!(counters.conc.lock().unwrap().in_flight, 1);
+        assert!(stream.next().await.unwrap().is_ok());
+        assert_eq!(counters.conc.lock().unwrap().in_flight, 1);
+        assert!(stream.next().await.is_none());
+        assert_eq!(counters.conc.lock().unwrap().in_flight, 0);
+        let stream = blob.list_stream().await.unwrap();
+        assert_eq!(counters.conc.lock().unwrap().in_flight, 1);
+        drop(stream);
+        assert_eq!(counters.conc.lock().unwrap().in_flight, 0);
+    }
 
     #[tokio::test]
     #[should_panic(expected = "unexpected backend methods")]

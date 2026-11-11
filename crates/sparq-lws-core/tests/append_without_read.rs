@@ -43,9 +43,19 @@ impl Harness {
         container_append: bool,
         spare: Option<usize>,
     ) -> Self {
+        Self::with_writer_mode(body, ct, container_append, spare, "Append").await
+    }
+
+    async fn with_writer_mode(
+        body: Option<Bytes>,
+        ct: &str,
+        container_append: bool,
+        spare: Option<usize>,
+        mode: &str,
+    ) -> Self {
         let root_acl = format!("@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n<#o> a acl:Authorization; acl:agent <{OWNER}>; acl:accessTo <{BASE_URL}/>; acl:default <{BASE_URL}/>; acl:mode acl:Read, acl:Write, acl:Control.\n{}",
-            if container_append { format!("<#w> a acl:Authorization; acl:agent <{WRITER}>; acl:accessTo <{BASE_URL}/>; acl:default <{BASE_URL}/>; acl:mode acl:Append.") } else { String::new() });
-        let target_acl = format!("@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n<#o> a acl:Authorization; acl:agent <{OWNER}>; acl:accessTo <{TARGET}>; acl:mode acl:Read, acl:Write, acl:Control.\n<#w> a acl:Authorization; acl:agent <{WRITER}>; acl:accessTo <{TARGET}>; acl:mode acl:Append.");
+            if container_append { format!("<#w> a acl:Authorization; acl:agent <{WRITER}>; acl:accessTo <{BASE_URL}/>; acl:default <{BASE_URL}/>; acl:mode acl:{mode}.") } else { String::new() });
+        let target_acl = format!("@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n<#o> a acl:Authorization; acl:agent <{OWNER}>; acl:accessTo <{TARGET}>; acl:mode acl:Read, acl:Write, acl:Control.\n<#w> a acl:Authorization; acl:agent <{WRITER}>; acl:accessTo <{TARGET}>; acl:mode acl:{mode}.");
         let used = root_acl.len() + target_acl.len() + body.as_ref().map_or(0, Bytes::len);
         let limits = InMemoryStoreLimits::new(spare.map_or(usize::MAX, |n| used + n), 1024);
         let counters = BackendCounters::new();
@@ -346,38 +356,47 @@ async fn residual_creating_by_insert_needs_append_on_the_container() {
 #[tokio::test]
 async fn conditional_inserts_without_read_are_refused_without_changes() {
     let mut answers = Vec::new();
-    for present in [false, true] {
-        for header in ["if-match", "if-none-match"] {
-            for value in ["*", "\"held\"", ""] {
-                let original = present.then(|| Bytes::from_static(b"old"));
-                let h = Harness::new(original.clone(), "text/turtle", true, None).await;
-                let before = h.store.meta(TARGET).await.unwrap();
-                let scope = h.counters.measure();
-                let response = h
-                    .request(Some(WRITER), "PATCH", "/doc", &[(header, value)])
+    for mode in ["Append", "Write"] {
+        for present in [false, true] {
+            for header in ["if-match", "if-none-match"] {
+                for value in ["*", "\"held\"", ""] {
+                    let original = present.then(|| Bytes::from_static(b"old"));
+                    let h = Harness::with_writer_mode(
+                        original.clone(),
+                        "text/turtle",
+                        true,
+                        None,
+                        mode,
+                    )
                     .await;
-                let counts = scope.delta();
-                let (mut parts, body) = response.into_parts();
-                parts.headers.remove("date");
-                assert_eq!(
-                    parts.status,
-                    StatusCode::FORBIDDEN,
-                    "{header}: {value}, present={present}"
-                );
-                assert_eq!(counts.blob_puts, 0, "a denied insert stores no bytes");
-                assert_eq!(
-                    counts.sparql_updates, 0,
-                    "a denied insert changes no index rows"
-                );
-                assert_eq!(h.store.meta(TARGET).await.unwrap(), before);
-                if let Some(original) = original {
-                    assert_eq!(h.store.read(TARGET).await.unwrap().body, original);
+                    let before = h.store.meta(TARGET).await.unwrap();
+                    let scope = h.counters.measure();
+                    let response = h
+                        .request(Some(WRITER), "PATCH", "/doc", &[(header, value)])
+                        .await;
+                    let counts = scope.delta();
+                    let (mut parts, body) = response.into_parts();
+                    parts.headers.remove("date");
+                    assert_eq!(
+                        parts.status,
+                        StatusCode::FORBIDDEN,
+                        "{header}: {value}, present={present}"
+                    );
+                    assert_eq!(counts.blob_puts, 0, "a denied insert stores no bytes");
+                    assert_eq!(
+                        counts.sparql_updates, 0,
+                        "a denied insert changes no index rows"
+                    );
+                    assert_eq!(h.store.meta(TARGET).await.unwrap(), before);
+                    if let Some(original) = original {
+                        assert_eq!(h.store.read(TARGET).await.unwrap().body, original);
+                    }
+                    answers.push((
+                        parts.status,
+                        parts.headers,
+                        to_bytes(body, usize::MAX).await.unwrap(),
+                    ));
                 }
-                answers.push((
-                    parts.status,
-                    parts.headers,
-                    to_bytes(body, usize::MAX).await.unwrap(),
-                ));
             }
         }
     }
@@ -391,8 +410,9 @@ async fn conditional_inserts_without_read_are_refused_without_changes() {
 
 #[tokio::test]
 async fn an_owner_get_folds_long_insert_chains_and_bounds_repeat_reads() {
-    use sparq_lws_core::store::APPEND_FOLD_THRESHOLD;
-    for count in [APPEND_FOLD_THRESHOLD + 1, APPEND_FOLD_THRESHOLD * 3] {
+    // Fixed inputs pin when maintenance must have happened, independently of
+    // the implementation threshold.
+    for count in [33, 96] {
         let h = Harness::new(
             Some(Bytes::from_static(b"old\n")),
             "text/turtle",

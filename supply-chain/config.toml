@@ -593,6 +593,11 @@ criteria = "safe-to-deploy"
 version = "2.5.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.crc-fast]]
+version = "1.10.0"
+criteria = "safe-to-deploy"
+notes = "Exact-version exemption for the opt-in native object-store blob plane (#7190); upstream provenance screened, source audit pending. Not a completed source audit. Cargo.lock is also the all-features workspace SBOM input."
+
 [[exemptions.crc32fast]]
 version = "1.5.0"
 criteria = "safe-to-deploy"
@@ -1103,6 +1108,11 @@ criteria = "safe-to-deploy"
 version = "1.10.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.humantime]]
+version = "2.4.0"
+criteria = "safe-to-deploy"
+notes = "Exact-version exemption for the opt-in native object-store blob plane (#7190); upstream provenance screened, source audit pending. Not a completed source audit. Cargo.lock is also the all-features workspace SBOM input."
+
 [[exemptions.hybrid-array]]
 version = "0.4.12"
 criteria = "safe-to-deploy"
@@ -1501,6 +1511,11 @@ criteria = "safe-to-deploy"
 version = "0.6.0+11769913"
 criteria = "safe-to-deploy"
 
+[[exemptions.nix]]
+version = "0.31.3"
+criteria = "safe-to-deploy"
+notes = "Exact-version exemption for the opt-in native object-store blob plane (#7190); upstream provenance screened, source audit pending. Not a completed source audit. Cargo.lock is also the all-features workspace SBOM input."
+
 [[exemptions.nom]]
 version = "7.1.3"
 criteria = "safe-to-run"
@@ -1560,6 +1575,11 @@ criteria = "safe-to-deploy"
 [[exemptions.objc2-io-surface]]
 version = "0.3.2"
 criteria = "safe-to-deploy"
+
+[[exemptions.object_store]]
+version = "0.14.2"
+criteria = "safe-to-deploy"
+notes = "Exact-version exemption for the opt-in native object-store blob plane (#7190); upstream provenance screened, source audit pending. Not a completed source audit. Cargo.lock is also the all-features workspace SBOM input."
 
 [[exemptions.oid-registry]]
 version = "0.8.1"
@@ -1938,6 +1958,11 @@ criteria = "safe-to-deploy"
 version = "0.12.28"
 criteria = "safe-to-deploy"
 
+[[exemptions.reqwest]]
+version = "0.13.5"
+criteria = "safe-to-deploy"
+notes = "Exact-version exemption for the opt-in native object-store blob plane (#7190); upstream provenance screened, source audit pending. Not a completed source audit. Cargo.lock is also the all-features workspace SBOM input."
+
 [[exemptions.resolv-conf]]
 version = "0.7.6"
 criteria = "safe-to-deploy"
@@ -2300,6 +2325,11 @@ version = "0.9.9"
 criteria = "safe-to-deploy"
 notes = "Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 3763264f6b73151db08c50ff20d7d8a0b8796e021cdea7ceedad07b80155fa0e. Selected once-initialization behavior has concurrency/memory-ordering obligations. Low-level synchronization is not certified by no-default-features builds or the absence of an advisory. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
+[[exemptions.spin]]
+version = "0.10.1"
+criteria = "safe-to-deploy"
+notes = "Exact-version exemption for the opt-in native object-store blob plane (#7190); upstream provenance screened, source audit pending. Not a completed source audit. Cargo.lock is also the all-features workspace SBOM input."
+
 [[exemptions.spirv]]
 version = "0.3.0+sdk-1.3.268.0"
 criteria = "safe-to-deploy"
@@ -2653,6 +2683,11 @@ criteria = "safe-to-run"
 [[exemptions.wasm-bindgen-test-shared]]
 version = "0.2.122"
 criteria = "safe-to-run"
+
+[[exemptions.wasm-streams]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+notes = "Exact-version exemption for the opt-in native object-store blob plane (#7190); upstream provenance screened, source audit pending. Not a completed source audit. Cargo.lock is also the all-features workspace SBOM input."
 
 [[exemptions.wayland-sys]]
 version = "0.31.11"

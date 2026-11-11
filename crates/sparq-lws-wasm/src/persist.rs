@@ -47,9 +47,9 @@
 //!
 //! Replay re-runs the writes, so each resource's `Last-Modified` becomes the replay instant rather
 //! than that of the original write, and it is backed by a freshly minted blob key. The `ETag` is
-//! derived from the body alone, so it is unchanged. A client holding a pre-restart
-//! `If-None-Match` still gets its 304; one holding `If-Modified-Since` re-fetches a body it
-//! already had.
+//! unchanged for full writes because it is derived from their body. Replayed inserts
+//! receive fresh opaque ETags, so their pre-restart validators cause a fresh response.
+//! A client holding `If-Modified-Since` also re-fetches its representation.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
@@ -204,10 +204,14 @@ impl std::fmt::Display for DecodeError {
                 write!(f, "unsupported journal version {}", v)
             }
             DecodeError::Truncated => f.write_str("journal ends mid-record"),
-            DecodeError::TooLarge => f.write_str("journal declares a length this target cannot address"),
+            DecodeError::TooLarge => {
+                f.write_str("journal declares a length this target cannot address")
+            }
             DecodeError::InvalidTag(tag) => write!(f, "unknown journal tag byte {}", tag),
             DecodeError::InvalidUtf8 => f.write_str("journal contains a non-UTF-8 string"),
-            DecodeError::TrailingBytes => f.write_str("journal has trailing bytes after its records"),
+            DecodeError::TrailingBytes => {
+                f.write_str("journal has trailing bytes after its records")
+            }
         }
     }
 }
@@ -360,7 +364,10 @@ struct Reader<'a> {
 impl<'a> Reader<'a> {
     fn take(&mut self, count: usize) -> Result<&'a [u8], DecodeError> {
         let end = self.pos.checked_add(count).ok_or(DecodeError::TooLarge)?;
-        let slice = self.bytes.get(self.pos..end).ok_or(DecodeError::Truncated)?;
+        let slice = self
+            .bytes
+            .get(self.pos..end)
+            .ok_or(DecodeError::Truncated)?;
         self.pos = end;
         Ok(slice)
     }
@@ -566,7 +573,11 @@ mod wasm_store {
             self.inner.list_children(container).await
         }
 
-        async fn read_plan(&self, target: &str, acl_candidates: &[String]) -> ServerResult<ReadPlan> {
+        async fn read_plan(
+            &self,
+            target: &str,
+            acl_candidates: &[String],
+        ) -> ServerResult<ReadPlan> {
             self.inner.read_plan(target, acl_candidates).await
         }
 
@@ -665,7 +676,8 @@ mod tests {
             .append(iri, Bytes::from_static(b"insert\n"))
             .await
             .unwrap();
-        let expected = store.read(iri).await.unwrap().body;
+        let before = store.read(iri).await.unwrap();
+        let expected = before.body;
         assert_eq!(expected, "old\ninsert\n");
         assert!(matches!(
             journal.records().last(),
@@ -675,7 +687,12 @@ mod tests {
         replay(&restored, decode(&journal.encode()).unwrap())
             .await
             .unwrap();
-        assert_eq!(restored.read(iri).await.unwrap().body, expected);
+        let after = restored.read(iri).await.unwrap();
+        assert_eq!(after.body, expected);
+        assert_ne!(
+            after.meta.etag, before.meta.etag,
+            "replayed inserts issue fresh validators"
+        );
         store
             .write(iri, Bytes::from_static(b"new"), "text/turtle")
             .await
@@ -779,6 +796,10 @@ mod tests {
     fn every_record_kind_survives_an_encode_decode_round_trip() {
         let records = vec![
             write("https://pod.example/card", "<a> <b> <c> ."),
+            Mutation::Append {
+                iri: "https://pod.example/card".into(),
+                ntriples: b"<https://e/s> <https://e/p> \"insert\" .\n".to_vec(),
+            },
             create("https://pod.example/box/", "https://pod.example/box/1", "one"),
             delete("https://pod.example/gone", Some("https://pod.example/box/")),
             delete("https://pod.example/loose", None),

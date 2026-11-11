@@ -1028,6 +1028,10 @@ impl SparqClient for StaleOnceSparq {
         self.inner.publish_append(iri, key, blob_key).await
     }
 
+    fn lifecycle(&self) -> std::sync::Arc<sparq_lws_core::store::Lifecycle> {
+        self.inner.lifecycle()
+    }
+
     fn call_timeout(&self) -> std::time::Duration {
         self.inner.call_timeout()
     }

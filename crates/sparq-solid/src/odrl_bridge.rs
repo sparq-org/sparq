@@ -1937,7 +1937,7 @@ pub fn materialize_odrl_n3_with_budget(
     // charges go into one whole-decision ledger that bounds their aggregate
     // (`crate::AuthBudget`); otherwise this lane could spend five times the allowance a
     // single-stratum WAC view can.
-    let mut work = crate::budget::DecisionWork::new(budget, deadline);
+    let mut work = crate::budget::AuthLedger::with_deadline(budget, deadline);
     for stratum in rules {
         closure = crate::materialize::auth_eval(
             &mut dict,

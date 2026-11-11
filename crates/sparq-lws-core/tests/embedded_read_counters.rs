@@ -392,6 +392,10 @@ impl<S: SparqClient> SparqClient for RawSeamCounter<S> {
         self.inner.publish_append(iri, key, blob_key).await
     }
 
+    fn lifecycle(&self) -> std::sync::Arc<sparq_lws_core::store::Lifecycle> {
+        self.inner.lifecycle()
+    }
+
     async fn replace_meta(
         &self,
         iri: &str,
@@ -498,7 +502,9 @@ async fn raw_seam_counter_forwards_a_marker_reset_at_service_start() {
     let mut cfg = sparq_lws_core::lws::LwsConfig::new("https://pod.example");
     cfg.open = true;
     cfg.reset_subscription_clock = true;
-    let state = sparq_lws_core::lws::LwsState::new(store, cfg).await.unwrap();
+    let state = sparq_lws_core::lws::LwsState::new(store, cfg)
+        .await
+        .unwrap();
     let marker = "https://pod.example/.lws/subscriptions/#high-water";
     assert!(state.store.read_marker(marker).await.unwrap().is_some());
 }

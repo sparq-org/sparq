@@ -121,6 +121,35 @@
   features: "blob-fs"
   test: true
 
+# Native byte-plane envelope encryption and reservation/cache lifecycle tests.
+- name: "sparq-lws-core (crypt)"
+  crate: "sparq-lws-core"
+  features: "crypt"
+  test: true
+
+# Exercise encrypted bodies over the native filesystem adapter, including reopen.
+- name: "sparq-lws-core (crypt,blob-fs)"
+  crate: "sparq-lws-core"
+  features: "crypt,blob-fs"
+  test: true
+
+# Exercise envelope keys and format upgrades over the object backend.
+- name: "sparq-lws-core (crypt,blob-object)"
+  crate: "sparq-lws-core"
+  features: "crypt,blob-object,test-support"
+  test: true
+
+# Immutable native byte plane and reusable downstream backend contract.
+- name: "sparq-lws-core (blob-object)"
+  crate: "sparq-lws-core"
+  features: "blob-object,test-support"
+  test: true
+
+- name: "sparq-lws-core (test-support)"
+  crate: "sparq-lws-core"
+  features: "test-support"
+  test: true
+
 # Exercise room authorization with the optional read gate attached.
 - name: "sparq-lws-core (crdt-sync + odrl-authz)"
   crate: "sparq-lws-core"
