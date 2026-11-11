@@ -62,6 +62,9 @@ mod reconcile_runtime;
 mod storage_runtime;
 
 #[cfg(not(target_arch = "wasm32"))]
+mod native_routing;
+
+#[cfg(not(target_arch = "wasm32"))]
 macro_rules! native_main {
     ($($item:item)*) => {
         $($item)*
@@ -117,6 +120,8 @@ use crate::reconcile_runtime::{
 
 // --- Environment configuration keys ----------------------------------------------------------------
 const ENV_BASE_URL: &str = "SOLID_SERVER_BASE_URL";
+/// Native LWS mount: `1`/`true` strips the base URL's path once; unset keeps proxy-relative paths.
+const ENV_LWS_MOUNT_BASE_PATH: &str = "SOLID_SERVER_LWS_MOUNT_BASE_PATH";
 const ENV_BIND: &str = "SOLID_SERVER_BIND";
 const ENV_TRUSTED_ISSUER: &str = "SOLID_SERVER_TRUSTED_ISSUER";
 /// The RS's identity required in a token's `aud` (RFC 9068). Defaults to the base URL.
@@ -1167,7 +1172,11 @@ where
         let _ = (issuer, jwks_cache_ttl, auth, identity);
         // The same overload stack the Solid router carries: the per-IP rate limiter, admission
         // control, the request timeout and the body ceiling, with /livez and /readyz outside it.
+        let mount_base_url = cfg.base_url.clone();
         let lws = sparq_lws_core::lws::router(store, cfg).await?;
+        let lws = native_routing::mount_lws_router(
+            lws, &mount_base_url, env_flag(ENV_LWS_MOUNT_BASE_PATH),
+        )?;
         return Ok(with_overload_layers_and_cors(lws, overload_config, cors));
     }
     // Dev/conformance seeding (gated): write the test users' WebID profiles + the container tree the

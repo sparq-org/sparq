@@ -876,6 +876,7 @@ cargo run -p sparq-lws-core
 
 | Variable | Meaning |
 |---|---|
+| `SOLID_SERVER_LWS_MOUNT_BASE_PATH` | Native LWS mode only: `1`, `true`, `True`, `TRUE` mount the router at the path in `SOLID_SERVER_BASE_URL`; unset or any other value is off (proxy-relative request paths). See [request mapping](#native-lws-request-mapping). |
 | `SOLID_SERVER_LWS_OWNER` | Agent IRI allowed every action on the storage, and the only one who may list or issue grants. |
 | `SOLID_SERVER_LWS_OPEN` (or `SOLID_SERVER_OPEN_MODE`) | `1` disables authorization entirely and implies `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH`. Test-suite use only. |
 | `SOLID_SERVER_LWS_SPARQL_MAX_RESOURCES` | Positive integer; default 10000. With `sparql-endpoint`, bounds readable resources assembled by one LWS query; exceeding it returns `507` with problem details. |
@@ -1481,6 +1482,56 @@ Both Touchstone and the Solid CTH driver accept `PSS_SPARQ_BACKEND=durable` to t
 an ephemeral `SOLID_SERVER_DATA_DIR` across graceful and idle hard-kill restarts.
 See the [conformance harness guide](../../crates/sparq-lws-core/conformance/README.md#durable-restart-checks)
 for the storage dependencies, byte/ETag checks and unchanged suite ratchets.
+
+## Native LWS request mapping
+
+With `SOLID_SERVER_PROTOCOL=lws`, the library router treats each request path `P`
+as relative to storage: its public resource or service URL is
+`<SOLID_SERVER_BASE_URL-without-trailing-slash>P`. The root path `/` maps to
+`<base>/`. The native binary preserves this mapping by default.
+
+For an origin-only base (`https://storage.example` or `https://storage.example/`),
+requests go directly to the native listener in either routing mode. For a path
+base (`https://storage.example/alice` or `https://storage.example/alice/`), use
+one of these setups; both base spellings select the same storage root:
+
+| Public request | Default, through a prefix-stripping proxy | Native mount (`SOLID_SERVER_LWS_MOUNT_BASE_PATH=1`) |
+|---|---|---|
+| `/alice` or `/alice/` | Proxy forwards `/` | Native forwards `/` to LWS |
+| `/alice/child` | Proxy forwards `/child` | Native forwards `/child` to LWS |
+| `/alice/alice/child` | Proxy forwards `/alice/child` | Native forwards `/alice/child` to LWS |
+| `/alice/.lws/subscriptions/` | Proxy forwards `/.lws/subscriptions/` | Native forwards `/.lws/subscriptions/` to LWS |
+| `/child` or `/alice-other/child` | Proxy should reject outside its mount | Native returns `404` |
+
+Native mount mode accepts `1`, `true`, `True`, or `TRUE`; unset and all other
+values leave it off. It affects only the native LWS binary composition, not the
+library router or Solid mode. Enable it for direct serving, or behind a proxy
+that preserves the full public path:
+
+```sh
+SOLID_SERVER_PROTOCOL=lws \
+SOLID_SERVER_BASE_URL=https://storage.example/alice/ \
+SOLID_SERVER_LWS_MOUNT_BASE_PATH=1 \
+cargo run -p sparq-lws-core
+```
+
+Keep it unset behind a proxy that already strips `/alice`. The default native
+listener never strips: a direct `/alice/child` request then maps to
+`https://storage.example/alice/alice/child`. In native mount mode a stripped
+`/child` request gets `404`; it is not retried as storage-relative. Each setup
+strips once and preserves query strings, percent-encoded octets and inner slashes.
+Both root forms select the canonical storage URL `https://storage.example/alice/`.
+Follow resource `Location` and service URLs exactly as advertised.
+
+Origin-level protected-resource discovery is a separate mapping:
+`/.well-known/oauth-protected-resource/alice/child` must reach the native listener
+**unchanged**, outside the storage mount. Native mount mode forwards this namespace
+unchanged too; the LWS handler validates the storage scope. For the storage root,
+use `/.well-known/oauth-protected-resource/alice/` (retain its trailing slash).
+`/livez` and `/readyz` also stay at the origin. These are the exceptions to the
+native mount's outside-path `404` rule. The existing advertised authorization-server
+metadata, keys and token URLs remain beneath `/alice/.well-known/` and pass through
+the storage mapping; the native mount does not add origin-level aliases for them.
 
 ## Follow the normative specs, not this server
 
