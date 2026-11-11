@@ -434,6 +434,7 @@ pub(crate) fn update_fold_appends(
     blob_key: &str,
     receipt: &str,
     nonce: &str,
+    epoch: u64,
 ) -> Result<String, BuildError> {
     let modified = match expected
         .last_modified
@@ -462,7 +463,7 @@ pub(crate) fn update_fold_appends(
         ct = literal(&expected.content_type),
         seq = expected.append_seq,
         receipt = iri(receipt)?,
-        fence = fence_guard(true, nonce),
+        fence = fence_guard(Some(epoch), nonce),
     ))
 }
 
@@ -475,7 +476,7 @@ pub(crate) fn update_publish_append(
     blob_key: &str,
     nonce: &str,
     modified: &str,
-    fenced: bool,
+    epoch: Option<u64>,
 ) -> Result<String, BuildError> {
     let dir = super::append_dir(key);
     let receipt = format!("urn:x-sparq-lws:append-results/{nonce}");
@@ -503,7 +504,7 @@ pub(crate) fn update_publish_append(
         dir = iri(&dir)?, dir_text = literal(&dir), contains = iri_const(LDP_CONTAINS),
         receipt = iri(&receipt)?, key = literal(key), blob_key = literal(blob_key),
         tag = literal(&format!("\"append-{nonce}\"")), modified = datetime_literal(modified),
-        nonce_text = literal(nonce), fence = fence_guard(fenced, nonce),
+        nonce_text = literal(nonce), fence = fence_guard(epoch, nonce),
     ))
 }
 
@@ -590,23 +591,54 @@ pub fn update_put_meta_fenced(
     nonce: &str,
     epoch: u64,
 ) -> Result<String, BuildError> {
+    update_put_meta_snapshot_fenced(
+        resource,
+        content_type,
+        blob_key,
+        etag,
+        modified,
+        nonce,
+        epoch,
+        0,
+    )
+}
+
+/// Fenced metadata upsert preserving a complete append snapshot.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn update_put_meta_snapshot_fenced(
+    resource: &str,
+    content_type: &str,
+    blob_key: &str,
+    etag: &str,
+    modified: Option<&str>,
+    nonce: &str,
+    epoch: u64,
+    append_seq: u64,
+) -> Result<String, BuildError> {
     let g = iri(resource)?;
     let rec = iri_const(&s_record());
-    let predicates = [p_content_type(), p_blob_key(), p_etag(), p_modified()]
-        .iter()
-        .map(|p| iri_const(p))
-        .collect::<Vec<_>>()
-        .join(", ");
+    let predicates = [
+        p_content_type(),
+        p_blob_key(),
+        p_etag(),
+        p_modified(),
+        p_append_seq(),
+    ]
+    .iter()
+    .map(|p| iri_const(p))
+    .collect::<Vec<_>>()
+    .join(", ");
     let modified = modified
         .map(|m| format!(" ; {} {}", iri_const(&p_modified()), datetime_literal(m)))
         .unwrap_or_default();
     Ok(format!(
         "DELETE {{ GRAPH {g} {{ {rec} ?oldP ?oldO }} }} \
-         INSERT {{ GRAPH {g} {{ {rec} {pct} {ct} ; {pbk} {bk} ; {pet} {et}{modified} }} {marker} }} \
+         INSERT {{ GRAPH {g} {{ {rec} {pct} {ct} ; {pbk} {bk} ; {pet} {et} ; {pseq} {append_seq}{modified} }} {marker} }} \
          WHERE {{ OPTIONAL {{ GRAPH {g} {{ {rec} ?oldP ?oldO }} FILTER (?oldP IN ({predicates})) }} {guard} }}",
         pct = iri_const(&p_content_type()), ct = literal(content_type),
         pbk = iri_const(&p_blob_key()), bk = literal(blob_key),
         pet = iri_const(&p_etag()), et = literal(etag),
+        pseq = iri_const(&p_append_seq()),
         marker = completion_marker(resource, nonce)?, guard = fence_guard(Some(epoch), nonce),
     ))
 }
@@ -655,12 +687,8 @@ pub fn update_create_child(
         etag,
         modified,
         nonce,
-<<<<<<< HEAD
-        false,
-        0,
-=======
         None,
->>>>>>> origin/main
+        0,
     )
 }
 
@@ -687,8 +715,7 @@ pub fn update_create_child_fenced(
         etag,
         modified,
         nonce,
-<<<<<<< HEAD
-        true,
+        Some(epoch),
         0,
     )
 }
@@ -700,7 +727,7 @@ pub(crate) fn update_create_child_meta(
     child: &str,
     meta: &super::ResourceMeta,
     nonce: &str,
-    fenced: bool,
+    epoch: Option<u64>,
 ) -> Result<String, BuildError> {
     let modified = meta
         .last_modified
@@ -713,11 +740,8 @@ pub(crate) fn update_create_child_meta(
         &meta.etag,
         modified.as_deref(),
         nonce,
-        fenced,
+        epoch,
         meta.append_seq,
-=======
-        Some(epoch),
->>>>>>> origin/main
     )
 }
 
@@ -730,12 +754,8 @@ fn create_child_guarded(
     etag: &str,
     modified: Option<&str>,
     nonce: &str,
-<<<<<<< HEAD
-    fenced: bool,
-    append_seq: u64,
-=======
     epoch: Option<u64>,
->>>>>>> origin/main
+    append_seq: u64,
 ) -> Result<String, BuildError> {
     let cg = iri(child)?;
     let crec = iri_const(&s_record());
@@ -1966,6 +1986,90 @@ mod tests {
         assert_eq!(rows, 1);
         run(&mut g, &update_end_reclaim("k2")).unwrap();
         assert!(!ask(&g, &ask_reclaiming("k2")));
+    }
+
+    #[cfg(all(
+        feature = "http-sparq",
+        feature = "embedded-sparq",
+        not(target_arch = "wasm32")
+    ))]
+    #[test]
+    fn append_and_fold_builders_observe_nonce_fences_and_writer_epochs() {
+        let child = "https://pod.example/c/d";
+        let expected = super::super::ResourceMeta {
+            content_type: "application/n-triples".into(),
+            blob_key: "original".into(),
+            etag: "old".into(),
+            last_modified: None,
+            append_seq: 3,
+        };
+        let receipt = "urn:x-sparq-lws:append-results/op-table";
+        for protection in ["nonce", "epoch", "pre-start", "active"] {
+            let epoch = if protection == "pre-start" { 0 } else { 1 };
+            let writes = [
+                (
+                    "append",
+                    update_publish_append(
+                        child,
+                        "original",
+                        "insert",
+                        "op-table",
+                        "2020-01-01T00:00:00Z",
+                        Some(epoch),
+                    )
+                    .unwrap(),
+                ),
+                (
+                    "fold",
+                    update_fold_appends(child, &expected, "folded", receipt, "op-table", epoch)
+                        .unwrap(),
+                ),
+            ];
+            for (name, update) in writes {
+                let mut graph = sparq_core::Graph::load_str("", "ntriples").unwrap();
+                let run = |g: &mut sparq_core::Graph, u: &str| {
+                    sparq_engine::update_in_place_atomic(g, u).unwrap()
+                };
+                run(
+                    &mut graph,
+                    &update_put_meta_with_append_seq(
+                        child,
+                        &expected.content_type,
+                        "original",
+                        "old",
+                        None,
+                        3,
+                    )
+                    .unwrap(),
+                );
+                if epoch > 0 {
+                    run(&mut graph, &update_begin_epoch(epoch, "start"));
+                }
+                match protection {
+                    "nonce" => run(&mut graph, &update_fence("op-table")),
+                    "epoch" | "pre-start" => run(&mut graph, &update_begin_epoch(2, "later-start")),
+                    _ => {}
+                }
+                let snapshot = |g: &sparq_core::Graph| {
+                    sparq_engine::query_json(
+                        g,
+                        "SELECT ?g ?s ?p ?o WHERE { GRAPH ?g { ?s ?p ?o } } ORDER BY ?g ?s ?p ?o",
+                    )
+                    .unwrap()
+                };
+                let before = snapshot(&graph);
+                run(&mut graph, &update);
+                let result =
+                    sparq_engine::query(&graph, &select_append_receipt(receipt).unwrap()).unwrap();
+                if protection == "active" {
+                    assert_eq!(result.rows.len(), 1, "{name}: active publication receipt");
+                    assert_ne!(snapshot(&graph), before, "{name}: active publication");
+                } else {
+                    assert!(result.rows.is_empty(), "{name}: {protection}");
+                    assert_eq!(snapshot(&graph), before, "{name}: {protection}");
+                }
+            }
+        }
     }
 
     fn fenced_writes(epoch: u64) -> Vec<(&'static str, String)> {

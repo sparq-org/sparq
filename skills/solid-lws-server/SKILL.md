@@ -173,11 +173,12 @@ Set `PSS_SPARQ_BACKEND` to one of:
   update committed (one `sparq-server` does). An eventually consistent or replicated
   endpoint that can lag is not supported, because the LWS server decides what a failed
   write left behind by reading the store straight after it. Metadata upserts,
-  resource graph deletes, containment edge removals, child creates and conditional
-  empty-container deletes carry a nonce fence and writer epoch in their `WHERE`.
+  resource graph deletes, containment edge removals, child creates, append and fold
+  publication, and conditional empty-container deletes carry a nonce fence and writer
+  epoch in their `WHERE`.
   A resource delete detaches its parent edge in the same update and captures the
   removed blob key in an operation receipt. Every acknowledged update is confirmed
-  through its completion marker, including updates whose guard matched nothing.
+  through its completion marker or receipt, including updates whose guard matched nothing.
   An acknowledged update carrying a superseded writer epoch is reported as refused with
   `Backend("fatal: writer epoch superseded")`, including child creates and conditional
   empty-container deletes. After confirmation and any receipt read, the client removes
@@ -339,8 +340,10 @@ primitive atomically publishes the insert record and directory, allocates its vi
 sequence and refreshes validators while the target still names `key`. Its default
 refuses. Composite append uses publication rather than a preliminary metadata bump,
 so a read snapshot cannot acquire an insert after its validators were issued.
-HTTP publication is fenced against a delayed Update and confirmed through a unique
-receipt, under the same serial-update backend assumption as reclamation.
+HTTP append and fold publication uses both the nonce fence and the active writer
+epoch, with confirmation through a unique receipt under the same serial-update
+backend assumption as reclamation. A superseded epoch is reported as refused before
+classifying an absent receipt as a missing target or a changed snapshot.
 
 Insert records live under `store::append_dir(blob_key)`. Each insert charges its own
 bytes and one content slot; the zero-byte directory is bookkeeping, bounded by the

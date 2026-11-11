@@ -30,26 +30,12 @@
 //! make the witness sound under real concurrency — overlapping windows each get their own correct
 //! peak, and one window can never erase another's.
 //!
-<<<<<<< HEAD
-//! ## Query-count mapping (per [`SparqClient`] method, mirroring `HttpSparqClient`)
-//! - `get_meta` / `exists` / `list_children` / `referenced_blob_keys` / `read_plan`: **1 query**
-//!   (`read_plan` is the ONE combined read-plan SELECT on the live client — §3.1; the in-memory
-//!   double answers it in one atomic index pass, so the 1-query model holds for it too).
-//! - `put_meta` / `delete_meta` / `remove_child`: **1 update**.
-//! - `publish_append`: **2 updates + 1 query** (mutation, receipt, cleanup).
-//! - `create_child` / `replace_child`: **1 update + 1 query** (the guarded insert, then the create-marker ASK).
-//! - `delete_meta_if_empty`: **1 update**, then **1 query** (marker ASK) when the outcome is
-//!   `Deleted`, else **2 queries** (marker ASK + exists ASK).
-//! - History methods have no HTTP implementation; they model **1 query** per index lookup
-//!   or **1 update** per atomic history mutation.
-=======
 //! ## Protocol mapping (per [`SparqClient`] method, mirroring `HttpSparqClient`)
 //! Reads issue their query. Successful metadata and containment mutations issue their guarded
 //! update, completion confirmation and best-effort cleanup. Resource deletes also read their
 //! captured blob key before cleanup; replacements first read the previous metadata. A refused
 //! conditional create or delete reads the current epoch before classifying its missing marker.
 //! History methods have no HTTP implementation and model an index lookup or atomic mutation.
->>>>>>> origin/main
 //!
 //! Error paths are counted best-effort (the live client may abort mid-sequence); the pinned tests
 //! only assert success paths, where the mapping is exact.

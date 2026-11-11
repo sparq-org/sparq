@@ -296,7 +296,7 @@ pub(super) fn restore(
         ));
     }
     let t = trash_entry(graph, member)?.ok_or(SparqError::NotFound)?;
-    let create = sparql::update_create_child_meta(parent, target, &t.meta, &next_nonce(), false)?;
+    let create = sparql::update_create_child_meta(parent, target, &t.meta, &next_nonce(), None)?;
     let mut updates = vec![
         create,
         copy_body(member, target)?,
