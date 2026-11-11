@@ -164,8 +164,11 @@ fn admits(t: &[Term; 3], graph_iri: &str) -> bool {
 /// (see [`admits`]): the loader would reject the whole document, and its resource would be
 /// left with no grants, Control included, so the writer could not repair it. Only `added`
 /// triples are checked, so a write removing such a triple is never refused.
-fn refuse_inadmissible(doc: &str, added: &[[Term; 3]]) -> Result<(), String> {
-    match added.iter().find(|t| !admits(t, doc)) {
+fn refuse_inadmissible<'a>(
+    doc: &str,
+    mut added: impl Iterator<Item = &'a [Term; 3]>,
+) -> Result<(), String> {
+    match added.find(|t| !admits(t, doc)) {
         None => Ok(()),
         Some(t) => Err(format!(
             "the access-control document <{doc}> may not state `{} {} {}`: it may describe only \
@@ -183,14 +186,16 @@ fn refuse_inadmissible(doc: &str, added: &[[Term; 3]]) -> Result<(), String> {
 /// another access-control resource the loader would reject in the state the write leaves, or
 /// of one it would not read at all, either of which would withhold the written one with it.
 /// The view of the control documents is computed at most once per
-/// write. The refusal names the statement the write sent and says nothing about the state of
-/// the document it reaches into.
+/// write. Dependency refusals disclose neither which referenced document failed nor its
+/// contents, including when admission exhausts an allowance.
 pub(crate) struct ControlWrites<'g> {
     graph: &'g Graph,
     acp: bool,
     /// A document whose content the write replaces, with its new content, when `graph` does
     /// not hold it yet.
-    replaced: Option<(&'g str, Vec<[Term; 3]>)>,
+    replaced: Option<(&'g str, &'g [[Term; 3]])>,
+    // Graph identity matters: an in-memory dataset can contain repeated named slots.
+    admitted: std::cell::RefCell<FxHashSet<*const Graph>>,
     documents: std::cell::OnceCell<Documents<'g>>,
 }
 
@@ -201,73 +206,151 @@ impl<'g> ControlWrites<'g> {
             graph,
             acp,
             replaced: None,
+            admitted: std::cell::RefCell::default(),
             documents: std::cell::OnceCell::new(),
         }
     }
 
     /// The check for a write that replaces document `doc` of `graph` with `content`.
-    pub(crate) fn replacing(graph: &'g Graph, acp: bool, doc: &'g str, content: Vec<[Term; 3]>) -> Self {
+    pub(crate) fn replacing(
+        graph: &'g Graph,
+        acp: bool,
+        doc: &'g str,
+        content: &'g [[Term; 3]],
+    ) -> Self {
         ControlWrites {
             replaced: Some((doc, content)),
             ..Self::new(graph, acp)
         }
     }
 
-    /// The control graphs the ACP loader reads from the state the write leaves, but `except`.
-    fn control_graphs(&self, except: Option<&str>) -> Vec<(&'g str, Vec<[Term; 3]>)> {
-        let replaced = self.replaced.as_ref().map(|(doc, _)| *doc);
-        let mut graphs: Vec<(&'g str, Vec<[Term; 3]>)> = self
-            .graph
-            .named()
-            .iter()
-            .filter_map(|(n, g)| {
-                graph_iri(n)
-                    .filter(|iri| {
-                        Some(*iri) != except
-                            && Some(*iri) != replaced
-                            && reads_as_control(iri, ACR_SUFFIX)
-                    })
-                    .map(|iri| (iri, graph_triples(g)))
-            })
-            .collect();
-        if let Some((doc, content)) = &self.replaced {
-            if Some(*doc) != except && reads_as_control(doc, ACR_SUFFIX) {
-                graphs.push((doc, content.clone()));
-            }
-        }
-        graphs
+    /// Borrow the stored ACP documents; replacement content is already admitted by its caller.
+    fn control_graphs(&self) -> impl Iterator<Item = (&'g str, &'g Graph)> + '_ {
+        let replaced = self.replaced.map(|(doc, _)| doc);
+        self.graph.named().iter().filter_map(move |(n, g)| {
+            graph_iri(n)
+                .filter(|iri| Some(*iri) != replaced && reads_as_control(iri, ACR_SUFFIX))
+                .map(|iri| (iri, g))
+        })
     }
 
-    /// Refuse `added` to the access-control document `doc`, naming the first statement it
-    /// may not make.
-    pub(crate) fn check(&self, doc: &str, added: &[[Term; 3]]) -> Result<(), String> {
+    /// Charge a candidate document once, before any validation reconstructs its terms.
+    pub(crate) fn admit(&self, doc: &str, ledger: &mut AuthLedger) -> Result<(), String> {
         let suffix = if self.acp { ACR_SUFFIX } else { ACL_SUFFIX };
         if !reads_as_control(doc, suffix) {
             return Ok(());
         }
-        refuse_inadmissible(doc, added)?;
+        if let Some((iri, graph)) = self
+            .graph
+            .named()
+            .iter()
+            .find_map(|(n, g)| graph_iri(n).filter(|iri| *iri == doc).map(|iri| (iri, g)))
+        {
+            if !self.admitted.borrow().contains(&std::ptr::from_ref(graph)) {
+                ledger.open()?;
+                let scan = graph.store().scan(&[None, None, None]);
+                ledger.document_row_bytes(scan.rows.len(), iri)?;
+                for row in scan.rows.iter() {
+                    admit_write_row(graph, iri, scan.to_spo(row), ledger)?;
+                }
+                self.admitted.borrow_mut().insert(std::ptr::from_ref(graph));
+            }
+        }
+        Ok(())
+    }
+
+    /// Retain only borrowed document names and dependency edges. Each stored row is
+    /// admitted before reconstruction, and no owned collection of document triples exists.
+    fn control_documents(&self, ledger: &mut AuthLedger) -> Result<Documents<'g>, String> {
+        let replacement = self
+            .replaced
+            .filter(|(doc, _)| reads_as_control(doc, ACR_SUFFIX));
+        let mut loaded: FxHashSet<&'g str> = FxHashSet::default();
+        for iri in self
+            .control_graphs()
+            .map(|(iri, _)| iri)
+            .chain(replacement.map(|(doc, _)| doc))
+        {
+            // Even an empty ACR needs a descriptor. Charge its borrowed name before
+            // growing the set, so an arbitrary number of empty documents is bounded.
+            ledger.resource_bytes(iri.len())?;
+            loaded.insert(iri);
+        }
+        let mut rejected = FxHashSet::default();
+        let mut referrers: FxHashMap<&str, Vec<&str>> = FxHashMap::default();
+        let mut visit =
+            |iri: &'g str, t: &[Term; 3], ledger: &mut AuthLedger| -> Result<(), String> {
+                if !admits(t, iri) {
+                    rejected.insert(iri);
+                }
+                record_dependency(
+                    &loaded,
+                    &mut rejected,
+                    &mut referrers,
+                    iri,
+                    t,
+                    Some(ledger),
+                )
+            };
+        for (iri, graph) in self.control_graphs() {
+            ledger.open()?;
+            let prepaid = self.admitted.borrow().contains(&std::ptr::from_ref(graph));
+            let scan = graph.store().scan(&[None, None, None]);
+            if !prepaid {
+                ledger.document_row_bytes(scan.rows.len(), iri)?;
+            }
+            for row in scan.rows.iter() {
+                let ids = scan.to_spo(row);
+                if !prepaid {
+                    admit_write_row(graph, iri, ids, ledger)?;
+                }
+                let triple = ids.map(|id| graph.dict().term(id));
+                visit(iri, &triple, ledger)?;
+            }
+            self.admitted.borrow_mut().insert(std::ptr::from_ref(graph));
+        }
+        if let Some((iri, triples)) = replacement {
+            for triple in triples {
+                visit(iri, triple, ledger)?;
+            }
+        }
+        reject_referrers(&mut rejected, &referrers, Some(ledger))?;
+        Ok(Documents { loaded, rejected })
+    }
+
+    /// Refuse `added` to the access-control document `doc`, naming the first statement it
+    /// may not make.
+    pub(crate) fn check<'a>(
+        &self,
+        doc: &str,
+        added: impl Clone + Iterator<Item = &'a [Term; 3]>,
+        ledger: &mut AuthLedger,
+    ) -> Result<(), String> {
+        let suffix = if self.acp { ACR_SUFFIX } else { ACL_SUFFIX };
+        if !reads_as_control(doc, suffix) {
+            return Ok(());
+        }
+        refuse_inadmissible(doc, added.clone())?;
         let depends = |t: &[Term; 3]| {
             matches!((&t[1], &t[2]), (Term::NamedNode(p), Term::NamedNode(o))
                 if ACP_DEPENDENCY_PREDICATES.contains(&p.as_str())
                     && group_doc_of(o.as_str()) != doc)
         };
-        if !self.acp || !added.iter().any(&depends) {
+        if !self.acp || !added.clone().any(&depends) {
             return Ok(());
         }
-        let documents = self
-            .documents
-            .get_or_init(|| document_view(&self.control_graphs(None), System::Acp));
-        // A document the store rejects now may be under repair: what it would depend on is
-        // judged without it.
-        let without_doc;
-        let documents = if documents.rejected.contains(doc) {
-            without_doc = document_view(&self.control_graphs(Some(doc)), System::Acp);
-            &without_doc
-        } else {
-            documents
-        };
+        if self.documents.get().is_none() {
+            let documents = self
+                .control_documents(ledger)
+                .map_err(write_admission_refusal)?;
+            let _ = self.documents.set(documents);
+        }
+        let documents = self.documents.get().expect("initialized document view");
+        // Self references are excluded above. Removing a rejected document cannot
+        // rehabilitate its referrers: they would then reference a missing document.
+        // The cached rejection set therefore also decides repair writes.
         // A reference the view does not resolve — to a document it rejects, or to one it does
-        // not read at all — would withhold `doc` too (see [`document_view`]), Control
+        // not read at all — would withhold `doc` too (see [`document_view_metered`]), Control
         // included, so the writer could not repair it. `depends` has already excluded a
         // reference to `doc`'s own nodes, which the state the write leaves always resolves.
         let unresolved = |t: &&[Term; 3]| {
@@ -276,7 +359,7 @@ impl<'g> ControlWrites<'g> {
                     if !documents.loaded.contains(group_doc_of(o.as_str()))
                         || documents.rejected.contains(group_doc_of(o.as_str())))
         };
-        if !added.iter().any(|t| unresolved(&t)) {
+        if !added.clone().any(|t| unresolved(&t)) {
             return Ok(());
         }
         // One body for every such refusal. It names neither the statement nor the reference
@@ -295,7 +378,7 @@ impl<'g> ControlWrites<'g> {
 
 /// Whether the loader reads the stored graph `iri` as a control document with `suffix`:
 /// outside the reserved and skolem spaces, and governing a resource below an authority.
-fn reads_as_control(iri: &str, suffix: &str) -> bool {
+pub(crate) fn reads_as_control(iri: &str, suffix: &str) -> bool {
     !iri.starts_with(RESERVED_PREFIX)
         && !iri.starts_with(SKOLEM_PREFIX)
         && iri
@@ -341,8 +424,57 @@ struct Documents<'a> {
     /// fragment-stripped document is not in here is one no loaded document defines: its
     /// statements are not available, so neither is what they would have decided.
     loaded: FxHashSet<&'a str>,
-    /// The control documents that contribute nothing (see [`document_view`]).
+    /// The control documents that contribute nothing (see [`document_view_metered`]).
     rejected: FxHashSet<&'a str>,
+}
+
+fn record_dependency<'a>(
+    loaded: &FxHashSet<&'a str>,
+    rejected: &mut FxHashSet<&'a str>,
+    referrers: &mut FxHashMap<&'a str, Vec<&'a str>>,
+    iri: &'a str,
+    triple: &[Term; 3],
+    meter: Option<&mut AuthLedger>,
+) -> Result<(), String> {
+    let (Term::NamedNode(p), Term::NamedNode(o)) = (&triple[1], &triple[2]) else {
+        return Ok(());
+    };
+    if !ACP_DEPENDENCY_PREDICATES.contains(&p.as_str()) {
+        return Ok(());
+    }
+    if let Some(&target) = loaded.get(group_doc_of(o.as_str())) {
+        let refs = referrers.entry(target).or_default();
+        if let Some(meter) = meter {
+            meter.reserve(refs, 1, Dim::Nodes)?;
+        }
+        refs.push(iri);
+    } else {
+        rejected.insert(iri);
+    }
+    Ok(())
+}
+
+fn reject_referrers<'a>(
+    rejected: &mut FxHashSet<&'a str>,
+    referrers: &FxHashMap<&'a str, Vec<&'a str>>,
+    mut meter: Option<&mut AuthLedger>,
+) -> Result<(), String> {
+    let mut work = Vec::new();
+    if let Some(meter) = meter.as_deref_mut() {
+        meter.reserve(&mut work, rejected.len(), Dim::Nodes)?;
+    }
+    work.extend(rejected.iter().copied());
+    while let Some(doc) = work.pop() {
+        for &referrer in referrers.get(doc).into_iter().flatten() {
+            if rejected.insert(referrer) {
+                if let Some(meter) = meter.as_deref_mut() {
+                    meter.reserve(&mut work, 1, Dim::Nodes)?;
+                }
+                work.push(referrer);
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The control documents the loader reads, and those among them that contribute nothing:
@@ -360,13 +492,6 @@ struct Documents<'a> {
 /// no grant from any source. A reference whose target IS loaded, in this pod or another,
 /// keeps applying: naming it delegates to whoever may edit that document, which is the
 /// referring document's own choice (see [`admits`]).
-fn document_view<'a>(
-    control_graphs: &[(&'a str, Vec<[Term; 3]>)],
-    system: System,
-) -> Documents<'a> {
-    document_view_metered(control_graphs, system, None).expect("unmetered document validation")
-}
-
 fn document_view_metered<'a>(
     control_graphs: &[(&'a str, Vec<[Term; 3]>)],
     system: System,
@@ -386,39 +511,17 @@ fn document_view_metered<'a>(
         let mut referrers: FxHashMap<&str, Vec<&str>> = FxHashMap::default();
         for (iri, triples) in control_graphs {
             for t in triples {
-                let Term::NamedNode(p) = &t[1] else { continue };
-                if !ACP_DEPENDENCY_PREDICATES.contains(&p.as_str()) {
-                    continue;
-                }
-                if let Term::NamedNode(o) = &t[2] {
-                    let target = group_doc_of(o.as_str());
-                    if loaded.contains(target) {
-                        let refs = referrers.entry(target).or_default();
-                        if let Some(meter) = meter.as_deref_mut() {
-                            meter.reserve(refs, 1, Dim::Nodes)?;
-                        }
-                        refs.push(iri);
-                    } else {
-                        rejected.insert(iri);
-                    }
-                }
+                record_dependency(
+                    &loaded,
+                    &mut rejected,
+                    &mut referrers,
+                    iri,
+                    t,
+                    meter.as_deref_mut(),
+                )?;
             }
         }
-        let mut work = Vec::new();
-        if let Some(meter) = meter.as_deref_mut() {
-            meter.reserve(&mut work, rejected.len(), Dim::Nodes)?;
-        }
-        work.extend(rejected.iter().copied());
-        while let Some(doc) = work.pop() {
-            for &referrer in referrers.get(doc).into_iter().flatten() {
-                if rejected.insert(referrer) {
-                    if let Some(meter) = meter.as_deref_mut() {
-                        meter.reserve(&mut work, 1, Dim::Nodes)?;
-                    }
-                    work.push(referrer);
-                }
-            }
-        }
+        reject_referrers(&mut rejected, &referrers, meter)?;
     }
     Ok(Documents { loaded, rejected })
 }
@@ -543,6 +646,55 @@ const SPECIAL_AGENTS: [&str; 5] = [
 pub(crate) enum System {
     Wac,
     Acp,
+}
+
+/// Keep admission diagnostics distinct from a failed materialization: no write or
+/// view replacement has happened. Other documents' details remain private.
+pub(crate) fn write_admission_refusal(error: String) -> String {
+    match crate::auth_allowance_refusal(&error) {
+        Some(kind) => crate::materialize::allowance_refusal(
+            kind,
+            "write refused during access-control admission; the previous authorization view \
+             is still in force; nothing was changed",
+        ),
+        None => error,
+    }
+}
+
+fn admit_write_row(
+    graph: &Graph,
+    iri: &str,
+    ids: [Id; 3],
+    ledger: &mut AuthLedger,
+) -> Result<(), String> {
+    for id in ids {
+        ledger.stored_term(iri, graph.dict(), id)?;
+    }
+    ledger
+        .core()
+        .charge(Dim::Facts, 1)
+        .map_err(|e| ledger.refusal(e, Dim::Facts, iri))?;
+    Ok(())
+}
+
+/// Own only the replacement's admitted triples; dependency checks borrow this buffer.
+pub(crate) fn write_triples_metered(
+    graph: &Graph,
+    iri: &str,
+    ledger: &mut AuthLedger,
+) -> Result<Vec<[Term; 3]>, String> {
+    ledger.open()?;
+    let scan = graph.store().scan(&[None, None, None]);
+    ledger.document_row_bytes(scan.rows.len(), iri)?;
+    let mut out = Vec::new();
+    for row in scan.rows.iter() {
+        let ids = scan.to_spo(row);
+        admit_write_row(graph, iri, ids, ledger)?;
+        ledger.reserve(&mut out, 1, Dim::Nodes)?;
+        out.push(ids.map(|id| graph.dict().term(id)));
+    }
+    ledger.checkpoint()?;
+    Ok(out)
 }
 
 /// [`graph_triples`] under the input budget `meter`, charging each term's bytes as it is
@@ -687,7 +839,7 @@ pub(crate) fn assemble_facts(
     let control_graphs = documents;
     // A control document with a triple it may not state contributes nothing. For ACP,
     // whose policies also deny, so does every ACR that references a node of a rejected
-    // document or a node no loaded document defines (transitively — see [`document_view`]),
+    // document or a node no loaded document defines (transitively — see [`document_view_metered`]),
     // and the resources a rejected ACR governs, with everything
     // below them, get no grants at all: a deny or exception it held can never be lost
     // while an allow elsewhere still applies. A rejected WAC ACL keeps governing its
@@ -1099,6 +1251,7 @@ fn collect_agents(
     }
     Ok(())
 }
+
 /// The origin (`scheme://authority`) of an IRI — the coarse pod boundary used to bucket
 /// the auth index + session cache for an ACL-write invalidation (sq-b7k7u).
 /// `https://pod.ex/a/b` → `https://pod.ex`; an authority with no path (`https://pod.ex`)

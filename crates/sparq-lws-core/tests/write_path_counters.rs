@@ -186,10 +186,7 @@ async fn fixture(h: &Harness) {
     assert_eq!(warm.status(), StatusCode::OK);
 }
 
-/// **PUT overwrite (k = 3, warm ACL cache).** The write-authz walk is now PLANNED: 1 combined
-/// read-plan query + 1 found-ACL live re-confirm, depth-independent (was the sequential k+1 = 4
-/// per-candidate probes). Remaining queries: the handler's own existence `meta` + the
-/// slash-semantics conflict probe. MEASURED before → after: 6 → 4 queries.
+/// Overwrite confirms the metadata upsert and cleans its evidence before reclaiming the previous blob.
 #[tokio::test]
 async fn put_overwrite_k3_counts() {
     let h = Harness::new().await;
@@ -205,8 +202,8 @@ async fn put_overwrite_k3_counts() {
         .await;
     assert_eq!(resp.status(), StatusCode::NO_CONTENT, "overwrite 204");
     assert_eq!(
-        d.sparql_queries, 6,
-        "PUT overwrite = existence meta + planned walk (plan + re-confirm) + slash probe + replace_meta's previous-record read + reading back that the replaced bytes were named as reclaimed, depth-independent: {d:?}"
+        d.sparql_queries, 7,
+        "PUT overwrite = existence meta + planned walk (plan + re-confirm) + slash probe + replace_meta's previous-record read + completion confirmation + reading back that the replaced bytes were named as reclaimed, depth-independent: {d:?}"
     );
     assert_eq!(d.blob_puts, 1, "one body write: {d:?}");
     assert_eq!(
@@ -214,22 +211,13 @@ async fn put_overwrite_k3_counts() {
         "one reclaim of the superseded blob: {d:?}"
     );
     assert_eq!(
-        d.sparql_updates, 3,
-        "one meta upsert + naming the replaced bytes as reclaimed and withdrawing that: {d:?}"
+        d.sparql_updates, 4,
+        "meta upsert and marker cleanup + naming the replaced bytes as reclaimed and withdrawing that: {d:?}"
     );
     assert_eq!(d.max_in_flight, 1, "strictly sequential");
 }
 
-/// **PUT create (k = 3 from the parent, warm).** The existence-non-disclosure V1 closure
-/// (`research/lws-design-records.md` §6) makes a PUT-create authorize the TARGET's own effective
-/// ACL (`acl:Write`, inherited via `acl:default`) — a PLANNED walk (plan + re-confirm = 2) — BEFORE
-/// probing existence, so create and overwrite are indistinguishable to an under-authorized
-/// requester. It THEN also authorizes container-modification `acl:Append` on the nearest EXISTING
-/// ancestor container (`/alice/c/`), a SECOND planned walk (found by upward existence probes) — two
-/// DISTINCT ACL resolutions (the target's inherited grant vs the container's own `acl:accessTo`),
-/// the same two-walk shape DELETE has always had. MEASURED before → after the planned-walk
-/// optimization was 12 → 11 for main's create (which authorized ONLY the parent); the integrated V1
-/// path adds the target-`acl:Write` planned walk (+2), for 13 total.
+/// Creation retains target and parent authorization, confirms the create, and cleans its evidence.
 #[tokio::test]
 async fn put_create_k3_counts() {
     let h = Harness::new().await;
@@ -249,7 +237,10 @@ async fn put_create_k3_counts() {
         "PUT create = planned TARGET-Write walk (V1 closure: 2) + existence meta + nearest-ancestor probe + planned container-modification walk (parent Append: 2) + slash probe + ensure-ancestors + create: {d:?}"
     );
     assert_eq!(d.blob_puts, 1, "one body write: {d:?}");
-    assert_eq!(d.sparql_updates, 1, "the create transaction: {d:?}");
+    assert_eq!(
+        d.sparql_updates, 2,
+        "the create transaction and marker cleanup: {d:?}"
+    );
     assert_eq!(d.max_in_flight, 1, "strictly sequential");
 }
 
@@ -293,9 +284,7 @@ async fn delete_doc_k3_counts() {
     assert_eq!(d.max_in_flight, 1, "strictly sequential");
 }
 
-/// **PATCH insert-only on the existing doc (k = 3, warm).** PATCH's content-derived required mode
-/// (Append for insert-only) authorizes via the SAME planned walk (plan + re-confirm — was the
-/// sequential k+1 = 4 probes). MEASURED before → after: 5 → 3.
+/// A patch reads and replaces the resource, confirms the upsert, and reclaims the previous blob.
 #[tokio::test]
 async fn patch_insert_existing_k3_counts() {
     let h = Harness::new().await;
@@ -310,8 +299,8 @@ _:patch a solid:InsertDeletePatch;\n\
         .await;
     assert_eq!(resp.status(), StatusCode::NO_CONTENT, "patch 204");
     assert_eq!(
-        d.sparql_queries, 5,
-        "PATCH = planned walk (2) + target read meta + replace_meta's previous-record read + reading back that the replaced bytes were named as reclaimed, depth-independent: {d:?}"
+        d.sparql_queries, 6,
+        "PATCH = planned walk (2) + target read meta + replace_meta's previous-record read + completion confirmation + reading back that the replaced bytes were named as reclaimed, depth-independent: {d:?}"
     );
     assert_eq!(d.blob_puts, 1, "one rewritten body: {d:?}");
     assert_eq!(
