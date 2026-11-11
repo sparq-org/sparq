@@ -28,8 +28,8 @@
 //! The two steps — swap the control graph, rebuild the auth view — succeed together or
 //! leave the store byte-for-byte as it was:
 //!
-//! 1. one admission ledger checks serialized bytes before parsing, then parsed rows,
-//!    stored terms and ACP dependencies before anything is mutated;
+//! 1. parse, then use one admission ledger for stored terms, parsed rows and ACP
+//!    dependencies before anything is mutated;
 //! 2. the prior control-graph slot is captured, then the new content is swapped in (or the
 //!    slot removed, for `delete_acl`);
 //! 3. the auth view is re-materialized. On success the store reflects the new rules.
@@ -247,8 +247,9 @@ impl PodStore {
         let name = NamedNode::new(acl_iri)
             .map_err(|e| format!("put_acl denied: malformed ACL IRI <{}>: {}", acl_iri, e))?;
         let mut admission = crate::budget::AuthLedger::new(self.auth_budget);
-        crate::loader::admit_write_document(&mut admission, acl_iri, content.len())
-            .map_err(|e| format!("put_acl denied: {e}"))?;
+        let admission_refusal = |e| {
+            format!("put_acl denied: {}", crate::loader::write_admission_refusal(e))
+        };
         // PARSE FIRST — a malformed document is rejected before anything mutates.
         let new_graph = Graph::load_str_with_base(content, format, acl_iri).map_err(|e| {
             format!(
@@ -256,14 +257,17 @@ impl PodStore {
                 acl_iri, format, e
             )
         })?;
-        let content = crate::loader::write_triples_metered(&new_graph, acl_iri, &mut admission)
-            .map_err(|e| format!("put_acl denied: {e}"))?;
+        let suffix = if acp { ACR_SUFFIX } else { ACL_SUFFIX };
+        let content = if crate::loader::reads_as_control(acl_iri, suffix) {
+            crate::loader::write_triples_metered(&new_graph, acl_iri, &mut admission)
+                .map_err(admission_refusal)?
+        } else {
+            Vec::new()
+        };
         crate::loader::ControlWrites::replacing(&self.graph, acp, acl_iri, &content)
             .check(acl_iri, content.iter(), &mut admission)
-            .map_err(|e| format!("put_acl denied: {e}"))?;
-        admission
-            .checkpoint()
-            .map_err(|e| format!("put_acl denied: {e}"))?;
+            .map_err(admission_refusal)?;
+        admission.checkpoint().map_err(admission_refusal)?;
         let new_len = graph_len(&new_graph);
 
         // Capture the prior slot (for rollback) and swap the new content in.
@@ -501,6 +505,35 @@ mod admission_tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn refused_put_preserves_dictionary_slots_view_and_acr_controlled() {
+        refused_put_cases(None);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn put_term_admission_precedes_mutation() {
+        refused_put_cases(Some("term"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn put_fact_admission_precedes_mutation() {
+        refused_put_cases(Some("facts"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn put_document_total_admission_precedes_mutation() {
+        refused_put_cases(Some("document"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn put_dependency_admission_precedes_mutation() {
+        refused_put_cases(Some("dependency"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn refused_put_cases(only: Option<&str>) {
         for acp in [false, true] {
             for missing in [false, true] {
                 for cap in [
@@ -512,7 +545,9 @@ mod admission_tests {
                     "dependency-term",
                     "dependency-facts",
                 ] {
-                    if cap.contains("dependenc") && !acp {
+                    if only.is_some_and(|wanted| wanted != cap)
+                        || (cap.contains("dependenc") && !acp)
+                    {
                         continue;
                     }
                     let mut store = crate::PodStore::new(
@@ -595,7 +630,22 @@ mod admission_tests {
                     let mut budget = default_auth_budget();
                     let expected = match cap {
                         "document" => {
-                            budget.max_document_bytes = replacement.len() - 1;
+                            let parsed = Graph::load_str(&replacement, "ntriples").unwrap();
+                            let scan = parsed.store().scan(&[None, None, None]);
+                            let mut size = sparq_core::meter::Ledger::new(
+                                sparq_core::meter::Limits::default(),
+                            );
+                            for row in scan.rows.iter() {
+                                for id in scan.to_spo(row) {
+                                    size.stored_term(parsed.dict(), id).unwrap();
+                                }
+                            }
+                            budget.max_document_bytes =
+                                size.spent(sparq_core::meter::Dim::Bytes) - 1;
+                            assert!(
+                                budget.max_document_bytes
+                                    > scan.rows.len() * 3 * sparq_core::meter::TERM_NODE_BYTES
+                            );
                             AuthAllowance::InputBytes
                         }
                         "facts" => {
@@ -636,6 +686,12 @@ mod admission_tests {
                         Some(expected),
                         "{cap}: {error}"
                     );
+                    assert!(error.contains("write refused"), "{cap}: {error}");
+                    assert!(
+                        error.contains("previous authorization view is still in force"),
+                        "{cap}: {error}"
+                    );
+                    assert!(!error.contains("view is not built"), "{cap}: {error}");
                     if cap.contains("dependenc") {
                         assert!(
                             !error.contains("policy.acr"),

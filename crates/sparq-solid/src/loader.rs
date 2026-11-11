@@ -236,6 +236,10 @@ impl<'g> ControlWrites<'g> {
 
     /// Charge a candidate document once, before any validation reconstructs its terms.
     pub(crate) fn admit(&self, doc: &str, ledger: &mut AuthLedger) -> Result<(), String> {
+        let suffix = if self.acp { ACR_SUFFIX } else { ACL_SUFFIX };
+        if !reads_as_control(doc, suffix) {
+            return Ok(());
+        }
         if let Some((iri, graph)) = self
             .graph
             .named()
@@ -245,6 +249,7 @@ impl<'g> ControlWrites<'g> {
             if !self.admitted.borrow().contains(&std::ptr::from_ref(graph)) {
                 ledger.open()?;
                 let scan = graph.store().scan(&[None, None, None]);
+                ledger.document_row_bytes(scan.rows.len(), iri)?;
                 for row in scan.rows.iter() {
                     admit_write_row(graph, iri, scan.to_spo(row), ledger)?;
                 }
@@ -278,23 +283,22 @@ impl<'g> ControlWrites<'g> {
                 if !admits(t, iri) {
                     rejected.insert(iri);
                 }
-                if let (Term::NamedNode(p), Term::NamedNode(o)) = (&t[1], &t[2]) {
-                    if ACP_DEPENDENCY_PREDICATES.contains(&p.as_str()) {
-                        if let Some(&target) = loaded.get(group_doc_of(o.as_str())) {
-                            let refs = referrers.entry(target).or_default();
-                            ledger.reserve(refs, 1, Dim::Nodes)?;
-                            refs.push(iri);
-                        } else {
-                            rejected.insert(iri);
-                        }
-                    }
-                }
-                Ok(())
+                record_dependency(
+                    &loaded,
+                    &mut rejected,
+                    &mut referrers,
+                    iri,
+                    t,
+                    Some(ledger),
+                )
             };
         for (iri, graph) in self.control_graphs() {
             ledger.open()?;
             let prepaid = self.admitted.borrow().contains(&std::ptr::from_ref(graph));
             let scan = graph.store().scan(&[None, None, None]);
+            if !prepaid {
+                ledger.document_row_bytes(scan.rows.len(), iri)?;
+            }
             for row in scan.rows.iter() {
                 let ids = scan.to_spo(row);
                 if !prepaid {
@@ -310,17 +314,7 @@ impl<'g> ControlWrites<'g> {
                 visit(iri, triple, ledger)?;
             }
         }
-        let mut work = Vec::new();
-        ledger.reserve(&mut work, rejected.len(), Dim::Nodes)?;
-        work.extend(rejected.iter().copied());
-        while let Some(doc) = work.pop() {
-            for &referrer in referrers.get(doc).into_iter().flatten() {
-                if rejected.insert(referrer) {
-                    ledger.reserve(&mut work, 1, Dim::Nodes)?;
-                    work.push(referrer);
-                }
-            }
-        }
+        reject_referrers(&mut rejected, &referrers, Some(ledger))?;
         Ok(Documents { loaded, rejected })
     }
 
@@ -348,7 +342,7 @@ impl<'g> ControlWrites<'g> {
         if self.documents.get().is_none() {
             let documents = self
                 .control_documents(ledger)
-                .map_err(dependency_admission_refusal)?;
+                .map_err(write_admission_refusal)?;
             let _ = self.documents.set(documents);
         }
         let documents = self.documents.get().expect("initialized document view");
@@ -382,21 +376,9 @@ impl<'g> ControlWrites<'g> {
     }
 }
 
-/// A controller need not be allowed to inspect other ACRs. Preserve the allowance
-/// kind without exposing which dependency exhausted it, its terms or their sizes.
-fn dependency_admission_refusal(error: String) -> String {
-    match crate::auth_allowance_refusal(&error) {
-        Some(kind) => crate::materialize::allowance_refusal(
-            kind,
-            "ACP dependency admission failed; nothing was changed",
-        ),
-        None => error,
-    }
-}
-
 /// Whether the loader reads the stored graph `iri` as a control document with `suffix`:
 /// outside the reserved and skolem spaces, and governing a resource below an authority.
-fn reads_as_control(iri: &str, suffix: &str) -> bool {
+pub(crate) fn reads_as_control(iri: &str, suffix: &str) -> bool {
     !iri.starts_with(RESERVED_PREFIX)
         && !iri.starts_with(SKOLEM_PREFIX)
         && iri
@@ -446,6 +428,55 @@ struct Documents<'a> {
     rejected: FxHashSet<&'a str>,
 }
 
+fn record_dependency<'a>(
+    loaded: &FxHashSet<&'a str>,
+    rejected: &mut FxHashSet<&'a str>,
+    referrers: &mut FxHashMap<&'a str, Vec<&'a str>>,
+    iri: &'a str,
+    triple: &[Term; 3],
+    meter: Option<&mut AuthLedger>,
+) -> Result<(), String> {
+    let (Term::NamedNode(p), Term::NamedNode(o)) = (&triple[1], &triple[2]) else {
+        return Ok(());
+    };
+    if !ACP_DEPENDENCY_PREDICATES.contains(&p.as_str()) {
+        return Ok(());
+    }
+    if let Some(&target) = loaded.get(group_doc_of(o.as_str())) {
+        let refs = referrers.entry(target).or_default();
+        if let Some(meter) = meter {
+            meter.reserve(refs, 1, Dim::Nodes)?;
+        }
+        refs.push(iri);
+    } else {
+        rejected.insert(iri);
+    }
+    Ok(())
+}
+
+fn reject_referrers<'a>(
+    rejected: &mut FxHashSet<&'a str>,
+    referrers: &FxHashMap<&'a str, Vec<&'a str>>,
+    mut meter: Option<&mut AuthLedger>,
+) -> Result<(), String> {
+    let mut work = Vec::new();
+    if let Some(meter) = meter.as_deref_mut() {
+        meter.reserve(&mut work, rejected.len(), Dim::Nodes)?;
+    }
+    work.extend(rejected.iter().copied());
+    while let Some(doc) = work.pop() {
+        for &referrer in referrers.get(doc).into_iter().flatten() {
+            if rejected.insert(referrer) {
+                if let Some(meter) = meter.as_deref_mut() {
+                    meter.reserve(&mut work, 1, Dim::Nodes)?;
+                }
+                work.push(referrer);
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The control documents the loader reads, and those among them that contribute nothing:
 /// each with a triple it may not state ([`admits`]) and, for ACP, each that names, as an
 /// access control, a policy or a matcher, a node of such a document OR a node of a
@@ -480,39 +511,17 @@ fn document_view_metered<'a>(
         let mut referrers: FxHashMap<&str, Vec<&str>> = FxHashMap::default();
         for (iri, triples) in control_graphs {
             for t in triples {
-                let Term::NamedNode(p) = &t[1] else { continue };
-                if !ACP_DEPENDENCY_PREDICATES.contains(&p.as_str()) {
-                    continue;
-                }
-                if let Term::NamedNode(o) = &t[2] {
-                    let target = group_doc_of(o.as_str());
-                    if loaded.contains(target) {
-                        let refs = referrers.entry(target).or_default();
-                        if let Some(meter) = meter.as_deref_mut() {
-                            meter.reserve(refs, 1, Dim::Nodes)?;
-                        }
-                        refs.push(iri);
-                    } else {
-                        rejected.insert(iri);
-                    }
-                }
+                record_dependency(
+                    &loaded,
+                    &mut rejected,
+                    &mut referrers,
+                    iri,
+                    t,
+                    meter.as_deref_mut(),
+                )?;
             }
         }
-        let mut work = Vec::new();
-        if let Some(meter) = meter.as_deref_mut() {
-            meter.reserve(&mut work, rejected.len(), Dim::Nodes)?;
-        }
-        work.extend(rejected.iter().copied());
-        while let Some(doc) = work.pop() {
-            for &referrer in referrers.get(doc).into_iter().flatten() {
-                if rejected.insert(referrer) {
-                    if let Some(meter) = meter.as_deref_mut() {
-                        meter.reserve(&mut work, 1, Dim::Nodes)?;
-                    }
-                    work.push(referrer);
-                }
-            }
-        }
+        reject_referrers(&mut rejected, &referrers, meter)?;
     }
     Ok(Documents { loaded, rejected })
 }
@@ -639,18 +648,17 @@ pub(crate) enum System {
     Acp,
 }
 
-/// Check the serialized write before parsing. Parsed-term accounting starts a fresh
-/// document counter, while sharing the admission ledger's aggregate and fact counters.
-pub(crate) fn admit_write_document(
-    ledger: &mut AuthLedger,
-    iri: &str,
-    bytes: usize,
-) -> Result<(), String> {
-    ledger.open()?;
-    ledger
-        .core()
-        .charge(Dim::DocumentBytes, bytes)
-        .map_err(|e| ledger.refusal(e, Dim::DocumentBytes, iri))
+/// Keep admission diagnostics distinct from a failed materialization: no write or
+/// view replacement has happened. Other documents' details remain private.
+pub(crate) fn write_admission_refusal(error: String) -> String {
+    match crate::auth_allowance_refusal(&error) {
+        Some(kind) => crate::materialize::allowance_refusal(
+            kind,
+            "write refused during access-control admission; the previous authorization view \
+             is still in force; nothing was changed",
+        ),
+        None => error,
+    }
 }
 
 fn admit_write_row(
@@ -659,13 +667,13 @@ fn admit_write_row(
     ids: [Id; 3],
     ledger: &mut AuthLedger,
 ) -> Result<(), String> {
+    for id in ids {
+        ledger.stored_term(iri, graph.dict(), id)?;
+    }
     ledger
         .core()
         .charge(Dim::Facts, 1)
         .map_err(|e| ledger.refusal(e, Dim::Facts, iri))?;
-    for id in ids {
-        ledger.stored_term(iri, graph.dict(), id)?;
-    }
     Ok(())
 }
 
@@ -677,6 +685,7 @@ pub(crate) fn write_triples_metered(
 ) -> Result<Vec<[Term; 3]>, String> {
     ledger.open()?;
     let scan = graph.store().scan(&[None, None, None]);
+    ledger.document_row_bytes(scan.rows.len(), iri)?;
     let mut out = Vec::new();
     for row in scan.rows.iter() {
         let ids = scan.to_spo(row);
