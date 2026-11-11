@@ -16,16 +16,26 @@ use bytes::Bytes;
 use super::{InMemoryStoreLimits, StoreUsage};
 
 /// A blob-store error (kept opaque so it never leaks backend detail to a client).
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum BlobError {
     #[error("blob not found")]
     NotFound,
     /// The configured in-memory byte or entry ceiling would be exceeded.
     #[error("in-memory blob-store quota exceeded")]
     QuotaExceeded,
+    /// The service pool's own byte or entry ceiling would be exceeded.
+    #[error("service pool is full")]
+    ServicePoolFull,
+    /// An envelope names no durable wrapped-key record.
+    #[error("UnknownDataKey")]
+    UnknownDataKey,
     #[error("blob backend error: {0}")]
     Backend(String),
 }
+
+/// The stable pod identity supplied by the resource read and write paths.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BlobScope(pub String);
 
 /// One stored blob, as surfaced by [`BlobStore::list`] for the reconciler's orphan sweep.
 ///
@@ -76,14 +86,31 @@ pub struct BlobEntry {
 /// Native object storage is available through the optional `blob-object` adapter.
 #[async_trait]
 pub trait BlobStore: Send + Sync {
+    /// Whether newly minted body keys must identify envelope storage.
+    /// Transparent decorators must forward the inner store's requirement.
+    fn requires_envelope(&self) -> bool {
+        false
+    }
+
     /// Read the bytes for a storage key.
     async fn get(&self, key: &str) -> Result<Bytes, BlobError>;
+
+    /// Read resource bytes for a pod. Ordinary backends ignore the scope;
+    /// decorators must forward it to their inner store.
+    async fn get_scoped(&self, _scope: &BlobScope, key: &str) -> Result<Bytes, BlobError> {
+        self.get(key).await
+    }
 
     /// Write bytes under a fresh storage key. Durable backends may refuse an existing key;
     /// the legacy in-memory double also supports replacement for generation-race tests.
     /// Callers must never reuse a key, including after deletion. CompositeStore mints
-    /// `($pool$)?b1-[0-9a-f]{32}` keys for this purpose.
+    /// `($pool$)?(b1|e1)-[0-9a-f]{32}` keys for this purpose.
     async fn put(&self, key: &str, body: Bytes) -> Result<(), BlobError>;
+
+    /// Write resource bytes for a pod. Ordinary backends ignore the scope.
+    async fn put_scoped(&self, _scope: &BlobScope, key: &str, body: Bytes) -> Result<(), BlobError> {
+        self.put(key, body).await
+    }
 
     /// Whether a key exists.
     async fn exists(&self, key: &str) -> Result<bool, BlobError>;
@@ -374,6 +401,13 @@ impl InMemoryBlobStore {
         // A service-pool record is admitted against the pool's own ceilings and counts towards
         // nothing else, so no number of them makes a write of content fail.
         let pooled = super::is_pooled_blob_key(key);
+        let full = || {
+            if pooled {
+                BlobError::ServicePoolFull
+            } else {
+                BlobError::QuotaExceeded
+            }
+        };
         let (pool_entries, pool_bytes) = guard.entries.pooled();
         let held = if pooled {
             pool_entries
@@ -386,30 +420,29 @@ impl InMemoryBlobStore {
             self.limits.max_resource_count
         };
         if is_new && held >= ceiling {
-            return Err(BlobError::QuotaExceeded);
+            return Err(full());
         }
         let retained_bytes = guard
             .total_bytes
             .checked_sub(previous_bytes)
             .ok_or_else(|| BlobError::Backend("blob byte accounting underflow".into()))?;
-        let next_total = retained_bytes
-            .checked_add(body.len())
-            .ok_or(BlobError::QuotaExceeded)?;
+        let next_total = retained_bytes.checked_add(body.len()).ok_or_else(full)?;
         let next_pool_bytes = if pooled {
             pool_bytes
                 .checked_sub(previous_bytes)
                 .ok_or_else(|| BlobError::Backend("blob byte accounting underflow".into()))?
                 .checked_add(body.len())
-                .ok_or(BlobError::QuotaExceeded)?
+                .ok_or_else(full)?
         } else {
             pool_bytes
         };
         let next_content_bytes = next_total
             .checked_sub(next_pool_bytes)
             .ok_or_else(|| BlobError::Backend("blob byte accounting underflow".into()))?;
-        if next_pool_bytes > self.limits.max_pool_bytes
-            || next_content_bytes > self.limits.max_total_bytes
-        {
+        if next_pool_bytes > self.limits.max_pool_bytes {
+            return Err(BlobError::ServicePoolFull);
+        }
+        if next_content_bytes > self.limits.max_total_bytes {
             return Err(BlobError::QuotaExceeded);
         }
 

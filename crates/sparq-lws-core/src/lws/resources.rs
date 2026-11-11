@@ -12,7 +12,7 @@ use bytes::Bytes;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
-use super::access::{format_rfc3339, parse_rfc3339, Action};
+use super::access::{self, format_rfc3339, parse_rfc3339, Action};
 use super::notify::Event;
 use super::{
     add_link, encode_meta, is_uri, jose, json_response, meta_key, method_not_allowed, parse_links,
@@ -1018,20 +1018,36 @@ async fn read<S: Store + 'static>(
             };
             set(resp.headers_mut(), header::ETAG, &etag);
             set(resp.headers_mut(), header::VARY, "Accept");
-            add_link(
-                resp.headers_mut(),
-                &storage,
-                &format!("{LWS_NS}storage"),
-                None,
-            );
+            resource_links(state, resp.headers_mut(), &storage, &[]);
             return resp;
         }
     }
-    // The shared lock is held from the permission check through the bytes served, so what is
-    // served is the state the decision was made on: every write holds the exclusive lock.
-    let mut tries = 0;
-    let (_guard, meta) = loop {
-        let Some(guard) = state.locks.read(uri).await else {
+    // Quiet listings retain the shared-lock path: members are only tried, never waited
+    // for under the container. A busy member or a changed generation discards that attempt
+    // and queues one exclusive read. Later creates cannot overtake the fair queue, and no
+    // member lock is taken beneath the exclusive container lock.
+    let Some(guard) = state.locks.read(uri).await else {
+        return set_aside_meanwhile();
+    };
+    let meta = match current(state, uri).await {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    if let Err(r) = recheck(state, Action::Read, uri, agent).await {
+        return r;
+    }
+    if uri.ends_with('/') {
+        if let Ok(listing) = read_container(state, req, uri, &meta, false).await {
+            return listing;
+        }
+        drop(guard);
+        drop(meta);
+        #[cfg(test)]
+        state
+            .locks
+            .listing_fallbacks
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let Some(_guard) = state.locks.lock(uri).await else {
             return set_aside_meanwhile();
         };
         let meta = match current(state, uri).await {
@@ -1041,25 +1057,10 @@ async fn read<S: Store + 'static>(
         if let Err(r) = recheck(state, Action::Read, uri, agent).await {
             return r;
         }
-        if !uri.ends_with('/') {
-            break (guard, meta);
-        }
-        let Busy(member) = match read_container(state, req, uri, &meta, false).await {
-            Ok(listing) => return listing,
-            Err(busy) => busy,
-        };
-        // A change to a member is in flight: the listing is read again once it is over, so
-        // nothing it may yet put back is shown. Waited for without the container's lock, which
-        // the change may take after the member's.
-        drop(guard);
-        tries += 1;
-        if tries == LISTING_TRIES {
-            return retry_later("the container's members kept changing while it was listed");
-        }
-        if state.locks.read(&member).await.is_none() {
-            return set_aside_meanwhile();
-        }
-    };
+        return read_container(state, req, uri, &meta, true)
+            .await
+            .unwrap_or_else(|_| set_aside_meanwhile());
+    }
     let types = match state.resource_meta(uri).await {
         Ok(m) => m.types,
         Err(e) => return store_error(e),
@@ -1224,12 +1225,8 @@ async fn with_sizes<S: Store + 'static>(
     }
 }
 
-/// How many times a listing is read again when changes to its members are in flight, before it
-/// is answered `503`.
-const LISTING_TRIES: usize = 8;
-
-/// Why a container could not be listed: a change to this member is in flight.
-struct Busy(String);
+/// Why an optimistic listing must be retried under the exclusive container lock.
+struct Busy;
 
 /// Why [`members`] could not list a container.
 enum Unlisted {
@@ -1247,10 +1244,10 @@ impl From<ServerError> for Unlisted {
 /// size (which [`with_sizes`] adds for the members shown). Each member's own entity tag stands
 /// for its content.
 ///
-/// Each member is read under its shared lock, so what is listed of it is what it was before or
-/// after a change to it, never in between: a change in flight to one (its lock busy) makes the
-/// listing [`Busy`] instead, unless the caller holds the container `exclusive`ly (then no change
-/// to a member is in flight: each holds the container's lock, shared, while it runs).
+/// On the optimistic path each member's shared lock is only tried. A busy lock discards
+/// the attempt; the caller retries once under the exclusive container lock. That fallback
+/// takes no member locks, since each mutation already holds the container until it commits
+/// or is put back.
 async fn members<S: Store + 'static>(
     state: &LwsState<S>,
     uri: &str,
@@ -1273,7 +1270,7 @@ async fn members<S: Store + 'static>(
             true => None,
             false => match state.locks.try_read(&child) {
                 Some(guard) => Some(guard),
-                None => return Err(Unlisted::Busy(Busy(child))),
+                None => return Err(Unlisted::Busy(Busy)),
             },
         };
         let Some(meta) = state.store.meta(&child).await? else {
@@ -1339,7 +1336,7 @@ async fn read_container<S: Store + 'static>(
     // Held exclusively, the container cannot change meanwhile (a counter it shares with
     // others may move, which says nothing about it).
     if !exclusive && state.generation(uri) != generation {
-        return Err(Busy(uri.to_string()));
+        return Err(Busy);
     }
     Ok(resp)
 }
@@ -1763,6 +1760,50 @@ fn prefers_set_linkset(req: &LwsRequest) -> bool {
         .any(|p| p.trim().eq_ignore_ascii_case("set-linkset"))
 }
 
+/// Moving is not offered. Only the resource's IRI determines its parent; no destination
+/// lookup or stored metadata participates in this decision.
+fn refuse_up_change<'a>(
+    uri: &str,
+    storage: &str,
+    mut targets: impl Iterator<Item = &'a str>,
+) -> Option<Response> {
+    let parent = parent_of(uri, storage);
+    targets
+        .any(|target| Some(target) != parent.as_deref())
+        .then(|| {
+            problem(
+                StatusCode::CONFLICT,
+                Some("changing the up link is not supported"),
+            )
+        })
+}
+
+/// Check Link headers before their server-managed relations are discarded. An explicit
+/// anchor changes the context; an up link about some other resource does not move this one.
+fn refuse_up_headers(req: &LwsRequest, uri: &str, storage: &str) -> Option<Response> {
+    for link in parse_links(&req.header_all(header::LINK)) {
+        if !link
+            .param("rel")
+            .is_some_and(|rel| rel.split_whitespace().any(|r| relation_key(r) == "up"))
+        {
+            continue;
+        }
+        if link
+            .param("anchor")
+            .is_some_and(|anchor| resolve_reference(uri, &anchor).as_deref() != Some(uri))
+        {
+            continue;
+        }
+        if let Some(target) = resolve_reference(uri, link.target) {
+            if let Some(refused) = refuse_up_change(uri, storage, std::iter::once(target.as_str()))
+            {
+                return Some(refused);
+            }
+        }
+    }
+    None
+}
+
 /// The linkset a new resource starts with: its declared user-managed links.
 fn initial_linkset(uri: &str, links: &Links) -> Option<Value> {
     if links.is_empty() {
@@ -1829,7 +1870,10 @@ pub(crate) async fn restore_history<S: Store + 'static>(
             // As for create, metadata precedes content. A stop can leave metadata alone.
             let result = async {
                 state.put_resource_meta(&target, &meta).await?;
-                state.store.restore_trash(&member, &target, &parent).await
+                state.store.restore_trash(&member, &target, &parent).await?;
+                Ok(access::Snapshot::take(&state, &target)
+                    .await
+                    .unwrap_or_else(|_| access::Snapshot::unreadable()))
             }
             .await;
             if result.is_err() {
@@ -1847,16 +1891,19 @@ pub(crate) async fn restore_history<S: Store + 'static>(
         }
     };
     let (container, uri) = (parent.to_string(), target.to_string());
-    let after = move |out: &Result<(), ServerError>| {
-        if out.is_ok() {
+    let after = move |out: &Result<access::Snapshot, ServerError>| {
+        if let Ok(snapshot) = out {
             (
                 Some(container.clone()),
-                Some(Event {
-                    kind: "Create",
-                    is_container: false,
-                    uri,
-                    relation: Some(("target", container)),
-                }),
+                Some((
+                    Event {
+                        kind: "Create",
+                        is_container: false,
+                        uri,
+                        relation: Some(("target", container)),
+                    },
+                    CommitSnapshot::Ready(snapshot.clone()),
+                )),
             )
         } else {
             (None, None)
@@ -1870,7 +1917,7 @@ pub(crate) async fn restore_history<S: Store + 'static>(
         writes,
     )
     .await?;
-    result
+    result.map(|_| ())
 }
 
 /// Residual: CTH write-access-bob.feature "Bob can POST container no A" and Touchstone
@@ -2045,8 +2092,8 @@ async fn create<S: Store + 'static>(
             req.admission.clone(),
         );
         tokio::spawn(async move {
-            // Held to the end, announcement included: this work still counts against the
-            // concurrency ceiling once the request has gone.
+            // Held through the write, then passed through selection and webhook queueing:
+            // both still count against the concurrency ceiling after the response.
             let _admission = admission;
             let (created, locks) = state
                 .store
@@ -2143,18 +2190,21 @@ async fn create<S: Store + 'static>(
                 })
                 .await??;
             // What follows a commit follows it whether or not the client is still there: the
-            // container's bookkeeping and the Create notification. Who hears of it is decided
-            // with the locks still held, so no change that follows can hide the create; the locks
-            // then go (the touch takes the container's lock again) before anything is sent.
+            // container's bookkeeping and the Create notification. Capture the state under
+            // the locks; selection and delivery run on the notification task.
             let event = Event {
                 kind: "Create",
                 uri: child.clone(),
                 is_container,
                 relation: Some(("target", parent.clone())),
             };
-            let pending = state.notify.prepare(&state, &event).await;
+            let pending = state.notify.commit(
+                &state,
+                event,
+                access::Snapshot::from_parts(meta, Some(content_type)),
+            );
             touch_after(&state, locks, &parent).await;
-            state.notify.send(&state, pending);
+            state.notify.send(&state, pending, _admission);
             Ok(created)
         })
         .await
@@ -2266,6 +2316,8 @@ async fn current<S: Store + 'static>(
 /// other's locks; that deployment needs a conditional write in the store itself.
 #[derive(Default)]
 pub struct IriLocks {
+    #[cfg(test)]
+    pub(super) listing_fallbacks: std::sync::atomic::AtomicUsize,
     map: std::sync::Mutex<LockMap>,
     /// The IRIs set aside ([`LwsState::set_aside`](super::LwsState::set_aside)), each with how
     /// many set-aside changes are to it.
@@ -2577,14 +2629,16 @@ async fn stored_meta<S: Store + 'static>(
 /// is still pending (a remote store may commit a request that was already sent): nobody else acts
 /// on the resource until the writes are over, and none of them is cut off half way. The task
 /// holds `admission`, the request's share of its admission permit, so a write that outlives its
-/// request still counts against the concurrency ceiling until it ends.
+/// request still counts against the concurrency ceiling. Successful notification work takes
+/// the slot on through selection and webhook queueing, without delaying the response;
+/// stream publication waits happen after the slot is released.
 ///
 /// When the writes failed and could not be put back (`writes` yields what is left), the task
 /// sets that aside with the locks ([`LwsState::set_aside`](super::LwsState::set_aside)) and the
 /// locks do not come back. What the writes changed (`after` says, from their outcome: a
 /// container whose listing changed, an event to announce) the task records once they are over:
-/// it decides who hears of the event with the locks held, then releases them, touches the
-/// container ([`touch_container`]) and sends the notifications, so a request that goes away once its writes have started can neither leave the
+/// it captures the commit state with the locks held, then releases them, touches the
+/// container ([`touch_container`]) and schedules notification selection, so a request that goes away once its writes have started can neither leave the
 /// container's date behind its listing nor keep subscribers from hearing of the change.
 async fn hold_locks<S, L, T, F, C>(
     state: &LwsState<S>,
@@ -2598,7 +2652,7 @@ where
     L: Send + 'static,
     T: Send + 'static,
     F: std::future::Future<Output = (T, Option<super::Unsettled>)> + Send + 'static,
-    C: FnOnce(&T) -> (Option<String>, Option<Event>) + Send + 'static,
+    C: FnOnce(&T) -> (Option<String>, Option<(Event, CommitSnapshot)>) + Send + 'static,
 {
     let state = state.detached();
     tokio::spawn(async move {
@@ -2621,25 +2675,40 @@ where
         let result = match after(&out) {
             (None, None) => (out, Some(locks)),
             (container, event) => {
-                let pending = match &event {
-                    Some(event) => state.notify.prepare(&state, event).await,
+                let pending = match event {
+                    Some((event, CommitSnapshot::Ready(snapshot))) => {
+                        state.notify.commit(&state, event, snapshot)
+                    }
+                    Some((event, CommitSnapshot::Patch(format))) => {
+                        state.notify.commit_patch(&state, event, format).await
+                    }
                     None => Default::default(),
                 };
                 match container {
                     Some(container) => touch_after(&state, locks, &container).await,
                     None => drop(locks),
                 }
-                state.notify.send(&state, pending);
+                state.notify.send(&state, pending, _admission);
                 (out, None)
             }
         };
         Ok(result)
     })
     .await
-    .map_err(|e| ServerError::Storage(format!("the request failed: {e}")))?
+    .map_err(|error| ServerError::Storage(format!("the request failed: {error}")))?
 }
 
-/// Write new content for `uri` and, with `meta` = `(new, old)`, its new metadata, such that a
+enum CommitSnapshot {
+    Ready(access::Snapshot),
+    Patch(Option<String>),
+}
+
+enum ContentMetadata {
+    Replace(ResourceMeta, Option<ResourceMeta>),
+    Unchanged(Option<ResourceMeta>),
+}
+
+/// Write new content for `uri` and optionally replace its metadata, keeping the prior state so a
 /// failure (or the request being dropped) never leaves content visible under metadata that does
 /// not describe it: the types (and the creator) in the metadata are what grants rest on, so new
 /// content under old types, or old content under new ones, could reach readers neither state
@@ -2665,7 +2734,7 @@ async fn write_with_meta<S: Store + 'static, L: Send + 'static>(
     uri: &str,
     body: Bytes,
     content_type: &str,
-    meta: Option<(ResourceMeta, Option<ResourceMeta>)>,
+    meta: ContentMetadata,
     admission: Option<crate::overload::AdmissionSlot>,
 ) -> (
     Result<crate::store::sparq::ResourceMeta, ServerError>,
@@ -2684,20 +2753,34 @@ async fn write_with_meta<S: Store + 'static, L: Send + 'static>(
                 Ok(_) | Err(ServerError::Storage(_)) | Err(ServerError::Unsettled { .. })
             )
     };
+    let (snapshot_meta, changed) = match meta {
+        ContentMetadata::Replace(mut new, old) => {
+            new.pending = false;
+            let changed = (old.clone().unwrap_or_default() != new).then(|| (new.clone(), old));
+            (Some(new), changed)
+        }
+        ContentMetadata::Unchanged(meta) => (meta, None),
+    };
     // Subscribers hear of a write that succeeded ("Update — an existing resource's content or
     // metadata was modified"); none of one that may not have happened.
     let update = {
+        let format = Some(
+            if uri.ends_with('/') {
+                LWS_JSON
+            } else {
+                content_type
+            }
+            .to_string(),
+        );
+        let snapshot = match snapshot_meta {
+            Some(meta) => CommitSnapshot::Ready(access::Snapshot::from_parts(meta, format)),
+            None => CommitSnapshot::Patch(format),
+        };
         let uri = uri.to_string();
         move |outcome: &Result<crate::store::sparq::ResourceMeta, ServerError>| {
-            outcome.is_ok().then(|| updated(&uri))
+            outcome.is_ok().then(|| (updated(&uri), snapshot))
         }
     };
-    let changed = meta
-        .map(|(mut new, old)| {
-            new.pending = false;
-            (new, old)
-        })
-        .filter(|(new, old)| old.clone().unwrap_or_default() != *new);
     // Metadata that could not be stored is refused before anything is written.
     if let Some(Err(e)) = changed.as_ref().map(|(new, _)| encode_meta(new)) {
         return (Err(e), Some(guard), true);
@@ -2815,6 +2898,11 @@ async fn update<S: Store + 'static>(
         Ok(declared) => declared,
         Err(r) => return r,
     };
+    if set_linkset {
+        if let Some(refused) = refuse_up_headers(req, uri, &state.cfg.storage()) {
+            return refused;
+        }
+    }
     let declared = if set_linkset {
         rmeta.linkset = initial_linkset(uri, &links);
         rmeta.links = links;
@@ -2867,7 +2955,7 @@ async fn update<S: Store + 'static>(
         uri,
         req.body.clone(),
         &content_type,
-        Some((rmeta, old_rmeta)),
+        ContentMetadata::Replace(rmeta, old_rmeta),
         req.admission.clone(),
     )
     .await;
@@ -3805,9 +3893,12 @@ async fn patch<S: Store + 'static>(
     // A patch reads what it patches: whether it applies, and what it makes, depend on the content
     // (a member there or not, the document's shape, format and size). So it needs Read as well as
     // Modify, checked before anything about the resource answers it.
-    if let Err(r) = recheck(state, Action::Read, uri, agent).await {
-        return r;
-    }
+    let authorization_meta = match access::allowed_with_meta(state, Action::Read, uri, agent).await
+    {
+        Ok((true, meta)) => meta,
+        Ok((false, _)) => return state.deny(agent),
+        Err(e) => return store_error(e),
+    };
     let meta = match current(state, uri).await {
         Ok(m) => m,
         Err(r) => return r,
@@ -3864,6 +3955,16 @@ async fn patch<S: Store + 'static>(
     };
     let patched = numbers_from_text(&serde_json::to_string(&patched).unwrap_or_default());
     let ct = meta.content_type.clone();
+    let rmeta = match authorization_meta {
+        Some(meta) => Some(meta),
+        // Skip the early read when possible. Commit captures eligibility and checks again,
+        // since ancestor and parent subscriptions can register during the content write.
+        None if state.cfg.open || !state.notify.has_non_owner_subscriptions() => None,
+        None => Some(state.resource_meta(uri).await.unwrap_or(ResourceMeta {
+            pending: true,
+            ..ResourceMeta::default()
+        })),
+    };
     // The linkset is left alone: a PATCH changes the content only.
     // The listing lock goes with the resource's into the writes' task (see [`hold_locks`]),
     // which touches the container once they are over.
@@ -3873,7 +3974,7 @@ async fn patch<S: Store + 'static>(
         uri,
         Bytes::from(patched),
         &ct,
-        None,
+        ContentMetadata::Unchanged(rmeta),
         req.admission.clone(),
     )
     .await;
@@ -4013,6 +4114,7 @@ async fn delete<S: Store + 'static>(
             let state = state.detached();
             let uri = uri.to_string();
             let parent = parent.clone();
+            let admission = req.admission.clone();
             async move {
                 let event = Event {
                     kind: "Delete",
@@ -4020,14 +4122,19 @@ async fn delete<S: Store + 'static>(
                     uri: uri.clone(),
                     relation: parent.clone().map(|p| ("origin", p)),
                 };
-                let pending = state.notify.prepare(&state, &event).await;
+                // Keep the pre-delete resource state; capture eligibility only once the
+                // move commits, while the resource and listing locks are still held.
+                let snapshot = access::Snapshot::take(&state, &uri)
+                    .await
+                    .unwrap_or_else(|_| access::Snapshot::unreadable());
                 let outcome = state
                     .store
                     .trash_resource(&uri, parent.as_deref(), fields)
                     .await;
                 if outcome.is_ok() {
                     let _ = state.store.delete(&meta_key(&uri), None).await;
-                    state.notify.send(&state, pending);
+                    let committed = state.notify.commit(&state, event, snapshot);
+                    state.notify.send(&state, committed, admission);
                 }
                 ((Vec::<String>::new(), outcome), None)
             }
@@ -4056,6 +4163,7 @@ async fn delete<S: Store + 'static>(
     // is in `removed`.
     let removal = {
         let state = state.detached();
+        let admission = req.admission.clone();
         async move {
             // A subtree too large to remove atomically is refused before anything is removed,
             // and before anyone's notifications are prepared: an oversized delete does none of
@@ -4068,13 +4176,9 @@ async fn delete<S: Store + 'static>(
                 let left = journal.rollback().await;
                 return ((Vec::new(), Err(e)), left);
             }
-            // Who hears of each removal is decided before the resources go, while who may read
-            // each can still be decided; the notifications go out only once the whole removal
-            // happened. A recursive delete removes every descendant, and each removal is a
-            // Delete of its own. They share the delivery queue's bound: what is prepared past it
-            // would be dropped when sent, and is not held while the removals run.
+            // Capture each resource's already-staged state before removal. Only a whole
+            // successful removal schedules selection, on one task sharing the queue bound.
             let mut notices = Vec::with_capacity(doomed.len());
-            let mut room = state.cfg.delivery.queue;
             // A linkset record a legacy edge makes a member is announced to nobody.
             for (gone, origin) in doomed
                 .iter()
@@ -4087,17 +4191,18 @@ async fn delete<S: Store + 'static>(
                     uri: gone,
                     relation: origin.map(|p| ("origin", p)),
                 };
-                let prepared = state.notify.prepare_at_most(&state, &event, room).await;
-                room = room.saturating_sub(prepared.len());
-                notices.push(prepared);
+                let snapshot = journal.snapshot(&event.uri);
+                notices.push((event, snapshot));
             }
             let (removed, outcome, left) = remove_staged(journal, &doomed).await;
             // Only a delete that happened whole is announced. One that failed was put back, or
             // what could not be is set aside, so nothing it touched is announced as gone.
             if outcome.is_ok() {
-                for pending in notices {
-                    state.notify.send(&state, pending);
-                }
+                let committed = notices
+                    .into_iter()
+                    .map(|(event, snapshot)| state.notify.commit(&state, event, snapshot))
+                    .collect();
+                state.notify.send_all(&state, committed, admission);
             }
             ((removed, outcome), left)
         }
@@ -4761,7 +4866,7 @@ fn absolute_linkset(doc: &Value, base: &str, budget: usize) -> Result<Resolved, 
 
 /// The user-managed part of a linkset document: every server-managed relation dropped from the
 /// entries about `uri`. A client cannot write those relations; whatever a patch puts there is
-/// ignored and the server's own values stand.
+/// discarded and the server's own values stand. Unsupported up changes are refused first.
 fn user_linkset(doc: &Resolved, uri: &str) -> Resolved {
     let entries = doc
         .0
@@ -5345,6 +5450,20 @@ where
             Some("the linkset would be too large"),
         ),
     };
+    let targets = patched.0["linkset"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|entry| anchored_at(entry, uri))
+        .filter_map(Value::as_object)
+        .flat_map(|entry| entry.iter())
+        .filter(|(relation, _)| relation_key(relation) == "up")
+        .filter_map(|(_, targets)| targets.as_array())
+        .flatten()
+        .filter_map(|target| target["href"].as_str());
+    if let Some(refused) = refuse_up_change(uri, &state.cfg.storage(), targets) {
+        return refused;
+    }
     // Only the user-managed part is kept; the links the type index matches are taken from
     // it, so the two never drift apart.
     let user = user_linkset(&patched, uri);
@@ -5399,12 +5518,24 @@ where
     };
     let parent = parent_of(uri, &state.cfg.storage());
     let event = updated(uri);
+    let snapshot = access::Snapshot::from_parts(
+        meta,
+        if uri.ends_with('/') {
+            Some(LWS_JSON.to_string())
+        } else {
+            format
+        },
+    );
     let after = move |w: &Result<(), ServerError>| {
         let landed = matches!(
             w,
             Ok(()) | Err(ServerError::Storage(_)) | Err(ServerError::Unsettled { .. })
         );
-        (parent.filter(|_| landed), w.is_ok().then_some(event))
+        (
+            parent.filter(|_| landed),
+            w.is_ok()
+                .then_some((event, CommitSnapshot::Ready(snapshot))),
+        )
     };
     match hold_locks(state, locks, req.admission.clone(), after, write).await {
         Ok((Ok(()), _)) => {}
@@ -6495,7 +6626,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn linkset_patch_ignores_server_managed_relations_and_keeps_links_in_step() {
+    async fn linkset_patch_keeps_fixed_relations_and_user_links_in_step() {
         let st = state().await;
         let uri = post(
             &st,
@@ -6506,8 +6637,8 @@ mod tests {
         )
         .await;
         let meta = format!("{}{META_SUFFIX}", path_of(&uri));
-        // A patch replacing the whole array: a forged parent and type, and a new link only.
-        let patch = json!({"linkset": [{"anchor": uri, "up": [{"href": "https://forged/"}],
+        // A patch replacing the whole array: the fixed parent, a forged type and a new link.
+        let patch = json!({"linkset": [{"anchor": uri, "up": [{"href": format!("{BASE}/")}],
             "type": [{"href": "https://forged/T"}], "describedby": [{"href": "https://ex.org/schema"}]}]});
         let r = call(
             &st,
@@ -10138,12 +10269,7 @@ mod tests {
         }
     }
 
-    /// Review finding: a listing read its members without their locks, so a change in flight
-    /// (content written, its metadata not yet) showed in it, though the change might yet be put
-    /// back; and a member's removal, which held its container only shared, could be listed
-    /// as gone before it was put back. A listing reads each member under its shared lock, and
-    /// is read again once a change in flight to one is over; a removal holds its container
-    /// exclusively.
+    /// Listings wait for mutations holding their container, including removals.
     #[tokio::test]
     async fn a_listing_waits_out_changes_in_flight_to_its_members() {
         use super::super::test_store::{request as req, state};
@@ -10161,9 +10287,11 @@ mod tests {
             })
         };
         let held = st.locks.lock(&x).await.expect("visible");
+        let parent = st.locks.read(&st.cfg.storage()).await.expect("visible");
         let listing = list();
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert!(!listing.is_finished(), "listed during a change to a member");
+        drop(parent);
         drop(held);
         let r = tokio::time::timeout(Duration::from_secs(1), listing)
             .await
@@ -10206,7 +10334,7 @@ mod tests {
     #[tokio::test]
     async fn a_listing_has_no_date_until_the_touch_after_a_change_lands() {
         use super::super::test_store::{request as req, state};
-        let (st, _store) = state(100).await;
+        let (st, store) = state(100).await;
         let anon = Agent::anonymous();
         for slug in ["a", "b"] {
             let h = [("slug", slug), ("content-type", "text/plain")];
@@ -10218,7 +10346,6 @@ mod tests {
             std::time::SystemTime::now() + std::time::Duration::from_secs(3600),
         )
         .unwrap();
-        // Every touch of the root waits.
         let touch = st.locks.lock(&format!("{root}\0touch")).await.unwrap();
         let removal = {
             let st = st.clone();
@@ -10246,8 +10373,20 @@ mod tests {
         let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anon).await;
         assert_eq!(r.status(), StatusCode::OK);
         assert!(!r.headers().contains_key(header::LAST_MODIFIED));
+        assert!(!removal.is_finished());
         drop(touch);
         assert!(removal.await.unwrap().status().is_success());
+        let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anon).await;
+        assert!(r.headers().contains_key(header::LAST_MODIFIED));
+        // A failed touch also leaves the listing undated until a later touch lands.
+        *store.fail_write_of.lock().unwrap() = Some(meta_key(&root));
+        let r = handle(&st, &req(Method::DELETE, "/a", &[], ""), &anon).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anon).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert!(!r.headers().contains_key(header::LAST_MODIFIED));
+        *store.fail_write_of.lock().unwrap() = None;
+        touch_container(&st, &root).await;
         let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anon).await;
         assert!(r.headers().contains_key(header::LAST_MODIFIED));
     }
@@ -10696,6 +10835,13 @@ mod tests {
         // One member alone fits, and its delete is prepared.
         let r = delete("/e/m0", &[]).await;
         assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while st.notify.prepared_for.load(Ordering::SeqCst) == prepared {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("successful delete was not selected");
         assert_eq!(st.notify.prepared_for.load(Ordering::SeqCst), prepared + 1);
     }
 

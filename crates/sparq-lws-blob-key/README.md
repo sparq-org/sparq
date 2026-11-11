@@ -7,15 +7,16 @@ wasm targets.
 ## 🚀 Quickstart
 
 ```rust
-let key = sparq_lws_blob_key::format([0xab; 16], true);
+let key = sparq_lws_blob_key::format([0xab; 16], true, false);
 assert_eq!(sparq_lws_blob_key::parse(&key).unwrap().1, true);
 ```
 
 ## ✨ Features
 
-`POOL_MARK` is `$pool$`; `PREFIX` is `b1-`. `parse(&str)` accepts exactly
-`($pool$)?b1-<32 lowercase hex>` and returns the bare key and pool flag.
-`format([u8; 16], bool)` formats caller-supplied suffix bytes as a canonical key.
+`POOL_MARK` is `$pool$`; `PREFIX` is `b1-`; `ENVELOPE_PREFIX` is `e1-`.
+`parse(&str)` accepts exactly `($pool$)?(b1|e1)-<32 lowercase hex>` and returns the bare key and pool flag.
+`format([u8; 16], pooled, envelope)` formats caller-supplied suffix bytes as a
+canonical key. The final boolean selects `e1-` when true and `b1-` when false.
 Callers supply randomness and retain responsibility for never reusing keys.
 
 ## 📚 Learn more

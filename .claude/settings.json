@@ -17,9 +17,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "hook_input=$(cat); guard=\"$CLAUDE_PROJECT_DIR/scripts/check-pr-arm-base.py\"; if [ -n \"$CLAUDE_PROJECT_DIR\" ] && [ -r \"$guard\" ] && guard_output=$(printf '%s' \"$hook_input\" | python3 \"$guard\") && [ -n \"$guard_output\" ]; then printf '%s\\n' \"$guard_output\"; elif printf '%s' \"$hook_input\" | grep -Eq 'gh[[:space:]]+pr[[:space:]]+merge'; then printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"\ud83e\udd16 SPARQ arm guard: scripts/check-pr-arm-base.py could not run, so this gh pr merge cannot be proven not to be the release-plz Release PR. DENYING (fail-closed, #1135 - a crates.io version can never be unpublished). Restore the guard script, or have a maintainer merge by hand.\"}}'; else printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"permissionDecisionReason\":\"\ud83e\udd16 SPARQ arm guard: guard script unavailable or failed and this is not a gh pr merge, so no arm is being gated; allowing (the stacked-base axis is fail-open by design).\"}}'; fi",
+            "command": "hook_input=$(cat); guard=\"$CLAUDE_PROJECT_DIR/scripts/check-pr-arm-base.py\"; if [ -n \"$CLAUDE_PROJECT_DIR\" ] && [ -r \"$guard\" ] && guard_output=$(printf '%s' \"$hook_input\" | python3 \"$guard\") && [ -n \"$guard_output\" ]; then printf '%s\\n' \"$guard_output\"; elif printf '%s' \"$hook_input\" | grep -Eq 'gh[[:space:]]+pr[[:space:]]+merge'; then printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"🤖 SPARQ arm guard: scripts/check-pr-arm-base.py could not run, so this gh pr merge cannot be proven not to be the release-plz Release PR. DENYING (fail-closed, #1135 - a crates.io version can never be unpublished). Restore the guard script, or have a maintainer merge by hand.\"}}'; else printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"permissionDecisionReason\":\"🤖 SPARQ arm guard: guard script unavailable or failed and this is not a gh pr merge, so no arm is being gated; allowing (the stacked-base axis is fail-open by design).\"}}'; fi",
             "timeout": 40,
-            "statusMessage": "Stacked-PR arm guard: checking PR base is main\u2026"
+            "statusMessage": "Stacked-PR arm guard: checking PR base is main…"
           }
         ]
       }
@@ -29,11 +29,12 @@
     "allow": [
       "Bash(gh api -X PATCH repos/sparq-org/sparq/issues/*)",
       "Bash(gh api -X POST repos/sparq-org/sparq/actions/runs/*/cancel)",
+      "Bash(gh api -X PUT repos/sparq-org/sparq/pulls/*/merge*)",
       "Bash(gh issue close *)",
       "Bash(gh pr close *)",
+      "Bash(gh pr ready*)",
       "Bash(gh run cancel *)",
-      "Edit(.github/workflows/**)",
-      "Bash(gh api -X PUT repos/sparq-org/sparq/pulls/*/merge*)"
+      "Edit(.github/workflows/**)"
     ]
   }
 }

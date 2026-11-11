@@ -350,3 +350,27 @@ fn non_utf8_names_and_symlinks_are_foreign() {
     assert_eq!(listing.blobs.len(), 1);
     assert_eq!(listing.blobs[0].key, KEY);
 }
+
+#[test]
+fn envelope_keys_share_layout_validation_and_reopen() {
+    let dir = Directory::new();
+    for (key, relative) in [
+        ("e1-0123456789abcdef0123456789abcdef", "objects/01/23"),
+        ("$pool$e1-0123456789abcdef0123456789abcdef", "pool/01"),
+    ] {
+        dir.open().put(key, b"envelope bytes").unwrap();
+        assert_eq!(
+            fs::read(dir.0.join(relative).join(key)).unwrap(),
+            b"envelope bytes"
+        );
+        let store = dir.open();
+        assert_eq!(store.get(key).unwrap(), b"envelope bytes");
+        assert!(store.exists(key).unwrap());
+        assert_eq!(store.stat(key).unwrap().unwrap().key, key);
+        let listing = store.list().unwrap();
+        assert!(listing.foreign.is_empty());
+        assert!(listing.blobs.iter().any(|entry| entry.key == key));
+        store.delete(key).unwrap();
+        assert!(!store.exists(key).unwrap());
+    }
+}

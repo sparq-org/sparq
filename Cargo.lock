@@ -138,9 +138,9 @@ dependencies = [
 
 [[package]]
 name = "arc-swap"
-version = "1.9.2"
+version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c049c0be4daef0b145cb3555416b3b8ef5b7888a38aea1a3a155801fe7b0810b"
+checksum = "380962b3d93b99642e50b9febf72c071e97e8b32d86eae9cf4ef582bb960ae6e"
 dependencies = [
  "rustversion",
 ]
@@ -431,9 +431,9 @@ dependencies = [
 
 [[package]]
 name = "async-lock"
-version = "3.4.2"
+version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "290f7f2596bd5b78a9fec8088ccd89180d7f9f55b94b0576823bbbdc72ee8311"
+checksum = "0876700b0d007ad25d5508865a4259c3af9af6d296bf663a0d586d0bc3369f6f"
 dependencies = [
  "event-listener",
  "event-listener-strategy",
@@ -465,9 +465,9 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "aws-lc-rs"
-version = "1.18.1"
+version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b281d307588d634de920874890732659e2e7672f72b5e10e81badc1a8a83621e"
+checksum = "048006790404103c488e6c5616b3e7e702a71292aadda08e8f7698a9e0d2eb53"
 dependencies = [
  "aws-lc-sys",
  "untrusted 0.7.1",
@@ -476,9 +476,9 @@ dependencies = [
 
 [[package]]
 name = "aws-lc-sys"
-version = "0.45.0"
+version = "0.47.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9bff6c3b54fad79a2e60b8102caf565819711497c1f5f092f49508e2f5c31b27"
+checksum = "8bfbe32ac36b3c428696ce315464181bc4029d689fd58e3f2a4e58c252242f52"
 dependencies = [
  "cc",
  "cmake",
@@ -624,15 +624,6 @@ checksum = "222fb4925a15bea6a68075021910e03d6aa2d04951d71ff1d956190a551d738f"
 
 [[package]]
 name = "bit-set"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08807e080ed7f9d5433fa9b275196cfc35414f66a0c79d864dc51a0d825231a3"
-dependencies = [
- "bit-vec 0.8.0",
-]
-
-[[package]]
-name = "bit-set"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09ec2f926cc3060f09db9ebc5b52823d85268d24bb917e472c0c4bea35780a7d"
@@ -641,10 +632,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "bit-vec"
-version = "0.8.0"
+name = "bit-set"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
+checksum = "56d87354e4229f54a44f7bf2435906a4656dba36026ab6eaca629a2c436a691c"
+dependencies = [
+ "bit-vec 0.10.1",
+]
 
 [[package]]
 name = "bit-vec"
@@ -652,6 +646,16 @@ version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b71798fca2c1fe1086445a7258a4bc81e6e49dcd24c8d0dd9a1e57395b603f51"
 dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "bit-vec"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5727b15fa97d4f4fee0a3b7c3d550ed0269f54329207b86388de918604e31269"
+dependencies = [
+ "borsh",
  "serde",
 ]
 
@@ -705,6 +709,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdeb9d870516001442e364c5220d3574d2da8dc765554b4a617230d33fa58ef5"
 dependencies = [
  "objc2",
+]
+
+[[package]]
+name = "borsh"
+version = "1.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "553c5d846a6ba5150c65e3b1b8ec073bcf1abc20f9b7220de384a4443ea4e20a"
+dependencies = [
+ "borsh-derive",
+ "bytes",
+ "cfg_aliases",
+]
+
+[[package]]
+name = "borsh-derive"
+version = "1.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12cdfe656708a01f89b451a7d36466e6fe6c414de0aa18fc54f864f6f9ca9f56"
+dependencies = [
+ "once_cell",
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote 1.0.45",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -1068,6 +1096,12 @@ name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
+
+[[package]]
+name = "core_detect"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f8f80099a98041a3d1622845c271458a2d73e688351bf3cb999266764b81d48"
 
 [[package]]
 name = "cpufeatures"
@@ -2757,9 +2791,9 @@ checksum = "34b357333733e8260735ba5894eb928c02ecc69c78715f01a8019e7fa7f2db4c"
 
 [[package]]
 name = "libc"
-version = "0.2.190"
+version = "0.2.191"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78"
+checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
 
 [[package]]
 name = "libloading"
@@ -2899,9 +2933,9 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "memmap2"
-version = "0.9.11"
+version = "0.9.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d1219ed1b7f229ee7104d281dd01d6802fe28bb6e95d292942c4daacdeb798c0"
+checksum = "6b0ca1155a9ecc25aa12e8313a119f32edf0255fea2f44839c4ac0a12b2ac157"
 dependencies = [
  "libc",
 ]
@@ -3123,9 +3157,9 @@ checksum = "521739c6d2bac4aa25192232afe6841231376b2b26d4d9fae5ecf8ca5772e441"
 
 [[package]]
 name = "num-integer"
-version = "0.1.46"
+version = "0.1.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7969661fd2958a5cb096e56c8e1ad0444ac2bbcd0061bd28660485a44879858f"
+checksum = "7ce2d95d4b3734dc35aa2f45e1aa22cd416814592a4f9d9205e11affd5b8e10b"
 dependencies = [
  "num-traits",
 ]
@@ -3768,6 +3802,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "proc-macro-crate"
+version = "3.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e67ba7e9b2b56446f1d419b1d807906278ffa1a658a8a5d8a39dcb1f5a78614f"
+dependencies = [
+ "toml_edit",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3797,16 +3840,17 @@ dependencies = [
 
 [[package]]
 name = "proptest"
-version = "1.11.0"
+version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b45fcc2344c680f5025fe57779faef368840d0bd1f42f216291f0dc4ace4744"
+checksum = "b8530004ccb15eae51c7e40009fbe317f341f804db54dc033eec1c50be28cfa0"
 dependencies = [
- "bit-set 0.8.0",
- "bit-vec 0.8.0",
+ "bit-set 0.11.1",
+ "bit-vec 0.10.1",
  "bitflags",
+ "chacha20 0.10.2",
+ "core_detect",
  "num-traits",
- "rand 0.9.4",
- "rand_chacha 0.9.0",
+ "rand 0.10.1",
  "rand_xorshift",
  "regex-syntax",
  "rusty-fork",
@@ -4097,11 +4141,11 @@ dependencies = [
 
 [[package]]
 name = "rand_xorshift"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "513962919efc330f829edb2535844d1b912b0fbe2ca165d613e4e8788bb05a5a"
+checksum = "60aa6af80be32871323012e02e6e65f8a7cc7890931ae421d217ad8fe0df2ccf"
 dependencies = [
- "rand_core 0.9.5",
+ "rand_core 0.10.1",
 ]
 
 [[package]]
@@ -4178,9 +4222,9 @@ dependencies = [
 
 [[package]]
 name = "redis"
-version = "1.7.1"
+version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed5b98ae99461e02895c3a96a25dbe4d852a3d5e5b815d31d5d9e4b5344d99e9"
+checksum = "db7f3d75b5a3301746bff39a767bf4c5c42506b08513527308b3875bfb64a031"
 dependencies = [
  "arcstr",
  "combine",
@@ -4420,9 +4464,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.45"
+version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
+checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "aws-lc-rs",
  "log",
@@ -4649,9 +4693,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.151"
+version = "1.0.154"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
+checksum = "e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6"
 dependencies = [
  "itoa",
  "memchr",
@@ -4839,9 +4883,9 @@ version = "0.3.1"
 
 [[package]]
 name = "smallvec"
-version = "1.16.3"
+version = "1.16.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b3dc8af474f516a851ff4bd12db780f948b9250ad37211e4eec0bccea54e01b"
+checksum = "149309498a5f7334b12ddae0cad8aba81ce785fe91755068867e017cf98fee46"
 
 [[package]]
 name = "socket2"
@@ -4940,7 +4984,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-acbench"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "hex",
  "oxrdf 0.3.3",
@@ -4951,7 +4995,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-algos"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "proptest",
@@ -4961,7 +5005,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-arrow"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -4977,7 +5021,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-bench"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "libc",
  "oxigraph",
@@ -4991,7 +5035,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-canon"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "base16ct 1.0.0",
  "digest 0.10.7",
@@ -5011,7 +5055,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-cli"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "bzip2",
  "flate2",
@@ -5034,7 +5078,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-conformance"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "oxjsonld",
  "oxrdf 0.3.3",
@@ -5060,11 +5104,11 @@ dependencies = [
 
 [[package]]
 name = "sparq-conformance-floors"
-version = "0.1.6"
+version = "0.1.8"
 
 [[package]]
 name = "sparq-core"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "fs4",
  "hashbrown 0.17.1",
@@ -5086,7 +5130,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-crdt"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -5097,7 +5141,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-difftest"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "bigdecimal",
  "num-bigint 0.5.1",
@@ -5109,7 +5153,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-dl-wasm"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "getrandom 0.3.4",
  "oxrdf 0.3.3",
@@ -5121,7 +5165,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-e2ee-ng"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "chacha20poly1305",
  "ed25519-dalek",
@@ -5137,7 +5181,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "md-5 0.11.0",
  "oxiri",
@@ -5162,7 +5206,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine-serialize"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -5175,7 +5219,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine-service"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "proptest",
@@ -5188,7 +5232,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-fedclient"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -5205,7 +5249,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-fedplan"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "criterion",
  "foldhash 0.2.0",
@@ -5216,7 +5260,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-fedplan-mpc"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "sparq-fedplan",
  "sparq-mpc",
@@ -5224,7 +5268,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-forms"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "getrandom 0.3.4",
  "oxrdf 0.3.3",
@@ -5238,7 +5282,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-geo"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "crs-definitions",
  "geo",
@@ -5261,7 +5305,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-gpu"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "bytemuck",
  "pollster",
@@ -5271,7 +5315,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-hdt"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "bzip2",
  "crc",
@@ -5288,7 +5332,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-http3"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "axum",
  "bytes",
@@ -5307,7 +5351,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-introspect"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "getrandom 0.3.4",
  "oxrdf 0.3.3",
@@ -5322,21 +5366,21 @@ dependencies = [
 
 [[package]]
 name = "sparq-jsonld"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "oxiri",
 ]
 
 [[package]]
 name = "sparq-jsonld-registry"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "sparq-jsonld",
 ]
 
 [[package]]
 name = "sparq-kb"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -5489,6 +5533,7 @@ dependencies = [
  "sparq-lws-blob-fs",
  "sparq-lws-blob-key",
  "sparq-lws-blob-object",
+ "sparq-lws-crypt",
  "sparq-lws-ysync",
  "sparq-policy",
  "sparq-shacl",
@@ -5504,6 +5549,8 @@ dependencies = [
  "tokio-tungstenite",
  "tower",
  "tower-http 0.7.1",
+ "tracing",
+ "tracing-subscriber",
  "url",
 ]
 
@@ -5522,7 +5569,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-lws-wasm"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "async-trait",
  "axum",
@@ -5554,7 +5601,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-mcp"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -5573,7 +5620,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-metamorph"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "criterion",
  "percent-encoding",
@@ -5587,7 +5634,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-mpc"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "getrandom 0.4.2",
  "oxrdf 0.3.3",
@@ -5602,7 +5649,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-nlq"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "proptest",
@@ -5618,7 +5665,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-parse"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "flate2",
  "proptest",
@@ -5628,7 +5675,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-policy"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "sparq-conformance-floors",
@@ -5639,7 +5686,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-prov"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -5652,7 +5699,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-py"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -5669,11 +5716,11 @@ dependencies = [
 
 [[package]]
 name = "sparq-query-protocol"
-version = "0.1.6"
+version = "0.1.8"
 
 [[package]]
 name = "sparq-reason"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "oxiri",
  "oxrdf 0.3.3",
@@ -5691,7 +5738,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-reason-diff"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "sparq-core",
  "sparq-reason",
@@ -5699,7 +5746,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-reason-dl"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "criterion",
  "num-bigint 0.5.1",
@@ -5717,7 +5764,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-reason-el"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "rustc-hash 2.1.3",
@@ -5727,7 +5774,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-reason-ql"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -5740,7 +5787,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-reason-wasm"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "getrandom 0.3.4",
  "oxrdf 0.3.3",
@@ -5753,7 +5800,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-rsp"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "proptest",
@@ -5768,7 +5815,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-rsp-wasm"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "getrandom 0.3.4",
  "oxrdf 0.3.3",
@@ -5781,7 +5828,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-secprop-vocab"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -5789,7 +5836,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-serve"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "arc-swap",
  "oxrdf 0.3.3",
@@ -5801,7 +5848,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-server"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "arc-swap",
  "axum",
@@ -5847,7 +5894,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-shacl"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -5859,11 +5906,12 @@ dependencies = [
  "sparq-core",
  "sparq-engine",
  "sparq-spargebra",
+ "sparq-substrate",
 ]
 
 [[package]]
 name = "sparq-shacl-wasm"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "getrandom 0.3.4",
  "oxrdf 0.3.3",
@@ -5875,7 +5923,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-shaclc"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -5885,7 +5933,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-sim"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "proptest",
@@ -5896,7 +5944,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-solid"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "getrandom 0.3.4",
  "oxrdf 0.3.3",
@@ -5928,7 +5976,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-substrate"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "criterion",
  "hashbrown 0.17.1",
@@ -5941,7 +5989,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-terse"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "proptest",
@@ -5953,7 +6001,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-text"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "proptest",
@@ -5970,7 +6018,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-text-wasm"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "getrandom 0.3.4",
  "sparq-core",
@@ -5982,7 +6030,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-trust"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "flate2",
  "getrandom 0.4.2",
@@ -6001,7 +6049,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-vc"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "bs58",
  "ed25519-dalek",
@@ -6018,7 +6066,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-vectors"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "getrandom 0.3.4",
  "instant-distance",
@@ -6040,7 +6088,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-wac-oracle"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "sparq-core",
  "sparq-policy",
@@ -6049,7 +6097,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-wasm"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "getrandom 0.2.17",
  "getrandom 0.3.4",
@@ -6069,7 +6117,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-wrapper"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "oxrdf 0.3.3",
  "sparq-core",
@@ -6077,7 +6125,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-zk"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "ark-bn254",
  "ark-ec",
@@ -6107,7 +6155,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-zk-compose"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "blake3",
  "libc",
@@ -6390,9 +6438,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.53.2"
+version = "1.54.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e95f91fcc7a621e8b030f6aa23c71fe9838ae2fb4d8118b75602a328f5144044"
+checksum = "b52fd3255258d26fac7264ab5a76b53c13367136dc011d3d6ad4f8ed070396a3"
 dependencies = [
  "bytes",
  "libc",
@@ -6448,6 +6496,36 @@ dependencies = [
  "futures-sink",
  "pin-project-lite",
  "tokio",
+]
+
+[[package]]
+name = "toml_datetime"
+version = "1.1.3+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "173f25c883cd2176a2d8212155638c0a60d484a9d84546d270866f40f56b6e49"
+dependencies = [
+ "serde_core",
+]
+
+[[package]]
+name = "toml_edit"
+version = "0.25.19+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd43688c4858d7264ae1cf9a9f874a67c3feb74a883b1cd7bebd6a4ea8307218"
+dependencies = [
+ "indexmap",
+ "toml_datetime",
+ "toml_parser",
+ "winnow",
+]
+
+[[package]]
+name = "toml_parser"
+version = "1.1.5+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "baa693a8032d7e1cada7d0041e96126df243179ff061456783ac7f12bda4744c"
+dependencies = [
+ "winnow",
 ]
 
 [[package]]
@@ -6655,9 +6733,9 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "ureq"
-version = "3.4.2"
+version = "3.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a7ac20be9b7726e0bbdbf974c059676d9acb1cd414961f570a4e8231cacd7fc"
+checksum = "e7be76686bdf7198002062423ca0d8cf9b75a27c8e1de804513b97e97b555d9d"
 dependencies = [
  "base64 0.23.1",
  "log",
@@ -6672,9 +6750,9 @@ dependencies = [
 
 [[package]]
 name = "ureq-proto"
-version = "0.6.4"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f86fd172ccca569e458f61b6bdd6220965a9ef36e672a6852953b51a0e1583be"
+checksum = "622dce33c252115466d83f63e9744a18f12b4406aae51a01c15ad8fcf1185eb3"
 dependencies = [
  "base64 0.23.1",
  "http",
@@ -6965,9 +7043,9 @@ dependencies = [
 
 [[package]]
 name = "webpki-roots"
-version = "1.0.7"
+version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52f5ee44c96cf55f1b349600768e3ece3a8f26010c05265ab73f945bb1a2eb9d"
+checksum = "f5f280bbb2b287bc8e7de7e3852945a0ff50d1bbcb5ed42b6c7a568c546df171"
 dependencies = [
  "rustls-pki-types",
 ]
@@ -7460,6 +7538,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
 
 [[package]]
+name = "winnow"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c3b93199df0ab874cdf0c6a94f0a0dc3423fe41f1cafb62b8bd7b1deb277aef"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "wit-bindgen"
 version = "0.51.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7647,9 +7734,9 @@ dependencies = [
 
 [[package]]
 name = "yrs"
-version = "0.28.0"
+version = "0.28.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52c70dc8beca8666c77612a96889106ca3cd65318609721f464624ff79685da9"
+checksum = "9f7716b4846f9fab489af2ed7ab31c4554f5fe6965ede2392b9cdfed0e5087ff"
 dependencies = [
  "arc-swap",
  "async-lock",

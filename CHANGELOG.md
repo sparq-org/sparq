@@ -7,8 +7,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **sparq-lws-core (LWS):** authentication challenges for paths without dot segments
+  name RFC 9728 metadata for the requested resource or service endpoint, preserving
+  encoded paths and trailing slashes.
+  Paths with literal or percent-encoded dot segments retain storage-root metadata in
+  challenges, and their derived metadata paths return `404`. Metadata is served
+  independently of resource existence and caller identity. Linkset
+  edits that change `up`, and content replacements with `Prefer: set-linkset` that change it,
+  return `409 Conflict` before writing when they declare a different parent; plain content
+  replacements leave `up` unchanged. Quiet container listings run concurrently; a busy
+  member or generation change falls back once through the fair exclusive queue, waiting
+  for commit or put-back. Storage descriptions also link the root container type. The builtin
+  LWS.net ratchet checks exact expected failure names and requires their removal when they pass.
+
+### Changed
+
+- **Release cadence guard:** the one-release v0.1.8 exception is removed now that v0.1.8 is
+  out; only the v0.1.3 recovery evidence can shorten the 24-hour minimum again.
+
+## [0.1.8] - 2026-11-05
+
+Patch release that publishes `@sparq-org/sparq` with `checkOwlDl` (its 0.1.7 npm publish
+stopped at `npm ci`) and fixes that release path. Publication is not implied by this entry;
+verify the tagged run and every registry and release artifact. crates.io publication still
+waits on the bootstrap. npm users of `@sparq-org/sparq` move from 0.1.6, so they also get
+every 0.1.7 change listed below.
+
 ### Added
 
+- **@sparq-org/sparq:** `checkOwlDl(tbox, abox?, options?)`, `store.checkOwlDl` and
+  `openOwlDlSession()` for OWL 2 DL consistency, profile checking and classification, backed by
+  a separate `wasm-dl/` bundle loaded on first use. They were in the 0.1.7 source but reach npm
+  first in this release.
+
+### Changed
+
+- **Release cadence guard:** a maintainer-authorized, one-release exception admits v0.1.8
+  directly after the exact v0.1.7 tag, with pinned tag evidence and definitive crates.io
+  absence, because v0.1.7's `@sparq-org/sparq` npm publish failed. All other versions keep
+  the 24-hour minimum.
+
+### Fixed
+
+- **npm release:** v0.1.7's `@sparq-org/sparq` npm publish stopped at `npm ci`
+  (`@sparq-org/solid-server`, `@sparq-org/eyereasoner-compat` and PyPI `sparq-rdf` 0.1.7 did
+  publish). The publish npm (11.x) refuses a `package-lock.json` that cannot satisfy every
+  manifest, and `@sparq-org/solid-server` pinned its native platform packages at a version npm
+  did not have, so the lock could not record them. The source manifest no longer pins them;
+  `publish.yml` adds the pins only in a dispatch that publishes those packages first. The `js`
+  workflow now runs `npm ci` with the publish npm on PRs that touch an npm workspace manifest
+  or the lock. `@sparq-org/solid-server@0.1.7` carries those unsatisfiable pins: it installs,
+  but an npm 11 `npm ci` of a project locked to it fails, so use 0.1.8.
+
+## [0.1.7] - 2026-11-04
+
+Patch release carrying the exact SHACL numeric range comparison (#7294) and the changes
+merged since 0.1.6. Publication is not implied by this entry; verify the tagged run and
+every registry and release artifact. crates.io publication still waits on the bootstrap.
+
+### Added
+
+- **@sparq-org/solid-server:** native Solid (`--native`) and LWS (`--protocol lws`) launch
+  modes that run the `sparq-lws-core` executable from an optional
+  `@sparq-org/solid-server-native-<platform>` package (#7248). Those platform packages are not
+  on npm yet, so in 0.1.7 the npm install serves the WebAssembly mode only and the native
+  modes report the missing package. To run the native server in 0.1.7, run `sparq-lws-core`
+  directly (a source build or the `ghcr.io/sparq-org/sparq-lws-core` image) instead of
+  through the npm CLI.
 - **sparq-core / sparq-engine:** durable UPDATE journals now record named-graph creation and
   removal alongside triple changes, with ordered replay and support for the previous journal
   format. Hardens named-graph layout recovery alongside directory ownership support:
@@ -190,6 +257,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   <!-- privacy-claims-allow: describes an added method-bound relation and its retained legacy contract; the external audit is named as an OPEN obligation and the downgrade is written down; asserts no soundness/privacy property; sq-qhy4 -->
 
 ### Changed
+
+- **Breaking — LWS capacity refusals:** subscription and access-request bounds now return the
+  same `429` response; service-pool exhaustion returns that response instead of `507`.
+  General storage refusals retain `507`. The new public `ServerError::ServicePoolFull`,
+  `BlobError::ServicePoolFull` and `SparqError::ServicePoolFull` variants require downstream
+  exhaustive matches to handle them. Notification recipients are selected on
+  a task the write response never awaits, using the subscriptions, grants and resource state
+  captured at commit.
 
 - **Breaking — sparq-lws-core:** LWS resource DELETE requires Read for `If-None-Match: *`.
   A non-reader's data DELETE with `If-Match: *` is treated as unconditional: settled present
@@ -849,6 +924,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   serde_json's `raw_value` feature (#6911); sparq-engine-service drops `rustc-hash` (#6917).
 
 ### Fixed
+
+- **sparq-shacl:** `sh:minInclusive`, `sh:maxInclusive`, `sh:minExclusive`, `sh:maxExclusive`,
+  `sh:lessThan` and `sh:lessThanOrEquals` compare `xsd:decimal` and integer-family values
+  exactly, at any length, instead of as `f64`, so `1.000000000000000015` no longer passes
+  `sh:minInclusive 1.00000000000000002` and integers past 2^53 no longer pass an exact bound
+  they miss (#7294). A float or double operand promotes the pair as the SPARQL and XPath
+  specifications define, at any length. An ill-typed numeric literal, such as
+  `"1.5"^^xsd:integer`, is now out of range, as it is for a SPARQL comparison.
+- LWS content-only PATCH retains metadata from its Read authorization check for
+  notification capture, skips LWS metadata lookups in open mode, and reads metadata for a
+  closed-mode owner only when a non-owner subscription exists or is registering. If the early
+  read was omitted, commit rechecks after capturing registration eligibility, including parent
+  and ancestor subscriptions registered during the write.
+
+- LWS quarantined access requests no longer take places from live requests; held-back and
+  quarantined subscriptions count only against the owner's total. Record settlements reserve
+  places per principal only for unknown outcomes in closed mode, while the shared bound
+  covers each whole change. Principal permit waits release the high-water gate and listing
+  locks; pending-listing claims preserve conditional tag checks through memory confirmation.
+  Subscriptions claim only their subscriber's listing, leaving whole-listing owner creates
+  available. Claims replace released listing guards; only the subscriber record's container
+  publication guard remains, preserving whole-listing conditional-create windows.
+  Notification selection retains request admission through webhook queueing, and delayed
+  record announcements retain a shared or maintenance place through that work. Those places
+  are released before stream publication waits. Pending stream publications have a separate
+  storage-wide delivery bound. Known outcomes release their principal permit before memory
+  confirmation.
+  Principal bookkeeping ends with the last change; withdrawal eligibility uses the state
+  captured at commit.
+  Stream deactivation uses its subscriber's settlement places, preserving the expiry
+  sweeper's maintenance places and closing the stream before durable removal.
 
 - **sparq-lws-core:** marker recognition includes path-based storage roots for generic store and raw index mutations.
 - **sparq-lws-core:** separately assembled composites over clones of an index share its lifecycle lease.
@@ -2025,7 +2131,9 @@ reproduce):
   single-pattern/FILTER comparisons short-circuit via index range-counting and are excluded
   from the claims above.
 
-[Unreleased]: https://github.com/sparq-org/sparq/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/sparq-org/sparq/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/sparq-org/sparq/compare/v0.1.7...v0.1.8
+[0.1.7]: https://github.com/sparq-org/sparq/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/sparq-org/sparq/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/sparq-org/sparq/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/sparq-org/sparq/compare/v0.1.3...v0.1.4

@@ -38,9 +38,15 @@ permissions:
   contents: read
 
 env:
-  TOUCHSTONE_REF: 6a3206eb97d173a89b3ffeb790f2d1a3337cf535
-  LWS_NET_REF: e0cdc973ee2a63d810764aa025f80b6fa2bb0fff
+  TOUCHSTONE_REF: 20b5d58607355aae2a59b64a21d1c85a1d510d60
+  LWS_NET_REF: 65a7c1420a76c1bbf3df60a28f7d103d5e7f06f9
+  # The head of lws-test-suite's yaml branch, the YAML-LD form (lws10/tests.yaml) the lws-net
+  # step converts. The main branch has no tests.yaml; LWS.net's builtin set already ports its
+  # manifest.
   LWS_TESTS_REF: 72cfc0a80c718dddbcf43ea6bea98a13a3c14e99
+  # tests.yaml predates the model of LWS.net 65a7c14, which aborts loading it, so that run keeps
+  # the LWS.net commit it was written for.
+  LWS_NET_YAML_REF: e0cdc973ee2a63d810764aa025f80b6fa2bb0fff
 
 jobs:
   blob-object:
@@ -192,6 +198,12 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          repository: langsamu/LWS.net
+          ref: ${{ env.LWS_NET_YAML_REF }}
+          path: LWS.net-yaml
+          persist-credentials: false
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
           repository: elf-pavlik/lws-test-suite
           ref: ${{ env.LWS_TESTS_REF }}
           path: lws-test-suite
@@ -207,21 +219,20 @@ jobs:
         run: cargo build -p sparq-lws-core
       - name: check the lws-net report reader
         run: python3 -B crates/sparq-lws-core/conformance/lws/lws-net-report.py --self-test
-      # LWS.net's own definitions first: the run below overwrites them with the YAML-LD suite.
-      # A ratchet: of its 57 tests, one fails on purpose ("Delete returns 999"), and "Container
-      # response varies by Accept" fails in the harness (its header extractor takes a single
-      # value, and .NET splits our list-valued Vary, "Accept, Origin", into two). Raise the floor
-      # with the change that earns it.
+      # LWS.net's own definitions first; the run below loads the YAML-LD suite into its own
+      # LWS.net checkout.
+      # Named ratchet: crates/sparq-lws-core/conformance/lws/lws-net-expected-failures.json
+      # Remove listed failures when they pass; every unlisted failure fails this step.
       - name: run lws-net (LWS.net's own definitions)
         env:
           LWS_NET: ${{ github.workspace }}/LWS.net
           LWS_TESTS: builtin
-          LWS_NET_MIN_PASSED: "55"
-          LWS_NET_EXPECTED_TOTAL: "57"
+          LWS_NET_EXPECTED_FAILURES: ${{ github.workspace }}/crates/sparq-lws-core/conformance/lws/lws-net-expected-failures.json
+          LWS_NET_EXPECTED_TOTAL: "292"
           OUT: ${{ github.workspace }}/target/lws-net-builtin
         run: crates/sparq-lws-core/conformance/lws/lws-net.sh
       - name: run lws-net
         env:
-          LWS_NET: ${{ github.workspace }}/LWS.net
+          LWS_NET: ${{ github.workspace }}/LWS.net-yaml
           LWS_TESTS: ${{ github.workspace }}/lws-test-suite/lws10/tests.yaml
         run: crates/sparq-lws-core/conformance/lws/lws-net.sh

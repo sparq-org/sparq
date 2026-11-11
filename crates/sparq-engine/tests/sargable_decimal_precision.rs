@@ -123,3 +123,27 @@ fn property_high_precision_decimals_match_oracle() {
         }
     }
 }
+
+/// #7294: the SHACL range table, asked as SPARQL comparisons on both the sargable FILTER
+/// path and the BIND expression path. SHACL range constraints are SPARQL comparisons
+/// (SHACL Core §4.3), so the two surfaces must agree on these values.
+#[test]
+fn shacl_range_table_values_compare_exactly() {
+    let lit = |lex: &str, dt: &str| format!("\"{lex}\"^^<http://www.w3.org/2001/XMLSchema#{dt}>");
+    let max_u64 = lit("18446744073709551615", "integer");
+    let cases: Vec<(String, String, bool)> = vec![
+        (lit("1.000000000000000015", "decimal"), format!("?v >= {}", lit("1.00000000000000002", "decimal")), false),
+        (lit("9007199254740993.0", "decimal"), format!("?v <= {}", lit("9007199254740992.0", "decimal")), false),
+        (lit("18446744073709551614", "integer"), format!("?v >= {max_u64}"), false),
+        (lit("18446744073709551616", "integer"), format!("?v <= {max_u64}"), false),
+        (lit("1.00000000000000002", "decimal"), format!("?v >= {}", lit("1.00000000000000002", "decimal")), true),
+        (max_u64.clone(), format!("?v >= {max_u64} && ?v <= {max_u64}"), true),
+        // Integer data against a decimal bound uses decimal semantics.
+        (lit("9007199254740993", "integer"), format!("?v <= {}", lit("9007199254740992.5", "decimal")), false),
+    ];
+    for (value, cond, want) in cases {
+        let g = graph_with(&value);
+        assert_eq!(sargable_count(&g, &cond) == 1, want, "FILTER({cond}) on {value}");
+        assert_eq!(oracle_true(&g, &cond), want, "BIND({cond}) on {value}");
+    }
+}

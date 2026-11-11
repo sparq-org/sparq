@@ -231,12 +231,33 @@ impl<T: SparqClient> SparqClient for SharedStore<T> {
 
 #[async_trait]
 impl<T: BlobStore> BlobStore for SharedStore<T> {
+    fn requires_envelope(&self) -> bool {
+        self.0.requires_envelope()
+    }
+
     async fn get(&self, key: &str) -> Result<Bytes, BlobError> {
         self.0.get(key).await
     }
 
+    async fn get_scoped(
+        &self,
+        scope: &sparq_lws_core::store::BlobScope,
+        key: &str,
+    ) -> Result<Bytes, BlobError> {
+        self.0.get_scoped(scope, key).await
+    }
+
     async fn put(&self, key: &str, body: Bytes) -> Result<(), BlobError> {
         self.0.put(key, body).await
+    }
+
+    async fn put_scoped(
+        &self,
+        scope: &sparq_lws_core::store::BlobScope,
+        key: &str,
+        body: Bytes,
+    ) -> Result<(), BlobError> {
+        self.0.put_scoped(scope, key, body).await
     }
 
     async fn exists(&self, key: &str) -> Result<bool, BlobError> {
