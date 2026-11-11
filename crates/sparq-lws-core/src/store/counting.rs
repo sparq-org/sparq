@@ -30,6 +30,7 @@
 //! make the witness sound under real concurrency — overlapping windows each get their own correct
 //! peak, and one window can never erase another's.
 //!
+<<<<<<< HEAD
 //! ## Query-count mapping (per [`SparqClient`] method, mirroring `HttpSparqClient`)
 //! - `get_meta` / `exists` / `list_children` / `referenced_blob_keys` / `read_plan`: **1 query**
 //!   (`read_plan` is the ONE combined read-plan SELECT on the live client — §3.1; the in-memory
@@ -41,6 +42,14 @@
 //!   `Deleted`, else **2 queries** (marker ASK + exists ASK).
 //! - History methods have no HTTP implementation; they model **1 query** per index lookup
 //!   or **1 update** per atomic history mutation.
+=======
+//! ## Protocol mapping (per [`SparqClient`] method, mirroring `HttpSparqClient`)
+//! Reads issue their query. Successful metadata and containment mutations issue their guarded
+//! update, completion confirmation and best-effort cleanup. Resource deletes also read their
+//! captured blob key before cleanup; replacements first read the previous metadata. A refused
+//! conditional create or delete reads the current epoch before classifying its missing marker.
+//! History methods have no HTTP implementation and model an index lookup or atomic mutation.
+>>>>>>> origin/main
 //!
 //! Error paths are counted best-effort (the live client may abort mid-sequence); the pinned tests
 //! only assert success paths, where the mapping is exact.
@@ -316,6 +325,13 @@ impl<S: SparqClient> CountingSparqClient<S> {
 
 #[async_trait]
 impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
+    async fn begin_epoch(&self, lease: &super::LifecycleGuard) -> Result<u64, SparqError> {
+        let _g = self.counters.op_guard();
+        self.counters.count_queries(2);
+        self.counters.count_update();
+        self.inner.begin_epoch(lease).await
+    }
+
     fn lifecycle(&self) -> std::sync::Arc<super::Lifecycle> {
         self.inner.lifecycle()
     }
@@ -330,7 +346,12 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         self.counters.record_method("index.reset_marker");
         let _g = self.counters.op_guard();
         self.counters.count_update();
-        self.inner.reset_marker(iri, value, lease).await
+        self.counters.count_queries(1);
+        let result = self.inner.reset_marker(iri, value, lease).await;
+        if result.is_ok() {
+            self.counters.count_update();
+        }
+        result
     }
 
     async fn replace_meta_retaining(
@@ -437,7 +458,12 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         self.counters.record_method("index.put_meta");
         let _g = self.counters.op_guard();
         self.counters.count_update();
-        self.inner.put_meta(iri, meta).await
+        self.counters.count_queries(1);
+        let result = self.inner.put_meta(iri, meta).await;
+        if result.is_ok() {
+            self.counters.count_update();
+        }
+        result
     }
 
     async fn replace_meta(
@@ -448,11 +474,15 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         #[cfg(test)]
         self.counters.record_method("index.replace_meta");
         let _g = self.counters.op_guard();
-        // The live client has no atomic replace: it pays the trait default's metadata SELECT plus
-        // the upsert UPDATE. Forwarded to `inner` so a wrapped atomic override still answers.
-        self.counters.count_queries(1);
+        // Model the prior-record read, guarded upsert, marker confirmation and cleanup.
+        // Forward to `inner` so a wrapped atomic override still answers.
+        self.counters.count_queries(2);
         self.counters.count_update();
-        self.inner.replace_meta(iri, meta).await
+        let result = self.inner.replace_meta(iri, meta).await;
+        if result.is_ok() {
+            self.counters.count_update();
+        }
+        result
     }
 
     async fn exists(&self, iri: &str) -> Result<bool, SparqError> {
@@ -532,7 +562,12 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         self.counters.record_method("index.delete_meta");
         let _g = self.counters.op_guard();
         self.counters.count_update();
-        self.inner.delete_meta(iri).await
+        self.counters.count_queries(1);
+        let result = self.inner.delete_meta(iri).await;
+        if result.is_ok() {
+            self.counters.count_update();
+        }
+        result
     }
 
     async fn delete_resource_retiring(
@@ -562,14 +597,14 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         #[cfg(test)]
         self.counters.record_method("index.delete_resource");
         let _g = self.counters.op_guard();
-        // Model the HTTP default's SELECT + detach + DROP, while preserving the inner
-        // backend's atomic override, just as replace_meta does.
-        self.counters.count_queries(1);
+        // The HTTP client confirms the atomic delete, reads its receipt, then cleans up.
+        self.counters.count_queries(2);
         self.counters.count_update();
-        if parent.is_some() {
+        let result = self.inner.delete_resource(iri, parent).await;
+        if result.is_ok() {
             self.counters.count_update();
         }
-        self.inner.delete_resource(iri, parent).await
+        result
     }
 
     async fn delete_meta_if_empty(
@@ -580,16 +615,15 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         #[cfg(test)]
         self.counters.record_method("index.delete_meta_if_empty");
         let _g = self.counters.op_guard();
-        // The live client: 1 guarded update, then the marker ASK; a non-Deleted outcome needs the
-        // second (exists) ASK to split NotEmpty from NotFound.
         self.counters.count_update();
         let outcome = self.inner.delete_meta_if_empty(iri, parent).await?;
-        self.counters
-            .count_queries(if outcome == DeleteOutcome::Deleted {
-                1
-            } else {
-                2
-            });
+        self.counters.count_queries(1);
+        if outcome == DeleteOutcome::Deleted {
+            self.counters.count_update();
+        } else {
+            // Epoch SELECT, then existence ASK after an absent completion marker.
+            self.counters.count_queries(2);
+        }
         Ok(outcome)
     }
 
@@ -602,11 +636,15 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         #[cfg(test)]
         self.counters.record_method("index.create_child");
         let _g = self.counters.op_guard();
-        // The live client: 1 guarded update + 1 create-marker ASK (issued for BOTH the created and
-        // the container-missing outcome — the ASK is how NotFound is learned).
         self.counters.count_update();
         self.counters.count_queries(1);
-        self.inner.create_child(container, child, meta).await
+        let result = self.inner.create_child(container, child, meta).await;
+        if result.is_ok() {
+            self.counters.count_update();
+        } else if matches!(result, Err(SparqError::NotFound)) {
+            self.counters.count_queries(1);
+        }
+        result
     }
 
     async fn replace_child(
@@ -618,11 +656,15 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         #[cfg(test)]
         self.counters.record_method("index.replace_child");
         let _g = self.counters.op_guard();
-        // Model the HTTP default's single create_child (guarded update + create-marker ASK), while
-        // preserving the inner client's atomic replacement.
         self.counters.count_update();
         self.counters.count_queries(1);
-        self.inner.replace_child(container, child, meta).await
+        let result = self.inner.replace_child(container, child, meta).await;
+        if result.is_ok() {
+            self.counters.count_update();
+        } else if matches!(result, Err(SparqError::NotFound)) {
+            self.counters.count_queries(1);
+        }
+        result
     }
 
     async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
@@ -630,7 +672,12 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         self.counters.record_method("index.remove_child");
         let _g = self.counters.op_guard();
         self.counters.count_update();
-        self.inner.remove_child(container, child).await
+        self.counters.count_queries(1);
+        let result = self.inner.remove_child(container, child).await;
+        if result.is_ok() {
+            self.counters.count_update();
+        }
+        result
     }
 
     async fn fence(&self, fence: &super::sparq::Fence) -> Result<(), SparqError> {
@@ -898,7 +945,7 @@ mod tests {
             sparq.replace_child(parent, child, meta.clone()),
             "index.replace_child",
             1,
-            1
+            2
         );
         check!(
             sparq.replace_meta_retaining(
@@ -967,8 +1014,8 @@ mod tests {
             check!(
                 sparq.delete_resource(child, None),
                 "index.delete_resource",
-                1,
-                1
+                2,
+                2
             ),
             None
         );
@@ -989,7 +1036,7 @@ mod tests {
         };
         sparq.put_meta("https://p/c/", meta.clone()).await.unwrap();
         let s0 = counters.snapshot();
-        assert_eq!((s0.sparql_updates, s0.sparql_queries), (1, 0));
+        assert_eq!((s0.sparql_updates, s0.sparql_queries), (2, 1));
 
         sparq.get_meta("https://p/c/").await.unwrap();
         sparq.exists("https://p/c/").await.unwrap();
@@ -1003,16 +1050,16 @@ mod tests {
         let d2 = counters.snapshot().since(&s0);
         assert_eq!((d2.blob_puts, d2.blob_gets), (1, 1));
 
-        // create_child = 1 update + 1 (marker-ASK-modelled) query.
+        // A confirmed create includes its marker cleanup.
         let before = counters.snapshot();
         sparq
             .create_child("https://p/c/", "https://p/c/doc", meta.clone())
             .await
             .unwrap();
         let d3 = counters.snapshot().since(&before);
-        assert_eq!((d3.sparql_updates, d3.sparql_queries), (1, 1));
+        assert_eq!((d3.sparql_updates, d3.sparql_queries), (2, 1));
 
-        // delete_meta_if_empty on a NON-empty container: 1 update + 2 queries (marker + exists ASK).
+        // A non-empty delete reads the epoch before classifying the missing marker.
         let before = counters.snapshot();
         let outcome = sparq
             .delete_meta_if_empty("https://p/c/", None)
@@ -1020,7 +1067,7 @@ mod tests {
             .unwrap();
         assert_eq!(outcome, DeleteOutcome::NotEmpty);
         let d4 = counters.snapshot().since(&before);
-        assert_eq!((d4.sparql_updates, d4.sparql_queries), (1, 2));
+        assert_eq!((d4.sparql_updates, d4.sparql_queries), (1, 3));
 
         // Sequential calls throughout ⇒ the await-depth witness stays 1.
         assert_eq!(counters.snapshot().max_in_flight, 1);

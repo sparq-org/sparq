@@ -213,7 +213,7 @@ pub trait SparqClient: Send + Sync {
     ///
     /// The composite store uses the returned record's `blob_key` to reclaim the superseded bytes
     /// once this commit has succeeded. The DEFAULT implementation is a [`get_meta`](Self::get_meta)
-    /// followed by a [`put_meta`](Self::put_meta) — two round-trips, NOT atomic: a concurrent writer
+    /// followed by a [`put_meta`](Self::put_meta), without atomicity: a concurrent writer
     /// can commit between them, in which case the returned record is that writer's predecessor and
     /// the concurrent writer's own key is left for the reconciler. That is still safe to delete:
     /// blob keys are minted unique per write and an index pointer never moves BACK to a key it has
@@ -350,6 +350,15 @@ pub trait SparqClient: Send + Sync {
         ))
     }
 
+    /// Begin a writer epoch while the service holds its lifecycle lease, before recovery.
+    /// HTTP clients check that the guard belongs to their backend before raising a durable epoch,
+    /// so earlier processes' writes become final before replay.
+    /// In-process backends have no writes that outlive the process and return zero without I/O.
+    async fn begin_epoch(&self, lease: &super::LifecycleGuard) -> Result<u64, SparqError> {
+        let _ = lease;
+        Ok(0)
+    }
+
     /// Stop naming `blob_key` as being reclaimed ([`begin_reclaim`](Self::begin_reclaim)).
     async fn end_reclaim(&self, blob_key: &str) -> Result<(), SparqError> {
         let _ = blob_key;
@@ -368,7 +377,8 @@ pub trait SparqClient: Send + Sync {
     /// Delete a resource and its parent edge, returning the removed record's blob key.
     ///
     /// Embedded and in-memory clients read the key and remove both index entries atomically.
-    /// The default preserves the HTTP client's separate read, detach, and delete operations.
+    /// The default uses separate read, detach, and delete operations; HTTP overrides it with one
+    /// fenced write.
     /// `None` means the resource was absent; an existing parent edge is still removed.
     ///
     /// # Errors
