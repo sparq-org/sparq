@@ -967,6 +967,7 @@ pub(super) fn cmp_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[I
 /// whether the NaN is stored or computed. Other unordered numeric pairs are false only when
 /// `arith` sent the comparison here (an arithmetic operand the f64 fast path used to decide).
 pub(super) fn relational_value(x: &Value, y: &Value, arith: bool, f: impl Fn(Ordering) -> bool) -> Value {
+    check_comparison_capacity(x, y);
     // A NaN operand (stored NaN misses the numeric cache and lands here) is false, never a
     // type error, matching the strict-capacity path and XPath numeric comparisons.
     if let (Some(a), Some(b)) = (comparison_numeric(x), comparison_numeric(y)) {
@@ -1040,7 +1041,7 @@ pub(super) fn equal_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &
 /// the ordering operators: only operands within a comparable family decide; unknown
 /// datatypes and ill-formed lexicals are type errors unless the terms are identical.
 pub(super) enum LitKind<'a> {
-    /// A numeric-datatype operand; `None` = ill-formed lexical.
+    /// A numeric-datatype operand; `None` = ill-formed or beyond the arithmetic tower.
     Num(Option<Num>),
     Str(&'a str),
     /// A boolean-datatype operand; `None` = ill-formed lexical.
@@ -1121,6 +1122,7 @@ pub(super) fn is_nan_lexical(value: &str, datatype: &str) -> bool {
 /// ill-formed lexicals, cross-family pairs — is a TYPE ERROR (`"a"^^ex:dt != "b"^^ex:other`
 /// filters the row out rather than evaluating to true).
 pub(super) fn values_equal(x: &Value, y: &Value) -> Option<bool> {
+    check_comparison_capacity(x, y);
     if matches!(x, Value::Unbound | Value::Error) || matches!(y, Value::Unbound | Value::Error) {
         return None;
     }
@@ -1190,9 +1192,9 @@ pub(super) fn value_compare_strict(x: &Value, y: &Value) -> Option<Ordering> {
     }
 }
 
-/// Comparison does not require an arithmetic representation or consume its capacity.
-/// Keep the bounded numeric fast path first; only scale overflow or an operand
-/// beyond the tower needs the any-length lexical comparator.
+/// Classify the bounded numeric value without consuming arithmetic capacity.
+/// Exact pairs can fall back to any-length lexicals; other scalar comparisons
+/// separately retain their checked operand consumers.
 fn comparison_numeric(v: &Value) -> Option<Num> {
     match v {
         Value::Num(n) => Some(*n),
@@ -1210,14 +1212,22 @@ fn comparison_num_cmp(a: Num, b: Num) -> Option<Ordering> {
 }
 
 fn exact_value_cmp(x: &Value, y: &Value) -> Option<Ordering> {
-    let result = exact_decimal_lexical(x)
-        .zip(exact_decimal_lexical(y))
-        .and_then(|(a, b)| cmp_decimal_str(&a, &b));
-    if result.is_none() && budget::strict_numeric() {
-        // Unsupported mixed comparisons retain the checked consumer contract.
+    cmp_decimal_str(&exact_decimal_lexical(x)?, &exact_decimal_lexical(y)?)
+}
+
+/// Only two valid exact operands are exempt from arithmetic representation limits.
+/// Other scalar comparisons retain the existing sticky strict-capacity checks.
+fn check_comparison_capacity(x: &Value, y: &Value) {
+    if !budget::strict_numeric() {
+        return;
+    }
+    let exact = |v: &Value| match comparison_numeric(v) {
+        Some(n) => n.to_dec().is_some(),
+        None => beyond_tower_lexical(v).is_some(),
+    };
+    if !(exact(x) && exact(y)) {
         let _ = (as_numeric(x), as_numeric(y));
     }
-    result
 }
 
 /// The TOTAL-order verdict for a same-family temporal pair `value_compare_strict` left

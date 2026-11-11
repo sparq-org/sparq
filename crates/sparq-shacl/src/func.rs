@@ -649,12 +649,19 @@ fn sum_literal(vals: &[Term]) -> Option<Term> {
 /// The numerically least (or greatest) member; `None` if no numeric member.
 fn min_max(vals: &[Term], max: bool) -> Option<Term> {
     let mut best: Option<&Term> = None;
+    // NaN remains unordered for extrema; a tie retains the first member.
+    let nan = |t: &Term| matches!(t, Term::Literal(l) if l.value() == "NaN");
     for v in vals.iter().filter(|v| is_numeric(v)) {
         let take = match best {
             None => true,
+            Some(b) if nan(v) || nan(b) => false,
             Some(b) => {
-                crate::eval::cmp_terms(v, b)
-                    .is_some_and(|o| if max { o.is_gt() } else { o.is_lt() })
+                let order = cmp_term(v, b);
+                if max {
+                    order.is_gt()
+                } else {
+                    order.is_lt()
+                }
             }
         };
         if take {

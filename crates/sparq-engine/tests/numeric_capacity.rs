@@ -191,7 +191,7 @@ fn exact_comparisons_past_i128() {
 
 #[test]
 fn order_by_past_i128_is_exact_in_both_sort_paths() {
-    let ordered = [
+    let mut ordered: Vec<String> = [
         "-340282366920938463463374607431768211456001",
         "-340282366920938463463374607431768211456000",
         "-0.00000000000000000000000000000000000000001",
@@ -199,7 +199,15 @@ fn order_by_past_i128_is_exact_in_both_sort_paths() {
         "0.00000000000000000000000000000000000000001",
         "340282366920938463463374607431768211456000",
         "340282366920938463463374607431768211456001",
-    ];
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect();
+    let low_infinite_image = format!("{}0", "8".repeat(399));
+    let high_infinite_image = format!("{}1", "8".repeat(399));
+    ordered.insert(0, format!("-{low_infinite_image}"));
+    ordered.insert(0, format!("-{high_infinite_image}"));
+    ordered.extend([low_infinite_image, high_infinite_image]);
     let data = ordered
         .iter()
         .rev()
@@ -211,29 +219,77 @@ fn order_by_past_i128_is_exact_in_both_sort_paths() {
         })
         .collect::<String>();
     let graph = Graph::load_str(&data, "n-triples").unwrap();
-    for budget in [QueryBudget::unlimited(), bounded()] {
-        for key in ["?v", "COALESCE(?v)"] {
-            for desc in [false, true] {
-                let order = if desc {
-                    format!("DESC({key})")
-                } else {
-                    key.to_string()
-                };
-                let q = format!("SELECT ?v {{?s ?p ?v}} ORDER BY {order}");
-                let result = sparq_engine::query_with_budget(&graph, &q, &budget).unwrap();
-                let actual: Vec<_> = result
-                    .rows
-                    .iter()
-                    .map(|row| match row[0].as_ref().unwrap() {
-                        oxrdf::Term::Literal(l) => l.value(),
-                        other => panic!("expected literal: {other}"),
-                    })
-                    .collect();
-                let mut expected = ordered.to_vec();
-                if desc {
-                    expected.reverse();
+    let compressed = Graph::load_str(&data, "n-triples")
+        .unwrap()
+        .into_compressed();
+    for graph in [&graph, &compressed] {
+        for budget in [QueryBudget::unlimited(), bounded()] {
+            for key in ["?v", "COALESCE(?v)"] {
+                for desc in [false, true] {
+                    let order = if desc {
+                        format!("DESC({key})")
+                    } else {
+                        key.to_string()
+                    };
+                    let q = format!("SELECT ?v {{?s ?p ?v}} ORDER BY {order}");
+                    let result = sparq_engine::query_with_budget(graph, &q, &budget).unwrap();
+                    let actual: Vec<_> = result
+                        .rows
+                        .iter()
+                        .map(|row| match row[0].as_ref().unwrap() {
+                            oxrdf::Term::Literal(l) => l.value(),
+                            other => panic!("expected literal: {other}"),
+                        })
+                        .collect();
+                    let mut expected: Vec<_> = ordered.iter().map(String::as_str).collect();
+                    if desc {
+                        expected.reverse();
+                    }
+                    assert_eq!(actual, expected, "{q}");
                 }
-                assert_eq!(actual, expected, "{q}");
+            }
+        }
+    }
+}
+
+#[test]
+fn strict_mixed_comparisons_keep_capacity_failures() {
+    for exact in [
+        "\"9223372036854775808\"^^xsd:integer",
+        "\"340282366920938463463374607431768211456000\"^^xsd:integer",
+        "\"340282366920938463463374607431768211456000.1\"^^xsd:decimal",
+    ] {
+        let graph = Graph::load_str(
+            &format!("PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> <http://ex/s> <http://ex/p> {exact} ."),
+            "turtle",
+        ).unwrap();
+        for other in [
+            "\"text\"",
+            "<http://ex/iri>",
+            "true",
+            "1e0",
+            "\"NaN\"^^xsd:double",
+        ] {
+            for op in ["=", "!=", "<", "<=", ">", ">="] {
+                for expression in [
+                    format!("{exact} {op} {other}"),
+                    format!("{other} {op} {exact}"),
+                ] {
+                    for expression in [expression.clone(), format!("COALESCE({expression}, false)")]
+                    {
+                        for scalar in [expression.clone(), format!("MAX({expression})")] {
+                            let q = query(&scalar);
+                            let error = sparq_engine::query_with_budget(&graph, &q, &bounded())
+                                .unwrap_err();
+                            assert!(error.contains("numeric-representation"), "{q}: {error}");
+                        }
+                        let filter = expression.replace(exact, "?v");
+                        let q = format!("PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> ASK {{?s ?p ?v FILTER({filter})}}");
+                        let error =
+                            sparq_engine::ask_with_budget(&graph, &q, &bounded()).unwrap_err();
+                        assert!(error.contains("numeric-representation"), "{q}: {error}");
+                    }
+                }
             }
         }
     }

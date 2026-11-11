@@ -163,7 +163,19 @@ fn min_max_keep_exact_digits() {
           ex:mn [ shnex:min ( 9007199254740993 9007199254740992 ) ] ;
           ex:mx [ shnex:max ( 0.123456789012345678 0.123456789012345679 ) ] ;
           ex:hugeMin [ shnex:min ( 340282366920938463463374607431768211456001 340282366920938463463374607431768211456000 ) ] ;
-          ex:hugeMax [ shnex:max ( 340282366920938463463374607431768211456000 340282366920938463463374607431768211456001 ) ] .
+          ex:hugeMax [ shnex:max ( 340282366920938463463374607431768211456000 340282366920938463463374607431768211456001 ) ] ;
+          ex:mixedMin [ shnex:min ( 9007199254740993 "9007199254740992"^^xsd:double ) ] ;
+          ex:mixedMax [ shnex:max ( "9007199254740992"^^xsd:double 9007199254740993 ) ] ;
+          ex:floatMin [ shnex:min ( "0.1"^^xsd:float 0.1 ) ] ;
+          ex:floatMax [ shnex:max ( 0.1 "0.1"^^xsd:float ) ] ;
+          ex:wideMixedMin [ shnex:min ( 340282366920938463463374607431768211456001 "340282366920938463463374607431768211456000"^^xsd:double ) ] ;
+          ex:wideMixedMax [ shnex:max ( "340282366920938463463374607431768211456000"^^xsd:double 340282366920938463463374607431768211456001 ) ] ;
+          ex:equalMin [ shnex:min ( "01"^^xsd:integer 1.0 ) ] ;
+          ex:equalMax [ shnex:max ( "01"^^xsd:integer 1.0 ) ] ;
+          ex:firstMinNaN [ shnex:min ( "NaN"^^xsd:double 1 ) ] ;
+          ex:lastMinNaN [ shnex:min ( 1 "NaN"^^xsd:double ) ] ;
+          ex:firstMaxNaN [ shnex:max ( "NaN"^^xsd:double 1 ) ] ;
+          ex:lastMaxNaN [ shnex:max ( 1 "NaN"^^xsd:double ) ] .
     "#);
     for (name, expected) in [
         ("mn", "9007199254740992"),
@@ -176,6 +188,32 @@ fn min_max_keep_exact_digits() {
             [expected],
             "{name}"
         );
+    }
+    for (name, value, datatype) in [
+        ("mixedMin", "9007199254740992", "double"),
+        ("mixedMax", "9007199254740993", "integer"),
+        ("floatMin", "0.1", "decimal"),
+        ("floatMax", "0.1", "float"),
+        (
+            "wideMixedMin",
+            "340282366920938463463374607431768211456000",
+            "double",
+        ),
+        (
+            "wideMixedMax",
+            "340282366920938463463374607431768211456001",
+            "integer",
+        ),
+        ("equalMin", "01", "integer"),
+        ("equalMax", "01", "integer"),
+        ("firstMinNaN", "NaN", "double"),
+        ("lastMinNaN", "1", "integer"),
+        ("firstMaxNaN", "NaN", "double"),
+        ("lastMaxNaN", "1", "integer"),
+    ] {
+        let actual = eval(&data, &shapes, name, &iri("a"));
+        assert_eq!(lexes(&actual), [value], "{name}");
+        assert_eq!(one_dt(&actual), format!("{XSD}{datatype}"), "{name}");
     }
 }
 

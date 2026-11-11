@@ -712,9 +712,10 @@ SHACL-spec-correct conforms/violations).
   as nothing. A numeric bound is read once per validation run.
 - **SHACL-AF numeric node expressions preserve exact digits.** With `shacl-af`,
   `min`, `max` and `orderBy` share the range constraints' any-length exact
-  integer/decimal comparison. `min`/`max` use floating promotion for mixed pairs;
-  `orderBy` refines floating ties by exact value, matching engine sorting. `sum`
-  adds through the bounded exact decimal tower: integer-only sums stay `xsd:integer`, a decimal
+  integer/decimal comparison and refine mixed floating ties by exact value,
+  matching engine numeric sorting. `min`/`max` retain the first member on equal
+  values and keep NaN unordered; `orderBy` sorts NaN first. `sum` adds through the
+  bounded exact decimal tower: integer-only sums stay `xsd:integer`, a decimal
   operand produces `xsd:decimal`, and float/double operands promote as in engine
   arithmetic (a double operand produces `xsd:double`). Arithmetic overflow follows
   the engine's floating fallback; a valid operand beyond the arithmetic tower

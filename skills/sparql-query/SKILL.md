@@ -164,6 +164,7 @@ Relational comparisons (`=`, `!=`, `<`, `<=`, `>`, `>=`) between well-formed
 integer/decimal values and `ORDER BY` use exact lexical comparison when the
 bounded numeric fast path cannot represent or align the values. They accept
 mantissas beyond `i128` in both capacity modes; this does not expand arithmetic.
+Other scalar comparisons retain their checked numeric capacity failures.
 Direct RDF output, valid unary plus, `isNumeric` and `sameTerm` preserve large
 lexicals without asserting arithmetic support. Numeric EBV separately classifies
 validated integer/decimal digits exactly, without a floating-point conversion.

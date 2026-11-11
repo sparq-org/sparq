@@ -20,7 +20,8 @@ Interpreted and compiled arithmetic, casts, MIN/MAX and SUM/AVG share checked
 consumers. Relational comparison of two well-formed integer/decimal values and
 standard ordering can instead compare exact lexicals of any length. The bounded
 numeric fast path stays first; exceeding its mantissa or scale-alignment capacity
-in these comparisons does not set an arithmetic capacity failure. Numeric sargable
+in these comparisons does not set an arithmetic capacity failure. Other scalar
+comparisons retain the checked operand limits and sticky failures. Numeric sargable
 shortcuts and parallel expression work fall back when this option is active, so worker-local evaluation cannot lose
 the capacity state. This may increase work; no latency neutrality is claimed.
 Reentrant calls restore their parent's state. A custom extension must propagate a
