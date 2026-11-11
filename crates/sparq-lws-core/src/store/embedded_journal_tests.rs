@@ -1155,10 +1155,17 @@ fn lws_builder_effects_match_full_forks() {
             "new",
             None,
             "create",
+            0,
         )
         .unwrap(),
         sparql::update_delete_container_if_empty(PARENT, None, "delete").unwrap(),
-        sparql::update_delete_container_if_empty_fenced(CHILD, Some(PARENT), "delete").unwrap(),
+        sparql::update_delete_container_if_empty_fenced(CHILD, Some(PARENT), "delete", 0).unwrap(),
+        sparql::update_put_meta_fenced(CHILD, "text/plain", "new", "new", None, "put", 0).unwrap(),
+        sparql::update_delete_resource_fenced(CHILD, "delete", 0).unwrap(),
+        sparql::update_delete_resource_with_parent_fenced(CHILD, Some(PARENT), "delete", 0)
+            .unwrap(),
+        sparql::update_remove_child_fenced(PARENT, CHILD, "detach", 0).unwrap(),
+        sparql::update_begin_epoch(1, "start"),
         sparql::update_fence("create"),
         sparql::update_remove_child(PARENT, CHILD).unwrap(),
         sparql::update_delete_resource(CHILD).unwrap(),
