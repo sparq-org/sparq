@@ -671,7 +671,10 @@ Solid collaboration room access composes an attached ODRL gate; live compaction,
 replay-byte reservations, snapshot cutoffs, bounded awareness clock tombstones,
 and socket upgrade Origin checks follow the collaboration contract. Compaction
 backs off without progress; reload preserves concurrent appends while peers continue
-editing. Admission keeps headroom for a compaction snapshot.
+editing. Failed update creates reconcile by envelope key against the room listing
+before retrying, so an already stored batch can clear and allow compaction. Folded
+resources reported missing by an authorized deletion count as already deleted.
+Admission keeps headroom for a compaction snapshot.
 See [collaboration](references/collaboration.md) for ticket JSON, room templates,
 read/write access, awareness, persistent room logs and configurable bounds.
 Live updates broadcast before persistence: clients retain their local Yjs state
