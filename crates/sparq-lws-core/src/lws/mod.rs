@@ -2598,9 +2598,9 @@ fn body_limit(path: &str, max_body: usize) -> usize {
 async fn dispatch<S: Store + 'static>(State(state): State<LwsState<S>>, req: Request) -> Response {
     let path = req.uri().path().to_owned();
     let mut response = dispatch_request(&state, req).await;
-    // All challenges, including service and streaming routes, acquire the actual target at
+    // Resource and service challenges without dot segments acquire the actual target at
     // the HTTP boundary. Keep the realm, token error and storage Link supplied by the handler.
-    if response.status() == StatusCode::UNAUTHORIZED {
+    if response.status() == StatusCode::UNAUTHORIZED && !discovery::has_dot_segments(&path) {
         if let Some(challenge) = response
             .headers()
             .get(header::WWW_AUTHENTICATE)

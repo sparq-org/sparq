@@ -32,6 +32,14 @@ pub(super) fn prm_url(resource: &str) -> Result<String, String> {
     ))
 }
 
+pub(super) fn has_dot_segments(path: &str) -> bool {
+    path.split('/').any(|segment| {
+        [".", "..", "%2e", ".%2e", "%2e.", "%2e%2e"]
+            .iter()
+            .any(|dot| segment.eq_ignore_ascii_case(dot))
+    })
+}
+
 /// The configured origin and the HTTP path as sent, without a query or path normalization.
 fn resource_uri(cfg: &super::LwsConfig, path: &str) -> Option<String> {
     let url = Url::parse(&cfg.base_url).ok()?;
@@ -53,6 +61,9 @@ pub(super) fn resource(cfg: &super::LwsConfig, path: &str) -> Option<String> {
         return None;
     }
     let path = if suffix.is_empty() { "/" } else { suffix };
+    if has_dot_segments(path) {
+        return None;
+    }
     let resource = resource_uri(cfg, path)?;
     let storage: axum::http::Uri = cfg.storage().parse().ok()?;
     path.strip_prefix(storage.path())?;
@@ -424,6 +435,211 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn nested_storage_follows_advertised_urls_and_names_public_resource_metadata() {
+        for base in [
+            "https://storage.example/alice",
+            "https://storage.example/alice/",
+        ] {
+            let mut cfg = LwsConfig::new(base);
+            cfg.owner = Some("https://owner.example/#me".into());
+            let bearer = format!(
+                "Bearer {}",
+                super::super::tokens::mint(
+                    &cfg,
+                    "https://owner.example/#me",
+                    "https://app.example/",
+                    &cfg.storage(),
+                )
+            );
+            let inner = router(FlakyStore::new(), cfg.clone()).await.unwrap();
+            let app = Router::new()
+                .nest("/alice", inner.clone())
+                .fallback_service(inner);
+            // Axum nests this router's root at /alice; discovery stays at the origin.
+            let description =
+                document(call(&app, "GET", "/alice", &[("accept", LWS_CID)], "").await).await;
+            assert_eq!(description["id"], "https://storage.example/alice/");
+            let endpoint = description["service"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|service| service["type"] == "NotificationService")
+                .unwrap()["serviceEndpoint"]
+                .as_str()
+                .unwrap();
+            assert_eq!(
+                endpoint,
+                "https://storage.example/alice/.lws/subscriptions/"
+            );
+            let response = call(&app, "POST", endpoint, &[("content-type", LWS_JSON)], "").await;
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+            let params = challenge_params(
+                response.headers()[header::WWW_AUTHENTICATE]
+                    .to_str()
+                    .unwrap(),
+            );
+            assert_eq!(
+                params["resource_metadata"],
+                format!("{PRM}/alice/.lws/subscriptions/")
+            );
+            let fetch = Url::parse(&params["resource_metadata"]).unwrap();
+            let doc = document(call(&app, "GET", fetch.as_str(), &[], "").await).await;
+            assert_eq!(doc["resource"], endpoint);
+            assert_eq!(doc["jlws_storage_description"], cfg.storage());
+            let created = call(
+                &app,
+                "POST",
+                "/alice",
+                &[
+                    ("authorization", &bearer),
+                    ("slug", "topic"),
+                    (
+                        "link",
+                        "<https://www.w3.org/ns/lws#Container>; rel=\"type\"",
+                    ),
+                ],
+                "",
+            )
+            .await;
+            assert_eq!(created.status(), StatusCode::CREATED);
+            let topic = created.headers()[header::LOCATION].to_str().unwrap();
+            assert_eq!(topic, "https://storage.example/alice/topic/");
+            let listing = document(
+                call(
+                    &app,
+                    "GET",
+                    topic,
+                    &[("authorization", &bearer), ("accept", LWS_JSON)],
+                    "",
+                )
+                .await,
+            )
+            .await;
+            assert_eq!(listing["id"], topic);
+            let body = json!({"@context": ["https://www.w3.org/ns/lws/v1"], "type": "WebhookSubscription", "topic": [topic], "inbox": "https://inbox.example/in"}).to_string();
+            let response = call(
+                &app,
+                "POST",
+                endpoint,
+                &[("content-type", LWS_JSON), ("authorization", &bearer)],
+                &body,
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::CREATED);
+            let subscription = super::super::test_store::body_json(response).await;
+            assert!(call(
+                &app,
+                "DELETE",
+                subscription["subscription"].as_str().unwrap(),
+                &[("authorization", &bearer)],
+                ""
+            )
+            .await
+            .status()
+            .is_success());
+            for path in [
+                "/alice/child",
+                "/alice/a%2fb%20/",
+                "/alice/a//b/",
+                "/alice/alice/child",
+            ] {
+                let response = call(&app, "GET", path, &[("accept", LWS_JSON)], "").await;
+                assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+                let params = challenge_params(
+                    response.headers()[header::WWW_AUTHENTICATE]
+                        .to_str()
+                        .unwrap(),
+                );
+                let fetch = Url::parse(&params["resource_metadata"]).unwrap();
+                let doc = document(call(&app, "GET", fetch.as_str(), &[], "").await).await;
+                assert_eq!(doc["resource"], format!("{BASE}{path}"));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn advertised_metadata_urls_round_trip_through_an_http_url_parser() {
+        let app = app().await;
+        for (method, path) in [
+            ("GET", "/"),
+            ("GET", "/private"),
+            ("GET", "/a//b/"),
+            ("GET", "/a%2fb%2F%20/"),
+            ("GET", "/a/%252e/"),
+            ("GET", "/a/.hidden/"),
+            ("GET", "/a/.../"),
+            ("GET", "/a/%2e%2e%2e/"),
+            ("GET", "/a/%2f%2e%2f/"),
+            ("GET", "/a/%2e%2ex/"),
+            ("GET", "/a/x%2e/"),
+            ("GET", "/a?view=private"),
+            ("POST", "/.lws/subscriptions/"),
+        ] {
+            let response = call(&app, method, path, &[], "").await;
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+            let params = challenge_params(
+                response.headers()[header::WWW_AUTHENTICATE]
+                    .to_str()
+                    .unwrap(),
+            );
+            let resource_path = path.split('?').next().unwrap();
+            let suffix = if resource_path == "/" {
+                ""
+            } else {
+                resource_path
+            };
+            assert_eq!(params["resource_metadata"], format!("{PRM}{suffix}"));
+            let fetch = Url::parse(&params["resource_metadata"]).unwrap();
+            let doc = document(call(&app, "GET", fetch.as_str(), &[], "").await).await;
+            assert_eq!(doc["resource"], format!("{BASE}{resource_path}"));
+        }
+    }
+
+    #[tokio::test]
+    async fn dot_segment_paths_keep_root_challenges_and_have_no_resource_metadata() {
+        for base in [BASE, "https://storage.example/alice"] {
+            let mut cfg = LwsConfig::new(base);
+            cfg.owner = Some("https://owner.example/#me".into());
+            let root_metadata = prm_url(&cfg.storage()).unwrap();
+            let app = router(FlakyStore::new(), cfg.clone()).await.unwrap();
+            for segment in [
+                ".", "..", "%2e", "%2E", ".%2e", ".%2E", "%2e.", "%2E.", "%2e%2e", "%2e%2E",
+                "%2E%2e", "%2E%2E",
+            ] {
+                for path in [
+                    format!("/{segment}"),
+                    format!("/a/{segment}/private"),
+                    format!("/a/{segment}/"),
+                ] {
+                    for headers in [vec![], vec![("authorization", "Bearer invalid")]] {
+                        let response = call(&app, "GET", &path, &headers, "").await;
+                        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{base}{path}");
+                        let params = challenge_params(
+                            response.headers()[header::WWW_AUTHENTICATE]
+                                .to_str()
+                                .unwrap(),
+                        );
+                        assert_eq!(params["resource_metadata"], root_metadata, "{base}{path}");
+                        assert_eq!(params["realm"], cfg.storage());
+                    }
+                    let resource: axum::http::Uri = cfg.absolute(&path).parse().unwrap();
+                    let metadata = format!("{PRM}{}", resource.path());
+                    for method in ["GET", "HEAD"] {
+                        assert_eq!(
+                            call(&app, method, &metadata, &[], "").await.status(),
+                            StatusCode::NOT_FOUND,
+                            "{method} {metadata}"
+                        );
+                    }
+                }
+            }
+            let fetch = Url::parse(&root_metadata).unwrap();
+            let doc = document(call(&app, "GET", fetch.as_str(), &[], "").await).await;
+            assert_eq!(doc["resource"], cfg.storage());
+        }
+    }
+
+    #[tokio::test]
     async fn touchstone_root_metadata_keeps_the_configured_resource_identifier() {
         let app = router(
             FlakyStore::new(),
@@ -492,7 +708,6 @@ mod tests {
             ("/c?view=private", "/c"),
             ("/absent", "/absent"),
             ("/a%2fb%2F%20/", "/a%2fb%2F%20/"),
-            ("/a/%2e%2e/", "/a/%2e%2e/"),
         ] {
             let response = call(&app, "GET", path, &[("accept", super::super::LWS_JSON)], "").await;
             assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{path}");

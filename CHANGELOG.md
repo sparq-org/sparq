@@ -9,9 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **sparq-lws-core (LWS):** authentication challenges name RFC 9728 metadata for the
-  requested resource or service endpoint, preserving encoded paths and trailing slashes.
-  Metadata is served independently of resource existence and caller identity. Linkset
+- **sparq-lws-core (LWS):** authentication challenges for paths without dot segments
+  name RFC 9728 metadata for the requested resource or service endpoint, preserving
+  encoded paths and trailing slashes.
+  Paths with literal or percent-encoded dot segments retain storage-root metadata in
+  challenges, and their derived metadata paths return `404`. Metadata is served
+  independently of resource existence and caller identity. Linkset
   edits that change `up`, and content replacements with `Prefer: set-linkset` that change it,
   return `409 Conflict` before writing when they declare a different parent; plain content
   replacements leave `up` unchanged. Quiet container listings run concurrently; a busy

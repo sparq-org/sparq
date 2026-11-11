@@ -357,6 +357,59 @@ async fn up_conflict_is_decided_after_authorization_and_preconditions() {
 }
 
 #[tokio::test]
+async fn up_checks_cover_multiple_targets_percent_spelling_and_the_storage_root() {
+    let f = Fixture::new().await;
+    for target in ["https://storage.example/%63/", "../", "/c"] {
+        let before = f.snapshot().await;
+        let counters = f.store.counters.snapshot();
+        let body =
+            json!({"linkset": [{"anchor": RESOURCE, "up": [{"href": PARENT}, {"href": target}]}]})
+                .to_string();
+        let response = f
+            .call(
+                "PUT",
+                "/c/moved.meta",
+                Some(&f.owner),
+                &[("content-type", LINKSET_JSON)],
+                &body,
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::CONFLICT, "{target}");
+        f.assert_no_writes(counters);
+        assert_eq!(f.snapshot().await, before);
+        let link = format!("<{PARENT}>; rel=\"up\", <{target}>; rel=\"up\"");
+        let response = f
+            .call(
+                "PUT",
+                "/c/moved",
+                Some(&f.owner),
+                &[
+                    ("content-type", "text/plain"),
+                    ("prefer", "set-linkset"),
+                    ("link", &link),
+                ],
+                "changed",
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::CONFLICT, "{target}");
+        f.assert_no_writes(counters);
+        assert_eq!(f.snapshot().await, before);
+    }
+    let counters = f.store.counters.snapshot();
+    let response = f
+        .call(
+            "PATCH",
+            "/.meta",
+            Some(&f.owner),
+            &[("content-type", JSON_PATCH)],
+            &up_patch("/"),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    f.assert_no_writes(counters);
+}
+
+#[tokio::test]
 async fn plain_put_ignores_up_link_headers() {
     let f = Fixture::new().await;
     let mut before = body_json(f.get("/c/moved.meta").await).await;

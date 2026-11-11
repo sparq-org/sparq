@@ -80,6 +80,13 @@ def read(path, strict=False):
         results[name] = (outcome, " ".join(msg.split())[:300])
     if strict and (executed != len(results) or passed != sum(o == "Passed" for o, _ in results.values())):
         raise ValueError("the report's counters disagree with its leaf results")
+    if strict:
+        try:
+            total, failed = int(counters.get("total")), int(counters.get("failed"))
+        except (TypeError, ValueError):
+            raise ValueError("the report's counters are not numbers") from None
+        if total != executed or failed != executed - passed:
+            raise ValueError("the report's counters disagree with its leaf results")
     return executed, passed, results
 
 
@@ -167,6 +174,9 @@ def self_test():
         assert why(complete, 0, **ratchet) == [], "valid test outcome"
         assert why(complete, expected={"t2"}) == ["a named ratchet requires a positive expected total"]
         for bad in ("", complete[:-10], complete.replace('testName="t2"', 'testName="t1"'),
+                    complete.replace('total="3"', 'total="9"'),
+                    complete.replace('failed="1"', 'failed="0"'),
+                    complete.replace('total="3"', 'total="invalid"'),
                     complete.replace('executed="3"', 'executed="9"'),
                     complete.replace('passed="2"', 'passed="3"'),
                     complete.replace('outcome="Failed"', 'outcome="NotExecuted"'),
@@ -200,6 +210,33 @@ def self_test():
         try:
             expected_failures(entries)
             raise AssertionError("duplicate JSON keys accepted")
+        except ValueError:
+            pass
+        with open(entries, "w", encoding="utf-8") as f:
+            json.dump(dict(_doc="fixture", expected_failures=[entry]), f)
+        for report_text, status, code in [
+            (complete, 2, 0),
+            (trx(["Passed", "Failed", "Failed"]), 2, 1),
+            (trx(["Passed"] * 3), 0, 1),
+            (complete.replace('testName="t2"', 'testName="renamed"'), 2, 1),
+            (complete.replace('testName="t2"', 'testName="t1"'), 2, 1),
+            (complete.replace('total="3"', 'total="9"'), 2, 1),
+        ]:
+            with open(report, "w", encoding="utf-8") as f:
+                f.write(report_text)
+            r = subprocess.run([
+                sys.executable, "-B", __file__, report, "--status", str(status),
+                "--expected-failures", entries, "--expected-total", "3",
+            ], capture_output=True, text=True)
+            assert r.returncode == code, (code, r.returncode, r.stdout, r.stderr)
+        with open(report, "wb") as f:
+            f.write(complete.replace('testName="t2"', 'testName="\xff"').encode("latin-1"))
+        assert problems(report, 2, **ratchet)[2] == ["unreadable report"]
+        with open(entries, "wb") as f:
+            f.write(b'{"_doc":"fixture","expected_failures":[{"name":"\xff"}]}')
+        try:
+            expected_failures(entries)
+            raise AssertionError("invalid UTF-8 accepted")
         except ValueError:
             pass
         for args in (["--status", "256"], ["--status", "512", "--expected-failures", entries, "--expected-total", "3"]):

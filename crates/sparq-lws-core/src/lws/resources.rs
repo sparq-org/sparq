@@ -10346,8 +10346,7 @@ mod tests {
             std::time::SystemTime::now() + std::time::Duration::from_secs(3600),
         )
         .unwrap();
-        // A failed touch leaves the new listing without a date until a later touch lands.
-        *store.fail_write_of.lock().unwrap() = Some(meta_key(&root));
+        let touch = st.locks.lock(&format!("{root}\0touch")).await.unwrap();
         let removal = {
             let st = st.clone();
             tokio::spawn(async move {
@@ -10371,7 +10370,18 @@ mod tests {
             ("accept", "application/lws+json"),
             ("if-modified-since", since.as_str()),
         ];
+        let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anon).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert!(!r.headers().contains_key(header::LAST_MODIFIED));
+        assert!(!removal.is_finished());
+        drop(touch);
         assert!(removal.await.unwrap().status().is_success());
+        let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anon).await;
+        assert!(r.headers().contains_key(header::LAST_MODIFIED));
+        // A failed touch also leaves the listing undated until a later touch lands.
+        *store.fail_write_of.lock().unwrap() = Some(meta_key(&root));
+        let r = handle(&st, &req(Method::DELETE, "/a", &[], ""), &anon).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
         let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anon).await;
         assert_eq!(r.status(), StatusCode::OK);
         assert!(!r.headers().contains_key(header::LAST_MODIFIED));
