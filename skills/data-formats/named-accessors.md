@@ -46,7 +46,9 @@ With `mmap`, `TxnOp::Insert { slot, triple }`, `Delete { slot, triple }`, `Creat
 `Drop(name)` are the ordered journal vocabulary. `slot: None` names the default graph;
 `Some(name)` names a named graph. `commit_txn_ops(&ops)` records one frame;
 `commit_txn_ops_checked(&ops)` reports errors as `(possibly_written, message)`. The caller
-materializes those operations through the durable graph methods, then calls `clear_txn()`.
+materializes those operations through the durable graph methods, then calls `finish_txn()`.
+Call `clear_txn()` for an immediate checkpoint instead. Named layout changes within a
+frame are published at checkpoint, after dirty WALs and new slot bases are synced.
 If materialization fails, call `poison_txn()` and reopen the store before accepting more writes.
 The existing tuple-based `commit_txn` methods remain available for triple-only operations.
 Recovery reads the previous journal format as well as the operation format.

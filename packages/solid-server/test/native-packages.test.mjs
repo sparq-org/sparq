@@ -13,6 +13,29 @@ test('unsupported native platforms are explicit', () => {
   assert.throws(() => nativePackageName('linux', 'riscv64'), /native server is unavailable for linux-riscv64/);
 });
 
+test('the source manifest leaves native packages unpinned so package-lock.json stays satisfiable', async () => {
+  const manifest = JSON.parse(await readFile(join(packageDir, 'package.json')));
+  assert.equal(manifest.optionalDependencies, undefined);
+});
+
+test('publish-time pinning lists every platform package at exactly the host version', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'solid-native-pin-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const manifest = JSON.parse(await readFile(join(packageDir, 'package.json')));
+  const copy = join(dir, 'package.json');
+  await writeFile(copy, JSON.stringify(manifest));
+  execFileSync(process.execPath, [join(packageDir, 'native/pin.mjs'), copy]);
+  const pinned = JSON.parse(await readFile(copy));
+  assert.deepEqual(pinned.optionalDependencies, {
+    '@sparq-org/solid-server-native-linux-x64': manifest.version,
+    '@sparq-org/solid-server-native-linux-arm64': manifest.version,
+    '@sparq-org/solid-server-native-darwin-x64': manifest.version,
+    '@sparq-org/solid-server-native-darwin-arm64': manifest.version,
+    '@sparq-org/solid-server-native-win32-x64': manifest.version,
+  });
+  assert.deepEqual({ ...pinned, optionalDependencies: undefined }, { ...manifest, optionalDependencies: undefined });
+});
+
 test('release archives assemble all platform packages with matching versions, binaries, and no scripts', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'solid-native-packages-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
@@ -45,7 +68,6 @@ test('release archives assemble all platform packages with matching versions, bi
     const name = `@sparq-org/solid-server-native-${platform}`;
     assert.equal(pkg.name, name);
     assert.equal(pkg.version, manifest.version);
-    assert.equal(manifest.optionalDependencies[name], pkg.version);
     assert.deepEqual(pkg.os, [os]); assert.deepEqual(pkg.cpu, [cpu]);
     assert.equal(pkg.scripts, undefined);
     assert.equal(await readFile(join(generated, 'bin', executable), 'utf8'), `native executable fixture for ${platform}`);

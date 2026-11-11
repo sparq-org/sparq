@@ -319,12 +319,21 @@ pub fn split_decimal(s: &str) -> Option<(bool, &str, &str)> {
 /// zero. This is the string-exact tier [`Num::cmp_total`]'s f64-tie disambiguation
 /// rides on. sq-wjl8i
 pub fn cmp_plain_decimal(a: &str, b: &str) -> Option<Ordering> {
-    let (na, ia, fa) = split_decimal(a)?;
-    let (nb, ib, fb) = split_decimal(b)?;
+    Some(cmp_decimal_parts(split_decimal(a)?, split_decimal(b)?))
+}
+
+/// [`cmp_plain_decimal`] over lexicals already split by [`split_decimal`] (or an equivalent
+/// validating scan): `(negative, integer digits without leading zeros, fraction digits
+/// without trailing zeros)`, both digit strings ASCII digits only.
+#[inline]
+pub fn cmp_decimal_parts(
+    (na, ia, fa): (bool, &str, &str),
+    (nb, ib, fb): (bool, &str, &str),
+) -> Ordering {
     let a_zero = ia.is_empty() && fa.is_empty();
     let b_zero = ib.is_empty() && fb.is_empty();
     if a_zero && b_zero {
-        return Some(Ordering::Equal);
+        return Ordering::Equal;
     }
     // Magnitude: longer (normalised) integer part wins, then integer digits, then
     // fraction digits with implicit trailing-zero padding.
@@ -342,12 +351,12 @@ pub fn cmp_plain_decimal(a: &str, b: &str) -> Option<Ordering> {
     });
     let neg_a = na && !a_zero;
     let neg_b = nb && !b_zero;
-    Some(match (neg_a, neg_b) {
+    match (neg_a, neg_b) {
         (true, false) => Ordering::Less,
         (false, true) => Ordering::Greater,
         (false, false) => mag,
         (true, true) => mag.reverse(),
-    })
+    }
 }
 
 /// The EXACT plain-decimal expansion of a finite `f64` (every finite `f64` is an exact

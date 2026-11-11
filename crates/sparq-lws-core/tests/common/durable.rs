@@ -98,6 +98,10 @@ impl Fixture {
     }
 
     pub async fn boot(&self) -> Process {
+        self.boot_with(&[]).await
+    }
+
+    pub async fn boot_with(&self, extra: &[(&str, &str)]) -> Process {
         let address = self.endpoint.strip_prefix("http://").unwrap();
         let data = self.data();
         let key = self.directory.0.join("as-key.json");
@@ -124,6 +128,7 @@ impl Fixture {
                 ("SOLID_SERVER_LWS_PAGE_SIZE", "1000"),
             ]);
         }
+        values.extend_from_slice(extra);
         let mut process = Process::start(env!("CARGO_BIN_EXE_sparq-lws-core"), &values);
         process.wait_ready(&self.client, &self.endpoint).await;
         process

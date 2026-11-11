@@ -1,0 +1,17 @@
+# Compile each optional provider; LocalFileSystem behavioural tests run in every leg.
+# SCOPE: changing the leg-name set also updates
+# scripts/tests/feature-matrix-legnames.golden.txt; feature/test edits do not.
+- name: "sparq-lws-blob-object (aws)"
+  crate: "sparq-lws-blob-object"
+  features: "aws"
+  test: true
+
+- name: "sparq-lws-blob-object (azure)"
+  crate: "sparq-lws-blob-object"
+  features: "azure"
+  test: true
+
+- name: "sparq-lws-blob-object (gcp)"
+  crate: "sparq-lws-blob-object"
+  features: "gcp"
+  test: true

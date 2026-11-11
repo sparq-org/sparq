@@ -125,6 +125,18 @@ commands against a loopback fixture and both complete shell drivers with local p
 fixtures. These checks cover harness orchestration; the real suites against a binary with the
 merged storage dependencies provide the durability evidence.
 
+## LWS.net builtin ratchet
+
+The builtin definitions run with `LWS_NET_EXPECTED_TOTAL=292` and
+`LWS_NET_EXPECTED_FAILURES` pointing to
+[`lws/lws-net-expected-failures.json`](lws/lws-net-expected-failures.json).
+Both variables default to unset in the driver, which then uses the harness's exit status.
+Each exact test name has an `intentional` or `runner` category and an evidence-based reason.
+An unlisted failure, a listed pass or missing test, an unexpected total, an inconsistent or
+unreadable TRX report, or a harness infrastructure error fails the step. Remove an entry
+when it starts passing; a new failure cannot replace it. The report reader's `--self-test`
+checks these outcomes. The separate `tests.yaml` step uses the harness's exit status.
+
 ## Auth wiring (Keycloak, the hard part)
 
 The CTH logs its test users in to obtain access tokens. Identity is delegated to **Keycloak**; the

@@ -1,0 +1,40 @@
+{
+  "_doc": "Exact builtin LWS.net failures at the workflow pin. lws-net-report.py requires this failed-name set and the expected total: an unlisted failure, a listed pass or a missing test fails CI. Remove an entry when it starts passing; do not add server defects.",
+  "expected_failures": [
+    {
+      "name": "Example: Delete returns 999 (intentionally failing)",
+      "category": "intentional",
+      "reason": "LWS.net Suite/Model/Resources/example.ttl deliberately expects DELETE status 999; a conforming deletion returns 204."
+    },
+    {
+      "name": "Touchstone: Container response varies by Accept",
+      "category": "runner",
+      "reason": "touchstone.ttl applies :single to Vary; HeaderExtractor.cs returns the .NET list values Accept and Origin separately. RFC 9110 sections 5.3 and 12.5.5 allow list-valued Vary; Origin preserves CORS caching."
+    },
+    {
+      "name": "Touchstone: Token exchange without subject token returns JSON",
+      "category": "runner",
+      "reason": "touchstone.ttl and oldmanifest.ttl construct _:tokenEndpoint as authorizationServer + /token rather than reading token_endpoint from /.well-known/lws-configuration (LWS Authorization, authorization-server-metadata; RFC 8414). The advertised /.well-known/lws/token returns 400 application/json invalid_request for a missing subject token."
+    },
+    {
+      "name": "Touchstone: Token exchange without subject token returns invalid_request",
+      "category": "runner",
+      "reason": "touchstone.ttl and oldmanifest.ttl construct _:tokenEndpoint as authorizationServer + /token rather than reading token_endpoint from /.well-known/lws-configuration (LWS Authorization, authorization-server-metadata; RFC 8414). The advertised /.well-known/lws/token returns 400 application/json invalid_request for a missing subject token."
+    },
+    {
+      "name": "Touchstone: Token exchange without subject token returns 400",
+      "category": "runner",
+      "reason": "touchstone.ttl and oldmanifest.ttl construct _:tokenEndpoint as authorizationServer + /token rather than reading token_endpoint from /.well-known/lws-configuration (LWS Authorization, authorization-server-metadata; RFC 8414). The advertised /.well-known/lws/token returns 400 application/json invalid_request for a missing subject token."
+    },
+    {
+      "name": "Ported from manifest.jsonld: LWS Protocol 1.0 Test Suite: authz-token-exchange-invalid-resource-status",
+      "category": "runner",
+      "reason": "touchstone.ttl and oldmanifest.ttl construct _:tokenEndpoint as authorizationServer + /token rather than reading token_endpoint from /.well-known/lws-configuration (LWS Authorization, authorization-server-metadata; RFC 8414). The advertised /.well-known/lws/token returns 400 application/json invalid_request for a missing subject token."
+    },
+    {
+      "name": "Ported from manifest.jsonld: LWS Authentication: Self-signed Identity using did:key: authn-didkey-missing-credential-status",
+      "category": "runner",
+      "reason": "touchstone.ttl and oldmanifest.ttl construct _:tokenEndpoint as authorizationServer + /token rather than reading token_endpoint from /.well-known/lws-configuration (LWS Authorization, authorization-server-metadata; RFC 8414). The advertised /.well-known/lws/token returns 400 application/json invalid_request for a missing subject token."
+    }
+  ]
+}

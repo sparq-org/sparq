@@ -82,6 +82,26 @@ fn native_boot_refuses_invalid_lock_wait_values() {
     }
 }
 
+#[cfg(not(feature = "blob-object"))]
+#[test]
+fn native_boot_refuses_object_url_without_feature_before_creating_data() {
+    let dir = Directory::new();
+    let output = Process::start(
+        env!("CARGO_BIN_EXE_sparq-lws-core"),
+        &[
+            ("SOLID_SERVER_DATA_DIR", dir.0.to_str().unwrap()),
+            ("SOLID_SERVER_BLOB_URL", "file:///private-object-location/"),
+        ],
+    )
+    .finish();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "boot unexpectedly succeeded");
+    assert!(stderr.contains("SOLID_SERVER_BLOB_URL"), "{stderr}");
+    assert!(stderr.contains("requires the opt-in `blob-object`"), "{stderr}");
+    assert!(!stderr.contains("private-object-location"), "{stderr}");
+    assert!(std::fs::read_dir(&dir.0).unwrap().next().is_none());
+}
+
 #[cfg(all(feature = "embedded-sparq", not(feature = "blob-fs")))]
 #[test]
 fn data_directory_boot_refuses_the_missing_filesystem_adapter() {

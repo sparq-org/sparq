@@ -16,26 +16,86 @@
 //! without a schema change.
 
 use serde::{Deserialize, Serialize};
-use sparq_zk::field::{field_from_hex_str, field_to_hex, Fr};
+use sparq_zk::field::{field_from_hex_str_strict, field_to_hex, Fr};
 // sq-h8rg (HolderPoP T2): the holder-key digest from the T1 message
 // family (`commitment_message_with_holder`) is computed via `holder_key_digest`;
 // the attested-holder-binding schema below wires it through the manifest.
 use sparq_zk::sig::{holder_key_digest, public_key_from_hex, HolderKeyError, PublicKey};
 
-/// Field element rendered as `0x`-prefixed 64-nibble hex — the same
-/// representation `<urn:sparq:zk>` registry literals use, so commitments and
-/// term encodings round-trip through the manifest verbatim.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Field hex with equality by field element and a canonical serialized form.
+/// Deserialization preserves input text; malformed or out-of-range text compares
+/// by raw spelling and is refused by [`Self::to_field`].
+#[derive(Debug, Clone, Deserialize)]
 #[serde(transparent)]
 pub struct FieldHex(pub String);
+
+impl PartialEq for FieldHex {
+    fn eq(&self, other: &Self) -> bool {
+        match (self.to_field(), other.to_field()) {
+            (Some(a), Some(b)) => a == b,
+            _ => self.0 == other.0,
+        }
+    }
+}
+
+impl Eq for FieldHex {}
+
+impl Serialize for FieldHex {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.canonical())
+    }
+}
 
 impl FieldHex {
     pub fn from_field(f: &Fr) -> Self {
         FieldHex(field_to_hex(f))
     }
-    /// Parse back to a field element. `None` if the hex is malformed.
+    /// Parse back to a field element, refusing malformed or out-of-range hex.
     pub fn to_field(&self) -> Option<Fr> {
-        field_from_hex_str(&self.0)
+        field_from_hex_str_strict(&self.0)
+    }
+    /// Canonical hex for a field element, or the original text if it is invalid.
+    /// Use this representation for string-keyed field sets and maps.
+    pub fn canonical(&self) -> String {
+        self.to_field().map(|f| field_to_hex(&f)).unwrap_or_else(|| self.0.clone())
+    }
+}
+
+#[cfg(test)]
+mod field_hex_tests {
+    use super::*;
+
+    #[test]
+    fn field_hex_values_and_wire_form() {
+        let canonical = FieldHex::from_field(&Fr::from(0xabcu64));
+        for text in ["abc", "0x0ABC", "0Xabc"] {
+            let h: FieldHex = serde_json::from_str(&format!("\"{text}\"")).unwrap();
+            assert_eq!(h.0, text, "deserialization preserves spelling");
+            assert_eq!(h, canonical);
+            assert_eq!(h.canonical(), canonical.0);
+            assert_eq!(serde_json::to_string(&h).unwrap(), format!("\"{}\"", canonical.0));
+            let round_trip: FieldHex = serde_json::from_str(&serde_json::to_string(&h).unwrap()).unwrap();
+            assert_eq!(round_trip, h);
+            assert_eq!(round_trip.0, canonical.0);
+        }
+        assert_ne!(canonical, FieldHex("0xabd".into()));
+        assert_eq!(FieldHex("0x0".into()), FieldHex::from_field(&Fr::from(0u64)));
+        let invalid = ["bad hex", "BAD HEX", "0xz", "0xZ",
+            "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001"];
+        for (i, text) in invalid.iter().enumerate() {
+            let h = FieldHex((*text).into());
+            assert_eq!(h, h.clone());
+            assert_eq!(h.to_field(), None);
+            assert_eq!(h.canonical(), *text);
+            assert_ne!(h, canonical);
+            assert_ne!(h, FieldHex("0".into()));
+            for other in &invalid[i + 1..] {
+                assert_ne!(h, FieldHex((*other).into()));
+            }
+            let json = serde_json::to_string(&h).unwrap();
+            assert_eq!(json, format!("\"{text}\""));
+            assert_eq!(serde_json::from_str::<FieldHex>(&json).unwrap().0, *text);
+        }
     }
 }
 
@@ -3233,6 +3293,26 @@ mod canonical_edge_tests {
             holder_set_proofs: vec![],
             fully_hidden_revocation: None,
         }
+    }
+
+    #[test]
+    fn manifest_json_canonicalizes_mixed_field_spellings() {
+        let mut canonical = manifest_with_edges(vec![], vec![]);
+        canonical.sub_proofs.push(SubProof {
+            inputs: ProofInputs::FilterInt {
+                id: CircuitId::FilterInt { d: 1 },
+                operand_enc: FieldHex::from_field(&Fr::from(0xabcu64)),
+                op: FilterOp::Eq, bound: 1, expected: true,
+            },
+            proof_hex: String::new(),
+        });
+        let mut mixed = canonical.clone();
+        mixed.binding = BindingMode::Challenge { challenge: FieldHex("01".into()) };
+        if let ProofInputs::FilterInt { operand_enc, .. } = &mut mixed.sub_proofs[0].inputs {
+            *operand_enc = FieldHex("0xABC".into());
+        }
+        assert_eq!(mixed.to_json().unwrap(), canonical.to_json().unwrap());
+        assert_eq!(ProofManifest::from_json(&mixed.to_json().unwrap()).unwrap(), canonical);
     }
 
     fn binding_edge(from_proof: usize, from_row: usize, from_slot: usize, to_proof: usize) -> BindingEdge {

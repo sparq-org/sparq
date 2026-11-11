@@ -8,22 +8,36 @@ The legacy `SOLID_SERVER_SPARQ_DIR` setting still opens an existing snapshot and
 retains the durable-index/in-memory-blob refusal. A directory-backed index opened
 through this legacy path also compacts on graceful shutdown.
 
-The default native build opens `FsBlobStore` at `<data>/blobs`. Both
-`embedded-sparq` and `blob-fs` are required; a build without either feature refuses
-data-directory boot with a message naming the missing feature. Without a data
+The default native build opens `FsBlobStore` at `<data>/blobs`. `embedded-sparq` is required; `blob-fs` is required when no object URL is set.
+A missing feature refuses boot with a message naming it.
+The default-off `blob-object` feature lets `SOLID_SERVER_BLOB_URL` replace only
+the byte plane; its URL and provider options are described in
+[object storage](blob-object.md). The offline directory-copy backup and restore
+procedure covers only the filesystem blob backend. Without a data
 directory, the native binary uses in-memory blobs.
 
-The boot contract checks `<data>/format.json` before opening either plane:
+The default provider `none` checks `<data>/format.json` before opening either plane:
 
 ```json
 {"schema":1,"index":{"major":1},"blobs":{"major":1}}
 ```
 
-An absent marker is published atomically (temporary file, file sync, rename,
-data-directory sync) only if both plane directories are absent or empty. Existing
+An absent marker is published atomically (temporary file, file sync, hard link,
+data-directory sync) only if both plane directories are absent or empty. Publication
+never replaces a concurrently created marker; that marker is validated instead. Existing
 plane content without the marker is refused as a foreign directory. An unknown
 schema, incompatible index/blob major, or malformed marker refuses boot. A marker
-without an index resumes first boot. Do not remove the marker from an existing store.
+without an index resumes first boot. An absent `blobs.backend` denotes
+`"filesystem"` for compatibility. Object boot writes
+`"blobs":{"major":1,"backend":"object","url":"s3://bucket/prefix"}`.
+The backend and exact URL must match on every reopen, including a marker-only
+first boot. Backend/location changes require migration; credentials and provider
+options are not recorded and may rotate without changing the namespace. Do not remove the marker from an existing store.
+
+With `SOLID_SERVER_CRYPT_PROVIDER=local`, a build with `crypt` upgrades blobs to
+`{"major":2,"encryption":"envelope-v1"}` under the index lock after validating
+existing keys. This is one-way; `none` and older binaries refuse the upgraded
+directory. See [blob encryption](blob-encryption.md) for KEK backup and format details.
 
 `EmbeddedSparqClient::open_or_create(dir)` delegates empty-store creation,
 interrupted-swap recovery and exclusive locking to the core. Its I/O result preserves
@@ -85,9 +99,28 @@ Dropping the final client joins its actor and explicitly releases its index lock
 ## Backup and restore
 
 This procedure uses the durable `SOLID_SERVER_DATA_DIR` contract with the default
-native build described above. It applies to both Solid
+native build and filesystem blob backend described above. It applies to both Solid
 and LWS protocol modes. It does not back up ephemeral in-memory storage or a
-remote SPARQ service.
+remote SPARQ service. An index-only snapshot does not include resource bytes.
+
+When `SOLID_SERVER_BLOB_URL` selects object storage, including `file://`, the bytes
+live in the separately configured object namespace. Stop the server
+and coordinate the index backup with a separate backup of that entire namespace;
+preserve object keys, including the pool layout. Restore both to the same stopped
+state before restarting. `format.json` must still record the same backend and
+exact URL, while provider options and credentials may rotate. A changed backend
+or URL requires migration; editing or removing the marker does not migrate bytes.
+
+With encryption enabled, archive the directory exactly as stored: preserve the
+major-2 marker (`blobs.major=2`, `encryption=envelope-v1`), all `e1-` bodies
+(including `$pool$e1-`), any legacy `b1-` bodies, and the index's wrapped-key
+records. Copying ciphertext does not require decryption. Back up the local KEK
+separately, retain its restricted permissions, and restore that same KEK before
+starting a build with `crypt` and `SOLID_SERVER_CRYPT_PROVIDER=local`. Preserve
+the protocol and configured pod scope used to wrap keys. Provider `none` refuses
+the restored major-2 directory; a missing or different KEK prevents decryption.
+The data-directory archive does not include a KEK stored outside that directory.
+The format upgrade preserves an object backend's recorded backend and URL.
 
 ### Make an offline backup
 
@@ -122,11 +155,14 @@ and external secrets separately, including any AS and notification signing-key
 files configured outside the data directory. The directory archive contains
 only files under that directory. Protect both the archive and the key backups
 as private data.
+Credentials are not stored in `format.json`.
 
 ### Restore an offline backup
 
 1. Unpack a trusted archive into a new, **empty** directory. Do not overlay an
-   existing store or unrelated files. `mktemp -d` creates an empty destination:
+   existing store or unrelated files. Use a filesystem that supports the
+   documented locking, hard-link and sync requirements. `mktemp -d` creates an
+   empty destination:
 
    ```sh
    set -eu
@@ -140,6 +176,7 @@ as private data.
    compatible server build, and retain `SOLID_SERVER_BASE_URL`: stored resource
    and grant IRIs are not rewritten to a new origin. Ensure the server's OS
    user can read and write the restored directory.
+   Do not combine an index from one backup with blobs from another.
 3. Start with `SOLID_SERVER_DATA_DIR` pointing at that directory. For example,
    with the other settings restored in the environment:
 

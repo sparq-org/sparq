@@ -15,7 +15,7 @@
 //! the query text and the authenticated method:
 //!
 //! 1. the member is the one the constant's datatype routes to;
-//! 2. the presented `datatype_const` is the canonical spelling of that lane's
+//! 2. the presented `datatype_const` equals that lane's
 //!    constant (for the decimal lane, of `decimal_lane_const(fd)` at an admitted
 //!    scale);
 //! 3. the presented `op` code equals the query comparison's, after the
@@ -141,8 +141,7 @@ pub enum PinError {
     LaneNotRouted { datatype: String },
     /// The sub-proof is on a different member than the constant's lane.
     MemberMismatch { expected: String, presented: String },
-    /// The presented `datatype_const` is not the lane's constant — or is not
-    /// its canonical spelling.
+    /// The presented `datatype_const` is not the lane's constant, or is invalid.
     LaneConstMismatch,
     /// The presented decimal lane constant names no admitted scale, or the query
     /// constant cannot be rescaled to that scale EXACTLY (it would need
@@ -201,7 +200,7 @@ impl std::fmt::Display for PinError {
             ),
             PinError::LaneConstMismatch => write!(
                 f,
-                "the sub-proof's datatype_const is not the canonical spelling of the FILTER constant's lane constant"
+                "the sub-proof's datatype_const is not the FILTER constant's lane constant"
             ),
             PinError::ScaleNotAdmitted => write!(
                 f,
@@ -424,10 +423,7 @@ pub fn check_value_lane_pin(
         });
     }
 
-    // The lane constant is compared on the DECODED field element AND the text
-    // must be its canonical spelling: `field_from_hex_str` accepts an uppercase,
-    // `0x`-less, short or at-or-above-modulus spelling, so a text comparison
-    // alone would let a re-spelled constant through.
+    // Strict parsing makes the lane comparison independent of hex spelling.
     let decoded = canonical_field(presented.datatype_const).ok_or(PinError::LaneConstMismatch)?;
     let presented_fd = match expected.lane_const {
         ExpectedLaneConst::Fixed(c) => {
@@ -534,12 +530,9 @@ fn u64_of_field(f: &Fr) -> Option<u64> {
     Some(u64::from_be_bytes(be[24..32].try_into().ok()?))
 }
 
-/// Decode a `FieldHex` and accept it only if its text is the CANONICAL rendering
-/// of the decoded element. Mirrors `dispatch::canonical_field`, which is
-/// crate-private to the dispatch module.
+/// Decode a field input strictly, accepting equivalent hex spellings by value.
 fn canonical_field(h: &FieldHex) -> Option<Fr> {
-    let f = h.to_field()?;
-    (field_to_hex(&f) == h.0).then_some(f)
+    h.to_field()
 }
 
 /// Map a query comparison to its manifest `FilterOp`. The two enums are 1:1 by
@@ -903,7 +896,7 @@ mod tests {
             ),
             Err(PinError::LaneConstMismatch)
         );
-        // ... and a NON-CANONICAL spelling of the RIGHT constant.
+        // An equivalent spelling of the right constant keeps the same pin.
         let respelled = ProofInputs::FilterValueDl {
             id: CircuitId::FilterValueDl,
             operand_enc: FieldHex("0x1".into()),
@@ -917,7 +910,7 @@ mod tests {
         };
         assert_eq!(
             check_value_lane_pin(V2, &f, &respelled),
-            Err(PinError::LaneConstMismatch)
+            Ok(())
         );
 
         // (3) op

@@ -128,11 +128,207 @@ fn incremental_rejects_forall_in_scope_patterns() {
     }
 }
 
+// A query and the same rule appended to the data must project the same marker.
+// Compare complete answer terms, and check the query first so a query-only mutant
+// cannot be killed merely by the forward oracle.
+fn query_parity(data: &str, premise: &str, expected: bool) {
+    let data = format!("@prefix : <{EX}>. {data}");
+    let query = format!("@prefix : <{EX}>. {{ {premise} }} => {{ :hit :by :rule }}.");
+    let result = sparq_reason::reason_n3_query_terms(&data, &query);
+    assert!(result.is_ok(), "{result:?}");
+    let answers = result.unwrap();
+    let want = if expected {
+        vec![[iri("hit"), iri("by"), iri("rule")]]
+    } else {
+        vec![]
+    };
+    assert_eq!(answers, want, "data: {data}; query: {query}");
+    let forward = reason_n3_terms(&format!("{data}\n{query}"), None).expect("forward reasons");
+    let projected: Vec<_> = forward
+        .facts
+        .into_iter()
+        .filter(|f| f[0] == iri("hit"))
+        .collect();
+    assert_eq!(answers, projected, "query/forward parity");
+}
+
 #[test]
-fn a_query_rejects_premise_own_forall() {
-    // A query premise is matched with no firing check: refused.
-    let src = format!("@prefix : <{EX}>. {{ @forAll :x. :x :p :b }} => {{ :hit :by :rule }}.");
-    assert_eq!(sparq_reason::reason_n3_query_terms("", &src).unwrap_err(), QUANTIFIER_ERROR);
+fn query_ground_fact_does_not_prove_a_universal() {
+    // EYE agrees with this forward-rule case: one instance proves no universal.
+    query_parity(":c :p :b.", "@forAll :x. :x :p :b", false);
+}
+
+#[test]
+fn query_stored_universal_proves_a_universal() {
+    for (data, premise) in [
+        ("@forAll :z. :z :p :b.", "@forAll :x. :x :p :b"),
+        ("@forAll :z. :a :p :z.", "@forAll :x. :a :p :x"),
+        (
+            "@forAll :z. :z :p :b. :z :q :r.",
+            "@forAll :x. :x :p :b. :x :q :r",
+        ),
+        (
+            "@forAll :z. :a :p ( :z :b ).",
+            "@forAll :x. :a :p ( :x :b )",
+        ),
+        (
+            "@forAll :z. :a :p <<( :z :q :b )>>.",
+            "@forAll :x. :a :p <<( :x :q :b )>>",
+        ),
+    ] {
+        query_parity(data, premise, true);
+    }
+    // The dictionary-returning public query entry point shares the term-level path.
+    let mut dict = sparq_core::dict::Dict::new();
+    let result = sparq_reason::reason_n3_query(
+        &mut dict,
+        &format!("@prefix : <{EX}>. @forAll :z. :z :p :b."),
+        &format!("@prefix : <{EX}>. {{ @forAll :x. :x :p :b }} => {{ :hit :by :rule }}."),
+    );
+    assert!(result.is_ok(), "{result:?}");
+    let terms: Vec<_> = result
+        .unwrap()
+        .into_iter()
+        .map(|f| f.map(|id| dict.term(id).to_string()))
+        .collect();
+    assert_eq!(
+        terms,
+        vec![[
+            "<http://ex/hit>".to_string(),
+            "<http://ex/by>".to_string(),
+            "<http://ex/rule>".to_string()
+        ]]
+    );
+}
+
+#[test]
+fn query_alias_does_not_prove_an_independent_universal() {
+    // Same conservative result as the forward test; EYE fires on this case.
+    query_parity("@forAll :z. :z :p :z.", "@forAll :x. :x :p ?y", false);
+    query_parity("@forAll :z, :w. :z :p :w.", "@forAll :x. :x :p ?y", true);
+}
+
+#[test]
+fn query_binding_must_not_hold_the_universal_at_any_depth() {
+    for value in ["( ( :z ) )", "{ :a :q ( :z ) }", "<<( :a :q ( :z ) )>>"] {
+        let data = format!("@forAll :z. :z :p :b. :a :q {value}.");
+        for premise in [
+            "@forAll :x. :x :p :b. :a :q ?v",
+            "@forAll :x. :a :q ?v. :x :p :b",
+        ] {
+            query_parity(&data, premise, false);
+        }
+    }
+}
+
+#[test]
+fn query_binding_must_not_hold_a_blank_node() {
+    for value in ["_:b", "( _:b )", "{ _:b :q :r }", "<<( _:b :q :r )>>"] {
+        query_parity(
+            &format!("@forAll :z. :z :p {value}."),
+            "@forAll :x. :x :p ?y",
+            false,
+        );
+    }
+    query_parity("@forAll :z. :z :p _:b.", "@forAll :x. :x :p _:y", false);
+}
+
+#[test]
+fn query_universals_require_an_injective_binding() {
+    // EYE agrees with the forward test: the diagonal is not the full relation.
+    query_parity("@forAll :z. :z :p :z.", "@forAll :x, :y. :x :p :y", false);
+    query_parity("@forAll :z. :z :p :z.", "@forAll :x. :x :p :x", true);
+    query_parity(
+        "@forAll :z, :w. :z :p :w.",
+        "@forAll :x, :y. :x :p :y",
+        true,
+    );
+}
+
+#[test]
+fn query_nested_closure_requires_its_own_universal() {
+    let premise = ":k :is ?f. ?f log:conclusion ?g. ?g log:includes { :inner :fired :yes }";
+    for (binder, expected) in [("@forAll :z.", false), ("", true)] {
+        let inner_binder = if expected { "@forAll :z." } else { "" };
+        let data = format!(
+            ":k :is {{ {binder} :z :p :b. :k2 :is {{ {inner_binder} :z :p :b. \
+            {{ @forAll :y. :y :p :b }} => {{ :inner :hit :yes }} }}. \
+            {{ :k2 :is ?f. ?f log:conclusion ?g. ?g log:includes {{ :inner :hit :yes }} }} \
+            => {{ :inner :fired :yes }} }}."
+        );
+        query_parity(&data, premise, expected);
+    }
+}
+
+#[test]
+fn query_refuses_unsupported_quantifier_placements() {
+    for query in premise_cases().into_iter().chain(scope_cases()) {
+        let result = sparq_reason::reason_n3_query_terms("", &query);
+        assert_eq!(result.err().as_deref(), Some(QUANTIFIER_ERROR), "{query}");
+    }
+}
+
+#[test]
+fn query_refuses_data_with_backward_rules() {
+    let data = format!("@prefix : <{EX}>. @forAll :z. :z :p :b. {{ :a :q :b }} <= {{ :a :r :b }}.");
+    let query = format!("@prefix : <{EX}>. {{ @forAll :x. :x :p :b }} => {{ :hit :by :rule }}.");
+    let result = sparq_reason::reason_n3_query_terms(&data, &query);
+    assert_eq!(result.err().as_deref(), Some(QUANTIFIER_ERROR));
+    assert_eq!(
+        reason_n3_terms(&format!("{data} {query}"), None)
+            .err()
+            .as_deref(),
+        Some(QUANTIFIER_ERROR)
+    );
+    // Unquantified queries keep their existing backward-rule support.
+    let plain = format!("@prefix : <{EX}>. {{ :a :q :b }} => {{ :hit :by :rule }}.");
+    let result = sparq_reason::reason_n3_query_terms(
+        &format!("{data} <http://ex/a> <http://ex/r> <http://ex/b>."),
+        &plain,
+    );
+    assert_eq!(result.unwrap(), vec![[iri("hit"), iri("by"), iri("rule")]]);
+}
+
+#[test]
+fn query_refuses_its_own_backward_rules_with_premise_universals() {
+    let data = format!("@prefix : <{EX}>. @forAll :z. :z :p :b.");
+    let query = format!("@prefix : <{EX}>. {{ @forAll :x. :x :p :b }} => {{ :hit :by :rule }}. {{ :a :q :b }} <= {{ :a :r :b }}.");
+    let result = sparq_reason::reason_n3_query_terms(&data, &query);
+    assert_eq!(result.err().as_deref(), Some(QUANTIFIER_ERROR));
+}
+
+#[test]
+fn query_w3c_simple_for_all_premise() {
+    // Verbatim w3c/N3 input at 23ccf3d56b25cb60a68878a04aae0d52493080f0,
+    // kept locally in fixtures/quantification (no manifest entry). Its
+    // document universal proves the query's own universal, as in the forward test.
+    let src = include_str!("fixtures/quantification/simple_forAll_premise.n3");
+    let query =
+        "@prefix : <http://example.org#>. { @forAll :y. :y :p :o } => { :test :was :successful }.";
+    let result = sparq_reason::reason_n3_query_terms(src, query);
+    assert!(result.is_ok(), "{result:?}");
+    let ex = |s: &str| Term::Iri(format!("http://example.org#{s}"));
+    let want = vec![[ex("test"), ex("was"), ex("successful")]];
+    assert_eq!(result.unwrap(), want);
+    assert!(reason_n3_terms(src, None).unwrap().facts.contains(&want[0]));
+}
+
+#[test]
+fn query_w3c_nested_universals_stay_refused() {
+    // These unmanifested W3C premises hold a universal inside a formula encoding
+    // a rule. That placement remains unsupported in both forward and query paths;
+    // neither input is grounds for silently reporting an empty answer.
+    for src in [
+        include_str!("fixtures/quantification/nested_universal.n3"),
+        include_str!("fixtures/quantification/nested_universal_with_existential.n3"),
+    ] {
+        let result = sparq_reason::reason_n3_query_terms("", src);
+        assert_eq!(result.err().as_deref(), Some(QUANTIFIER_ERROR));
+        assert_eq!(
+            reason_n3_terms(src, None).err().as_deref(),
+            Some(QUANTIFIER_ERROR)
+        );
+    }
 }
 
 // GH #6882: a rule premise's own `@forAll` (`{ @forAll :x. :x :p :b } => …`) reads

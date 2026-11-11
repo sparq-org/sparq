@@ -395,7 +395,7 @@ pub fn select_children_limited(container: &str, limit: usize) -> Result<String, 
 /// be an injection vector and is infallible-by-construction (returned as `String`, not a `Result`).
 pub fn select_referenced_blob_keys() -> String {
     format!(
-        "SELECT DISTINCT ?bk WHERE {{ GRAPH ?g {{ {s} {p} ?bk }} }}",
+        "SELECT DISTINCT ?bk WHERE {{ GRAPH ?g {{ {s} {p} ?bk }} FILTER(?bk != \"\") }}",
         s = iri_const(&s_record()),
         p = iri_const(&p_blob_key()),
     )

@@ -22,6 +22,12 @@ pub mod eliasfano;
 pub mod dir_lock;
 #[cfg(all(test, feature = "mmap"))]
 mod fault;
+#[cfg(feature = "mmap")]
+mod checkpoint;
+#[cfg(all(test, feature = "mmap"))]
+mod crash;
+#[cfg(all(test, feature = "mmap"))]
+mod journal_tests;
 #[cfg(all(test, feature = "mmap"))]
 mod swap_tests;
 #[cfg(feature = "mmap")]
@@ -155,8 +161,8 @@ pub struct Graph {
     /// resolved per-slot quad-delta of one `apply_effects` call is recorded here as ONE fsync'd
     /// frame BEFORE it is materialised across the per-graph WALs, so a crash mid-body can never
     /// leave a PARTIAL durable write (e.g. parent containment without the child graph). On the next
-    /// `open` a committed frame is redone idempotently and the journal truncated. `None` for
-    /// in-memory graphs (the per-`apply_effects` commit/clear are then no-ops). See [`TxnJournal`].
+    /// `open` committed frames are redone in order and the journal checkpointed. `None` for
+    /// in-memory graphs (the per-`apply_effects` commit/finish are then no-ops). See [`TxnJournal`].
     #[cfg(feature = "mmap")]
     txn: Option<TxnJournal>,
     /// Shared durable-write and layout state for this graph tree.
@@ -2143,6 +2149,7 @@ impl Graph {
     #[cfg(feature = "mmap")]
     pub fn save(&self, dir: &std::path::Path) -> std::io::Result<()> {
         let owned = self.lock_to_write(dir)?;
+        self.tree.checkpoint()?;
         self.save_unlocked(&owned.dir, Role::Root)
     }
 
@@ -2172,6 +2179,7 @@ impl Graph {
     #[cfg(feature = "mmap")]
     pub fn save_compressed(&self, dir: &std::path::Path) -> std::io::Result<()> {
         let owned = self.lock_to_write(dir)?;
+        self.tree.checkpoint()?;
         self.save_compressed_unlocked(&owned.dir, Role::Root)
     }
 
@@ -2572,56 +2580,27 @@ impl Graph {
             }
         }
         g.wal = WriteState::Durable(Wal::open(dir)?);
-        // (sq-ycle) AFTER the per-graph WALs are replayed (above + per named graph in
-        // `open_named`), redo any committed parent-level transaction frame, idempotently. A
-        // multi-op UPDATE body's resolved per-slot quad-delta is one atomic `txn.log` frame; if a
-        // crash interrupted materialisation after that journal commit, the per-graph WALs hold only a
-        // PREFIX of the body — replaying the frame heals the desync. Re-applying records the WALs
-        // already materialised is a no-op: `apply_delta` replays with set semantics (re-inserting a
-        // present triple / deleting an absent one changes nothing) and `ensure_named` is
-        // find-or-create.
-        //
-        // (Copilot #135) DURABILITY ORDER (load-bearing): the records MUST be
-        // MATERIALISED INTO THE DURABLE PER-GRAPH WAL (`redo_txn_record` -> `apply_delta`, which
-        // appends + fsyncs) BEFORE the `txn.log` is truncated. The earlier code applied them with
-        // `apply_delta_mem` (IN-MEMORY only) and then truncated the journal, so a record that lived
-        // ONLY in `txn.log` — the precise crash window the journal exists for — was applied to this
-        // process's memory but written nowhere durable, then ERASED by the truncation, so it did NOT
-        // survive the NEXT restart. Re-logging into the WAL first (then truncate) makes the recovered
-        // state durable across any number of restarts; a re-crash between WAL-redo and truncation
-        // simply redoes the (idempotent) frame again on the next open.
-        let txn_ops = TxnJournal::replay(dir)?;
-        for op in txn_ops {
-            g.redo_txn_op(op).map_err(std::io::Error::other)?;
-        }
-        // Every committed record is now durably in a per-graph WAL (fsync'd by `apply_delta`); only
-        // NOW is it safe to truncate the journal that was the sole durable home of those records.
-        let mut journal = TxnJournal::open(dir)?;
-        if journal.file.metadata()?.len() != 0 {
-            journal.truncate()?;
-        }
-        g.txn = Some(journal);
-        // Share the recovered tree state with every named child.
+        // WALs can independently contain prefixes of materialization. Replay the entire
+        // retained journal in order, then make all materialization durable together.
+        g.txn = Some(TxnJournal::open(dir)?);
         g.share_tree();
+        let txn_ops = TxnJournal::replay(dir)?;
+        if g.txn.as_ref().expect("attached journal").file.metadata()?.len() != 0 {
+            g.tree.retain_journal(g.txn.as_ref().expect("attached journal"))?;
+            g.tree.materializing.store(true, std::sync::atomic::Ordering::Release);
+            for op in txn_ops {
+                if let Err(e) = g.redo_txn_op(op) {
+                    g.poison_txn();
+                    return Err(std::io::Error::other(e));
+                }
+            }
+            g.clear_txn().map_err(std::io::Error::other)?;
+        }
         Ok(g)
     }
 
-    /// (sq-ycle) Idempotently re-apply one redo-journal record on `open`. A default-slot
-    /// record goes to this graph's default store; a named-slot record is routed to the matching
-    /// named sub-graph (find-or-create via [`ensure_named`](Self::ensure_named), so a frame whose
-    /// child-graph creation crashed before materialisation still rebuilds the graph). Set-semantic:
-    /// re-applying a change the per-graph WAL already materialised is a no-op.
-    ///
-    /// (Copilot #135) DURABILITY: the redo goes through the WAL-logged + fsync'd
-    /// [`apply_delta`](Self::apply_delta) (NOT the in-memory-only `apply_delta_mem`), so a record
-    /// that lived ONLY in `txn.log` — the exact crash window the journal exists for (crash AFTER
-    /// `commit_txn` fsync, BEFORE per-graph WAL materialisation) — is MATERIALISED into the durable
-    /// per-graph WAL on recovery. The caller truncates `txn.log` only AFTER every record has been
-    /// re-logged this way (see [`open`](Self::open)), so the recovered state survives ANY number of
-    /// subsequent restarts. Re-logging a record the per-graph WAL already holds is harmless: the WAL
-    /// replays with set semantics (re-inserting a present triple / deleting an absent one is a
-    /// no-op), so a re-crash mid-redo simply redoes the (idempotent) frame again.
-    #[cfg(feature = "mmap")]
+    /// Replays ordered journal operations through the deferred durable helpers. The
+    /// caller checkpoints all WALs and the named layout before discarding the journal.
     ///
     /// Replays [`TxnOp::Create`] and [`TxnOp::Drop`] through the idempotent durable helpers.
     #[cfg(feature = "mmap")]
@@ -3728,8 +3707,9 @@ impl Graph {
     /// work instead of the O(n) full rebuild. New terms are interned APPEND-ONLY (the
     /// dictionary grows; existing ids never change), so readers of existing ids are
     /// unaffected. For a directory-backed graph (opened via `open`) the
-    /// batch is appended to the write-ahead log and fsync'd BEFORE it is applied, so a
-    /// crash replays it on the next open. Fold the overlay back into the immutable base
+    /// batch is appended to the write-ahead log and synced before it is applied. During
+    /// materialization of a committed journal frame, its WAL sync is deferred until
+    /// checkpoint; the journal already covers recovery. Fold the overlay back into the immutable base
     /// periodically with [`compact`](Self::compact).
     pub fn apply_delta(&mut self, inserts: &[[Term; 3]], deletes: &[[Term; 3]]) -> Result<(), String> {
         if inserts.is_empty() && deletes.is_empty() {
@@ -3748,7 +3728,14 @@ impl Graph {
         {
             let appended = match &mut self.wal {
                 WriteState::Durable(w) => {
-                    w.append_batch(inserts, deletes).map_err(|e| e.to_string())
+                    if tree.materializing() {
+                        w.append_batch_deferred(inserts, deletes)
+                            .and_then(|()| tree.dirty_wal(w))
+                            .map_err(|e| e.to_string())
+                    } else {
+                        tree.checkpoint().map_err(|e| e.to_string())?;
+                        w.append_batch(inserts, deletes).map_err(|e| e.to_string())
+                    }
                 }
                 // No log because this graph never had one: the write is overlay-only by design.
                 WriteState::Ephemeral => Ok(()),
@@ -3771,8 +3758,9 @@ impl Graph {
     /// `INSERT DATA { … }` SPARQL string for what is conceptually one append. The term is interned
     /// APPEND-ONLY and applied through the same delta-overlay path as `apply_delta`, so it inherits
     /// the identical semantics: set-valued (re-inserting an existing triple is a no-op), O(1) work,
-    /// and — for a directory-backed graph (opened via `open`) — WAL-logged + fsync'd
-    /// before it is applied. To add several triples at once, prefer one
+    /// and — for a directory-backed graph (opened via `open`) — WAL-logged before it
+    /// is applied, with the same journal/checkpoint sync rules as `apply_delta`.
+    /// To add several triples at once, prefer one
     /// [`apply_delta`](Self::apply_delta) batch over a loop of single inserts (one WAL append).
     ///
     /// [RDF 1.2]: https://www.w3.org/TR/rdf12-concepts/
@@ -3791,7 +3779,7 @@ impl Graph {
     ///
     /// Removing a triple the graph does not contain is a NO-OP (set semantics, inherited from
     /// `apply_delta`), never an error. As with `insert_triple`, for a directory-backed graph the
-    /// deletion is WAL-logged + fsync'd before it is applied; to retract several triples at once,
+    /// deletion follows `apply_delta`'s logging and sync rules; to retract several triples at once,
     /// prefer one [`apply_delta`](Self::apply_delta) batch.
     pub fn remove_triple(
         &mut self,
@@ -3806,7 +3794,8 @@ impl Graph {
     /// Commits a resolved triple delta as one durable journal frame.
     ///
     /// Records are `(is_insert, slot, triple)` tuples. Materialize the committed records
-    /// through the durable methods, then call [`clear_txn`](Self::clear_txn). Recovery
+    /// through the durable methods, then call [`finish_txn`](Self::finish_txn) (or
+    /// [`clear_txn`](Self::clear_txn) for an immediate checkpoint). Recovery
     /// replays committed frames idempotently. In-memory graphs and empty batches require
     /// no frame, but still respect write refusal. Use [`commit_txn_ops`](Self::commit_txn_ops)
     /// for named-graph creation and removal.
@@ -3817,8 +3806,8 @@ impl Graph {
         self.commit_txn_checked(records).map_err(|(_, e)| e)
     }
 
-    /// [`Graph::commit_txn`], saying on failure whether the journal may hold any of the frame:
-    /// `false` only when the journal refused it unwritten, after an earlier failed append.
+    /// [`Graph::commit_txn`], saying on failure whether the journal may hold any of the frame.
+    /// `false` means this frame was refused before appending.
     pub fn commit_txn_checked(
         &mut self,
         records: &[(bool, Option<Term>, [Term; 3])],
@@ -3874,6 +3863,9 @@ impl Graph {
             if ops.is_empty() {
                 return Ok(());
             }
+            if let Some(j) = &self.txn {
+                tree.prepare_journal(j).map_err(|e| (false, e.to_string()))?;
+            }
             // Append errors freeze the shared tree until recovery.
             let appended = match &mut self.txn {
                 Some(j) => j.append(ops),
@@ -3883,6 +3875,14 @@ impl Graph {
                 self.poison_txn();
                 return Err((true, format!("txn journal commit failed: {}", e)));
             }
+            if let Some(j) = &self.txn {
+                if let Err(e) = tree.retain_journal(j) {
+                    self.poison_txn();
+                    return Err((true, e.to_string()));
+                }
+                tree.materializing.store(true, std::sync::atomic::Ordering::Release);
+                tree.checkpoint_on_drop.store(true, std::sync::atomic::Ordering::Release);
+            }
             return Ok(());
         }
         #[cfg(not(feature = "mmap"))]
@@ -3890,35 +3890,49 @@ impl Graph {
         Ok(())
     }
 
-    /// Clears the redo journal after its committed frame has been durably materialized.
-    /// In-memory graphs have no journal. The common durable-write gate applies.
-    pub fn clear_txn(&mut self) -> Result<(), String> {
-        // Hold the reentrant tree permit through validation, logging and materialization.
-        #[cfg(feature = "mmap")]
-        let tree = std::sync::Arc::clone(&self.tree);
-        #[cfg(feature = "mmap")]
-        let _permit = tree.write_permit();
+    /// Finishes materialization, checkpointing only when the retained journal reaches
+    /// the size limit. The committed frame already covers every deferred WAL append.
+    pub fn finish_txn(&mut self) -> Result<(), String> {
         #[cfg(feature = "mmap")]
         {
+            let tree = std::sync::Arc::clone(&self.tree);
+            let _permit = tree.write_permit();
             if self.txn.is_some() {
-                // Check the common durable-write gate before truncating the journal.
                 self.begin_durable_write()?;
             }
-            let cleared = match &mut self.txn {
-                Some(j) => j.truncate().map_err(|e| e.to_string()),
-                // In-memory graphs have no journal.
-                None => Ok(()),
-            };
-            // A truncation error freezes the shared tree until recovery.
-            self.freeze_on_err(cleared, "a txn journal clear")
+            self.tree.materializing.store(false, std::sync::atomic::Ordering::Release);
+            self.tree.checkpoint_if_due().map_err(|e| e.to_string())?;
         }
-        #[cfg(not(feature = "mmap"))]
         Ok(())
     }
 
-    /// Refuse a rewrite of the base (compaction, vacuum) while the journal of this graph or of
-    /// any named graph under it keeps a frame for the reopen to replay: the rewrite would start
-    /// a fresh journal without it.
+    /// Checkpoints now: syncs materialized WALs and named layout before truncating
+    /// the redo journal. A failure freezes the tree and retains recovery records.
+    pub fn clear_txn(&mut self) -> Result<(), String> {
+        #[cfg(feature = "mmap")]
+        {
+            let tree = std::sync::Arc::clone(&self.tree);
+            let _permit = tree.write_permit();
+            if self.txn.is_some() {
+                self.begin_durable_write()?;
+            }
+            self.tree.materializing.store(false, std::sync::atomic::Ordering::Release);
+            self.tree.checkpoint().map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    /// Closes this handle, checkpointing a clean durable tree and reporting failures.
+    /// Refuses unfinished materialization. In-memory graphs have nothing to flush.
+    pub fn close(mut self) -> Result<(), String> {
+        #[cfg(feature = "mmap")]
+        if self.tree.materializing() {
+            return Err("finish transaction materialization before close".to_owned());
+        }
+        self.clear_txn()
+    }
+
+    /// Refuses a rewrite or removal while this tree retains a failed commit for recovery.
     fn refuse_while_txn_poisoned(&self) -> Result<(), String> {
         self.refuse_if_detached()?;
         #[cfg(feature = "mmap")]
@@ -4004,8 +4018,8 @@ impl Graph {
     /// `*graph = empty_graph()` on a directory-backed graph (where the latter dropped the WAL
     /// and a reopen restored the old on-disk base). For a directory-backed graph the current
     /// triples are retracted through [`apply_delta`](Self::apply_delta), so the deletions are
-    /// WAL-logged + fsync'd and survive a crash/reopen; for an in-memory graph it clears the
-    /// store overlay in place (no WAL to keep). Named graphs are untouched.
+    /// covered by `apply_delta`'s durability contract and survive a crash/reopen; for an in-memory
+    /// graph it clears the store overlay in place (no WAL to keep). Named graphs are untouched.
     pub fn clear_default_durable(&mut self) -> Result<(), String> {
         self.refuse_if_detached()?;
         #[cfg(feature = "mmap")]
@@ -4040,7 +4054,7 @@ impl Graph {
     /// (on a directory-backed parent) dropped the sub-graph's WAL/dir so the clear only became
     /// durable at the next compaction. The retraction routes through the sub-graph's own
     /// [`clear_default_durable`](Self::clear_default_durable), so for a directory-backed
-    /// sub-graph the deletions are WAL-logged + fsync'd (durable before this returns) and
+    /// sub-graph the deletions follow `apply_delta`'s durability contract and
     /// survive a crash/reopen; the manifest is untouched (the slot stays). Returns `true` if a
     /// matching named graph existed (and was emptied), `false` if it was absent — the caller
     /// keeps the SPARQL CLEAR no-op-on-absent semantics. An in-memory parent's sub-graph just
@@ -4066,6 +4080,8 @@ impl Graph {
     /// Durably removes the named graph and its manifest entry.
     ///
     /// Survivors keep their slots. Detached entries remain declared until explicitly dropped.
+    /// Within a committed journal frame, manifest publication waits until checkpoint;
+    /// the synced frame covers recovery in the meantime.
     /// Writable opens clean undeclared residue after validating the complete declared layout.
     /// Returns false when no attached graph matches. A stale handle is detached from memory only.
     pub fn drop_named_durable(&mut self, name: &Term) -> Result<bool, String> {
@@ -4078,7 +4094,7 @@ impl Graph {
         #[cfg(feature = "mmap")]
         let _permit = tree.write_permit();
         // Refused while this graph, or any named graph under it, refuses writes (a frozen named
-        // graph would be re-saved from its view) or keeps a journal frame for the reopen.
+        // graph would be re-saved from its view) or keeps a failed journal commit for the reopen.
         self.refuse_while_txn_poisoned()?;
         self.named_changed();
         // Directory-backed parent: durably remove the sub-dir + manifest entry. For an in-memory
@@ -4113,6 +4129,15 @@ impl Graph {
             self.named.remove(idx);
             return Ok(true);
         }
+        if self.tree.materializing() {
+            let child = &self.named[idx].1;
+            let named_dir = dir.join(NAMED_SUBDIR);
+            let slot = child.named_slot_in(&named_dir).ok_or("named graph has no durable slot")?;
+            self.tree.defer_drop(dir, slot, self.next_slot).map_err(|e| e.to_string())?;
+            self.named.remove(idx);
+            return Ok(true);
+        }
+        self.tree.checkpoint().map_err(|e| e.to_string())?;
         let slot = match self.named[idx].1.wal.dir() {
             None => None,
             Some(_) => Some(self.named[idx].1.named_slot_in(&named_dir).ok_or_else(|| {
@@ -4182,6 +4207,14 @@ impl Graph {
         }
         self.refuse_while_txn_poisoned()?;
         self.named_changed();
+        #[cfg(feature = "mmap")]
+        if self.tree.materializing() && self.wal.is_durable() {
+            let names: Vec<_> = self.named.iter().map(|(n, _)| n.clone()).collect();
+            for name in names { self.drop_named_durable(&name)?; }
+            return Ok(());
+        }
+        #[cfg(feature = "mmap")]
+        self.tree.checkpoint().map_err(|e| e.to_string())?;
         self.named.clear();
         #[cfg(feature = "mmap")]
         if let Some(dir) = self.wal.dir() {
@@ -4409,6 +4442,23 @@ impl Graph {
         #[cfg(feature = "mmap")]
         if let Some(dir) = self.wal.dir() {
             self.begin_durable_write()?;
+            if self.tree.materializing() {
+                let named_dir = dir.join(NAMED_SUBDIR);
+                std::fs::create_dir_all(&named_dir).map_err(|e| e.to_string())?;
+                let slot = self.claim_named_slot(&named_dir)?;
+                let sub_dir = named_dir.join(slot.to_string());
+                let mut g = Graph::new();
+                g.wal = WriteState::Durable(Wal::open(&sub_dir).map_err(|e| e.to_string())?);
+                g.txn = Some(TxnJournal::open(&sub_dir).map_err(|e| e.to_string())?);
+                g.tree = std::sync::Arc::clone(&self.tree);
+                g.generation = self.tree.generation();
+                g.lock = self.lock.clone();
+                let created = self.tree.defer_create(&dir, slot, name, self.next_slot);
+                self.freeze_on_err(created.map_err(|e| e.to_string()), "creating a named graph")?;
+                self.named.push((name.clone(), g));
+                return Ok(self.named.len() - 1);
+            }
+            self.tree.checkpoint().map_err(|e| e.to_string())?;
             let entries = self.named_slot_entries(&dir.join(NAMED_SUBDIR))?;
             if entries.iter().any(|(_, declared)| declared == name) {
                 return Err(format!(
@@ -4496,6 +4546,12 @@ impl Graph {
         self.wal.refuse_if_poisoned("a compaction")?;
         #[cfg(feature = "mmap")]
         self.begin_durable_write()?;
+        #[cfg(feature = "mmap")]
+        if self.tree_has_overlay() || self.tree_has_sparse_slots() {
+            self.checkpoint_before_base_rewrite().map_err(|e| e.to_string())?;
+        } else {
+            self.tree.checkpoint().map_err(|e| e.to_string())?;
+        }
         // A directory-backed graph compacts its complete tree in one image swap.
         #[cfg(feature = "mmap")]
         if self.wal.is_durable() {
@@ -4692,6 +4748,7 @@ impl Graph {
         fresh
             .refuse_while_txn_poisoned()
             .map_err(std::io::Error::other)?;
+        fresh.tree.checkpoint()?;
         let owned = claim_store(dir, Claim::Write, |_, _| Ok(()))?;
         swap_dir_to_new_base(&owned.dir, Some(owned.lock), |new_dir, role| {
             fresh.save_unlocked(new_dir, role)
@@ -4716,7 +4773,34 @@ impl Graph {
         fresh
             .refuse_while_txn_poisoned()
             .map_err(std::io::Error::other)?;
+        fresh.tree.checkpoint()?;
         self.publish_staged_base_or_freeze(|_, new_dir, role| fresh.save_unlocked(new_dir, role))
+    }
+
+    #[cfg(feature = "mmap")]
+    fn checkpoint_before_base_rewrite(&self) -> std::io::Result<()> {
+        let validated: std::io::Result<()> = (|| {
+            if let Some(dir) = self.persist_dir() {
+                if read_store_marker(&dir)?.unwrap_or(Role::Root) == Role::Root {
+                    refuse_swap_without_outside_lock(&dir, self.lock.as_deref())?;
+                }
+                refuse_foreign_descendants(&dir)?;
+                let id = read_marker(&dir)?.and_then(|marker| marker.id);
+                let _staging_locks = (
+                    lock_staging(&staging_path(&dir, "compact-new"))?,
+                    lock_staging(&staging_path(&dir, "compact-old"))?,
+                );
+                for kind in ["compact-new", "compact-old"] {
+                    check_staging_owner(&staging_path(&dir, kind), kind, id.as_deref(), &dir)?;
+                }
+            }
+            Ok(())
+        })();
+        if validated.is_err() {
+            self.tree.checkpoint_on_drop.store(false, std::sync::atomic::Ordering::Release);
+        }
+        validated?;
+        self.tree.checkpoint()
     }
 
     /// Publish a staged base, or freeze: replace this directory-backed graph's base with the
@@ -4741,6 +4825,7 @@ impl Graph {
     where
         F: FnOnce(&Graph, &std::path::Path, Role) -> std::io::Result<()>,
     {
+        self.checkpoint_before_base_rewrite()?;
         let dir = self.persist_dir().ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::InvalidInput, "the graph is not directory-backed")
         })?;
@@ -5063,6 +5148,8 @@ impl Graph {
         self.wal.refuse_if_poisoned("a vacuum")?;
         #[cfg(feature = "mmap")]
         self.begin_durable_write()?;
+        #[cfg(feature = "mmap")]
+        self.checkpoint_before_base_rewrite().map_err(|e| e.to_string())?;
         // Re-intern the whole live dataset into a fresh graph with an EMPTY dictionary, so any
         // term orphaned by a prior delete/drop is dropped (it is never re-interned).
         let mut fresh = self.reintern_live()?;
@@ -5177,7 +5264,14 @@ impl FreshFile {
     /// (`fsync`, or `FlushFileBuffers` on Windows), [`publish_rename`] it over the target, then
     /// [`fsync_dir`] the directory. Every publication error is returned; removing the temporary
     /// file after a failure is best effort.
-    pub(crate) fn commit(mut self) -> std::io::Result<()> {
+    pub(crate) fn commit(self) -> std::io::Result<()> {
+        self.commit_with(publish_rename)
+    }
+
+    fn commit_with(
+        mut self,
+        publish: impl FnOnce(&std::path::Path, &std::path::Path) -> std::io::Result<()>,
+    ) -> std::io::Result<()> {
         let file = self.file.take().expect("a fresh file is committed once");
         // The file it replaces keeps its permissions (on Unix: a store whose files an operator
         // made group-readable stays so); a new file gets the default under the umask.
@@ -5198,9 +5292,11 @@ impl FreshFile {
             std::fs::remove_file(&self.tmp).ok();
             return Err(e);
         }
+        #[cfg(test)]
+        crash::synced(&self.tmp);
         fault_point("file-synced", &self.path)?;
         drop(file);
-        if let Err(e) = publish_rename(&self.tmp, &self.path) {
+        if let Err(e) = publish(&self.tmp, &self.path) {
             std::fs::remove_file(&self.tmp).ok();
             return Err(e);
         }
@@ -5282,6 +5378,8 @@ fn fsync_file(path: &std::path::Path) -> std::io::Result<()> {
     #[cfg(not(windows))]
     let file = std::fs::File::open(path)?;
     file.sync_all()?;
+    #[cfg(test)]
+    crash::synced(path);
     fault_point("file-synced", path)
 }
 
@@ -5303,6 +5401,8 @@ fn fsync_dir(dir: &std::path::Path) -> std::io::Result<()> {
     match std::fs::File::open(dir) {
         Ok(f) => {
             f.sync_all()?;
+            #[cfg(test)]
+            crash::synced(dir);
             fault_point("dir-synced", dir)
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -5407,6 +5507,24 @@ fn publish_rename(from: &std::path::Path, to: &std::path::Path) -> std::io::Resu
         delay *= 2;
     }
     unreachable!("the loop returns")
+}
+
+#[cfg(all(feature = "mmap", windows))]
+fn write_fresh_journal(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut f = FreshFile::create(path)?;
+    std::io::Write::write_all(&mut f, bytes)?;
+    f.commit_with(|from, to| {
+        fault_point("rename", from)?;
+        let fresh = std::fs::OpenOptions::new().write(true).open(from)?;
+        // Unlike publish_rename, std's Windows rename falls back to FileRenameInfoEx
+        // with REPLACE_IF_EXISTS | POSIX_SEMANTICS, replacing the still-open journal
+        // (Rust opens it with FILE_SHARE_DELETE). Unsupported systems/filesystems
+        // return an error: checkpoint must keep the tree frozen, never skip restoration.
+        std::fs::rename(from, to)?;
+        // This rename has no MOVEFILE_WRITE_THROUGH. Flush its metadata through the
+        // fresh file, never through the failed journal descriptor.
+        fresh.sync_all()
+    })
 }
 
 /// A random 128-bit identifier in 32 lowercase hex digits (a store's identity in its marker, or
@@ -6169,11 +6287,24 @@ fn remove_staging(
     id: Option<&str>,
     live: &std::path::Path,
 ) -> std::io::Result<()> {
+    if check_staging_owner(staging, kind, id, live)? {
+        remove_staging_dir(staging)?;
+    }
+    Ok(())
+}
+
+#[cfg(feature = "mmap")]
+fn check_staging_owner(
+    staging: &std::path::Path,
+    kind: &str,
+    id: Option<&str>,
+    live: &std::path::Path,
+) -> std::io::Result<bool> {
     if !something_at(staging)? {
-        return Ok(());
+        return Ok(false);
     }
     match staging_mark(staging, kind, live)? {
-        Some(owner) if id == Some(owner.as_str()) => remove_staging_dir(staging),
+        Some(owner) if id == Some(owner.as_str()) => Ok(true),
         Some(_) => Err(not_own_staging(
             staging,
             kind,
@@ -7588,11 +7719,26 @@ fn sync_log_entry(
 ) -> std::io::Result<()> {
     if *needs_entry_sync {
         file.sync_all()?;
+        #[cfg(test)]
+        crash::synced(path);
         fault_point("log-file-synced", path)?;
         fsync_dir(path.parent().unwrap_or_else(|| std::path::Path::new(".")))?;
         fault_point("log-opened", path)?;
         *needs_entry_sync = false;
     }
+    Ok(())
+}
+
+#[cfg(feature = "mmap")]
+fn sync_log_data(file: &std::fs::File, path: &std::path::Path) -> std::io::Result<()> {
+    fault_point("sync-data", path)?;
+    #[cfg(test)]
+    if io_fault::sync_fails(path) {
+        return Err(std::io::Error::other(format!("injected fsync fault for {}", path.display())));
+    }
+    file.sync_data()?;
+    #[cfg(test)]
+    crash::synced(path);
     Ok(())
 }
 
@@ -7621,12 +7767,13 @@ fn truncate_log(file: &mut std::fs::File) -> std::io::Result<()> {
 /// COMMIT POINT: `replay` only applies a batch whose trailer is present AND whose checksum
 /// matches, and TRUNCATES the log at the start of the first batch that fails either check
 /// (the torn tail of an interrupted append). So replay applies exactly the batches that were
-/// fully durable — never a prefix of one. The whole batch is `write_all`'d then fsync'd once.
+/// fully durable — never a prefix of one. Direct appends sync each batch; journal-covered
+/// appends defer that sync until checkpoint.
 #[cfg(feature = "mmap")]
 struct Wal {
     file: std::fs::File,
     dir: std::path::PathBuf,
-    needs_entry_sync: bool,
+    needs_entry_sync: std::sync::Arc<std::sync::Mutex<bool>>,
 }
 
 /// Test-only thread-local append faults and path-scoped file-sync faults.
@@ -7710,7 +7857,10 @@ impl Wal {
     fn open(dir: &std::path::Path) -> std::io::Result<Wal> {
         let file = open_log(&Self::path(dir))?;
         // Even an existing entry may come from an interrupted open, so the first append syncs it.
-        Ok(Wal { file, dir: dir.to_path_buf(), needs_entry_sync: true })
+        Ok(Wal {
+            file, dir: dir.to_path_buf(),
+            needs_entry_sync: std::sync::Arc::new(std::sync::Mutex::new(true)),
+        })
     }
 
     /// FNV-1a 64-bit checksum (no extra deps; deterministic across runs/platforms).
@@ -7728,6 +7878,17 @@ impl Wal {
     /// fsyncs, so the WHOLE batch is durable as a unit BEFORE it is applied in memory. A
     /// crash mid-append leaves an uncommitted tail that `replay` discards entirely.
     fn append_batch(
+        &mut self,
+        inserts: &[[Term; 3]],
+        deletes: &[[Term; 3]],
+    ) -> std::io::Result<()> {
+        self.append_batch_deferred(inserts, deletes)?;
+        sync_log_data(&self.file, &Self::path(&self.dir))?;
+        sync_log_entry(&self.file, &Self::path(&self.dir),
+            &mut self.needs_entry_sync.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    fn append_batch_deferred(
         &mut self,
         inserts: &[[Term; 3]],
         deletes: &[[Term; 3]],
@@ -7767,8 +7928,7 @@ impl Wal {
           // write at the end, never over it.
         std::io::Seek::seek(&mut self.file, std::io::SeekFrom::End(0))?;
         self.file.write_all(&buf)?;
-        self.file.sync_data()?;
-        sync_log_entry(&self.file, &Self::path(&self.dir), &mut self.needs_entry_sync)
+        fault_point("wal-appended", &Self::path(&self.dir))
     }
 
     fn push_record(buf: &mut Vec<u8>, op: u8, t: &[Term; 3]) -> std::io::Result<()> {
@@ -8039,6 +8199,10 @@ struct TreeState {
     layout: std::sync::Mutex<LayoutLog>,
     /// Reentrant exclusion for durable operations throughout a graph tree.
     writer: WriterPermit,
+    checkpoint: std::sync::Mutex<checkpoint::Pending>,
+    materializing: std::sync::atomic::AtomicBool,
+    /// A base rewrite refused during validation preserves its recovery files through drop.
+    checkpoint_on_drop: std::sync::atomic::AtomicBool,
 }
 
 /// Tracks replacement generations by directory.
@@ -8075,6 +8239,9 @@ impl TreeState {
             poisoned: std::sync::atomic::AtomicBool::new(false),
             layout: std::sync::Mutex::new(LayoutLog::default()),
             writer: WriterPermit::new(),
+            checkpoint: std::sync::Mutex::new(checkpoint::Pending::default()),
+            materializing: std::sync::atomic::AtomicBool::new(false),
+            checkpoint_on_drop: std::sync::atomic::AtomicBool::new(true),
         })
     }
 
@@ -8256,30 +8423,33 @@ fn decode_slot(bytes: &[u8], pos: usize) -> Result<(Option<Term>, usize), String
     }
 }
 
-/// (sq-ycle) A parent-level REDO JOURNAL — the single durable COMMIT POINT for a
-/// whole multi-operation SPARQL UPDATE body — at `dir/txn.log`, a sibling of the per-graph [`Wal`].
+/// The parent-level redo journal (`txn.log`) is the commit point for an atomic
+/// multi-operation update. Each frame is written and data-synced before any WAL
+/// materialization. The first append also completes [`sync_log_entry`]. During
+/// materialization, WAL frames are appended without syncing and named-layout changes
+/// are retained in the shared tree until checkpoint. Direct writes checkpoint first
+/// and retain their own WAL sync, preserving order with earlier journal frames.
 ///
-/// The problem it fixes: a multi-op body like `DROP SILENT GRAPH <r> ; INSERT DATA { GRAPH <r> ... ;
-/// GRAPH <parent> ldp:contains <r> }` materialises through [`apply_effects`] as N independent
-/// `apply_delta` calls across DIFFERENT files (the `<r>` per-graph `wal.log`, the `<parent>`
-/// per-graph `wal.log`, the `named.bin` manifest), each fsync'd on its own. A crash between them
-/// leaves a PARTIAL durable write (parent containment present but child graph missing, or vice
-/// versa). This journal records the WHOLE resolved per-slot quad-delta of one `apply_effects` call
-/// as ONE framed, checksummed frame. Its data sync, plus the first append's entry sync, must
-/// finish before commit is acknowledged; the per-graph WAL appends are then materialisation.
+/// [`Graph::finish_txn`] retains frames between updates. A checkpoint syncs dirty WALs,
+/// persists new empty slot bases plus their WALs, and durably publishes named manifests
+/// before truncating and syncing the journal. Checkpoints run at
+/// [`checkpoint::JOURNAL_CHECKPOINT_BYTES`], before base rewrites or saves, on explicit
+/// [`Graph::clear_txn`] / [`Graph::close`], on clean drop, and after recovery. Failed
+/// syncs freeze the shared tree; the failed descriptor is never synced again.
+/// Staging validation refusals preserve logs through drop; a successful write or explicit checkpoint
+/// restores normal close behavior. A failed journal-truncation sync preserves whole frames
+/// by atomic fresh-file publication, without reusing the failed descriptor.
 ///
-/// On [`open`](Graph::open), AFTER the per-graph WALs are replayed, any committed `txn.log` frame
-/// is replayed idempotently and then the journal is truncated. (Copilot #135) The redo
-/// goes through the DURABLE [`apply_delta`](Graph::apply_delta) (WAL-logged + fsync'd), NOT the
-/// in-memory-only `apply_delta_mem`, and the truncation happens only AFTER every record is durably
-/// in a per-graph WAL — so a record that lived ONLY in `txn.log` (the crash-after-commit /
-/// before-materialisation window) is moved into durable storage on recovery and survives the NEXT
-/// restart, instead of being applied in-memory once and then erased by the truncation. Idempotency
-/// holds because [`apply_delta`](Graph::apply_delta) replays with set semantics (re-inserting a
-/// present triple / deleting an absent one is a no-op) and [`ensure_named`](Graph::ensure_named) is
-/// find-or-create — so re-applying records the per-graph WALs already materialised changes nothing.
+/// Recovery replays all retained frames in order over independent WAL prefixes. For
+/// each triple, the last insert/delete in the retained sequence determines membership,
+/// regardless of which earlier writes survived. CREATE preserves an existing graph;
+/// DROP removes its entire incarnation. After a DROP, every triple in a later incarnation
+/// comes from a subsequent journal insert. Thus a replayed DROP may discard a WAL ahead
+/// of that frame without losing state: later frames reconstruct the final incarnation.
+/// Monotonic slot allocation never reuses the removed directory. The same argument
+/// applies when recovery itself is interrupted; the journal remains until checkpoint.
 ///
-/// Frame layout (byte-identical write+fsync discipline to [`Wal::append_batch`]):
+/// Frame layout (the same framing discipline as [`Wal::append_batch`]):
 ///
 /// ```text
 /// [TXN_MAGIC u32][n_records u32][body_len u32]   <- header
@@ -8463,7 +8633,7 @@ impl TxnJournal {
         }
         let written = std::io::Seek::seek(&mut self.file, std::io::SeekFrom::End(0))
             .and_then(|_| self.file.write_all(&buf))
-            .and_then(|()| self.file.sync_data())
+            .and_then(|()| sync_log_data(&self.file, &Self::path(&self.dir)))
             .and_then(|()| {
                 sync_log_entry(&self.file, &Self::path(&self.dir), &mut self.needs_entry_sync)
             });
@@ -8480,6 +8650,7 @@ impl TxnJournal {
 
     /// Empties the journal (after its frame has been materialised into the per-graph state).
     /// Refused once an append or a materialisation failed: its frame is kept for the reopen.
+    #[cfg(test)]
     fn truncate(&mut self) -> std::io::Result<()> {
         if self.poisoned {
             return Err(std::io::Error::other(
