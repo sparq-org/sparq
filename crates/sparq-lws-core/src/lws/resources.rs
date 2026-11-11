@@ -1024,8 +1024,8 @@ async fn read<S: Store + 'static>(
     }
     // Quiet listings retain the shared-lock path: members are only tried, never waited
     // for under the container. A busy member or a changed generation discards that attempt
-    // and queues one exclusive read. Later creates cannot overtake the fair queue, and no
-    // member lock is taken beneath the exclusive container lock.
+    // and queues one exclusive read within the usual lock wait. Later creates cannot overtake
+    // the fair queue, and no member lock is taken beneath the exclusive container lock.
     let Some(guard) = state.locks.read(uri).await else {
         return set_aside_meanwhile();
     };
@@ -1047,8 +1047,9 @@ async fn read<S: Store + 'static>(
             .locks
             .listing_fallbacks
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let Some(_guard) = state.locks.lock(uri).await else {
-            return set_aside_meanwhile();
+        let _guard = match super::records::within_wait(state.locks.lock(uri)).await {
+            Ok(guard) => guard,
+            Err(response) => return response,
         };
         let meta = match current(state, uri).await {
             Ok(m) => m,
@@ -1059,7 +1060,7 @@ async fn read<S: Store + 'static>(
         }
         return read_container(state, req, uri, &meta, true)
             .await
-            .unwrap_or_else(|_| set_aside_meanwhile());
+            .expect("exclusive container listing cannot be busy");
     }
     let types = match state.resource_meta(uri).await {
         Ok(m) => m.types,
@@ -1226,6 +1227,7 @@ async fn with_sizes<S: Store + 'static>(
 }
 
 /// Why an optimistic listing must be retried under the exclusive container lock.
+#[derive(Debug)]
 struct Busy;
 
 /// Why [`members`] could not list a container.
@@ -2000,7 +2002,7 @@ async fn create<S: Store + 'static>(
                 // Held exclusively: no change to a member is in flight.
                 let listing = read_container(state, &get, parent, &meta, true)
                     .await
-                    .unwrap_or_else(|_| set_aside_meanwhile());
+                    .expect("exclusive container listing cannot be busy");
                 if !listing.status().is_success() {
                     return listing;
                 }
@@ -4058,7 +4060,7 @@ async fn delete<S: Store + 'static>(
         // The whole subtree is held: no change to a member is in flight.
         let listing = read_container(state, &plain_get(req), uri, &meta, true)
             .await
-            .unwrap_or_else(|_| set_aside_meanwhile());
+            .expect("exclusive container listing cannot be busy");
         if !listing.status().is_success() {
             return listing;
         }
