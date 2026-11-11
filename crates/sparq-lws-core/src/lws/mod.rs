@@ -806,6 +806,10 @@ impl<S: Store + 'static> LwsState<S> {
             .lifecycle()
             .acquire()
             .ok_or("another LWS service is running over this store")?;
+        store
+            .begin_epoch(&lease)
+            .await
+            .map_err(|e| format!("store epoch: {e}"))?;
         let http = fetch_client(&cfg)?;
         let root = cfg.storage();
         if !store
@@ -2061,14 +2065,19 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         // From here on the intent may be stored (a lost reply), and keeps the holds.
         self.holds.intended = true;
         let outcome = intents::store(self.state, &record, existing, &undo, &[]).await;
-        if let Err(crate::error::ServerError::Unsettled { fence, .. }) = &outcome {
+        self.keep_fence(&outcome);
+        outcome?;
+        self.persisted = self.planned.len();
+        Ok(())
+    }
+
+    /// Keep settlement after the undo it protects, so reverse rollback fences first.
+    fn keep_fence<T>(&mut self, outcome: &Result<T, crate::error::ServerError>) {
+        if let Err(crate::error::ServerError::Unsettled { fence, .. }) = outcome {
             self.undo.push(Undo::Fence {
                 fence: fence.clone(),
             });
         }
-        outcome?;
-        self.persisted = self.planned.len();
-        Ok(())
     }
 
     /// The pre-removal access state already staged by this journal; no store calls.
@@ -2116,6 +2125,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
                 prior,
             });
         }
+        self.keep_fence(&written);
         written
     }
 
@@ -2143,6 +2153,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         if may_have_happened(&deleted) {
             self.undo.push(Undo::Restore { key, prior });
         }
+        self.keep_fence(&deleted);
         match deleted {
             Ok(()) | Err(crate::error::ServerError::NotFound) => Ok(()),
             Err(e) => Err(e),
@@ -2163,7 +2174,9 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
             // live member can be left unlisted by it.
             if let (true, Some(parent)) = (names_record(iri), parent) {
                 self.durable().await?;
-                match self.state.store.delete(iri, Some(parent)).await {
+                let outcome = self.state.store.delete(iri, Some(parent)).await;
+                self.keep_fence(&outcome);
+                match outcome {
                     Ok(()) | Err(crate::error::ServerError::NotFound) => {}
                     Err(e) => return Err(e),
                 }
@@ -2185,11 +2198,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
                 kept,
             });
         }
-        if let Err(crate::error::ServerError::Unsettled { fence, .. }) = &outcome {
-            self.undo.push(Undo::Fence {
-                fence: fence.clone(),
-            });
-        }
+        self.keep_fence(&outcome);
         outcome
     }
 
@@ -3330,6 +3339,10 @@ pub(crate) mod test_store {
         pub slow_delete_answer_ms: Arc<std::sync::atomic::AtomicU64>,
         /// As `unsettle_next_create`, for the next `delete_container_if_empty` of the IRI named.
         pub unsettle_next_delete_of: GateOf,
+        /// As `unsettle_next_create`, for the next plain write of the IRI named.
+        pub unsettle_next_write_of: GateOf,
+        /// As `unsettle_next_create`, for the next plain delete of the IRI named.
+        pub unsettle_next_remove_of: GateOf,
         /// As `unsettle_next_create`, for every create of a resource while set (one gate).
         pub unsettle_creates: Arc<std::sync::Mutex<Option<Arc<tokio::sync::Semaphore>>>>,
         /// `fence` fails, as while the remote store cannot be reached.
@@ -3442,6 +3455,8 @@ pub(crate) mod test_store {
                 slow_delete_ms: Default::default(),
                 slow_delete_answer_ms: Default::default(),
                 unsettle_next_delete_of: Default::default(),
+                unsettle_next_write_of: Default::default(),
+                unsettle_next_remove_of: Default::default(),
                 unsettle_creates: Default::default(),
                 fail_fence: Default::default(),
                 fail_next_fence: Default::default(),
@@ -3566,6 +3581,11 @@ pub(crate) mod test_store {
 
     #[async_trait]
     impl Store for FlakyStore {
+        async fn begin_epoch(&self, lease: &crate::store::LifecycleGuard) -> ServerResult<u64> {
+            self.traced("begin_epoch", "");
+            self.inner.begin_epoch(lease).await
+        }
+
         fn lifecycle(&self) -> std::sync::Arc<crate::store::Lifecycle> {
             self.inner.lifecycle()
         }
@@ -3649,6 +3669,12 @@ pub(crate) mod test_store {
                     return Err(ServerError::InsufficientStorage);
                 }
                 *left -= 1;
+            }
+            if let Some(gate) = held(&self.unsettle_next_write_of, iri) {
+                let (inner, iri, ct) = (self.inner.clone(), iri.to_string(), ct.to_string());
+                return Err(self.unsettle(gate, vec![iri.clone()], async move {
+                    let _ = inner.write(&iri, body, &ct).await;
+                }));
             }
             if let Some(gate) = held(&self.hold_next_write_of, iri) {
                 let (inner, iri, ct) = (self.inner.clone(), iri.to_string(), ct.to_string());
@@ -3833,6 +3859,17 @@ pub(crate) mod test_store {
             }
             if parent.is_some() {
                 self.two_step_deletes.fetch_add(1, Ordering::SeqCst);
+            }
+            if let Some(gate) = held(&self.unsettle_next_remove_of, iri) {
+                let (inner, iri, parent) = (
+                    self.inner.clone(),
+                    iri.to_string(),
+                    parent.map(str::to_string),
+                );
+                let touches = std::iter::once(iri.clone()).chain(parent.clone()).collect();
+                return Err(self.unsettle(gate, touches, async move {
+                    let _ = inner.delete(&iri, parent.as_deref()).await;
+                }));
             }
             if self.partial_delete_of.lock().unwrap().as_deref() == Some(iri) {
                 let kept = self.inner.read(iri).await?;
@@ -4391,6 +4428,152 @@ pub(crate) mod test_store {
 mod tests {
     use super::*;
     use test_store::{body_json, links, request};
+
+    #[tokio::test]
+    async fn startup_begins_the_epoch_before_reading_or_writing_the_store() {
+        let store = test_store::FlakyStore::new();
+        *store.trace.lock().unwrap() = Some(Vec::new());
+        let state = LwsState::new(store.clone(), LwsConfig::new("http://localhost:3000"))
+            .await
+            .unwrap();
+        let trace = store.trace.lock().unwrap().clone().unwrap();
+        assert_eq!(trace.first().map(String::as_str), Some("begin_epoch "));
+        drop(state);
+    }
+
+    async fn rollback_fences_before_any_restore(
+        journal: Journal<'_, test_store::FlakyStore>,
+        store: &test_store::FlakyStore,
+    ) {
+        use std::sync::atomic::Ordering;
+        store.slow_fence_ms.store(50, Ordering::SeqCst);
+        let rollback = journal.rollback();
+        tokio::pin!(rollback);
+        tokio::select! {
+            _ = &mut rollback => panic!("rollback completed before the fence probe"),
+            _ = async {
+                while store.fences_tried.load(Ordering::SeqCst) == 0 { tokio::task::yield_now().await; }
+            } => {},
+        }
+        assert_eq!(
+            store.restores.load(Ordering::SeqCst),
+            0,
+            "restoration must wait for the fence"
+        );
+        assert!(rollback.await.is_none());
+    }
+
+    #[tokio::test]
+    async fn journal_unsettled_write_is_fenced_before_restore() {
+        use std::sync::atomic::Ordering;
+        let (state, store) = test_store::state(100).await;
+        let iri = state.cfg.absolute("/d");
+        store
+            .write(&iri, Bytes::from_static(b"original"), "text/plain")
+            .await
+            .unwrap();
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_write_of.lock().unwrap() = Some((iri.clone(), gate.clone()));
+        let mut journal = state.journal();
+        assert!(matches!(
+            journal
+                .write(&iri, Bytes::from_static(b"late"), "text/plain")
+                .await,
+            Err(crate::error::ServerError::Unsettled { .. })
+        ));
+        let later = state.cfg.absolute("/later");
+        *store.fail_write_of.lock().unwrap() = Some(later.clone());
+        assert!(journal
+            .write(&later, Bytes::new(), "text/plain")
+            .await
+            .is_err());
+        rollback_fences_before_any_restore(journal, &store).await;
+        assert!(store.fences_tried.load(Ordering::SeqCst) >= 1);
+        gate.add_permits(1);
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert_eq!(store.read(&iri).await.unwrap().body, "original");
+    }
+
+    #[tokio::test]
+    async fn journal_unsettled_metadata_delete_is_fenced_before_restore() {
+        use std::sync::atomic::Ordering;
+        let (state, store) = test_store::state(100).await;
+        let iri = state.cfg.absolute("/d");
+        let key = meta_key(&iri);
+        // A valid metadata record is staged by the same path as a real metadata delete.
+        let original = encode_meta(&ResourceMeta::default()).unwrap();
+        store
+            .write(&key, Bytes::from(original.clone()), JSON)
+            .await
+            .unwrap();
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_remove_of.lock().unwrap() = Some((key.clone(), gate.clone()));
+        let mut journal = state.journal();
+        assert!(matches!(
+            journal.delete_meta(&iri).await,
+            Err(crate::error::ServerError::Unsettled { .. })
+        ));
+        let later = state.cfg.absolute("/later");
+        *store.fail_write_of.lock().unwrap() = Some(later.clone());
+        assert!(journal
+            .write(&later, Bytes::new(), "text/plain")
+            .await
+            .is_err());
+        rollback_fences_before_any_restore(journal, &store).await;
+        assert!(store.fences_tried.load(Ordering::SeqCst) >= 1);
+        gate.add_permits(1);
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert_eq!(store.read(&key).await.unwrap().body, original);
+    }
+
+    #[tokio::test]
+    async fn journal_legacy_edge_is_fenced_before_commit_clears_the_intent() {
+        use std::sync::atomic::Ordering;
+        let (state, store) = test_store::state(100).await;
+        // A legacy metadata edge names a record that no longer exists.
+        let iri = meta_key(&state.cfg.absolute("/d"));
+        let parent = state.cfg.storage();
+        store
+            .create_in_container(&parent, &iri, Bytes::new(), JSON)
+            .await
+            .unwrap();
+        store.delete(&iri, None).await.unwrap();
+        assert!(store
+            .list_children(&parent)
+            .await
+            .unwrap()
+            .iter()
+            .any(|child| child.as_str() == iri));
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_remove_of.lock().unwrap() = Some((iri.clone(), gate.clone()));
+        let mut journal = state.journal();
+        assert!(matches!(
+            journal.remove_member(&iri, Some(&parent)).await,
+            Err(crate::error::ServerError::Unsettled { .. })
+        ));
+        let intents = intents::container(&parent);
+        assert!(!store.list_children(&intents).await.unwrap().is_empty());
+        store.slow_fence_ms.store(50, Ordering::SeqCst);
+        let commit = journal.commit(None);
+        tokio::pin!(commit);
+        tokio::select! {
+            _ = &mut commit => panic!("commit completed before the fence probe"),
+            _ = async {
+                while store.fences_tried.load(Ordering::SeqCst) == 0 { tokio::task::yield_now().await; }
+            } => {},
+        }
+        assert!(!store.list_children(&intents).await.unwrap().is_empty());
+        assert!(commit.await.is_ok());
+        assert!(store.fences_tried.load(Ordering::SeqCst) >= 1);
+        assert!(store.list_children(&intents).await.unwrap().is_empty());
+        store
+            .create_in_container(&parent, &iri, Bytes::from_static(b"later"), JSON)
+            .await
+            .unwrap();
+        gate.add_permits(1);
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert_eq!(store.read(&iri).await.unwrap().body, "later");
+    }
 
     #[cfg(feature = "sparql-endpoint")]
     #[tokio::test]

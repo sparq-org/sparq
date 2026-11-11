@@ -247,13 +247,14 @@ fn refused_acl_edits_restore_documents_and_disable_unrebuilt_authorization() {
                 |agent| format!("ASK {{ ?s <http://www.w3.org/ns/auth/acl#agent> <{agent}> }}");
             assert!(sparq_engine::ask(restored, &names(ALICE)).unwrap());
             assert!(!sparq_engine::ask(restored, &names(BOB)).unwrap());
-            // Rollback omits the deadline but keeps the input-fact cap.
+            // Admission refusals preserve the view without rollback. A delete still
+            // rebuilds after removal; its rollback keeps the input-fact cap.
             for agent in [ALICE, BOB] {
                 assert_eq!(
                     store
                         .decide(&sess(agent), "https://pod.ex/notes/n1", Mode::Read)
                         .allow,
-                    kind == AuthAllowance::Deadline && agent == ALICE
+                    (kind == AuthAllowance::Deadline || !delete) && agent == ALICE
                 );
             }
             store.set_auth_budget(default_auth_budget());

@@ -207,6 +207,10 @@ impl<S> std::ops::Deref for Tracked<S> {
 
 #[async_trait]
 impl<S: Store> Store for Tracked<S> {
+    async fn begin_epoch(&self, lease: &crate::store::LifecycleGuard) -> ServerResult<u64> {
+        self.inner.begin_epoch(lease).await
+    }
+
     fn history_config(&self) -> crate::store::history::HistoryConfig {
         self.inner.history_config()
     }

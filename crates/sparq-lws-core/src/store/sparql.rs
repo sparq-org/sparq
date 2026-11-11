@@ -53,9 +53,8 @@ pub const XSD_DATETIME: &str = "http://www.w3.org/2001/XMLSchema#dateTime";
 pub fn p_create_marker() -> String {
     format!("{PSS_NS}createMarker")
 }
-/// Predicate: a per-operation **delete** marker (a unique-nonce literal), written atomically with the
-/// guarded empty-container delete into a SEPARATE scratch graph so the "did the empty+exists guard
-/// match?" confirm is race-resistant (no other op writes or removes THIS nonce).
+/// Predicate: a per-operation completion marker (a unique-nonce literal), written atomically
+/// with a guarded index write into a separate scratch graph. Each operation confirms its own nonce.
 pub fn p_delete_marker() -> String {
     format!("{PSS_NS}deleteMarker")
 }
@@ -458,6 +457,39 @@ pub fn update_put_meta(
     ))
 }
 
+/// Upsert metadata in one modify, guarded by a nonce fence and the writer epoch.
+/// Only reserved record predicates are replaced; body triples are preserved.
+/// The completion marker survives later changes to the resource graph.
+pub fn update_put_meta_fenced(
+    resource: &str,
+    content_type: &str,
+    blob_key: &str,
+    etag: &str,
+    modified: Option<&str>,
+    nonce: &str,
+    epoch: u64,
+) -> Result<String, BuildError> {
+    let g = iri(resource)?;
+    let rec = iri_const(&s_record());
+    let predicates = [p_content_type(), p_blob_key(), p_etag(), p_modified()]
+        .iter()
+        .map(|p| iri_const(p))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let modified = modified
+        .map(|m| format!(" ; {} {}", iri_const(&p_modified()), datetime_literal(m)))
+        .unwrap_or_default();
+    Ok(format!(
+        "DELETE {{ GRAPH {g} {{ {rec} ?oldP ?oldO }} }} \
+         INSERT {{ GRAPH {g} {{ {rec} {pct} {ct} ; {pbk} {bk} ; {pet} {et}{modified} }} {marker} }} \
+         WHERE {{ OPTIONAL {{ GRAPH {g} {{ {rec} ?oldP ?oldO }} FILTER (?oldP IN ({predicates})) }} {guard} }}",
+        pct = iri_const(&p_content_type()), ct = literal(content_type),
+        pbk = iri_const(&p_blob_key()), bk = literal(blob_key),
+        pet = iri_const(&p_etag()), et = literal(etag),
+        marker = completion_marker(resource, nonce)?, guard = fence_guard(Some(epoch), nonce),
+    ))
+}
+
 /// UPDATE: ATOMICALLY create-or-replace a child record + its container-containment edge, guarded by a
 /// `container`-EXISTS check — in ONE SPARQL `DELETE/INSERT … WHERE` update.
 ///
@@ -482,13 +514,9 @@ pub fn update_put_meta(
 /// [`ask_create_marker`]) — a signal no concurrent `remove_child`/sibling create ever touches — so the
 /// confirm is immune to a containment-edge race between the update and the check.
 ///
-/// The marker is **APPEND-ONLY**: it is NOT in the DELETE/OPTIONAL clause, so a concurrent same-child
-/// create can never remove an earlier operation's marker (the round-5 finding — deleting all markers
-/// let operation B clear operation A's nonce before A confirmed, giving A a false `NotFound`). Each
-/// operation only ever ASKs for its OWN unique nonce, so leftover markers from other operations are
-/// harmless; pruning them is a reconciler-GC concern (M3-next). Only the single-valued record
-/// predicates (`contentType`/`blobKey`/`etag`) are DELETE-replaced (so `select_meta(... LIMIT 1)`
-/// stays deterministic — the round-3 finding); the marker is purely additive.
+/// Concurrent creates retain each other's markers. After confirming its own nonce, a client may
+/// remove that nonce alone; markers for operations still awaiting confirmation remain available.
+/// Only the single-valued record predicates are DELETE-replaced by this update.
 pub fn update_create_child(
     container: &str,
     child: &str,
@@ -506,13 +534,15 @@ pub fn update_create_child(
         etag,
         modified,
         nonce,
-        false,
+        None,
     )
 }
 
 /// [`update_create_child`], which does nothing once its `nonce` is fenced ([`update_fence`]): the
 /// form a client sends when a failed update can still commit after it has answered (an HTTP
 /// update that timed out), so that a fence can make its outcome final.
+/// The writer epoch must also match; zero permits an index with no epoch record yet.
+#[allow(clippy::too_many_arguments)]
 pub fn update_create_child_fenced(
     container: &str,
     child: &str,
@@ -521,6 +551,7 @@ pub fn update_create_child_fenced(
     etag: &str,
     modified: Option<&str>,
     nonce: &str,
+    epoch: u64,
 ) -> Result<String, BuildError> {
     create_child_guarded(
         container,
@@ -530,7 +561,7 @@ pub fn update_create_child_fenced(
         etag,
         modified,
         nonce,
-        true,
+        Some(epoch),
     )
 }
 
@@ -543,7 +574,7 @@ fn create_child_guarded(
     etag: &str,
     modified: Option<&str>,
     nonce: &str,
-    fenced: bool,
+    epoch: Option<u64>,
 ) -> Result<String, BuildError> {
     let cg = iri(child)?;
     let crec = iri_const(&s_record());
@@ -580,7 +611,7 @@ fn create_child_guarded(
             OPTIONAL {{ GRAPH {cg} {{ {crec} {pet} ?oldEt }} }} \
             {mod_opt}{fence}\
          }}",
-        fence = fence_guard(fenced, nonce),
+        fence = fence_guard(epoch, nonce),
         mod_del = mod_del,
         mod_ins = mod_ins,
         mod_opt = mod_opt,
@@ -669,8 +700,151 @@ pub(super) fn update_delete_resource_with_parent(
 ) -> Result<String, BuildError> {
     let delete = update_delete_resource(resource)?;
     match parent {
-        Some(parent) => Ok(format!("{}; {delete}", update_remove_child(parent, resource)?)),
+        Some(parent) => Ok(format!(
+            "{}; {delete}",
+            update_remove_child(parent, resource)?
+        )),
         None => Ok(delete),
+    }
+}
+
+/// Delete a resource graph in one modify under its nonce fence and writer epoch.
+/// An absent resource still records completion (the operation is idempotent).
+pub fn update_delete_resource_fenced(
+    resource: &str,
+    nonce: &str,
+    epoch: u64,
+) -> Result<String, BuildError> {
+    update_delete_resource_with_parent_fenced(resource, None, nonce, epoch)
+}
+
+/// Delete a resource graph and detach its parent edge in the same fenced modify.
+/// The completion marker is independent of the resource and parent graphs.
+pub fn update_delete_resource_with_parent_fenced(
+    resource: &str,
+    parent: Option<&str>,
+    nonce: &str,
+    epoch: u64,
+) -> Result<String, BuildError> {
+    let g = iri(resource)?;
+    let parent = parent
+        .map(|p| -> Result<String, BuildError> {
+            Ok(format!(
+                "GRAPH {} {{ {} {} {g} }}",
+                iri(p)?,
+                iri_const(&s_record()),
+                iri_const(LDP_CONTAINS)
+            ))
+        })
+        .transpose()?
+        .unwrap_or_default();
+    Ok(format!(
+        "DELETE {{ GRAPH {g} {{ ?s ?p ?o }} {parent} }} INSERT {{ {marker} \
+         GRAPH {mg} {{ {receipt} <{PSS_NS}deletedBlobKey> ?oldKey }} }} \
+         WHERE {{ OPTIONAL {{ GRAPH {g} {{ ?s ?p ?o }} }} \
+         OPTIONAL {{ GRAPH {g} {{ {rec} {pbk} ?oldKey }} }} {guard} }}",
+        mg = iri_const(&g_delete_markers()),
+        receipt = delete_receipt(nonce)?,
+        rec = iri_const(&s_record()),
+        pbk = iri_const(&p_blob_key()),
+        marker = completion_marker(resource, nonce)?,
+        guard = fence_guard(Some(epoch), nonce),
+    ))
+}
+
+/// Read the blob key captured atomically by a fenced resource delete.
+/// No row means the resource had no metadata pointer when the delete committed.
+pub fn select_deleted_blob_key(nonce: &str) -> Result<String, BuildError> {
+    Ok(format!(
+        "SELECT ?bk WHERE {{ GRAPH {} {{ {} {} ?bk }} }}",
+        iri_const(&g_delete_markers()),
+        delete_receipt(nonce)?,
+        iri_const(&format!("{PSS_NS}deletedBlobKey"))
+    ))
+}
+
+fn delete_receipt(nonce: &str) -> Result<String, BuildError> {
+    iri(&format!("{PSS_NS}deleted/{nonce}"))
+}
+
+/// Detach one containment edge under its nonce fence and writer epoch.
+/// An absent edge still records completion.
+pub fn update_remove_child_fenced(
+    container: &str,
+    child: &str,
+    nonce: &str,
+    epoch: u64,
+) -> Result<String, BuildError> {
+    Ok(format!(
+        "DELETE {{ GRAPH {g} {{ {rec} {contains} {child} }} }} INSERT {{ {marker} }} WHERE {{ {guard} }}",
+        g = iri(container)?, rec = iri_const(&s_record()), contains = iri_const(LDP_CONTAINS),
+        child = iri(child)?, marker = completion_marker(child, nonce)?, guard = fence_guard(Some(epoch), nonce),
+    ))
+}
+
+fn completion_marker(resource: &str, nonce: &str) -> Result<String, BuildError> {
+    Ok(format!(
+        "GRAPH {} {{ {} {} {} }}",
+        iri_const(&g_delete_markers()),
+        iri(resource)?,
+        iri_const(&p_delete_marker()),
+        literal(nonce)
+    ))
+}
+
+/// Remove only this operation's completion evidence after its confirmation and receipt reads.
+/// A failed cleanup may be left for later; it does not change the completed write's outcome.
+#[cfg(feature = "http-sparq")]
+pub(super) fn update_clear_completion(resource: &str, nonce: &str) -> Result<String, BuildError> {
+    Ok(format!(
+        "DELETE {{ GRAPH {mg} {{ {resource} {deleted} {nonce_literal} . {receipt} {key} ?key }} \
+         GRAPH {resource} {{ {record} {created} {nonce_literal} }} }} \
+         WHERE {{ OPTIONAL {{ GRAPH {mg} {{ {receipt} {key} ?key }} }} }}",
+        mg = iri_const(&g_delete_markers()),
+        resource = iri(resource)?,
+        deleted = iri_const(&p_delete_marker()),
+        nonce_literal = literal(nonce),
+        receipt = delete_receipt(nonce)?,
+        key = iri_const(&format!("{PSS_NS}deletedBlobKey")),
+        record = iri_const(&s_record()),
+        created = iri_const(&p_create_marker()),
+    ))
+}
+
+/// The reserved graph holding the storage index's writer epoch.
+/// Generic resource mutations refuse this IRI; only a lifecycle start raises it.
+pub const WRITER_EPOCH: &str = "urn:x-sparq-lws:writer-epoch";
+
+/// Read the writer epoch. No row means that no lifecycle start has raised it yet.
+pub fn select_writer_epoch() -> String {
+    format!("SELECT ?epoch WHERE {{ GRAPH <{WRITER_EPOCH}> {{ <{WRITER_EPOCH}> <{PSS_NS}epoch> ?epoch }} }}")
+}
+
+/// Raise the writer epoch to `epoch` in one atomic modify, recording this start's `owner` nonce.
+/// A delayed raise cannot lower a subsequent epoch or claim another start's equal epoch.
+pub fn update_begin_epoch(epoch: u64, owner: &str) -> String {
+    format!(
+        "DELETE {{ GRAPH <{WRITER_EPOCH}> {{ <{WRITER_EPOCH}> <{PSS_NS}epoch> ?old ; <{PSS_NS}epochOwner> ?owner }} }} \
+        INSERT {{ GRAPH <{WRITER_EPOCH}> {{ <{WRITER_EPOCH}> <{PSS_NS}epoch> {epoch} ; <{PSS_NS}epochOwner> {owner} }} }} \
+        WHERE {{ OPTIONAL {{ GRAPH <{WRITER_EPOCH}> {{ <{WRITER_EPOCH}> <{PSS_NS}epoch> ?old }} }} \
+        OPTIONAL {{ GRAPH <{WRITER_EPOCH}> {{ <{WRITER_EPOCH}> <{PSS_NS}epochOwner> ?owner }} }} \
+        FILTER (!BOUND(?old) || ?old < {epoch}) }}",
+        owner = literal(owner),
+    )
+}
+
+/// Confirm the start that established this epoch, including its unique owner nonce.
+#[cfg(feature = "http-sparq")]
+pub(super) fn ask_writer_epoch_owner(epoch: u64, owner: &str) -> String {
+    format!("ASK {{ GRAPH <{WRITER_EPOCH}> {{ <{WRITER_EPOCH}> <{PSS_NS}epoch> {epoch} ; <{PSS_NS}epochOwner> {} }} }}", literal(owner))
+}
+
+fn epoch_guard(epoch: u64) -> String {
+    if epoch == 0 {
+        // Clients used without a lifecycle start retain ordinary LDP semantics until a start.
+        format!("FILTER NOT EXISTS {{ GRAPH <{WRITER_EPOCH}> {{ <{WRITER_EPOCH}> <{PSS_NS}epoch> ?epoch }} FILTER (?epoch != 0) }} ")
+    } else {
+        format!("GRAPH <{WRITER_EPOCH}> {{ <{WRITER_EPOCH}> <{PSS_NS}epoch> {epoch} }} ")
     }
 }
 
@@ -718,7 +892,7 @@ pub fn update_delete_container_if_empty(
     parent: Option<&str>,
     nonce: &str,
 ) -> Result<String, BuildError> {
-    delete_container_guarded(container, parent, nonce, false)
+    delete_container_guarded(container, parent, nonce, None)
 }
 
 /// [`update_delete_container_if_empty`], which does nothing once its `nonce` is fenced
@@ -727,15 +901,16 @@ pub fn update_delete_container_if_empty_fenced(
     container: &str,
     parent: Option<&str>,
     nonce: &str,
+    epoch: u64,
 ) -> Result<String, BuildError> {
-    delete_container_guarded(container, parent, nonce, true)
+    delete_container_guarded(container, parent, nonce, Some(epoch))
 }
 
 fn delete_container_guarded(
     container: &str,
     parent: Option<&str>,
     nonce: &str,
-    fenced: bool,
+    epoch: Option<u64>,
 ) -> Result<String, BuildError> {
     let g = iri(container)?;
     let rec = iri_const(&s_record());
@@ -772,7 +947,7 @@ fn delete_container_guarded(
             FILTER NOT EXISTS {{ GRAPH {g} {{ {rec} {contains} ?anyChild }} }} \
             {fence}\
          }}",
-        fence = fence_guard(fenced, nonce),
+        fence = fence_guard(epoch, nonce),
         g = g,
         rec = rec,
         pct = pct,
@@ -785,14 +960,15 @@ fn delete_container_guarded(
 }
 
 /// The `WHERE` clause that makes a fenced update ([`update_create_child_fenced`],
-/// [`update_delete_container_if_empty_fenced`]) do nothing once its `nonce` is fenced; empty for
-/// an unfenced one.
-fn fence_guard(fenced: bool, nonce: &str) -> String {
-    if !fenced {
+/// [`update_delete_container_if_empty_fenced`]) require their writer epoch and do nothing once
+/// their `nonce` is fenced; empty for an unfenced one.
+fn fence_guard(epoch: Option<u64>, nonce: &str) -> String {
+    let Some(epoch) = epoch else {
         return String::new();
-    }
+    };
     format!(
-        "FILTER NOT EXISTS {{ GRAPH {fg} {{ {rec} {p} {n} }} }} ",
+        "{epoch_guard}FILTER NOT EXISTS {{ GRAPH {fg} {{ {rec} {p} {n} }} }} ",
+        epoch_guard = epoch_guard(epoch),
         fg = iri_const(&g_fences()),
         rec = iri_const(&s_record()),
         p = iri_const(&p_fenced()),
@@ -827,10 +1003,9 @@ pub fn update_fence(nonce: &str) -> String {
     )
 }
 
-/// ASK whether a per-operation delete marker for `container` with `nonce` is present in the reserved
-/// scratch graph — the race-resistant "the empty+exists guard matched, so the delete ran" confirm.
-/// No other operation ever writes or removes THIS nonce, so a concurrent containment mutation cannot
-/// flip the result. Fail-closed.
+/// ASK whether the completion marker for `container` and `nonce` is present in the reserved
+/// scratch graph. Used by conditional deletes and other guarded index writes to confirm that
+/// their modify ran. No other operation writes or removes this nonce.
 pub fn ask_delete_marker(container: &str, nonce: &str) -> Result<String, BuildError> {
     Ok(format!(
         "ASK {{ GRAPH {mg} {{ {g} {p} {n} }} }}",
@@ -960,7 +1135,11 @@ mod tests {
         );
         assert_eq!(
             update_delete_resource_with_parent(child, Some(parent)).unwrap(),
-            format!("{}; {}", update_remove_child(parent, child).unwrap(), update_delete_resource(child).unwrap())
+            format!(
+                "{}; {}",
+                update_remove_child(parent, child).unwrap(),
+                update_delete_resource(child).unwrap()
+            )
         );
         assert_eq!(
             update_delete_resource_with_parent("bad>iri", None),
@@ -1626,6 +1805,209 @@ mod tests {
         assert!(!ask(&g, &ask_reclaiming("k2")));
     }
 
+    fn fenced_writes(epoch: u64) -> Vec<(&'static str, String)> {
+        let (parent, child, nonce) = (
+            "https://pod.example/c/",
+            "https://pod.example/c/d",
+            "op-table",
+        );
+        vec![
+            (
+                "put",
+                update_put_meta_fenced(child, "text/plain", "candidate", "new", None, nonce, epoch)
+                    .unwrap(),
+            ),
+            (
+                "delete",
+                update_delete_resource_fenced(child, nonce, epoch).unwrap(),
+            ),
+            (
+                "delete_parent",
+                update_delete_resource_with_parent_fenced(child, Some(parent), nonce, epoch)
+                    .unwrap(),
+            ),
+            (
+                "detach",
+                update_remove_child_fenced(parent, child, nonce, epoch).unwrap(),
+            ),
+            (
+                "create",
+                update_create_child_fenced(
+                    parent,
+                    child,
+                    "text/plain",
+                    "candidate",
+                    "new",
+                    None,
+                    nonce,
+                    epoch,
+                )
+                .unwrap(),
+            ),
+            (
+                "empty_delete",
+                update_delete_container_if_empty_fenced(child, Some(parent), nonce, epoch).unwrap(),
+            ),
+        ]
+    }
+
+    #[test]
+    fn every_fenced_builder_carries_the_epoch_and_nonce_guards() {
+        for (name, update) in fenced_writes(7) {
+            let guard = update.split("WHERE {").last().unwrap();
+            assert!(guard.contains("GRAPH <urn:x-sparq-lws:writer-epoch> { <urn:x-sparq-lws:writer-epoch> <urn:pss:index#epoch> 7 }"), "{name}: {update}");
+            assert!(
+                guard.contains("FILTER NOT EXISTS { GRAPH <urn:pss:index#fences>"),
+                "{name}: {update}"
+            );
+            assert!(
+                guard.contains("<urn:pss:index#fenced> \"op-table\""),
+                "{name}: {update}"
+            );
+        }
+    }
+
+    #[cfg(all(feature = "embedded-sparq", not(target_arch = "wasm32")))]
+    #[test]
+    fn every_fenced_write_is_final_after_a_nonce_fence_or_a_new_epoch() {
+        let (parent, child) = ("https://pod.example/c/", "https://pod.example/c/d");
+        for protection in ["nonce", "epoch", "pre-start", "active"] {
+            let epoch = if protection == "pre-start" { 0 } else { 1 };
+            for (name, update) in fenced_writes(epoch) {
+                let mut graph = sparq_core::Graph::load_str("", "ntriples").unwrap();
+                let run = |g: &mut sparq_core::Graph, u: &str| {
+                    sparq_engine::update_in_place_atomic(g, u).unwrap()
+                };
+                let ask = |g: &sparq_core::Graph, q: &str| sparq_engine::ask(g, q).unwrap();
+                run(
+                    &mut graph,
+                    &update_put_meta(parent, "text/plain", "parent", "p", None).unwrap(),
+                );
+                run(
+                    &mut graph,
+                    &update_create_child(
+                        parent,
+                        child,
+                        "text/plain",
+                        "original",
+                        "old",
+                        Some("2020-01-01T00:00:00Z"),
+                        "op-initial",
+                    )
+                    .unwrap(),
+                );
+                run(
+                    &mut graph,
+                    &format!("INSERT DATA {{ GRAPH <{child}> {{ <urn:s> <urn:p> \"body\" }} }}"),
+                );
+                if epoch > 0 {
+                    run(&mut graph, &update_begin_epoch(1, "start-one"));
+                }
+                match protection {
+                    "nonce" => run(&mut graph, &update_fence("op-table")),
+                    "epoch" | "pre-start" => run(&mut graph, &update_begin_epoch(2, "start-two")),
+                    _ => {}
+                }
+                run(&mut graph, &update);
+                let marker = match name {
+                    "create" => ask_create_marker(child, "op-table").unwrap(),
+                    _ => ask_delete_marker(child, "op-table").unwrap(),
+                };
+                if protection == "active" {
+                    assert!(ask(&graph, &marker), "{name}: active write did not commit");
+                    match name {
+                        "put" | "create" => {
+                            let q = format!(
+                                "ASK {{ GRAPH <{child}> {{ <{}> <{}> \"candidate\" }} }}",
+                                s_record(),
+                                p_blob_key()
+                            );
+                            assert!(ask(&graph, &q), "{name}");
+                            assert!(
+                                ask(
+                                    &graph,
+                                    &format!(
+                                        "ASK {{ GRAPH <{child}> {{ <urn:s> <urn:p> \"body\" }} }}"
+                                    )
+                                ),
+                                "body preserved"
+                            );
+                            assert!(
+                                !ask(
+                                    &graph,
+                                    &format!(
+                                        "ASK {{ GRAPH <{child}> {{ <{}> <{}> ?modified }} }}",
+                                        s_record(),
+                                        p_modified()
+                                    )
+                                ),
+                                "stale timestamp cleared"
+                            );
+                        }
+                        "detach" => {
+                            assert!(ask(&graph, &ask_exists(child).unwrap()));
+                            assert!(!ask(&graph, &ask_contains_edge(parent, child).unwrap()));
+                        }
+                        _ => {
+                            assert!(!ask(&graph, &ask_exists(child).unwrap()), "{name}");
+                            if name != "delete" {
+                                assert!(!ask(&graph, &ask_contains_edge(parent, child).unwrap()));
+                            }
+                        }
+                    }
+                    if matches!(name, "delete" | "delete_parent") {
+                        let result = sparq_engine::query(
+                            &graph,
+                            &select_deleted_blob_key("op-table").unwrap(),
+                        )
+                        .unwrap();
+                        assert_eq!(
+                            result.rows,
+                            vec![vec![Some(
+                                oxrdf::Literal::new_simple_literal("original").into()
+                            )]],
+                            "{name}: receipt captures the deleted record's exact key"
+                        );
+                        assert!(
+                            !ask(&graph, &ask_blob_referenced("original")),
+                            "receipt is not a live pointer"
+                        );
+                    }
+                } else {
+                    assert!(!ask(&graph, &marker), "{protection} {name}: marker");
+                    assert!(
+                        ask(&graph, &ask_exists(child).unwrap()),
+                        "{protection} {name}: record"
+                    );
+                    assert!(
+                        ask(&graph, &ask_contains_edge(parent, child).unwrap()),
+                        "{protection} {name}: edge"
+                    );
+                    let q = format!(
+                        "ASK {{ GRAPH <{child}> {{ <{}> <{}> \"original\" }} }}",
+                        s_record(),
+                        p_blob_key()
+                    );
+                    assert!(ask(&graph, &q), "{protection} {name}: original key");
+                }
+            }
+        }
+    }
+
+    #[cfg(all(feature = "embedded-sparq", not(target_arch = "wasm32")))]
+    #[test]
+    fn epoch_raises_do_not_lower_a_later_start() {
+        let mut graph = sparq_core::Graph::load_str("", "ntriples").unwrap();
+        for epoch in [1, 2, 2, 1] {
+            sparq_engine::update_in_place_atomic(&mut graph, &update_begin_epoch(epoch, "start"))
+                .unwrap();
+        }
+        assert!(sparq_engine::ask(&graph,
+            "ASK { GRAPH <urn:x-sparq-lws:writer-epoch> { <urn:x-sparq-lws:writer-epoch> <urn:pss:index#epoch> 2 } }").unwrap());
+        assert!(!sparq_engine::ask(&graph,
+            "ASK { GRAPH <urn:x-sparq-lws:writer-epoch> { <urn:x-sparq-lws:writer-epoch> <urn:pss:index#epoch> 1 } }").unwrap());
+    }
+
     /// Issue #6836: the fenced create and delete do nothing once fenced, and as before otherwise,
     /// on the engine `sparq-server` runs (so the endpoint parses and applies them as written).
     #[cfg(all(feature = "embedded-sparq", not(target_arch = "wasm32")))]
@@ -1645,7 +2027,8 @@ mod tests {
         )
         .unwrap();
         let create = |child: &str, nonce: &str| {
-            update_create_child_fenced(c, child, "text/turtle", "bk", "\"e\"", None, nonce).unwrap()
+            update_create_child_fenced(c, child, "text/turtle", "bk", "\"e\"", None, nonce, 0)
+                .unwrap()
         };
         // Not fenced: applied as the unfenced form is.
         run(&mut g, &create(a, "op-a")).unwrap();
@@ -1665,14 +2048,14 @@ mod tests {
         run(&mut g, &update_fence("op-d")).unwrap();
         run(
             &mut g,
-            &update_delete_container_if_empty_fenced(a, Some(c), "op-d").unwrap(),
+            &update_delete_container_if_empty_fenced(a, Some(c), "op-d", 0).unwrap(),
         )
         .unwrap();
         assert!(ask(&g, &ask_exists(a).unwrap()));
         assert!(!ask(&g, &ask_delete_marker(a, "op-d").unwrap()));
         run(
             &mut g,
-            &update_delete_container_if_empty_fenced(a, Some(c), "op-e").unwrap(),
+            &update_delete_container_if_empty_fenced(a, Some(c), "op-e", 0).unwrap(),
         )
         .unwrap();
         assert!(!ask(&g, &ask_exists(a).unwrap()));

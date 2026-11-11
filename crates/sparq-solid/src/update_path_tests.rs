@@ -743,7 +743,9 @@ fn panicking_rebuild_hook(rollback: bool) {
         crate::materialize::STRATUM_PANIC_AFTER.with(|n| n.set(Some(if rollback { 0 } else { 2 })));
         let result = catch_unwind(AssertUnwindSafe(|| {
             if rollback {
-                let _ = store.put_acl(ACL, "", "ntriples");
+                // Removal reaches the rebuild with the zero request deadline; put
+                // admission would refuse before the rollback hook can run.
+                let _ = store.delete_acl(ACL);
             } else {
                 let edit = format!("DELETE DATA {{ GRAPH <{ACL}> {{ <{ACL}#bob> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> }} }}");
                 let _ = store.update_as(&session(ALICE), &edit);
