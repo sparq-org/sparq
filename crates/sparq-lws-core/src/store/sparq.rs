@@ -131,6 +131,9 @@ pub enum SparqError {
     /// The configured in-memory resource-count ceiling would be exceeded.
     #[error("in-memory index quota exceeded")]
     QuotaExceeded,
+    /// The service pool's own entry ceiling would be exceeded.
+    #[error("service pool is full")]
+    ServicePoolFull,
     #[error("sparq backend error: {0}")]
     Backend(String),
     /// A write failed in a way after which it may still commit (an HTTP update that timed out),
@@ -196,6 +199,10 @@ impl From<super::sparql::BuildError> for SparqError {
 /// retains the WAC/ACP ACL-document graphs the (future) access-evaluation step reads.
 #[async_trait]
 pub trait SparqClient: Send + Sync {
+    /// The lifecycle lease retained by this backend. Clones share the same `Arc` and wrappers
+    /// forward their inner client's lease, including when building a new composite store.
+    fn lifecycle(&self) -> std::sync::Arc<super::Lifecycle>;
+
     /// Fetch the authoritative metadata for a resource IRI, or [`SparqError::NotFound`].
     async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError>;
 
@@ -497,7 +504,8 @@ pub trait SparqClient: Send + Sync {
     /// Reset a marker under the running service's lifecycle lease.
     ///
     /// # Errors
-    /// Refuses by default; clients supporting resets write the marker in one operation.
+    /// Refuses by default; clients supporting resets check that `lease` belongs to their
+    /// backend with [`super::LifecycleGuard::belongs_to`] before writing the marker in one operation.
     async fn reset_marker(
         &self,
         iri: &str,
@@ -598,9 +606,11 @@ pub trait SparqClient: Send + Sync {
 ///
 /// Holds the metadata records AND the containment edges (container IRI → ordered child IRIs) behind
 /// a single lock, so a POST/DELETE that touches both stays internally consistent under the test
-/// double's coarse locking.
+/// double's coarse locking. Clones share the index and its lifecycle lease.
+#[derive(Clone)]
 pub struct InMemorySparqClient {
-    inner: Mutex<Index>,
+    inner: std::sync::Arc<Mutex<Index>>,
+    lifecycle: std::sync::Arc<super::Lifecycle>,
     /// Immutable admission ceiling, enforced under the index lock.
     limits: InMemoryStoreLimits,
 }
@@ -647,6 +657,8 @@ struct Meta {
     holds: usize,
     /// Zero-byte append directory rows; their content records remain charged.
     append_directories: usize,
+    /// Reserved wrapped-key records, admitted apart from content.
+    data_keys: usize,
     /// The one notification marker ([`super::is_service_marker`]) holding the slot kept for it,
     /// admitted apart from every ceiling and counted in none: the first stored. Any other IRI of
     /// that shape (another origin's) is an ordinary pool record.
@@ -700,6 +712,7 @@ impl Meta {
         let pooled = super::in_service_pool(&iri) && !marker;
         let hold = super::is_hold_record(&iri);
         let append_directory = is_append_directory(&iri);
+        let data_key = super::limits::is_data_key_record(&iri);
         if marker && self.marker.is_none() {
             self.marker = Some(iri.clone());
         }
@@ -708,6 +721,7 @@ impl Meta {
             self.pooled += usize::from(pooled);
             self.holds += usize::from(hold);
             self.append_directories += usize::from(append_directory);
+            self.data_keys += usize::from(data_key);
         }
         replaced
     }
@@ -724,6 +738,9 @@ impl Meta {
         }
         if is_append_directory(iri) {
             self.append_directories -= 1;
+        }
+        if super::limits::is_data_key_record(iri) {
+            self.data_keys -= 1;
         }
         Some(gone)
     }
@@ -796,7 +813,8 @@ impl InMemorySparqClient {
     /// Build with an explicit resource-count limit.
     pub fn with_limits(limits: InMemoryStoreLimits) -> Self {
         Self {
-            inner: Mutex::new(Index::default()),
+            inner: std::sync::Arc::new(Mutex::new(Index::default())),
+            lifecycle: Default::default(),
             limits,
         }
     }
@@ -826,6 +844,7 @@ impl InMemorySparqClient {
         if index.meta.contains_key(iri)
             || super::is_hold_record(iri)
             || is_append_directory(iri)
+            || super::limits::is_data_key_record(iri)
             || index.meta.is_marker_slot(iri)
         {
             return Ok(());
@@ -839,12 +858,17 @@ impl InMemorySparqClient {
                     - pooled
                     - index.meta.holds()
                     - index.meta.markers()
-                    - index.meta.append_directories,
+                    - index.meta.append_directories
+                    - index.meta.data_keys,
                 self.limits.max_resource_count,
             )
         };
         if held >= ceiling {
-            return Err(SparqError::QuotaExceeded);
+            return Err(if super::in_service_pool(iri) {
+                SparqError::ServicePoolFull
+            } else {
+                SparqError::QuotaExceeded
+            });
         }
         Ok(())
     }
@@ -887,6 +911,10 @@ impl InMemorySparqClient {
 
 #[async_trait]
 impl SparqClient for InMemorySparqClient {
+    fn lifecycle(&self) -> std::sync::Arc<super::Lifecycle> {
+        self.lifecycle.clone()
+    }
+
     async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
         let guard = self
             .inner
@@ -904,8 +932,13 @@ impl SparqClient for InMemorySparqClient {
         &self,
         iri: &str,
         value: i64,
-        _: &super::LifecycleGuard,
+        lease: &super::LifecycleGuard,
     ) -> Result<(), SparqError> {
+        if !lease.belongs_to(&self.lifecycle) {
+            return Err(SparqError::Backend(
+                "marker reset requires this backend's lifecycle lease".into(),
+            ));
+        }
         self.put_meta_unchecked(iri, super::sparq::marker_meta(&value.to_string()))
             .await
     }
@@ -1167,6 +1200,12 @@ impl SparqClient for InMemorySparqClient {
         let mut meta = expected.clone();
         meta.blob_key = blob_key.to_owned();
         meta.append_seq = 0;
+        if let Some(version) = index.versions.get_mut(iri) {
+            version.meta = meta.clone();
+        }
+        if let Some(trash) = index.trash.get_mut(iri) {
+            trash.meta = meta.clone();
+        }
         index.meta.insert(iri.to_owned(), meta);
         Ok(true)
     }
@@ -1463,7 +1502,12 @@ impl SparqClient for InMemorySparqClient {
             .map_err(|_| SparqError::Backend("poisoned".into()))?;
         // Every metadata record's `blob_key` is a live reference. Mirrors the live path's
         // `SELECT DISTINCT ?bk` over the `pss:blobKey` predicate across all graphs.
-        Ok(guard.meta.values().map(|m| m.blob_key.clone()).collect())
+        Ok(guard
+            .meta
+            .values()
+            .filter(|m| !m.blob_key.is_empty())
+            .map(|m| m.blob_key.clone())
+            .collect())
     }
 
     async fn read_plan(
@@ -1520,7 +1564,10 @@ mod tests {
             .unwrap();
         index.replace_meta("urn:child", meta("new")).await.unwrap();
         assert_eq!(
-            index.delete_resource("urn:child", Some("urn:parent")).await.unwrap(),
+            index
+                .delete_resource("urn:child", Some("urn:parent"))
+                .await
+                .unwrap(),
             Some("new".into())
         );
         assert!(!index.exists("urn:child").await.unwrap());
@@ -1531,7 +1578,10 @@ mod tests {
             .unwrap();
         index.delete_meta("urn:child").await.unwrap();
         assert_eq!(
-            index.delete_resource("urn:child", Some("urn:parent")).await.unwrap(),
+            index
+                .delete_resource("urn:child", Some("urn:parent"))
+                .await
+                .unwrap(),
             None
         );
         assert!(index.list_children("urn:parent").await.unwrap().is_empty());
@@ -1574,7 +1624,7 @@ mod tests {
             assert!(
                 matches!(
                     index.raise_marker(other, 5).await,
-                    Err(SparqError::QuotaExceeded)
+                    Err(SparqError::ServicePoolFull)
                 ),
                 "{other}"
             );
@@ -1605,9 +1655,17 @@ mod tests {
         assert!(!crate::store::is_service_marker(
             "http://u@a.example/.lws/subscriptions/#high-water"
         ));
-        assert!(!crate::store::is_service_marker(
+        assert!(crate::store::is_service_marker(
             "http://a.example/x/.lws/subscriptions/#high-water"
         ));
+        for ordinary in [
+            "http://a.example/x/.lws/subscriptions/record",
+            "http://a.example/x/.lws/subscriptions/#other",
+            "http://a.example/x?next=/.lws/subscriptions/#high-water",
+            "http://a.example/x#part/.lws/subscriptions/#high-water",
+        ] {
+            assert!(!crate::store::is_service_marker(ordinary), "{ordinary}");
+        }
     }
 
     /// A marker admitted to the pool (the slot held by another) stays in it when the slot's

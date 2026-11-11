@@ -30,9 +30,11 @@
 //! QUIC listener on the same resolved address and port over UDP. The existing TCP ALPN contract stays
 //! exactly `[h2, http/1.1]`; only the cloned QUIC configuration advertises `h3`.
 //!
+//! ## Native storage
+//! Native storage selects filesystem bytes by default in a data directory, or the optional
+//! object backend through `SOLID_SERVER_BLOB_URL`; see `storage_runtime`.
+//!
 //! ## Still seamed (not in this slice)
-//! - The live SPARQ HTTP client + the `object_store`-backed blob store (the binary still boots the
-//!   in-memory store doubles so it runs without SPARQ / S3; swapping in `HttpSparqClient` is wiring).
 //! - WAC authorization (gated on sparq#992 — the LDP layer is fail-closed: mutations need an
 //!   authenticated caller, reads are public since no ACLs exist yet).
 //!
@@ -106,8 +108,6 @@ use sparq_lws_core::tls::{self, TlsMode};
 use sparq_lws_core::transport::{ConnectionLimiter, TransportConfig};
 
 use crate::storage_runtime::{StorageConfig, StorageShutdown};
-#[cfg(feature = "embedded-sparq")]
-use crate::storage_runtime::make_blobs;
 #[cfg(test)]
 use crate::storage_runtime::{sparq_backend_is_durable, reject_durable_sparq_with_inmem_blob};
 
@@ -632,7 +632,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let storage = StorageConfig::from_env()?;
     let backend = &storage.backend;
     sparq_lws_core::store::history::HistoryConfig::from_env()?.validate_backend(backend)?;
-    // Data-directory boot pairs the durable index with filesystem bytes.
+    // Data-directory boot pairs the durable index with the configured native bytes.
     // Legacy backends retain the in-memory blob guard.
     storage.check_durability(storage.has_data_dir())?;
 
@@ -666,6 +666,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 InMemorySparqClient::new(),
                 InMemoryBlobStore::new(),
                 reconcile_interval,
+                &storage,
                 &base_url,
                 &issuer,
                 jwks_cache_ttl,
@@ -696,6 +697,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 HttpSparqClient::new(endpoint),
                 InMemoryBlobStore::new(),
                 reconcile_interval,
+                &storage,
                 &base_url,
                 &issuer,
                 jwks_cache_ttl,
@@ -707,14 +709,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         #[cfg(feature = "embedded-sparq")]
         "embedded" => {
-            let (sparq, blob) = storage
-                .open_embedded_with(storage.has_data_dir(), make_blobs)
-                .await?;
+            let (sparq, blob) = storage.open_embedded().await?;
             storage_shutdown.retain(&storage, &sparq);
             build_app_for_backend(
                 sparq,
                 blob,
                 reconcile_interval,
+                &storage,
                 &base_url,
                 &issuer,
                 jwks_cache_ttl,
@@ -1008,6 +1009,66 @@ async fn build_app_for_backend<S, B, J, R>(
     sparq: S,
     blob: B,
     reconcile_interval: Option<Duration>,
+    storage: &StorageConfig,
+    base_url: &str,
+    issuer: &str,
+    jwks_cache_ttl: Duration,
+    auth: AuthContext<J, R>,
+    overload_config: OverloadConfig,
+    identity: Option<IdentityConfig>,
+) -> Result<(axum::Router, Option<tokio::task::JoinHandle<()>>), Box<dyn std::error::Error>>
+where
+    S: sparq_lws_core::store::SparqClient + 'static,
+    B: sparq_lws_core::store::BlobStore + 'static,
+    J: JwksProvider + Send + Sync + 'static,
+    R: ReplayStore + Send + Sync + 'static,
+{
+    #[cfg(feature = "crypt")]
+    if storage.crypt_enabled() {
+        let _ = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::WARN)
+            .with_writer(std::io::stderr)
+            .try_init();
+        // One coordinator per index. Sharing for reconciliation happens only after assembly.
+        let sparq = SharedStore::new(sparq);
+        let blob = storage
+            .encrypt(std::sync::Arc::new(sparq.clone()), blob)
+            .await?;
+        return build_app_for_configured_backend(
+            sparq,
+            blob,
+            reconcile_interval,
+            storage,
+            base_url,
+            issuer,
+            jwks_cache_ttl,
+            auth,
+            overload_config,
+            identity,
+        )
+        .await;
+    }
+    build_app_for_configured_backend(
+        sparq,
+        blob,
+        reconcile_interval,
+        storage,
+        base_url,
+        issuer,
+        jwks_cache_ttl,
+        auth,
+        overload_config,
+        identity,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn build_app_for_configured_backend<S, B, J, R>(
+    sparq: S,
+    blob: B,
+    reconcile_interval: Option<Duration>,
+    storage: &StorageConfig,
     base_url: &str,
     issuer: &str,
     jwks_cache_ttl: Duration,
@@ -1029,6 +1090,7 @@ where
             blob.clone(),
             body_cache_from_env(),
         )
+        .with_blob_scope(storage.blob_scope(base_url))
         .with_history(sparq_lws_core::store::history::HistoryConfig::from_env()?)?;
         let app = build_app_for_store(
             store,
@@ -1044,6 +1106,7 @@ where
         Ok((app, task))
     } else {
         let store = CompositeStore::with_body_cache(sparq, blob, body_cache_from_env())
+            .with_blob_scope(storage.blob_scope(base_url))
             .with_history(sparq_lws_core::store::history::HistoryConfig::from_env()?)?;
         let app = build_app_for_store(
             store,

@@ -307,6 +307,16 @@ fn a_swap_failing_after_its_first_rename_is_completed_at_once() {
     fault::fail_when(move |step, p| step == "mark" && old(p));
     g.compact().expect("the recovered swap counts as done");
     assert_eq!(fault::disarm(), 1);
+    let inside = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(dir.join(dir_lock::INSIDE_LOCK))
+        .unwrap();
+    assert!(matches!(
+        fs4::FileExt::try_lock(&inside),
+        Err(fs4::TryLockError::WouldBlock)
+    ));
+    drop(inside);
     assert!(!g.is_frozen());
     assert!(has(&g, "a2") && has(sub(&g, "g0"), "b2"));
     g.apply_delta(&[triple("z")], &[]).unwrap();
@@ -606,14 +616,18 @@ fn a_frozen_view_replays_root_and_named_transaction_logs_without_writing() {
     let root = scratch("frozen-transactions");
     let dir = root.join("g");
     let mut g = open_with_logged_update(&dir);
-    g.commit_txn(&[
-        (true, None, triple("root-txn")),
-        (true, Some(iri("g9")), triple("new-named-txn")),
+    // Construct a legacy recovery image, without starting a live materialization
+    // (which now refuses base rewrites until it is finished).
+    g.txn.as_mut().unwrap().append(&[
+        TxnOp::Insert { slot: None, triple: triple("root-txn") },
+        TxnOp::Insert { slot: Some(iri("g9")), triple: triple("new-named-txn") },
     ])
     .unwrap();
     g.named[0]
         .1
-        .commit_txn(&[(true, None, triple("child-txn"))])
+        .txn.as_mut().unwrap().append(&[TxnOp::Insert {
+            slot: None, triple: triple("child-txn"),
+        }])
         .unwrap();
     let paths = [
         dir.join("txn.log"),

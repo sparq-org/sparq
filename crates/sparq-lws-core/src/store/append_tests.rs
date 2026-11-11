@@ -525,7 +525,7 @@ async fn an_append_sequence_survives_embedded_reopen() {
     }
     let dir = Scratch(std::env::temp_dir().join(format!(
         "lws-append-{}",
-        CompositeStore::<InMemorySparqClient, InMemoryBlobStore>::mint_blob_key(DOC).unwrap()
+        CompositeStore::<InMemorySparqClient, InMemoryBlobStore>::mint_blob_key(DOC, false).unwrap()
     )));
     std::fs::create_dir(&dir.0).unwrap();
     let path = dir.0.join("index");
@@ -768,7 +768,7 @@ async fn insert_blob_fetches_overlap_in_bounded_batches() {
         .await
         .unwrap();
     let mut expected = String::from("old\n");
-    for n in 0..APPEND_FETCH_CONCURRENCY + 1 {
+    for n in 0..17 {
         let insert = format!("insert {n}\n");
         expected.push_str(&insert);
         store.append(DOC, Bytes::from(insert)).await.unwrap();
@@ -781,7 +781,7 @@ async fn insert_blob_fetches_overlap_in_bounded_batches() {
         "insert fetches must overlap: {counts:?}"
     );
     assert!(
-        counts.max_in_flight <= APPEND_FETCH_CONCURRENCY as u64,
+        counts.max_in_flight <= 16,
         "the fetch fan-out must stay bounded: {counts:?}"
     );
 }
@@ -812,5 +812,88 @@ async fn a_quota_refused_fold_still_serves_the_complete_snapshot() {
     assert!(
         store.blob.exists(&before.unwrap().blob_key).await.unwrap(),
         "a refused fold must retain the original base bytes"
+    );
+}
+
+struct YieldingIndex(InMemorySparqClient);
+
+#[async_trait::async_trait]
+impl SparqClient for YieldingIndex {
+    fn lifecycle(&self) -> Arc<Lifecycle> {
+        self.0.lifecycle()
+    }
+    async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
+        tokio::task::yield_now().await;
+        self.0.get_meta(iri).await
+    }
+    async fn put_meta(&self, iri: &str, meta: ResourceMeta) -> Result<(), SparqError> {
+        self.0.put_meta(iri, meta).await
+    }
+    async fn publish_append(&self, iri: &str, key: &str, blob_key: &str) -> Result<(), SparqError> {
+        self.0.publish_append(iri, key, blob_key).await
+    }
+    async fn exists(&self, iri: &str) -> Result<bool, SparqError> {
+        self.0.exists(iri).await
+    }
+    async fn delete_meta(&self, iri: &str) -> Result<(), SparqError> {
+        self.0.delete_meta(iri).await
+    }
+    async fn delete_meta_if_empty(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+    ) -> Result<DeleteOutcome, SparqError> {
+        self.0.delete_meta_if_empty(iri, parent).await
+    }
+    async fn create_child(
+        &self,
+        container: &str,
+        child: &str,
+        meta: ResourceMeta,
+    ) -> Result<(), SparqError> {
+        self.0.create_child(container, child, meta).await
+    }
+    async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
+        self.0.remove_child(container, child).await
+    }
+    async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError> {
+        self.0.list_children(container).await
+    }
+    async fn referenced_blob_keys(&self) -> Result<std::collections::HashSet<String>, SparqError> {
+        self.0.referenced_blob_keys().await
+    }
+}
+
+#[tokio::test]
+async fn insert_metadata_fetches_overlap_in_bounded_batches() {
+    let counters = counting::BackendCounters::new();
+    let store = CompositeStore::with_body_cache(
+        counting::CountingSparqClient::new(
+            YieldingIndex(InMemorySparqClient::new()),
+            counters.clone(),
+        ),
+        InMemoryBlobStore::new(),
+        BodyCache::disabled(),
+    );
+    store
+        .write(DOC, Bytes::from_static(b"base\n"), "text/turtle")
+        .await
+        .unwrap();
+    let mut expected = String::from("base\n");
+    for n in 0..17 {
+        let insert = format!("insert {n}\n");
+        expected.push_str(&insert);
+        store.append(DOC, Bytes::from(insert)).await.unwrap();
+    }
+    let scope = counters.measure();
+    assert_eq!(store.read(DOC).await.unwrap().body, expected);
+    let counts = scope.delta();
+    assert!(
+        counts.max_in_flight > 1,
+        "metadata fetches must overlap: {counts:?}"
+    );
+    assert!(
+        counts.max_in_flight <= 16,
+        "metadata fan-out must stay bounded: {counts:?}"
     );
 }

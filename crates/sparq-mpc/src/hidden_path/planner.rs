@@ -302,39 +302,71 @@ impl BoundedPathPlan {
     ///    is a lower bound on the output stage. The stage's own
     ///    [`crate::oblivious_join::ObliviousOutputCost`] reports the full count.
     ///
-    /// `bound` is the PUBLIC padded output bound `B`; it must be `>= 1` (the operator
-    /// reveals exactly `B` slots). `parties` is the compute-party count `n`.
+    /// `bound` is the PUBLIC padded output bound `B` (the operator reveals exactly
+    /// `B` slots). `parties` is the compute-party count `n`.
     ///
     /// `B` is capped by [`crate::oblivious_join::MAX_OUTPUT_BOUND`], refused before
-    /// any of the counting below: step (3) iterates `B` times and builds a real
-    /// [`WaksmanNetwork`] over `B` slots, so an unchecked `B` would do work (and
-    /// allocate a network) proportional to a number the caller chose. Counting the
-    /// cost of a run the stage itself would refuse is not a cost model either way.
+    /// any of the counting below: step (3) builds a real [`WaksmanNetwork`] over
+    /// `B` slots, so an unchecked `B` would allocate a network proportional to a
+    /// number the caller chose. (That one cap is enough on its own:
+    /// [`crate::oblivious::MAX_NETWORK_WIDTH`] IS `MAX_OUTPUT_BOUND`, so a `B`
+    /// inside the bound cap is inside the width cap by definition.) Every backend
+    /// constructor enforces [`crate::robust::MAX_ROBUST_SHARES`]. This planner
+    /// receives a bare party count, so it checks that ceiling when `B > 0` or
+    /// the plan performs secure equalities. A plan with neither kind of work
+    /// accepts larger party counts without constructing a backend.
+    ///
+    /// The counting itself is CLOSED FORM: every counter the per-equality and
+    /// per-slot records touch is linear in its multiplicity, so the batches fold in
+    /// arithmetically (`record_mults` / `record_opens`) rather than by looping the
+    /// instrument `secure_equalities` and `B` times — which would make the cost
+    /// MODEL cost as much as the protocol it models. Every fold is checked, so an
+    /// overflowing total is a refusal and never a wrapped count that would
+    /// understate the cost.
+    ///
+    /// This API receives neither the backend threshold nor the payload width.
+    /// Aggregate slot work is checked at the output stage using their actual
+    /// values; the largest possible threshold cannot serve as a lower bound.
     pub fn comm_counter(&self, parties: usize, bound: usize) -> Result<CommCounter, MpcError> {
         crate::oblivious_join::check_output_bound_cap(bound)?;
+        // Unlike backend-taking entries, the planner receives an unchecked count.
+        if (bound > 0 || self.secure_equalities > 0) && parties > crate::robust::MAX_ROBUST_SHARES {
+            return Err(MpcError::Protocol(format!(
+                "bounded path planner: {} compute parties exceeds MAX_ROBUST_SHARES={} — \
+                 output slots and secure equalities require a party count within \
+                 the robust reconstruction share limit",
+                parties,
+                crate::robust::MAX_ROBUST_SHARES
+            )));
+        }
+        // The aggregate slot-work budget also needs the actual threshold and
+        // payload width, neither of which this API receives. It is checked at
+        // the output stage. Assuming the largest threshold here would refuse
+        // plans that fit with a smaller threshold.
         let mut c = CommCounter::new(parties);
         // (1) The k×-join secure equalities — the cost center. Independent ACROSS
         // tuples (the matrix's `record_independent_equalities` batch shape).
-        c.record_independent_equalities(self.secure_equalities);
+        c.record_independent_equalities(self.secure_equalities)?;
         // (2) The AND/degree-reduce reductions that chain the per-tuple hop bits and
         // OR-fold the per-pair connected-bit: one secure multiplication (degree
         // reduce) per chained bit. Folded as `secure_equalities` reductions — the
         // O(k)-depth reduction work bounded by MAX_CHAIN_TUPLES.
-        for _ in 0..self.secure_equalities {
-            c.record_mult();
-        }
+        // CLOSED FORM: every counter `record_mult` touches is linear, so the whole
+        // batch folds in arithmetically instead of looping the instrument
+        // `secure_equalities` times. The totals are identical.
+        c.record_mults(self.secure_equalities)?;
         // (3) The B-slot oblivious output, as a LOWER BOUND: one select mult + one
         // degree-`t` open per slot — the TAG column only — plus the shuffle over B
         // slots (switch count + depth from the real network). The per-limb selects,
         // their degree reductions and their opens are not charged, because
         // `limb_capacity` is a property of the payload bytes this planner does not
         // see. See the doc above.
-        for _ in 0..bound {
-            c.record_mult();
-            c.record_open();
-        }
+        // CLOSED FORM again: `B` select multiplications and `B` opens, folded in
+        // arithmetically rather than by looping `B` times.
+        c.record_mults(bound as u64)?;
+        c.record_opens(bound as u64)?;
         let net = WaksmanNetwork::try_new(bound)?;
-        c.record_shuffle(ShuffleCost::model(bound, net.switch_count()));
+        c.record_shuffle(ShuffleCost::model(bound, net.switch_count()))?;
         Ok(c)
     }
 }

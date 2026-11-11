@@ -11,16 +11,18 @@
 //! change between reads, the byte-fetch + parse of that ACL is pure waste — the SAME triples come out
 //! every time.
 //!
-//! This cache stores the **parsed triples** of an ACL resource keyed by **`(acl-iri, etag)`**. On each
-//! probe of a candidate ACL the resolver obtains the ACL's CURRENT [`ResourceMeta::etag`](crate::store::ResourceMeta::etag) CHEAPLY (a
+//! This cache stores the **parsed triples** of an ACL resource keyed by **`(acl-iri, etag)`**.
+//! Resolver lookups also require the immutable blob pointer that was parsed.
+//! A changed pointer is re-read even when its content-derived ETag is unchanged.
+//! On each probe the resolver obtains the ACL's CURRENT [`ResourceMeta`](crate::store::ResourceMeta) CHEAPLY (a
 //! `store.meta` — an index lookup, NO blob byte-fetch, NO parse) and:
-//! - if a cached entry exists for that `acl-iri` AND its stored etag **equals** the current etag, the
+//! - if a cached entry exists for that `acl-iri` with the same ETag and blob pointer, the
 //!   cached triples are reused (the byte-fetch + `oxttl` parse are SKIPPED);
-//! - otherwise (no entry, or the etag DIFFERS — the ACL was rotated) it is a MISS: the resolver reads
+//! - otherwise it is a MISS: the resolver reads
 //!   + parses the ACL afresh and REFRESHES the entry under the new etag.
 //!
 //! ## 🔒 The cache is NEVER authoritative (the charter rule)
-//! - **Keyed by `(acl-iri, etag)`.** A cached parse is reused ONLY when the current etag matches, so a
+//! - **Keyed by ACL IRI, ETag and blob pointer in the resolver.** A cached parse requires all three, so a
 //!   rotated ACL (new bytes ⇒ new etag) can NEVER be honoured stale — the etag mismatch forces a
 //!   re-read+re-parse. The cache only avoids the re-PARSE of an UNCHANGED ACL; it can never change the
 //!   triples the resolver sees, hence never the decision or the `WAC-Allow` output.
@@ -42,7 +44,7 @@
 //! "this resource is public" flag. The resolver ALWAYS performs the SAME child→root walk and the SAME
 //! `store.meta` existence/etag probe per candidate ACL — a MISSING ACL is still observed as missing
 //! (the cache holds no entry that could fabricate one), and a PRESENT ACL's triples are reused ONLY
-//! when its etag is unchanged. The modes are then computed by the SAME `modes_for` over those triples.
+//! when its ETag and blob pointer are unchanged. Modes use the SAME `modes_for` over those triples.
 //! So: a removed ACL → the `meta` probe returns `None` → the walk continues exactly as before (the
 //! cache cannot resurrect deleted grants); a rotated ACL → etag mismatch → re-parse (no stale grant);
 //! a broken ACL → re-parsed to empty-triples (fail-closed) and that empty parse is what gets cached
@@ -75,6 +77,8 @@ struct AclEntry {
     /// The etag the bytes had when parsed. A reuse requires the CURRENT etag to equal this — a
     /// different etag means the ACL was rewritten (new bytes) and the cached parse is stale.
     etag: String,
+    /// Immutable blob pointer authenticated when the resolver parsed these bytes.
+    blob_key: String,
     /// The parsed ACL triples (the expensive `oxttl` output reused on a hit). An empty `Vec` is a
     /// LEGITIMATE cached value — a PRESENT-but-malformed ACL parses to empty triples (fail-closed), and
     /// caching that empty parse under its etag is correct (it still DENIES, as the cold path does).
@@ -150,6 +154,16 @@ impl AclCache {
     /// etag-equality gate guarantees the cached parse corresponds to the bytes currently at `acl_iri`.
     /// It can never return triples for a DIFFERENT (rotated) ACL.
     pub fn get(&self, acl_iri: &str, current_etag: &str, now: i64) -> Option<Vec<Triple>> {
+        self.get_for_blob(acl_iri, current_etag, "", now)
+    }
+
+    pub(crate) fn get_for_blob(
+        &self,
+        acl_iri: &str,
+        current_etag: &str,
+        blob_key: &str,
+        now: i64,
+    ) -> Option<Vec<Triple>> {
         let inner = self.inner.as_ref()?;
         let mut map = match inner.lock() {
             Ok(m) => m,
@@ -160,7 +174,7 @@ impl AclCache {
         // Freshness gate, RE-CHECKED on every hit: the etag MUST match the current bytes, AND the entry
         // must be within the validation TTL. A mismatch OR a stale-by-TTL entry is evicted and missed.
         let within_ttl = now < entry.inserted_at.saturating_add(self.max_entry_ttl_secs);
-        if entry.etag != current_etag || !within_ttl {
+        if entry.etag != current_etag || entry.blob_key != blob_key || !within_ttl {
             map.remove(acl_iri);
             return None;
         }
@@ -179,12 +193,24 @@ impl AclCache {
     ///
     /// `now` is the insertion time (recorded for the validation-TTL bound).
     pub fn insert(&self, acl_iri: &str, etag: &str, triples: Vec<Triple>, now: i64) {
+        self.insert_for_blob(acl_iri, etag, "", triples, now);
+    }
+
+    pub(crate) fn insert_for_blob(
+        &self,
+        acl_iri: &str,
+        etag: &str,
+        blob_key: &str,
+        triples: Vec<Triple>,
+        now: i64,
+    ) {
         let Some(inner) = self.inner.as_ref() else {
             return; // disabled: never cache.
         };
         let tick = self.clock.fetch_add(1, Ordering::Relaxed) + 1;
         let entry = AclEntry {
             etag: etag.to_string(),
+            blob_key: blob_key.to_owned(),
             triples,
             inserted_at: now,
             last_access: tick,

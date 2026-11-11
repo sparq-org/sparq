@@ -172,7 +172,9 @@ IndexedDB) and the flush policy stay in the host. A `Store` that awaits a JS pro
 is not available: the trait is `Send + Sync` and every `JsValue` is `!Send`. The encoding folds
 superseded writes and deleted resources away, so it tracks current contents rather than full
 history. Restart replays the writes, so `Last-Modified` becomes the replay instant, while the
-body-derived `ETag` is unchanged — a pre-restart `If-None-Match` still gets its 304. An owner ACL is provisioned only when the
+body-derived `ETag` of a full write is unchanged. Replayed inserts receive fresh
+opaque ETags; a pre-restart `If-None-Match` for those resources receives a fresh
+representation. An owner ACL is provisioned only when the
 restored pod has none, so a restart never reverts an ACL the owner edited; a snapshot that cannot be
 decoded or replayed is refused rather than booting a partly-populated pod.
 

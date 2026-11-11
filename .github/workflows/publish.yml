@@ -337,9 +337,13 @@ jobs:
   # by design — no static token is stored). See docs/release.md.
   npm-solid-server:
     name: npm publish @sparq-org/solid-server (OIDC trusted publishing)
-    needs: setup
+    # After the native packages when the same dispatch publishes them, so the pins added below
+    # never name a version that is not on npm yet. Skipped native job = unpinned host package.
+    needs: [setup, npm-solid-server-native]
     runs-on: ubuntu-latest
     if: >-
+      !cancelled() && needs.setup.result == 'success' &&
+      contains(fromJSON('["success", "skipped"]'), needs.npm-solid-server-native.result) &&
       github.event_name == 'workflow_dispatch' && inputs.publish_solid_server
     permissions:
       contents: read
@@ -374,6 +378,12 @@ jobs:
       # NOT rebuilt automatically on `npm publish` — build it explicitly here, before publish.
       - name: Build wasm bundle
         run: npm run build:lws-wasm
+      # The source manifest carries no native pins (package-lock.json cannot record a version
+      # npm does not have yet, and `npm ci` refuses the tree). Add them only when this dispatch
+      # has just published the platform packages.
+      - name: Pin native platform packages
+        if: inputs.publish_solid_server_native
+        run: node native/pin.mjs
       # `npm publish` packs ONLY the `files` allowlist (bin/ + src/ + wasm/ + README); runtime
       # dependencies are resolved by the consumer at install time and are not bundled, so no npm
       # install is needed for a correct tarball. Provenance is emitted by default under trusted

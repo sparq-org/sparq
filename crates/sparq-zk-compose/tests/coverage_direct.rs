@@ -235,13 +235,9 @@ fn encode_decimal_literal_matches_independent_lexical_encoding() {
 fn encode_int_literal_is_stable_and_nondegenerate() {
     let a = encode_int_literal(42);
     assert_eq!(a, encode_int_literal(42));
-    // Non-degeneracy: the encoding must not collapse to the ZERO field element. A
-    // `FieldHex` is a CANONICAL `0x`-prefixed 64-nibble string (via `field_to_hex`), so
-    // the zero element renders as `0x000…000`, NOT the bare `"0x0"` — comparing against
-    // `fh("0x0")` would be vacuous (a real encoding never equals the non-canonical
-    // `"0x0"`). Compare against the true canonical zero so the check actually bites.
+    // Non-degeneracy is a field-value property, independent of zero's spelling.
     let canonical_zero = FieldHex(field_to_hex(&Fr::from(0u64)));
-    assert_ne!(canonical_zero, fh("0x0"), "sanity: canonical zero is not the bare \"0x0\"");
+    assert_eq!(canonical_zero, fh("0x0"));
     assert_ne!(a, canonical_zero, "a real encoding is not the zero field element");
     assert_ne!(a, encode_int_literal(43));
 }

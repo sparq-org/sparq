@@ -27,9 +27,10 @@
 //!   BEFORE any body lookup; a deleted resource 404s upstream and this cache is never consulted, so
 //!   it cannot resurrect deleted bytes.
 //! - **The etag in the key is defence-in-depth** (the PSS keying): even on a hypothetical backend
-//!   path that REUSED a blob key, changed bytes get a different content-derived etag ⇒ a different
-//!   cache key ⇒ a miss. Two writes can only collide on a cache entry by sharing the same sequence,
-//!   128-bit-random key AND the content etag.
+//!   path that REUSED a blob key, a different validator selects a different
+//!   cache key ⇒ a miss. Inserts publish a fresh sequence and opaque ETag, so their complete
+//!   merged bodies also have distinct cache identities. A cache entry matches only the same
+//!   sequence, blob key and validator.
 //!
 //! ## Why a hit can NEVER bypass authorization
 //! The cache stores BYTES keyed by CONTENT identity — no principal, no decision, no modes. It sits
@@ -72,7 +73,9 @@ const ENTRY_OVERHEAD_BYTES: usize = 64;
 /// One cached body: the bytes, what they are charged against the budget, and an LRU recency tick.
 struct BodyEntry {
     body: Bytes,
-    /// `body.len() + key lengths + ENTRY_OVERHEAD_BYTES` — subtracted back on eviction/replacement.
+    /// Pod authenticated when the body was fetched.
+    pod: String,
+    /// Body, key and pod lengths plus overhead, subtracted on eviction/replacement.
     charge: usize,
     /// Monotonic last-access tick (higher = more recently used).
     last_access: u64,
@@ -160,27 +163,48 @@ impl BodyCache {
     /// a remembered pointer. Under that contract a hit returns exactly the bytes that metadata
     /// committed with (see the module docs' staleness argument).
     pub fn get(&self, blob_key: &str, etag: &str) -> Option<Bytes> {
-        self.get_snapshot(blob_key, 0, etag)
+        self.get_for_pod("", blob_key, etag).ok().flatten()
     }
 
-    pub(crate) fn get_snapshot(
+    pub(super) fn get_for_pod(
         &self,
+        pod: &str,
+        blob_key: &str,
+        etag: &str,
+    ) -> Result<Option<Bytes>, super::BlobError> {
+        self.get_snapshot(pod, blob_key, 0, etag)
+    }
+
+    pub(super) fn get_snapshot(
+        &self,
+        pod: &str,
         blob_key: &str,
         append_seq: u64,
         etag: &str,
-    ) -> Option<Bytes> {
-        let inner = self.inner.as_ref()?;
+    ) -> Result<Option<Bytes>, super::BlobError> {
+        let Some(inner) = self.inner.as_ref() else {
+            return Ok(None);
+        };
         let mut guard = match inner.lock() {
             Ok(g) => g,
             // A poisoned lock must never turn into a hit; treat as a miss (the blob fetch is paid).
-            Err(_) => return None,
+            Err(_) => return Ok(None),
         };
         let tick = self.clock.fetch_add(1, Ordering::Relaxed) + 1;
-        let entry = guard
-            .map
-            .get_mut(&(blob_key.to_string(), append_seq, etag.to_string()))?;
+        let key = (blob_key.to_string(), append_seq, etag.to_string());
+        if guard.map.get(&key).is_some_and(|entry| entry.pod != pod) {
+            if let Some(entry) = guard.map.remove(&key) {
+                guard.total_charged = guard.total_charged.saturating_sub(entry.charge);
+            }
+            return Err(super::BlobError::Backend(
+                "cached body pod does not match resource pod".into(),
+            ));
+        }
+        let Some(entry) = guard.map.get_mut(&key) else {
+            return Ok(None);
+        };
         entry.last_access = tick;
-        Some(entry.body.clone())
+        Ok(Some(entry.body.clone()))
     }
 
     /// Cache the body fetched for `(blob_key, 0, etag)` — called after a MISS's blob fetch so the next
@@ -189,11 +213,16 @@ impl BodyCache {
     /// budget, least-recently-used entries are evicted until the new entry fits. No-op on a disabled
     /// cache. The stored [`Bytes`] is a refcount clone of `body`.
     pub fn insert(&self, blob_key: &str, etag: &str, body: &Bytes) {
-        self.insert_snapshot(blob_key, 0, etag, body);
+        self.insert_for_pod("", blob_key, etag, body);
     }
 
-    pub(crate) fn insert_snapshot(
+    pub(super) fn insert_for_pod(&self, pod: &str, blob_key: &str, etag: &str, body: &Bytes) {
+        self.insert_snapshot(pod, blob_key, 0, etag, body);
+    }
+
+    pub(super) fn insert_snapshot(
         &self,
+        pod: &str,
         blob_key: &str,
         append_seq: u64,
         etag: &str,
@@ -206,6 +235,7 @@ impl BodyCache {
             .len()
             .saturating_add(blob_key.len())
             .saturating_add(etag.len())
+            .saturating_add(pod.len())
             .saturating_add(ENTRY_OVERHEAD_BYTES);
         if charge > self.max_entry_bytes {
             return; // oversize: bypass — served, never stored.
@@ -238,6 +268,7 @@ impl BodyCache {
             key,
             BodyEntry {
                 body: body.clone(),
+                pod: pod.to_owned(),
                 charge,
                 last_access: tick,
             },
@@ -298,6 +329,20 @@ mod tests {
 
     fn body(s: &str) -> Bytes {
         Bytes::copy_from_slice(s.as_bytes())
+    }
+
+    #[test]
+    fn pod_mismatch_refuses_and_evicts_the_cached_body() {
+        let c = BodyCache::new(4096);
+        c.insert_for_pod("alice", "key", "etag", &body("alice"));
+        assert_eq!(
+            c.get_for_pod("alice", "key", "etag").unwrap(),
+            Some(body("alice"))
+        );
+        assert!(c.get_for_pod("bob", "key", "etag").is_err());
+        assert_eq!(c.len(), 0);
+        assert_eq!(c.total_charged(), 0);
+        assert!(c.get_for_pod("alice", "key", "etag").unwrap().is_none());
     }
 
     #[test]

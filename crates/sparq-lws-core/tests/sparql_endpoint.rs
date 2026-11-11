@@ -289,7 +289,13 @@ async fn endpoint_preserves_version_ebv_and_rejects_unknown_labels() {
         assert_eq!(json(response).await["boolean"], expected);
     }
     for prologue in ["VERSION 'bogus'", "VERSION '1.1' VERSION '1.2'"] {
-        assert_eq!(harness.direct_query(&format!("{prologue} ASK {{}}")).await.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            harness
+                .direct_query(&format!("{prologue} ASK {{}}"))
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
     }
 }
 
@@ -586,6 +592,10 @@ impl SparqClient for ChurningSparq {
 
     async fn publish_append(&self, iri: &str, key: &str, blob_key: &str) -> Result<(), SparqError> {
         self.inner.publish_append(iri, key, blob_key).await
+    }
+
+    fn lifecycle(&self) -> std::sync::Arc<sparq_lws_core::store::Lifecycle> {
+        self.inner.lifecycle()
     }
 
     fn call_timeout(&self) -> std::time::Duration {

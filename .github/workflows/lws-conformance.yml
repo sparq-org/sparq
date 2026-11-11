@@ -24,6 +24,11 @@ on:
       - "crates/sparq-lws-authn*/**"
       - ".github/workflows/lws-conformance.yml"
   workflow_dispatch:
+    inputs:
+      blob_object:
+        description: Run the optional object-store contract against MinIO
+        type: boolean
+        default: false
 
 concurrency:
   group: lws-conformance-${{ github.ref }}
@@ -33,11 +38,87 @@ permissions:
   contents: read
 
 env:
-  TOUCHSTONE_REF: 6a3206eb97d173a89b3ffeb790f2d1a3337cf535
-  LWS_NET_REF: e0cdc973ee2a63d810764aa025f80b6fa2bb0fff
+  TOUCHSTONE_REF: 20b5d58607355aae2a59b64a21d1c85a1d510d60
+  LWS_NET_REF: 65a7c1420a76c1bbf3df60a28f7d103d5e7f06f9
+  # The head of lws-test-suite's yaml branch, the YAML-LD form (lws10/tests.yaml) the lws-net
+  # step converts. The main branch has no tests.yaml; LWS.net's builtin set already ports its
+  # manifest.
   LWS_TESTS_REF: 72cfc0a80c718dddbcf43ea6bea98a13a3c14e99
+  # tests.yaml predates the model of LWS.net 65a7c14, which aborts loading it, so that run keeps
+  # the LWS.net commit it was written for.
+  LWS_NET_YAML_REF: e0cdc973ee2a63d810764aa025f80b6fa2bb0fff
 
 jobs:
+  blob-object:
+    # Dispatch-only integration signal; not a required PR check.
+    if: github.event_name == 'workflow_dispatch' && inputs.blob_object
+    name: lws object-store integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_BUILD_JOBS: "2"
+      LWS_BLOB_TEST_URL: s3://blob-contract/integration
+      LWS_BLOB_TEST_ENDPOINT: http://127.0.0.1:9000
+      LWS_BLOB_TEST_ACCESS_KEY: local-contract-user
+      LWS_BLOB_TEST_SECRET_KEY: local-contract-password
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: lws-blob-object
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
+        with:
+          # Match the toolchain directive in the pinned MinIO go.mod.
+          go-version: "1.24.2"
+          cache: false
+      - name: Install pinned MinIO and bucket client
+        run: |
+          export GOBIN="$RUNNER_TEMP/minio-bin"
+          mkdir -p "$GOBIN"
+          # RELEASE.2025-04-22T22-12-26Z, commit 0d7408fc9969caf07de6a8c3a84f9fbb10a6739e.
+          go install github.com/minio/minio@v0.0.0-20250422221226-0d7408fc9969
+          # The object-store wrapper has no bucket API; avoid custom signing in the test.
+          go install github.com/minio/mc@v0.0.0-20250312172924-c1d5d4cbb4ca
+      - name: Start isolated MinIO
+        env:
+          MINIO_ROOT_USER: ${{ env.LWS_BLOB_TEST_ACCESS_KEY }}
+          MINIO_ROOT_PASSWORD: ${{ env.LWS_BLOB_TEST_SECRET_KEY }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/minio-data"
+          nohup "$RUNNER_TEMP/minio-bin/minio" server \
+            --address 127.0.0.1:9000 --console-address 127.0.0.1:9001 \
+            "$RUNNER_TEMP/minio-data" > "$RUNNER_TEMP/minio.log" 2>&1 < /dev/null &
+          echo "$!" > "$RUNNER_TEMP/minio.pid"
+          curl --fail --retry 20 --retry-delay 1 --retry-connrefused --max-time 5 \
+            "$LWS_BLOB_TEST_ENDPOINT/minio/health/ready"
+      - name: Create isolated bucket
+        run: |
+          "$RUNNER_TEMP/minio-bin/mc" --config-dir "$RUNNER_TEMP/minio-client" \
+            alias set fixture "$LWS_BLOB_TEST_ENDPOINT" \
+            "$LWS_BLOB_TEST_ACCESS_KEY" "$LWS_BLOB_TEST_SECRET_KEY"
+          "$RUNNER_TEMP/minio-bin/mc" --config-dir "$RUNNER_TEMP/minio-client" \
+            mb fixture/blob-contract
+      - name: Run MinIO contract, router round trip and grace-window sweep
+        run: |
+          cargo test -p sparq-lws-core \
+            --features blob-object,test-support,sparq-lws-blob-object/aws \
+            --test blob_object minio_contract_router_and_orphan_sweep -- --ignored
+      - name: Print MinIO server log
+        if: failure()
+        run: |
+          if [[ -f "$RUNNER_TEMP/minio.log" ]]; then
+            cat "$RUNNER_TEMP/minio.log"
+          fi
+      - name: Stop MinIO
+        if: always()
+        run: |
+          if [[ -f "$RUNNER_TEMP/minio.pid" ]]; then
+            kill "$(cat "$RUNNER_TEMP/minio.pid")" || true
+          fi
+
   touchstone:
     # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
@@ -117,6 +198,12 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          repository: langsamu/LWS.net
+          ref: ${{ env.LWS_NET_YAML_REF }}
+          path: LWS.net-yaml
+          persist-credentials: false
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
           repository: elf-pavlik/lws-test-suite
           ref: ${{ env.LWS_TESTS_REF }}
           path: lws-test-suite
@@ -132,21 +219,20 @@ jobs:
         run: cargo build -p sparq-lws-core
       - name: check the lws-net report reader
         run: python3 -B crates/sparq-lws-core/conformance/lws/lws-net-report.py --self-test
-      # LWS.net's own definitions first: the run below overwrites them with the YAML-LD suite.
-      # A ratchet: of its 57 tests, one fails on purpose ("Delete returns 999"), and "Container
-      # response varies by Accept" fails in the harness (its header extractor takes a single
-      # value, and .NET splits our list-valued Vary, "Accept, Origin", into two). Raise the floor
-      # with the change that earns it.
+      # LWS.net's own definitions first; the run below loads the YAML-LD suite into its own
+      # LWS.net checkout.
+      # Named ratchet: crates/sparq-lws-core/conformance/lws/lws-net-expected-failures.json
+      # Remove listed failures when they pass; every unlisted failure fails this step.
       - name: run lws-net (LWS.net's own definitions)
         env:
           LWS_NET: ${{ github.workspace }}/LWS.net
           LWS_TESTS: builtin
-          LWS_NET_MIN_PASSED: "55"
-          LWS_NET_EXPECTED_TOTAL: "57"
+          LWS_NET_EXPECTED_FAILURES: ${{ github.workspace }}/crates/sparq-lws-core/conformance/lws/lws-net-expected-failures.json
+          LWS_NET_EXPECTED_TOTAL: "292"
           OUT: ${{ github.workspace }}/target/lws-net-builtin
         run: crates/sparq-lws-core/conformance/lws/lws-net.sh
       - name: run lws-net
         env:
-          LWS_NET: ${{ github.workspace }}/LWS.net
+          LWS_NET: ${{ github.workspace }}/LWS.net-yaml
           LWS_TESTS: ${{ github.workspace }}/lws-test-suite/lws10/tests.yaml
         run: crates/sparq-lws-core/conformance/lws/lws-net.sh
