@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **sparq-lws-core (LWS):** `SOLID_SERVER_LWS_MOUNT_BASE_PATH` opts the native
+  listener into mounting at the path in `SOLID_SERVER_BASE_URL`; the default
+  remains storage-relative routing behind a prefix-stripping proxy. The bare
+  mount root redirects with `308` to its trailing-slash URL, preserving the query.
+  Paths outside the mount, dot segments after the prefix, and protected-resource
+  metadata paths under the storage prefix return `404`; origin-level discovery
+  stays unchanged. Unrecognized non-empty switch values fail startup.
+
 - **sparq-lws-core:** lifecycle starts establish a writer epoch before intent recovery.
   HTTP index updates carry that epoch alongside their per-operation nonce guards.
   In-memory and embedded clients need no durable epoch. The HTTP backend remains
