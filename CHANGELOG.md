@@ -7,8 +7,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **sparq-lws-core (LWS):** authentication challenges for paths without dot segments
+  name RFC 9728 metadata for the requested resource or service endpoint, preserving
+  encoded paths and trailing slashes.
+  Paths with literal or percent-encoded dot segments retain storage-root metadata in
+  challenges, and their derived metadata paths return `404`. Metadata is served
+  independently of resource existence and caller identity. Linkset
+  edits that change `up`, and content replacements with `Prefer: set-linkset` that change it,
+  return `409 Conflict` before writing when they declare a different parent; plain content
+  replacements leave `up` unchanged. Quiet container listings run concurrently; a busy
+  member or generation change falls back once through the fair exclusive queue, waiting
+  for commit or put-back. Storage descriptions also link the root container type. The builtin
+  LWS.net ratchet checks exact expected failure names and requires their removal when they pass.
+
+### Changed
+
+- **Release cadence guard:** the one-release v0.1.8 exception is removed now that v0.1.8 is
+  out; only the v0.1.3 recovery evidence can shorten the 24-hour minimum again.
+
+## [0.1.8] - 2026-11-05
+
+Patch release that publishes `@sparq-org/sparq` with `checkOwlDl` (its 0.1.7 npm publish
+stopped at `npm ci`) and fixes that release path. Publication is not implied by this entry;
+verify the tagged run and every registry and release artifact. crates.io publication still
+waits on the bootstrap. npm users of `@sparq-org/sparq` move from 0.1.6, so they also get
+every 0.1.7 change listed below.
+
 ### Added
 
+- **@sparq-org/sparq:** `checkOwlDl(tbox, abox?, options?)`, `store.checkOwlDl` and
+  `openOwlDlSession()` for OWL 2 DL consistency, profile checking and classification, backed by
+  a separate `wasm-dl/` bundle loaded on first use. They were in the 0.1.7 source but reach npm
+  first in this release.
+
+### Changed
+
+- **Release cadence guard:** a maintainer-authorized, one-release exception admits v0.1.8
+  directly after the exact v0.1.7 tag, with pinned tag evidence and definitive crates.io
+  absence, because v0.1.7's `@sparq-org/sparq` npm publish failed. All other versions keep
+  the 24-hour minimum.
+
+### Fixed
+
+- **npm release:** v0.1.7's `@sparq-org/sparq` npm publish stopped at `npm ci`
+  (`@sparq-org/solid-server`, `@sparq-org/eyereasoner-compat` and PyPI `sparq-rdf` 0.1.7 did
+  publish). The publish npm (11.x) refuses a `package-lock.json` that cannot satisfy every
+  manifest, and `@sparq-org/solid-server` pinned its native platform packages at a version npm
+  did not have, so the lock could not record them. The source manifest no longer pins them;
+  `publish.yml` adds the pins only in a dispatch that publishes those packages first. The `js`
+  workflow now runs `npm ci` with the publish npm on PRs that touch an npm workspace manifest
+  or the lock. `@sparq-org/solid-server@0.1.7` carries those unsatisfiable pins: it installs,
+  but an npm 11 `npm ci` of a project locked to it fails, so use 0.1.8.
+
+## [0.1.7] - 2026-11-04
+
+Patch release carrying the exact SHACL numeric range comparison (#7294) and the changes
+merged since 0.1.6. Publication is not implied by this entry; verify the tagged run and
+every registry and release artifact. crates.io publication still waits on the bootstrap.
+
+### Added
+
+- **@sparq-org/solid-server:** native Solid (`--native`) and LWS (`--protocol lws`) launch
+  modes that run the `sparq-lws-core` executable from an optional
+  `@sparq-org/solid-server-native-<platform>` package (#7248). Those platform packages are not
+  on npm yet, so in 0.1.7 the npm install serves the WebAssembly mode only and the native
+  modes report the missing package. To run the native server in 0.1.7, run `sparq-lws-core`
+  directly (a source build or the `ghcr.io/sparq-org/sparq-lws-core` image) instead of
+  through the npm CLI.
 - **sparq-core / sparq-engine:** durable UPDATE journals now record named-graph creation and
   removal alongside triple changes, with ordered replay and support for the previous journal
   format. Hardens named-graph layout recovery alongside directory ownership support:
@@ -190,6 +257,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   <!-- privacy-claims-allow: describes an added method-bound relation and its retained legacy contract; the external audit is named as an OPEN obligation and the downgrade is written down; asserts no soundness/privacy property; sq-qhy4 -->
 
 ### Changed
+
+- **Breaking — LWS capacity refusals:** subscription and access-request bounds now return the
+  same `429` response; service-pool exhaustion returns that response instead of `507`.
+  General storage refusals retain `507`. The new public `ServerError::ServicePoolFull`,
+  `BlobError::ServicePoolFull` and `SparqError::ServicePoolFull` variants require downstream
+  exhaustive matches to handle them. Notification recipients are selected on
+  a task the write response never awaits, using the subscriptions, grants and resource state
+  captured at commit.
 
 - **Breaking — sparq-lws-core:** LWS resource DELETE requires Read for `If-None-Match: *`.
   A non-reader's data DELETE with `If-Match: *` is treated as unconditional: settled present
@@ -440,10 +515,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   map, and a lookup still computes one hash of the same bytes and lands in the same bucket — one
   lookup per lookup, as before; the saving is in what a copy costs, not in what a lookup costs. No output depends on the
   substitution's iteration order: every reader of a whole binding, including the proof-mode
-  tie-break, sorts it or asks a question of every entry. Every `__bw<n>_` name, derived fact, proof, `why()` string and `sparq-prov` IRI is
-  byte-identical, pinned against output captured from the parent commit, and the W3C N3 inference
-  conformance report is unchanged. No run that previously answered is refused, and no refusal
-  changes. (#7080)
+  tie-break, sorts it or asks a question of every entry. That substitution optimisation
+  preserved names, facts, proofs and refusals against its parent (#7080). The later #6943
+  correction below changes surviving backward names and their identity keys, `why()` strings
+  and `sparq-prov` IRIs; the W3C N3 inference conformance report remains unchanged.
 
 - **sparq-zk-compose / zk (sq-j506, #7121; Noir library #7103):** the `DualLeafV2` **component-witnessed** scan and
   hidden-join circuit members, and a **method-aware** pattern-constant encoder. Two NEW Noir
@@ -525,17 +600,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hashes and verification-key/gate evidence are regenerated by the dedicated-hardware measurement
   run. NOT externally audited (sq-qhy4).
 - **sparq-reason (N3 backward chaining):** the per-goal cost of naming a backward renaming by
-  its proof-tree fingerprint is reduced, with no change to any name or answer. A goal's
+  its proof-tree fingerprint is reduced. This optimisation preserved names and answers
+  against its parent; the later #6943 correction below changes surviving backward names. A goal's
   canonical identity key is built into one pre-sized buffer with the length prefix written
   straight into it, instead of a fresh string per term and a fresh string per length; the walk
   that resolves a goal's variables to the end of their chains now BORROWS the terms it did not
   have to rebuild, and keeps its occurs-check stack by reference; a candidate rule application
-  folds its node key once rather than three times, and renders its `__bw<n>_` prefix without
+  folds its node key once rather than three times, and renders its `__bw<n>.` application prefix without
   allocating. `log:conclusion` on a nested formula with no `<=` rule no longer registers that
   formula's scope salt: a purely forward nested closure can mint no name, so it no longer spends
   the run's backward identity allowance nor grows the run's tables, and the salt's value is
-  unchanged either way. Every `__bw<n>_` name, derived fact, proof, `why()` string and
-  `sparq-prov` IRI is byte-identical, and the W3C N3 inference conformance report is unchanged.
+  unchanged either way. The naming optimisation itself preserved facts, proofs and
+  identity; the #6943 correction below changes surviving names and thus identity keys,
+  `why()` strings and `sparq-prov` IRIs. The W3C N3 inference report remains unchanged.
 
   **This does change which runs are refused, in the direction of refusing fewer.** Nested
   closures accumulate their salts run-wide against `max_join_rows × max_rounds` while each
@@ -743,9 +820,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   existential whose witness may depend on it). A ground fact never proves it. Supported where the
   universal is a subject or object (or in a list or triple term there) of a
   stored-predicate atom, in a document with no backward rules; every other placement (or a
-  premise that also holds a blank constant, as a rule inside a closed formula can), and
-  an N3 query document, is still refused with the same error. The `compiled-rules` engine
-  compiles such a rule as one that never fires (its store is ground), and
+  premise that also holds a blank constant, as a rule inside a closed formula can), or
+  a document with backward rules, is still refused with the same error. N3 query
+  documents now use the forward firing's same independence check and placement limits;
+  backward rules in either data or query still cause the same refusal. The
+  `compiled-rules` engine compiles such a rule as one that never fires (its store is ground), and
   `MaterializedN3Graph` evaluates it in fallback mode. (#6882)
 
 - **sparq-core:** `net::is_forbidden_ip` is the one outbound-address classifier behind the
@@ -846,6 +925,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **sparq-shacl:** `sh:minInclusive`, `sh:maxInclusive`, `sh:minExclusive`, `sh:maxExclusive`,
+  `sh:lessThan` and `sh:lessThanOrEquals` compare `xsd:decimal` and integer-family values
+  exactly, at any length, instead of as `f64`, so `1.000000000000000015` no longer passes
+  `sh:minInclusive 1.00000000000000002` and integers past 2^53 no longer pass an exact bound
+  they miss (#7294). A float or double operand promotes the pair as the SPARQL and XPath
+  specifications define, at any length. An ill-typed numeric literal, such as
+  `"1.5"^^xsd:integer`, is now out of range, as it is for a SPARQL comparison.
+- LWS content-only PATCH retains metadata from its Read authorization check for
+  notification capture, skips LWS metadata lookups in open mode, and reads metadata for a
+  closed-mode owner only when a non-owner subscription exists or is registering. If the early
+  read was omitted, commit rechecks after capturing registration eligibility, including parent
+  and ancestor subscriptions registered during the write.
+
+- LWS quarantined access requests no longer take places from live requests; held-back and
+  quarantined subscriptions count only against the owner's total. Record settlements reserve
+  places per principal only for unknown outcomes in closed mode, while the shared bound
+  covers each whole change. Principal permit waits release the high-water gate and listing
+  locks; pending-listing claims preserve conditional tag checks through memory confirmation.
+  Subscriptions claim only their subscriber's listing, leaving whole-listing owner creates
+  available. Claims replace released listing guards; only the subscriber record's container
+  publication guard remains, preserving whole-listing conditional-create windows.
+  Notification selection retains request admission through webhook queueing, and delayed
+  record announcements retain a shared or maintenance place through that work. Those places
+  are released before stream publication waits. Pending stream publications have a separate
+  storage-wide delivery bound. Known outcomes release their principal permit before memory
+  confirmation.
+  Principal bookkeeping ends with the last change; withdrawal eligibility uses the state
+  captured at commit.
+  Stream deactivation uses its subscriber's settlement places, preserving the expiry
+  sweeper's maintenance places and closing the stream before durable removal.
+
+- **sparq-lws-core:** marker recognition includes path-based storage roots for generic store and raw index mutations.
+- **sparq-lws-core:** separately assembled composites over clones of an index share its lifecycle lease.
+- **sparq-lws-core:** marker resets require a guard belonging to the store's and raw index client's backend lease.
 - **sparq-lws-core:** access grant/request lookups hide records owned by another principal;
   subscription lookups clone only owned records. An unconditional LWS data DELETE allowed by an
   unconstrained Delete grant without Read returns `204` for settled present or absent targets,
@@ -915,6 +1028,109 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   %-decoded slash (`..%2Fx`). A topic being created is decided as a URI where nothing is,
   whatever metadata the change kept.
 
+- **sparq-reason (N3):** a quoted formula a backward (`<=`) rule RETURNS now carries the
+  bindings its proof made for it. A formula is opaque to substitution, so a variable the
+  proof produced survived the projection onto the goal — and the substitution that bound it
+  was dropped the moment the projection ended, so the value named a variable nothing would
+  ever bind, and that name — not the term the proof found — became part of the derived
+  fact's term identity, its `why()` string and its `sparq-prov` IRI:
+  `{ ?x :pattern ?f } <= { ( { ?x :p :b } ) list:member ?f }` proved for `:c` returned
+  `{ ?__bw<n>_x :p :b }` where the proof had bound that variable to `:c`, and now returns
+  `{ :c :p :b }`. Only what the PROOF produced is instantiated: a name the caller already
+  binds, and a name the goal itself writes, are the caller's to resolve and are left exactly
+  as they are, so a formula a caller supplies and a formula read from the store come back as
+  they went in. A variable no premise binds keeps its derivation fingerprint, escaped to
+  `__bx<fold>.name` before it enters the top-level fact store or query result. Nested
+  closures preserve only the enclosing live names present in their input formula; names
+  their own proofs mint escape before entering their store. Re-proving the same
+  goal in a later round therefore treats the stored name as an ordinary free variable.
+  Proof-support lookup uses the store's same spelling, preserving `why()` support when
+  a later round re-proves the goal. A quoted
+  formula's own `@forAll` binder is never bound by a proof, so it is untouched. Returned-formula
+  expectations pin the change from a leaked name to the term the proof bound. Backward names
+  use the internal `__bw<fold>.` prefix while their proof is live. For facts retaining
+  an unbound backward name, the changed spelling changes identity keys, `why()` strings
+  and `sparq-prov` IRIs; regenerate persisted lineage for those facts.
+
+- **sparq-reason (N3):** inside a backward (`<=`) proof, a clause, template or pattern that
+  arrives through a VARIABLE — `log:collectAllIn`, `log:forAllIn`, `log:includes`,
+  `log:notIncludes`, `log:supports` — is now resolved and MATCHED as the formula the document
+  configured, instead of being matched with variables in it that nothing could bind. Before
+  this, a containment pattern reached through a variable fell back to the EMPTY pattern unless
+  it was ground AS STORED, which made `log:includes` hold of everything and `log:notIncludes`
+  of nothing; and an aggregation clause was matched with its own variables still free, so it
+  constrained nothing, `log:forAllIn` held VACUOUSLY and fired a rule that must not fire, and
+  `log:collectAllIn` collected against a constraint that was not there. The common
+  "configured pattern" idiom — `:cfg :cl { ?x :type :T }` read through `?cl` and used as a
+  clause — is answered, with the answer a forward rule over the same premise gives.
+
+  Resolution follows a variable's chain until it reaches the VALUE, and then stops. The
+  variables written inside that value belong to it: they are renamed apart under a fresh
+  `__bp.<fold>.` prefix, one prefix per atom evaluation, so names shared between the arriving
+  values of one atom stay shared — `( ?template ?clause ?list )` whose template and clause
+  come from one configured list, and `( ?clause-a ?clause-b )` whose two clauses do. They are
+  never looked up in the live binding: a binding is one flat domain in which a stored
+  formula's own variable and a caller's can be spelled the same, so looking one up would read
+  whichever the document happened to spell, and the answer would turn on a caller's arbitrary
+  choice of variable name. Only the names the ENGINE minted are resolved — a backward
+  application's `__bw<fold>.` renaming, and the `__bp.` names of an outer atom — which is what
+  keeps a clause the rule built out of its own text sharing with the rule that wrote it.
+  The dot in the backward prefix cannot occur in a source variable name. Exact writers
+  give ordinary backward and escaped names legal, bijective spellings across the output
+  document, while retaining the existing refusal for backward copies of universals.
+  Exact serialization borrows one document-wide name plan for each statement and rule,
+  avoiding per-unit copies and discarded local plans. `reason_n3_pass_all` output with
+  unbound backward variables can grow on re-run: written names become ordinary source
+  variables on re-read, so re-derivation can add a distinct formula. This is a second
+  fixpoint exception beside fresh conclusion existentials; fully bound output still
+  reaches a fixpoint. A backward projection past the term-depth limit reports an `n3:`
+  refusal naming backward projection and the nested-container allowance.
+  A free minted name stays shared only if its canonical prefix names a live application
+  whose rule actually renamed that variable. Names from completed producers, padded IDs
+  and other source spellings are renamed apart for each containment match. These free
+  names cannot read unrelated caller bindings during preparation. Aggregation outputs
+  restore their original names, so no local `__bp.` name enters a derived fact. Scoped
+  operators read the registered ancestry, keeping ordinary proof paths to one fingerprint.
+
+  Stopping at the value is also what keeps a quoted formula OPAQUE. A clause written inline is
+  never spliced with the formula a variable beside it is bound to: a stored formula put into
+  an inline clause position stops being a term compared by identity and becomes a structural
+  PATTERN, so `( { :d :has ?f } { :k0 :ok ?f } ) log:forAllIn` would hold of two formulas that
+  are not the same formula. Slots nothing arrived through are untouched — a `{ … }` the rule
+  wrote, a variable with no binding entry (the ordinary spelling of a `collectAllIn`
+  template), anything that is not a variable — as is the SCOPE of an aggregation, which is the
+  data a clause is searched against rather than a pattern that has to match. A quoted
+  formula's own `@forAll` binder is never renamed, and an arriving `@forAll` formula is still
+  refused as an antecedent, because arrival is classified before anything is substituted.
+  Forward rules are unaffected: their atoms are never standardized apart, so nothing arrives
+  through an engine name there, and the as-stored rule below still governs them.
+
+- **sparq-reason (N3):** the projection of a backward proof onto its goal now resolves INSIDE
+  the value each variable lands on, not just up to it. A term a proof bound can itself hold
+  variables the same substitution binds, and stopping at the first value left them in the
+  derived fact: `{ ?s :pat { ?l :p :b } } <= { ( { ?y :q :r } ) list:member ?l . ?s :val ?y }`
+  returned `{ { ?__bw<n>_y :q :r } :p :b }` with `?y` bound all along, and now returns
+  `{ { :v :q :r } :p :b }`. Only names the engine minted are resolved, so a variable written
+  in data or by a caller is left as it is. The descent carries an occurs check and a cycle
+  guard, so a self-referential binding terminates as it did before. It also follows an ALIAS
+  CHAIN wherever it sits, not only inside a quoted formula: one hop of `?a → ?b → :c` leaves
+  `?b` behind, and in a list or a triple term nothing else resolved it, so
+  `{ ( ?x ?y ) :cl ( ?x ) } <= { :seed :value ?y }` asked as `( ?t ?t ) :cl ?cl` derived
+  NOTHING — the projection declined to bind `?cl` and the fact was dropped — where the same
+  position written `{ :a :q ?x }` derived `{ :a :q :c }`. Both now derive the value.
+
+  A binding whose values share subterms is a DAG, and resolving into it builds that DAG's
+  UNFOLDING, which can grow exponentially from a small N3 document. The size is computed
+  from borrowed terms before building, memoized by address and remaining depth and alias
+  allowances. Oversized terms are refused on size; structural nesting uses the run's
+  term-depth allowance, while alias fuel uses the binding length plus one, independently
+  of backward search depth. Excess structural depth fails with a named term-depth refusal
+  even in a positive-only rule. The existing structural bound is unchanged: a parsed-text
+  run allows 128 nested containers, so a fully nested 200-member chain is refused on depth;
+  a 200-member chain within that nesting allowance resolves fully. Ordinary
+  substitution is unchanged — a quoted formula is a value, and a formula a caller passes in
+  still comes back as the caller wrote it.
+
 - **sparq-lws-core (LWS notifications, type index, records):** notifications follow the
   subscriber's current access. A WebSocket notification the subscriber may no longer read is
   not sent and decides no close; an access timer (every 30 seconds, `ACCESS_RECHECK`) closes the
@@ -960,7 +1176,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   least premise vector rather than whichever one arrived first, so `why()` names the same
   supporting facts every run. (refs #6844)
 
-- **sparq-reason (N3):** the backward chainer's freshened variable names (`__bw<n>_`) now
+- **sparq-reason (N3):** the backward chainer's freshened application names (`__bw<n>.`) now
   address the DERIVATION they standardize apart, instead of counting applications. A rule
   conclusion can bind a goal variable to a quoted formula that still holds that application's
   renamed variables, and that value reaches a derived fact — so the name was part of the
@@ -971,8 +1187,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scope, the node's place in the proof tree (the premise-atom index, then the
   `(rule, conclusion)` site index, plus a scoped operator's clause position) and the goal
   being proved — folded step by step, each step from the one above it, so neither the name nor
-  the work of building it grows with the depth of the proof — rendered in the `__bw<n>_` form the readers already accept, so no writer, key
-  or refusal changes shape, and a name's length no longer grows with the depth of the proof.
+  the work of building it grows with the depth of the proof. The application uses the
+  internal `__bw<n>.` spelling; the later #6943 correction escapes surviving names to
+  `__bx<n>.` in facts and query output, changing affected identity keys, `why()` strings
+  and provenance IRIs. A name's length does not grow with the depth of the proof.
   Two derivations that fold alike are refused — the run fails rather than let them share one
   set of renamed variables, and the table that detects it belongs to the whole top-level run,
   so a collision between a data closure, a query's own evaluation and a nested
@@ -1913,7 +2131,9 @@ reproduce):
   single-pattern/FILTER comparisons short-circuit via index range-counting and are excluded
   from the claims above.
 
-[Unreleased]: https://github.com/sparq-org/sparq/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/sparq-org/sparq/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/sparq-org/sparq/compare/v0.1.7...v0.1.8
+[0.1.7]: https://github.com/sparq-org/sparq/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/sparq-org/sparq/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/sparq-org/sparq/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/sparq-org/sparq/compare/v0.1.3...v0.1.4

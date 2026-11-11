@@ -12,8 +12,8 @@
 //! [`ValueLaneProof::checked_prover_toml`] is the validation-then-render step the
 //! checked prove entry `crate::driver::CircuitProver::prove_value_lane` runs
 //! before any subprocess: it resolves the `(method, member, use)` dispatch,
-//! refuses any non-canonical `FieldHex` it would write (the challenge and the
-//! private witnesses included), applies the lane↔member allow-list, requires the
+//! refuses malformed or out-of-range `FieldHex` inputs (including the challenge
+//! and private witnesses), applies the lane↔member allow-list, requires the
 //! method version and the lane constant version to agree, and only then renders
 //! the `Prover.toml` from those validated fields. No caller-supplied TOML enters
 //! that path.
@@ -472,17 +472,16 @@ impl ValueLaneProof {
     /// 1. the `(method, derived member, use_)` dispatch
     ///    (`crate::dispatch::resolve_circuit_for_use`);
     /// 2. every `FieldHex` to be written — `challenge`, `operand_enc`,
-    ///    `datatype_const` and the private witness fields — must be the canonical
-    ///    `0x` + 64-lowercase-nibble rendering of its element
-    ///    ([`DispatchError::NonCanonicalFieldHex`], the same decoder the dispatch
-    ///    checks use);
+    ///    `datatype_const` and the private witness fields — must parse strictly
+    ///    as a field element ([`DispatchError::NonCanonicalFieldHex`], the same
+    ///    decoder the dispatch checks use);
     /// 3. the lane↔member allow-list under `use_`
     ///    (`crate::dispatch::check_lane_member_pairing_for_use`);
     /// 4. a dual-leaf `method` and the lane constant must be the same version
     ///    ([`DispatchError::MethodLaneVersionMismatch`]).
     ///
-    /// Only then is the text rendered, from these validated fields, in the member
-    /// `main`'s declaration order. Because every interpolated string has passed
+    /// Only then is canonical field hex rendered in the member `main`'s
+    /// declaration order. Because every interpolated string has passed
     /// step 2, the rendered file cannot carry a key or a table its fields did not
     /// produce.
     pub fn checked_prover_toml(

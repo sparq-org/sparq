@@ -60,13 +60,18 @@ authentication and protocol configuration; see the
 [Solid/LWS server skill](https://github.com/sparq-org/sparq/blob/main/skills/solid-lws-server/SKILL.md).
 `ownerWebid` and `oidc` are wasm host options and are rejected in native mode.
 
-npm installs an optional `@sparq-org/solid-server-native-<platform>` package at
-exactly the host version for `linux-x64`, `linux-arm64`, `darwin-x64`,
-`darwin-arm64`, or `win32-x64`. These packages ship their executables without
-lifecycle scripts, so installation with `ignore-scripts=true` works. Resolution
-uses only installed files. A missing platform package produces an error naming
-that package. Installed package versions must match the host. The CLI forwards
-SIGINT/SIGTERM, bounds shutdown, and exits with the native process.
+A release that publishes the native platform packages pins the one for each of
+`linux-x64`, `linux-arm64`, `darwin-x64`, `darwin-arm64` and `win32-x64` as an
+optional dependency at exactly the host version, and npm installs the matching
+one. These packages ship their executables without lifecycle scripts, so
+installation with `ignore-scripts=true` works. Resolution uses only installed
+files. A missing platform package produces an error naming that package.
+Installed package versions must match the host. The CLI forwards SIGINT/SIGTERM,
+bounds shutdown, and exits with the native process.
+
+The platform packages are not yet published to npm, so an npm install runs the
+WebAssembly mode only. Until they are, run `sparq-lws-core` directly (a source
+build or the `ghcr.io/sparq-org/sparq-lws-core` image) for the native server.
 
 Native mode binds loopback and maps `--port` to `SOLID_SERVER_BIND`, and
 `--base-url` to `SOLID_SERVER_BASE_URL`, with memory as the native default.

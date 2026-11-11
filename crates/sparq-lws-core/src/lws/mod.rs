@@ -40,6 +40,11 @@ mod sparql;
 mod snapshot;
 pub mod tokens;
 pub mod tracked;
+#[cfg(test)]
+mod touchstone_tests;
+
+#[cfg(test)]
+mod concurrent_listing_tests;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -2066,6 +2071,27 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         Ok(())
     }
 
+    /// The pre-removal access state already staged by this journal; no store calls.
+    pub(crate) fn snapshot(&self, iri: &str) -> access::Snapshot {
+        let meta = match self.staged.get(&meta_key(iri)) {
+            Some(Some(kept)) => match kept.body().and_then(|b| parse_meta(iri, b).ok()) {
+                Some(meta) => meta,
+                None => return access::Snapshot::unreadable(),
+            },
+            Some(None) => ResourceMeta::default(),
+            None => return access::Snapshot::unreadable(),
+        };
+        let format = if iri.ends_with('/') {
+            Some(LWS_JSON.to_string())
+        } else {
+            self.staged
+                .get(iri)
+                .and_then(|k| k.as_ref())
+                .map(|k| k.meta().content_type.clone())
+        };
+        access::Snapshot::from_parts(meta, format)
+    }
+
     /// What was stored at `key` before this step (staged now if it was not already).
     async fn prior(&mut self, key: &str) -> Result<Option<Kept>, crate::error::ServerError> {
         self.stage(key).await?;
@@ -2386,16 +2412,10 @@ pub(crate) enum QuotaFull {
 
 impl QuotaFull {
     pub(crate) fn response(&self, what: &str) -> Response {
-        match self {
-            QuotaFull::Author => problem(
-                StatusCode::TOO_MANY_REQUESTS,
-                Some(&format!("this agent holds as many {what} as it may")),
-            ),
-            QuotaFull::Total => problem(
-                StatusCode::INSUFFICIENT_STORAGE,
-                Some(&format!("the server holds as many {what} as it may")),
-            ),
-        }
+        problem(
+            StatusCode::TOO_MANY_REQUESTS,
+            Some(&format!("this agent may not hold more {what} now")),
+        )
     }
 }
 
@@ -2576,15 +2596,42 @@ fn body_limit(path: &str, max_body: usize) -> usize {
 }
 
 async fn dispatch<S: Store + 'static>(State(state): State<LwsState<S>>, req: Request) -> Response {
+    let path = req.uri().path().to_owned();
+    let mut response = dispatch_request(&state, req).await;
+    // Resource and service challenges without dot segments acquire the actual target at
+    // the HTTP boundary. Keep the realm, token error and storage Link supplied by the handler.
+    if response.status() == StatusCode::UNAUTHORIZED && !discovery::has_dot_segments(&path) {
+        if let Some(challenge) = response
+            .headers()
+            .get(header::WWW_AUTHENTICATE)
+            .and_then(|v| v.to_str().ok())
+        {
+            if let (Ok(root), Ok(target)) = (
+                discovery::prm_url(&state.cfg.storage()),
+                discovery::prm_url(&state.cfg.absolute(&path)),
+            ) {
+                let challenge = challenge.replacen(
+                    &format!("resource_metadata=\"{root}\""),
+                    &format!("resource_metadata=\"{target}\""),
+                    1,
+                );
+                set(response.headers_mut(), header::WWW_AUTHENTICATE, &challenge);
+            }
+        }
+    }
+    response
+}
+
+async fn dispatch_request<S: Store + 'static>(state: &LwsState<S>, req: Request) -> Response {
     #[cfg(feature = "crdt-sync")]
     if crate::crdt::is_socket(req.uri().path()) {
-        return crate::crdt::lws_socket(&state, req).await;
+        return crate::crdt::lws_socket(state, req).await;
     }
     if notify::stream_path(req.uri().path()) {
         if let Err(refused) = check_headers(req.headers()) {
             return refused;
         }
-        return notify::connect(&state, req).await;
+        return notify::connect(state, req).await;
     }
     let (parts, body) = req.into_parts();
     if let Err(refused) = check_headers(&parts.headers) {
@@ -2607,7 +2654,7 @@ async fn dispatch<S: Store + 'static>(State(state): State<LwsState<S>>, req: Req
         body,
     };
     let is_head = req.is_head();
-    let mut resp = route(&state, req).await;
+    let mut resp = route(state, req).await;
     // A 304 or 204 has no content, and no length to declare: a 304's Content-Length would have
     // to be the 200's (RFC 9110 section 8.6), which an empty body is not. Its body declares no
     // length, so none is derived from it on the way out either.
@@ -2674,8 +2721,8 @@ async fn route<S: Store + 'static>(state: &LwsState<S>, req: LwsRequest) -> Resp
         return authz_server::handle(state, &req).await;
     }
     if path.starts_with("/.well-known/") {
-        if discovery::prm_url(&state.cfg.storage()).is_ok_and(|url| url.path() == path) {
-            return discovery::handle(state, &req);
+        if let Some(resource) = discovery::resource(&state.cfg, path) {
+            return discovery::handle(state, &req, &resource);
         }
         return problem(StatusCode::NOT_FOUND, None);
     }
@@ -3209,6 +3256,14 @@ pub(crate) mod test_store {
         /// backend. The create is already sent: dropping the call does not stop it, and it
         /// commits once the gate opens.
         pub hold_next_create: Arc<std::sync::Mutex<Option<Arc<tokio::sync::Semaphore>>>>,
+        /// Hold ordinary create replies, without making their outcome unknown.
+        pub hold_creates: Arc<std::sync::Mutex<Option<Arc<tokio::sync::Semaphore>>>>,
+        pub creates_waiting: Arc<std::sync::atomic::AtomicUsize>,
+        pub creates_started: Arc<std::sync::atomic::AtomicUsize>,
+        /// Refuse a create as a generic storage ceiling or the typed service pool ceiling.
+        pub refuse_creates: Arc<std::sync::Mutex<Option<bool>>>,
+        /// The next create of this IRI commits, then waits before returning its reply.
+        pub hold_next_create_reply_of: GateOf,
         /// As `hold_next_create`, for the next `write` of the IRI named.
         pub hold_next_write_of: GateOf,
         /// The next `read` of the IRI named reads it, then waits on the gate before it answers.
@@ -3347,6 +3402,11 @@ pub(crate) mod test_store {
                 write_cycles: Default::default(),
                 fail_exists: Arc::new(AtomicBool::new(false)),
                 hold_next_create: Default::default(),
+                hold_creates: Default::default(),
+                creates_waiting: Default::default(),
+                creates_started: Default::default(),
+                refuse_creates: Default::default(),
+                hold_next_create_reply_of: Default::default(),
                 hold_next_write_of: Default::default(),
                 hold_next_read_reply_of: Default::default(),
                 hold_next_delete_of: Default::default(),
@@ -3634,6 +3694,21 @@ pub(crate) mod test_store {
             ct: &str,
         ) -> ServerResult<ResourceMeta> {
             self.step()?;
+            self.creates_started.fetch_add(1, Ordering::SeqCst);
+            if let Some(pool) = *self.refuse_creates.lock().unwrap() {
+                return Err(if pool {
+                    ServerError::ServicePoolFull
+                } else {
+                    ServerError::InsufficientStorage
+                });
+            }
+            let ordinary_gate = self.hold_creates.lock().unwrap().clone();
+            if let Some(gate) = ordinary_gate {
+                self.creates_waiting.fetch_add(1, Ordering::SeqCst);
+                gate.acquire().await.expect("gate").forget();
+                self.creates_waiting.fetch_sub(1, Ordering::SeqCst);
+            }
+
             let gate = if container.starts_with(super::intents::PREFIX) {
                 self.unsettle_next_intent.lock().unwrap().take()
             } else {
@@ -3677,6 +3752,9 @@ pub(crate) mod test_store {
                 .inner
                 .create_in_container(container, child, body, ct)
                 .await;
+            if let Some(gate) = held(&self.hold_next_create_reply_of, child) {
+                gate.acquire().await.expect("create reply").forget();
+            }
             if self.fail_after_create.load(Ordering::SeqCst)
                 && !container.starts_with(super::intents::PREFIX)
             {
@@ -4064,6 +4142,47 @@ pub(crate) mod test_store {
         }
     }
 
+    /// Drive the live HTTP dispatch, including token authentication and body handling.
+    pub async fn call<S: Store + 'static>(
+        state: &super::LwsState<S>,
+        method: &str,
+        path: &str,
+        subject: Option<&str>,
+        body: &str,
+    ) -> axum::response::Response {
+        use tower::ServiceExt;
+        let mut req = axum::http::Request::builder()
+            .method(method)
+            .uri(path)
+            .header("content-type", super::LWS_JSON);
+        if let Some(subject) = subject {
+            let token = super::tokens::mint(
+                &state.cfg,
+                subject,
+                "https://app.example/",
+                &state.cfg.realm(),
+            );
+            req = req.header("authorization", format!("Bearer {token}"));
+        }
+        axum::Router::new()
+            .fallback(super::dispatch::<S>)
+            .with_state(state.clone())
+            .oneshot(req.body(axum::body::Body::from(body.to_string())).unwrap())
+            .await
+            .unwrap()
+    }
+
+    pub async fn response_bytes(
+        response: axum::response::Response,
+    ) -> (axum::http::StatusCode, axum::http::HeaderMap, Bytes) {
+        let (parts, body) = response.into_parts();
+        (
+            parts.status,
+            parts.headers,
+            axum::body::to_bytes(body, usize::MAX).await.unwrap(),
+        )
+    }
+
     /// An open-mode state over a [`FlakyStore`].
     pub async fn state(page_size: usize) -> (super::LwsState<FlakyStore>, FlakyStore) {
         let store = FlakyStore::new();
@@ -4272,6 +4391,256 @@ pub(crate) mod test_store {
 mod tests {
     use super::*;
     use test_store::{body_json, links, request};
+
+    #[cfg(feature = "sparql-endpoint")]
+    #[tokio::test]
+    async fn query_views_follow_settlement_visibility() {
+        use std::collections::BTreeSet;
+        use std::time::Duration;
+
+        let (state, _) = test_store::state(100).await;
+        let root = state.cfg.storage();
+        let uri = state.cfg.absolute("/note.ttl");
+        state
+            .store
+            .create_in_container(
+                &root,
+                &uri,
+                Bytes::from_static(b"<urn:s> <urn:p> <urn:o> ."),
+                "text/turtle",
+            )
+            .await
+            .unwrap();
+        let req = request(
+            Method::POST,
+            "/sparql",
+            &[("content-type", "application/sparql-query")],
+            "SELECT ?g WHERE { GRAPH ?g {} }",
+        );
+        let hidden = state.hide_all(vec![Unsettled::new(vec![Undo::Locked {
+            iri: uri.clone(),
+        }])]);
+        let during = sparql::handle(&state, &req, &Agent::anonymous()).await;
+        let during_status = during.status();
+        let during = body_json(during).await;
+        state.settle_hidden(hidden);
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !state.visible(&uri) {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("settlement completed");
+        let after = sparql::handle(&state, &req, &Agent::anonymous()).await;
+        assert_eq!(during_status, StatusCode::OK);
+        assert_eq!(after.status(), StatusCode::OK);
+        let after = body_json(after).await;
+        let names = |result: &Value| -> BTreeSet<String> {
+            result["results"]["bindings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|row| row["g"]["value"].as_str().unwrap().to_owned())
+                .collect()
+        };
+        assert_eq!(names(&during), BTreeSet::new());
+        assert_eq!(names(&after), [root, uri].into_iter().collect());
+    }
+
+    #[tokio::test]
+    async fn container_views_follow_create_settlement() {
+        use std::sync::atomic::Ordering;
+        use std::time::Duration;
+        use test_store::{agent, closed_state, OWNER};
+
+        let (state, store) = closed_state(100).await;
+        let container_type = format!("<{LWS_NS}Container>; rel=\"type\"");
+        assert_eq!(
+            resources::handle(
+                &state,
+                &request(
+                    Method::POST,
+                    "/",
+                    &[("slug", "notes"), ("link", &container_type)],
+                    ""
+                ),
+                &agent(OWNER),
+            )
+            .await
+            .status(),
+            StatusCode::CREATED
+        );
+        let uri = state.cfg.absolute("/notes/note.txt");
+        store.fail_after_create.store(true, Ordering::SeqCst);
+        *store.fail_delete_of.lock().unwrap() = Some(uri.clone());
+        let response = resources::handle(
+            &state,
+            &request(
+                Method::POST,
+                "/notes/",
+                &[("slug", "note.txt"), ("content-type", "text/plain")],
+                "note",
+            ),
+            &agent(OWNER),
+        )
+        .await;
+        let pending = resources::handle(
+            &state,
+            &request(Method::GET, "/", &[("accept", "application/lws+cid")], ""),
+            &agent(OWNER),
+        )
+        .await
+        .status();
+        store.fail_after_create.store(false, Ordering::SeqCst);
+        *store.fail_delete_of.lock().unwrap() = None;
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !state.visible(&uri) {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("create settled");
+        assert!(response.status().is_server_error());
+        assert_eq!(pending, StatusCode::SERVICE_UNAVAILABLE);
+        for (path, expected) in [
+            ("/", StatusCode::OK),
+            ("/notes/", StatusCode::OK),
+            ("/notes/note.txt", StatusCode::NOT_FOUND),
+        ] {
+            assert_eq!(
+                resources::handle(&state, &request(Method::GET, path, &[], ""), &agent(OWNER),)
+                    .await
+                    .status(),
+                expected
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn create_reply_errors_preserve_the_initial_store_view() {
+        use std::sync::atomic::Ordering;
+        use test_store::{agent, closed_state, OWNER};
+
+        let (state, store) = closed_state(100).await;
+        let uri = state.cfg.absolute("/note.txt");
+        let metadata = format!("{uri}{META_SUFFIX}");
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.fail_after_write_of.lock().unwrap() = Some(metadata.clone());
+        *store.unsettle_next_delete_of.lock().unwrap() = Some((uri.clone(), gate.clone()));
+        store.fail_fence.store(true, Ordering::SeqCst);
+        let response = resources::handle(
+            &state,
+            &request(
+                Method::POST,
+                "/",
+                &[("slug", "note.txt"), ("content-type", "text/plain")],
+                "note",
+            ),
+            &agent(OWNER),
+        )
+        .await;
+        let present = store.exists(&metadata).await.unwrap();
+        store.fail_fence.store(false, Ordering::SeqCst);
+        gate.add_permits(1);
+        assert!(response.status().is_server_error());
+        assert!(!present);
+        assert!(!store.exists(&uri).await.unwrap());
+        assert_eq!(
+            resources::handle(
+                &state,
+                &request(Method::GET, "/note.txt", &[], ""),
+                &agent(OWNER),
+            )
+            .await
+            .status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+
+    #[tokio::test]
+    async fn create_views_follow_store_reply_completion() {
+        use std::time::Duration;
+        use test_store::{agent, closed_state, OWNER};
+
+        let (state, store) = closed_state(100).await;
+        let root = state.cfg.storage();
+        let reader = "https://reader.example/#me";
+        let kind = "https://example.org/Note";
+        let policies = access::policies(
+            &json!([{"type": ["AccessPolicy"], "action": ["read", "modify"],
+                "assignee": reader, "constraint": [{"leftOperand": "type",
+                "operator": "eq", "rightOperand": kind}]}]),
+            &root,
+        )
+        .unwrap();
+        state.access.put_grant_for_test("reader", policies);
+        let uri = state.cfg.absolute("/note.txt");
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_create_reply_of.lock().unwrap() = Some((uri.clone(), gate.clone()));
+        let creating = tokio::spawn({
+            let state = state.clone();
+            async move {
+                let link = format!("<{kind}>; rel=\"type\"");
+                let req = request(
+                    Method::POST,
+                    "/",
+                    &[
+                        ("slug", "note.txt"),
+                        ("content-type", "text/plain"),
+                        ("link", &link),
+                    ],
+                    "note",
+                );
+                resources::handle(&state, &req, &agent(OWNER))
+                    .await
+                    .status()
+            }
+        });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !store.exists(&uri).await.unwrap() {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("create stored");
+        assert!(!creating.is_finished());
+        let req = request(
+            Method::PATCH,
+            "/note.txt",
+            &[("content-type", "application/json-patch+json")],
+            "[]",
+        );
+        let pending = tokio::time::timeout(
+            Duration::from_secs(3),
+            resources::handle(&state, &req, &agent(reader)),
+        )
+        .await;
+        gate.add_permits(1);
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(2), creating)
+                .await
+                .expect("create completed")
+                .unwrap(),
+            StatusCode::CREATED
+        );
+        assert_eq!(
+            pending.expect("pending view").status(),
+            StatusCode::FORBIDDEN
+        );
+        let response = resources::handle(
+            &state,
+            &request(Method::GET, "/note.txt", &[], ""),
+            &agent(reader),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+            Bytes::from_static(b"note")
+        );
+    }
 
     /// Review finding: the default OpenID Connect suite could not be swapped for one with
     /// trusted providers, as a second suite for ID Tokens is refused. An embedder offers the one

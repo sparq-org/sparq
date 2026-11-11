@@ -7,10 +7,10 @@
 #     crates/sparq-lws-core/conformance/lws/lws-net.sh
 #
 # LWS_TESTS=builtin runs the definitions LWS.net itself carries (Suite/Model/Resources/new.ttl)
-# instead. LWS_NET_MIN_PASSED makes the run a ratchet: it fails when fewer tests pass (that suite
-# holds a test that fails on purpose), when fewer than LWS_NET_EXPECTED_TOTAL ran, when the report
-# does not parse, or when the harness aborted. Each failed test is printed by name, as a CI
-# annotation in GitHub Actions (lws-net-report.py; `--self-test` checks it).
+# instead. LWS_NET_EXPECTED_FAILURES names the JSON exception list; together with
+# LWS_NET_EXPECTED_TOTAL it requires exactly those failed test names. A listed pass or missing
+# test, an unlisted failure, an inconsistent report or an aborted harness fails the run.
+# Each failed test is printed by name (lws-net-report.py; `--self-test` checks it).
 #
 # Needs the .NET 10 SDK and Node.js (to convert the YAML-LD definition to N-Triples).
 set -euo pipefail
@@ -61,10 +61,8 @@ status=0
 # VSTest's --logger (it exits 5, invalid arguments, on --logger).
 Suite__BaseUri="http://localhost:$PORT/" dotnet test Suite/Test \
   --report-trx --report-trx-filename lws-net.trx --results-directory "$OUT" || status=$?
-# The counts and each failed test, as CI annotations in GitHub Actions; with a floor, the run
-# counts only when the report parses, LWS_NET_EXPECTED_TOTAL tests ran and the harness ended with
-# a test outcome.
+# Without an exception list the harness status stands (the tests.yaml step).
 python3 -B "$here/lws-net-report.py" "$OUT/lws-net.trx" --status "$status" \
   ${GITHUB_ACTIONS:+--gha} \
-  ${LWS_NET_MIN_PASSED:+--min-passed "$LWS_NET_MIN_PASSED"} \
+  ${LWS_NET_EXPECTED_FAILURES:+--expected-failures "$LWS_NET_EXPECTED_FAILURES"} \
   ${LWS_NET_EXPECTED_TOTAL:+--expected-total "$LWS_NET_EXPECTED_TOTAL"} || exit $?

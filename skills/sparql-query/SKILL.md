@@ -211,11 +211,21 @@ Update (data lives in the default + named graphs):
   of those graphs (empty default graph). `authorize: Option<&mut WriteAuthorizer>` is called per
   `DELETE`/`INSERT … WHERE` with the graphs its instantiated templates delete from and insert into,
   before that operation is applied; an `Err` aborts, leaving earlier operations applied.
+- `update_graph_scope(&spargebra::Update) -> Option<Vec<Term>>` — analyze the exact parsed
+  request before effect capture. `Some(names)` permits `Graph::fork_scoped(&names)`;
+  the default graph is always copied. Concrete template, WHERE, USING/WITH and operation
+  graph names are included across the whole request. Variable graphs, NAMED/ALL targets
+  and SERVICE return `None` and require `Graph::fork()`. Use
+  `update_in_place_algebra_capturing` on that same algebra, then apply the effects to the
+  complete dataset. The atomic helpers retain a full fork because they replace the whole dataset.
 - `update_in_place_capturing(&mut Graph, &str, &QueryBudget) -> Result<Vec<UpdateEffect>, String>`
   + `apply_effects(&mut Graph, &[UpdateEffect])` — apply once, capturing the RESOLVED delta, then
   replay it onto a second (e.g. durable mirror) graph WITHOUT re-executing the text. Use this when
   mirroring a sequence of updates so non-deterministic functions (`NOW()`/`RAND()`/`UUID()`/`BNODE()`)
   and `LOAD <remote>` are not re-rolled on the second graph (the server's `--persist` path uses it).
+  Durable application syncs one journal frame before materialization and calls `finish_txn()`;
+  WALs and named layout are flushed at checkpoint before retained frames are discarded.
+  A failure after that commit point requires reopen and may recover the entire update.
 - `where_update_effects(&Graph, &spargebra::Update, reads, &QueryBudget) -> Result<Option<Vec<UpdateEffect>>, String>`
   — the effects of a request that is exactly one `DELETE`/`INSERT … WHERE`, computed read-only (the
   WHERE evaluated once, nothing applied), so a caller can authorize them and then `apply_effects`

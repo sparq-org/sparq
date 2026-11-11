@@ -44,6 +44,198 @@ impl Drop for Directory {
     }
 }
 
+async fn drop_then_reopen_loop(dir: Directory) {
+    for i in 0..500 {
+        let open = |phase| {
+            EmbeddedSparqClient::open(&dir.0).unwrap_or_else(|error| {
+                panic!("iteration {i}, {phase}({}) failed: {error}", dir.0.display())
+            })
+        };
+        let c = open("open before write");
+        c.put_meta(CHILD, meta(&format!("record-{i}")))
+            .await
+            .unwrap();
+        assert_eq!(Arc::strong_count(&c.actor), 1);
+        let actor = Arc::downgrade(&c.actor);
+        drop(c);
+        assert!(
+            actor.upgrade().is_none(),
+            "the actor must not outlive its last client"
+        );
+        let reopened = open("reopen after drop");
+        assert_eq!(
+            reopened.get_meta(CHILD).await.unwrap(),
+            meta(&format!("record-{i}"))
+        );
+    }
+}
+
+#[tokio::test]
+async fn drop_then_reopen_without_child_processes() {
+    drop_then_reopen_loop(Directory::empty()).await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn drop_then_reopen_while_spawning_child_processes() {
+    // Keep the fork stress in its own process: it must not inject inherited lock handles
+    // into unrelated tests of Graph's intentionally immediate lock-refusal contract.
+    const STRESS_CHILD: &str = "SPARQ_REOPEN_STRESS_CHILD";
+    if std::env::var_os(STRESS_CHILD).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "store::embedded::journal_tests::drop_then_reopen_while_spawning_child_processes",
+                "--nocapture",
+            ])
+            .env(STRESS_CHILD, "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    // Finish creating the empty store before any fork can inherit its save's locks.
+    let dir = Directory::empty();
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stopped = stop.clone();
+    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(0);
+    let child_thread = std::thread::spawn(move || {
+        let mut spawned = 0;
+        while !stopped.load(Ordering::Relaxed) {
+            assert!(std::process::Command::new("true")
+                .status()
+                .unwrap()
+                .success());
+            spawned += 1;
+            if spawned == 1 {
+                ready_tx.send(()).unwrap();
+            }
+        }
+        spawned
+    });
+    // Establish that child spawning has started before the first directory open.
+    ready_rx.recv().unwrap();
+    let result = tokio::spawn(drop_then_reopen_loop(dir)).await;
+    stop.store(true, Ordering::Relaxed);
+    assert!(child_thread.join().unwrap() > 0);
+    result.unwrap();
+}
+
+#[tokio::test]
+async fn directory_open_refuses_both_live_lock_files_and_reopens_after_drop() {
+    use sparq_core::dir_lock::{DirLock, LockLocation};
+
+    for inside in [false, true] {
+        let dir = Directory::empty();
+        // The sibling of the dummy path `sparq` is the store's inside `sparq.lock`.
+        let target = if inside {
+            dir.0.join("sparq")
+        } else {
+            dir.0.clone()
+        };
+        let held = DirLock::acquire(LockLocation::sibling_of(&target).unwrap()).unwrap();
+        let error = EmbeddedSparqClient::open(&dir.0)
+            .err()
+            .expect("a live lock holder must be refused");
+        assert!(
+            matches!(error, SparqError::Backend(ref message) if message.contains("is locked:")),
+            "{error}"
+        );
+        drop(held);
+        let c = dir.open();
+        c.put_meta(CHILD, meta("after-contention")).await.unwrap();
+        drop(c);
+        assert_eq!(
+            dir.open().get_meta(CHILD).await.unwrap(),
+            meta("after-contention")
+        );
+    }
+}
+
+const HOLDER_DIRECTORY: &str = "SPARQ_REOPEN_HOLDER_DIRECTORY";
+
+#[test]
+fn embedded_lock_holder_process() {
+    use std::io::{Read, Write};
+
+    let Some(dir) = std::env::var_os(HOLDER_DIRECTORY) else {
+        return;
+    };
+    let _held = Graph::open(std::path::Path::new(&dir)).unwrap();
+    println!("store lock ready");
+    std::io::stdout().flush().unwrap();
+    let mut release = [0];
+    // EOF also releases the holder if the parent test panics or is terminated.
+    let _ = std::io::stdin().read(&mut release).unwrap();
+}
+
+#[test]
+fn a_live_process_holder_is_refused() {
+    use std::io::{BufRead, Write};
+    use std::process::{Child, Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    struct Holder(Child);
+    impl Drop for Holder {
+        fn drop(&mut self) {
+            if let Some(mut stdin) = self.0.stdin.take() {
+                let _ = stdin.write_all(b"x");
+            }
+            self.0.wait().unwrap();
+        }
+    }
+
+    let dir = Directory::empty();
+    let mut holder = Holder(
+        Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "store::embedded::journal_tests::embedded_lock_holder_process",
+                "--nocapture",
+            ])
+            .env(HOLDER_DIRECTORY, &dir.0)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    let mut stdout = std::io::BufReader::new(holder.0.stdout.take().unwrap());
+    loop {
+        let mut line = String::new();
+        assert_ne!(
+            stdout.read_line(&mut line).unwrap(),
+            0,
+            "holder exited before locking"
+        );
+        if line.trim() == "store lock ready" {
+            break;
+        }
+    }
+    let started = Instant::now();
+    let error = EmbeddedSparqClient::open(&dir.0)
+        .err()
+        .expect("a live holder must be refused");
+    assert!(
+        matches!(error, SparqError::Backend(ref message) if message.contains("is locked:")),
+        "{error}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "open must return while the holder is still alive"
+    );
+    assert!(
+        holder.0.try_wait().unwrap().is_none(),
+        "the holder must still be alive"
+    );
+    drop(holder);
+    drop(dir.open());
+}
+
 #[test]
 fn every_embedded_update_uses_the_commit_helper() {
     let source = include_str!("embedded.rs");
@@ -53,7 +245,7 @@ fn every_embedded_update_uses_the_commit_helper() {
         .collect();
     assert_eq!(calls.len(), 2, "only the commit helper may execute updates");
     assert!(calls[0].contains("sparq_engine::update_in_place_atomic("));
-    assert!(calls[1].contains("sparq_engine::update_in_place_capturing("));
+    assert!(calls[1].contains("sparq_engine::update_in_place_algebra_capturing("));
     let helper = source
         .split("fn commit(")
         .nth(1)
@@ -872,6 +1064,301 @@ async fn failed_saves_remove_only_empty_directories_they_created() {
     assert!(c.save(&dir.0.join("new/../file/deep")).await.is_err());
     assert!(!dir.0.join("new").exists());
     assert_eq!(std::fs::read(blocker).unwrap(), b"existing");
+}
+
+#[test]
+fn directory_setup_reports_file_destinations_and_cleans_created_directories() {
+    let dir = Directory::empty();
+    let file = dir.0.join("destination");
+    std::fs::write(&file, b"existing").unwrap();
+    {
+        let mut created = SaveDirectories::default();
+        assert!(created.create(&file).is_err());
+        assert!(created.create(&file.join("child")).is_err());
+        let nested = dir.0.join("new/deep");
+        created.create(&nested).unwrap();
+        assert!(nested.is_dir());
+    }
+    assert!(!dir.0.join("new").exists());
+    assert_eq!(std::fs::read(&file).unwrap(), b"existing");
+}
+
+#[test]
+fn final_client_drop_finishes_and_releases_the_directory() {
+    let dir = Directory::empty();
+    let client = dir.open();
+    let (closed, ready) = std::sync::mpsc::channel();
+    let dropping = std::thread::spawn(move || {
+        drop(client);
+        let _ = closed.send(());
+    });
+    ready
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("final client dropped");
+    dropping.join().unwrap();
+    let reopened = dir.open();
+    drop(reopened);
+}
+
+fn dataset_terms(graph: &Graph) -> Vec<(Option<oxrdf::Term>, Vec<[oxrdf::Term; 3]>)> {
+    fn triples(graph: &Graph) -> Vec<[oxrdf::Term; 3]> {
+        let mut rows: Vec<_> = graph
+            .iter_ids()
+            .map(|row| row.map(|id| graph.dict().term(id)))
+            .collect();
+        rows.sort_by_cached_key(|row| format!("{row:?}"));
+        rows
+    }
+    let mut rows = vec![(None, triples(graph))];
+    rows.extend(
+        graph
+            .named()
+            .iter()
+            .map(|(name, graph)| (Some(name.clone()), triples(graph))),
+    );
+    rows.sort_by_cached_key(|(name, _)| format!("{name:?}"));
+    rows
+}
+
+#[test]
+fn lws_builder_effects_match_full_forks() {
+    let parent = sparql::update_put_meta(PARENT, "text/turtle", "parent", "parent", None).unwrap();
+    let child = sparql::update_put_meta(CHILD, "text/plain", "child", "child", None).unwrap();
+    let body = sparql::insert_body_data(
+        CHILD,
+        &[(
+            "urn:s".into(),
+            "urn:p".into(),
+            sparql::BodyObject::Iri("urn:o".into()),
+        )],
+    )
+    .unwrap();
+    let corpus = [
+        parent.clone(),
+        child.clone(),
+        body,
+        sparql::update_put_meta(
+            CHILD,
+            "text/plain",
+            "new",
+            "new",
+            Some("2026-01-01T00:00:00Z"),
+        )
+        .unwrap(),
+        sparql::update_create_child(PARENT, CHILD, "text/plain", "new", "new", None, "create")
+            .unwrap(),
+        sparql::update_create_child_fenced(
+            PARENT,
+            CHILD,
+            "text/plain",
+            "new",
+            "new",
+            None,
+            "create",
+        )
+        .unwrap(),
+        sparql::update_delete_container_if_empty(PARENT, None, "delete").unwrap(),
+        sparql::update_delete_container_if_empty_fenced(CHILD, Some(PARENT), "delete").unwrap(),
+        sparql::update_fence("create"),
+        sparql::update_remove_child(PARENT, CHILD).unwrap(),
+        sparql::update_delete_resource(CHILD).unwrap(),
+        sparql::update_end_reclaim("unreferenced"),
+    ];
+    for populated in [false, true] {
+        let mut base = Graph::load_str("", "ntriples").unwrap();
+        if populated {
+            sparq_engine::update_in_place(&mut base, &format!("{parent}; {child}")).unwrap();
+        }
+        for update in &corpus {
+            let algebra = sparq_engine::parse_update_rec2013(update).unwrap();
+            let names = sparq_engine::update_graph_scope(&algebra).expect("concrete LWS builder");
+            let mut scoped = base.fork_scoped(&names);
+            let mut full = base.fork();
+            let budget = sparq_engine::QueryBudget::unlimited();
+            let a = sparq_engine::update_in_place_algebra_capturing(
+                &mut scoped,
+                &algebra,
+                None,
+                None,
+                &budget,
+            )
+            .unwrap();
+            let b = sparq_engine::update_in_place_algebra_capturing(
+                &mut full, &algebra, None, None, &budget,
+            )
+            .unwrap();
+            assert_eq!(a, b, "{update}");
+            let mut replay = base.fork();
+            sparq_engine::apply_effects(&mut replay, &a).unwrap();
+            assert_eq!(dataset_terms(&replay), dataset_terms(&full), "{update}");
+        }
+    }
+    // Reclaim admission examines references in every named graph.
+    let reclaim = sparq_engine::parse_update_rec2013(&sparql::update_begin_reclaim("key")).unwrap();
+    assert_eq!(sparq_engine::update_graph_scope(&reclaim), None);
+}
+
+#[tokio::test]
+async fn durable_single_resource_commit_forks_only_named_slots() {
+    let dir = Directory(std::env::temp_dir().join(format!(
+        "lws-scoped-fork-{}-{}",
+        std::process::id(),
+        next_nonce(),
+    )));
+    let mut data = String::new();
+    for i in 0..1000 {
+        data.push_str(&format!(
+            "<urn:s> <urn:p> \"{i}\" <https://pod.example/r{i}> .\n"
+        ));
+    }
+    Graph::load_dataset(&data, "nquads")
+        .unwrap()
+        .save(&dir.0)
+        .unwrap();
+    let client = dir.open();
+    client
+        .dispatch(|_| {
+            NAMED_GRAPH_FORKS.with(|count| count.set(0));
+            Ok(())
+        })
+        .await
+        .unwrap();
+    client
+        .put_meta("https://pod.example/r999", meta("after"))
+        .await
+        .unwrap();
+    client
+        .dispatch(|graph| {
+            assert_eq!(NAMED_GRAPH_FORKS.with(|count| count.replace(0)), 1);
+            assert_eq!(graph.named().len(), 1000);
+            assert_eq!(
+                graph
+                    .named_graph(
+                        &oxrdf::NamedNode::new("https://pod.example/r0")
+                            .unwrap()
+                            .into()
+                    )
+                    .unwrap()
+                    .len(),
+                1
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    // An enumeration operation takes the full-fork branch on the same durable path.
+    client
+        .dispatch(|graph| {
+            commit(graph, "CLEAR NAMED", "scoped fallback")?;
+            assert_eq!(NAMED_GRAPH_FORKS.with(|count| count.replace(0)), 1000);
+            assert!(graph.named().iter().all(|(_, graph)| graph.is_empty()));
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn resource_removal_preserves_unrelated_graph_files() {
+    // Each entry point removes the same record; none needs to republish another graph's files.
+    for operation in ["metadata", "resource", "member"] {
+        let dir = Directory::empty();
+        let c = dir.open();
+        c.put_meta(PARENT, meta("parent")).await.unwrap();
+        c.create_child(PARENT, CHILD, meta("child")).await.unwrap();
+        c.actor.call(|graph| commit(graph,
+            &format!("INSERT DATA {{ GRAPH <{CHILD}> {{ <urn:subject> <urn:predicate> <urn:object> }} }}"),
+            "seed resource statements")).await.unwrap();
+        let sibling = "https://pod.example/unrelated";
+        c.put_meta(sibling, meta("sibling")).await.unwrap();
+        let slot = c
+            .actor
+            .call(move |graph| {
+                Ok(graph
+                    .named()
+                    .iter()
+                    .position(|(name, _)| {
+                        name == &oxrdf::Term::NamedNode(oxrdf::NamedNode::new(sibling).unwrap())
+                    })
+                    .unwrap())
+            })
+            .await
+            .unwrap();
+        let files = dir.0.join("named").join(slot.to_string());
+        let snapshot = || -> Option<std::collections::BTreeMap<String, Vec<u8>>> {
+            std::fs::read_dir(&files)
+                .ok()?
+                .map(|entry| {
+                    let entry = entry.ok()?;
+                    Some((
+                        entry.file_name().to_str()?.to_string(),
+                        std::fs::read(entry.path()).ok()?,
+                    ))
+                })
+                .collect()
+        };
+        let before = snapshot().expect("unrelated graph's files");
+        assert!(before.get("wal.log").is_some_and(|bytes| !bytes.is_empty()));
+        match operation {
+            "metadata" => c.delete_meta(CHILD).await.unwrap(),
+            "resource" => {
+                assert_eq!(
+                    c.delete_resource(CHILD, None).await.unwrap(),
+                    Some("child".into())
+                );
+            }
+            "member" => {
+                assert_eq!(
+                    c.delete_resource(CHILD, Some(PARENT)).await.unwrap(),
+                    Some("child".into())
+                );
+            }
+            _ => unreachable!(),
+        }
+        assert_eq!(
+            snapshot(),
+            Some(before),
+            "unrelated graph changed after {operation}"
+        );
+        assert!(!c.exists(CHILD).await.unwrap());
+        assert!(
+            c.actor
+                .call(|graph| Ok(graph
+                    .named_graph(&oxrdf::Term::NamedNode(
+                        oxrdf::NamedNode::new(CHILD).unwrap()
+                    ))
+                    .is_none()))
+                .await
+                .unwrap(),
+            "removed resource's named-graph slot remains after {operation}"
+        );
+        assert_eq!(c.get_meta(sibling).await.unwrap(), meta("sibling"));
+        drop(c);
+        let c = dir.open();
+        assert!(
+            !c.exists(CHILD).await.unwrap(),
+            "removed record stays absent after {operation}"
+        );
+        assert!(
+            c.actor
+                .call(|graph| Ok(graph
+                    .named_graph(&oxrdf::Term::NamedNode(
+                        oxrdf::NamedNode::new(CHILD).unwrap()
+                    ))
+                    .is_none()))
+                .await
+                .unwrap(),
+            "removed resource's named-graph slot returns after reopening {operation}"
+        );
+        assert_eq!(c.get_meta(sibling).await.unwrap(), meta("sibling"));
+        if operation == "member" {
+            assert!(c.list_children(PARENT).await.unwrap().is_empty());
+        }
+        c.create_child(PARENT, CHILD, meta("recreated"))
+            .await
+            .unwrap();
+        assert_eq!(c.get_meta(CHILD).await.unwrap(), meta("recreated"));
+    }
 }
 
 #[tokio::test]
