@@ -361,8 +361,10 @@ Materialize the authorization view from the access-control documents, then enfor
   primitive. Replaces (or removes) the `.acl`/`.acr` GRAPH and re-materializes
   `<urn:sparq:auth>` as ONE **atomic, fail-closed** unit, so SPARQ stays the source of
   truth (the auth view is always a pure function of the present `.acl` graphs — no stale
-  grant survives a rule change). `content` is parsed FIRST (malformed, or stating a triple
-  the document may not — see above — ⇒ `Err`, nothing mutated); a re-materialization
+  grant survives a rule change). Write admission parses the document, then meters stored
+  terms, parsed triples and ACP dependencies before touching the stored slot
+  (see [Write admission](#write-admission)). Malformed content or a statement the document
+  may not make also returns `Err` without mutation; a re-materialization
   failure ROLLS BACK to the prior content + prior auth view (all-or-nothing). A non-`.acl`/`.acr` target IRI is
   rejected (write content graphs through `update_as`). It performs **NO session
   authorization** — the server authorizes the request itself (e.g. `decide(.., Mode::Control)`)
@@ -953,6 +955,59 @@ after these rebuilds, including when a rebuild unwinds; WAC and ACP candidate ad
 keep their deadlines. If a rollback or post-commit rebuild is refused by a cap,
 authorization is disabled and every request is denied until a rebuild succeeds.
 
+### Write admission
+
+`put_acl` and `put_acl_acp` create one admission `AuthLedger` from the store's
+`AuthBudget`. Admission charges, in order:
+
+1. Apply the stored-row byte lower bound used by materialization, then check each
+   stored term against `max_input_term_bytes`, then the per-document stored-term
+   total against `max_document_bytes` and the aggregate against `max_input_bytes`,
+   before dictionary reconstruction. An impossible row total reports `InputBytes`
+   before individual terms are inspected. Serialized comments and unrelated update data
+   do not consume these allowances. Callers set any request-text cap at the transport layer.
+2. Each parsed row against `max_input_facts`, after its stored terms have been checked.
+3. ACP dependency validation, when a new statement references another ACR. The check
+   borrows stored graphs, charges their document names before retaining descriptors,
+   and charges each row and stored term before reconstructing one triple at a time.
+   Replacement triples are borrowed from the admitted buffer. Candidate documents
+   already charged by the same ledger are not charged again. The dependency view is
+   computed once per write, including repair checks. Removing a rejected document
+   would leave its referrers unresolved, so its cached rejection state decides those
+   checks without another scan or another charge.
+
+All admission completes before the named slot is removed or replaced. A refusal keeps
+stored dictionaries, triples, slot order, ACR lifecycle tracking and the installed view
+unchanged. Document-total or aggregate byte-cap refusals are `AuthAllowance::InputBytes`;
+row-cap refusals are `InputFacts`; per-term byte and nesting refusals are
+`InputTermBytes`. Admission keeps the configured deadline and reports `Deadline` when
+it expires. Dependency-admission refusals retain the allowance kind and omit other
+ACRs' names, terms and sizes. Allowance refusals during admission state that the write was refused and
+the previous authorization view remains in force. These caps also apply to documents
+whose rows are rejected by validation, dependency sets whose combined stored source
+exceeds the input allowance, and empty ACR sets whose document names alone exhaust
+the aggregate byte allowance.
+
+Session-checked SPARQL control writes use the same admission ledger on the candidate
+fork. When surviving additions remain, only affected candidate documents read by the
+active model are charged before the added statements and ACP dependencies are checked.
+Both put and update admission skip an inactive `.acr` graph under WAC and an inactive
+`.acl` graph under ACP. Update text, comments and ordinary data graphs are not charged
+as access-control documents. All public update entry points share this path. Their
+candidate admission and candidate materialization keep their deadlines; a refusal
+discards the fork before commit. Removal-only updates do not charge admission input.
+
+Admission and authorization materialization use separate ledgers: the per-write input
+allowance is up to **2 × `AuthBudget`**, one admission allowance and one rebuild
+allowance. This is deliberate; the existing dataset and the engine's candidate fork
+are separate from these metered buffers. The admitted replacement is not cloned for
+dependency validation. Rollback and post-commit rebuilds omit the elapsed deadline via
+`AuthBudget::without_deadline()` and retain every count and size cap.
+
+`delete_acl` and `delete_acl_acp` add no input-admission refusal: removing a document
+never consumes admission allowance. Their rebuild still checks the remaining store
+against its materialization budget, with the existing rollback on error.
+
 ### Input and whole-decision budget
 
 `ClosureLimits` bounds what the RULES may do inside one closure. Two things sit outside it,
@@ -971,13 +1026,12 @@ reconstructed**. The existing byte caps bound a document's row count before its 
 is reserved: each
 row contributes at least three fixed term-node costs. This pre-check reports
 `InputBytes` before inspecting individual terms, so an oversized document containing
-an oversized term can report `InputBytes` where reconstruction-first assembly reported
-`InputTermBytes`. Every accepted source or generated
+an oversized term reports `InputBytes` when the row-count pre-check fails; otherwise
+the per-term check can report `InputTermBytes`. Every accepted source or generated
 fact is charged before reserving its assembled output row. Consequently, `InputFacts`
-can take precedence over a later principal-IRI validation or generated-byte refusal;
-this ordering changes the reported kind without changing acceptance under the defaults.
-Control documents and WAC group documents use the same path. Rejected control-document rows and filtered group
-rows consume source byte allowance,
+can take precedence over a later principal-IRI validation or generated-byte refusal.
+Control documents and WAC group documents use the same path. During materialization,
+rejected control-document rows and filtered group rows consume source byte allowance,
 while only rows actually assembled consume input-fact allowance. Skolem names,
 structural and `inDoc` facts, trusted
 provenance, credential holdings and WebID facts charge their generated lexical strings
@@ -994,10 +1048,10 @@ Allocation failure during auxiliary `Nodes` vector reservation maps explicitly t
 The fixed stored triple-term nesting guard
 also reports `InputTermBytes`; it matches the dictionary's existing reconstruction
 guard and is independent of the configurable byte cap. Under the default term-byte
-cap, main already refuses terms this deep. Raising `max_input_term_bytes` above its
-default can make the depth guard an additional refusal. The generated-string default
-sits beyond the baseline materializer's usable memory range; it does not reuse the
-source-byte default as a new generated-input limit.
+cap, terms reaching the nesting guard exceed the byte allowance. A raised
+`max_input_term_bytes` can admit the term's bytes while the nesting guard still refuses it.
+Generated lexical strings have an independent allowance and do not debit the source or
+document byte counters.
 
 `ClosureLimits::max_facts` is now charged over the GIVEN facts too, so a refused closure does
 not first hold and copy an input of the caller's choosing.
