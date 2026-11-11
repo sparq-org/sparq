@@ -1362,10 +1362,11 @@ What the server exposes, all discoverable from the storage description
   create needs none: its metadata is written before its content and removed after it, so no
   stop leaves content without its metadata. A container listing never shows a change in
   flight to a member: quiet listings share the container lock and only try member locks.
-  A busy member or a generation change discards that attempt and queues one exclusive
-  listing, which takes no member locks. Member changes hold that container through commit
-  or put-back; the fair queue lets the fallback finish while new changes keep arriving,
-  without a churn-based `503`. A resource set aside for recovery still answers `503`. A
+  A busy member or a generation change discards that attempt and redoes the listing once
+  under the exclusive container lock, taking no member locks. Acquiring that lock uses the
+  usual lock wait; a timeout answers `503` with `Retry-After`. Member changes hold that
+  container through commit or put-back; the fair queue lets the fallback finish while new
+  changes keep arriving. A resource set aside for recovery still answers `503`. A
   container whose modification time has not yet been, or could not be, moved on after a
   change has no `Last-Modified` until it is, so `If-Modified-Since` never answers `304`
   on a stale date. A listing's `Last-Modified` is the latest of the container's own time and
