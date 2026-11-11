@@ -798,7 +798,10 @@ fn ceil_log2(n: usize) -> usize {
 /// ## The refusals, all before any draw
 ///
 /// Fail-closed: every check runs before the permutation is sampled, so a refused
-/// call consumes no randomness (see `require_shufflable_column`).
+/// call consumes no randomness (see `require_shufflable_column`). They also run
+/// before the network is BUILT: the width cap first (closed form on a public
+/// number), then the column validation, and the `O(n log n)` switch list last, so
+/// neither refusal allocates a topology it then discards.
 ///
 /// - An entry whose width is not a whole number of `n`-party sharings is refused:
 ///   the elements could not be told apart to mask them separately.
@@ -817,13 +820,21 @@ pub fn shuffle(
     mut col: SecretColumn,
 ) -> Result<(SecretColumn, ShuffleCost), MpcError> {
     let items = col.len();
-    // The width is the caller's column length: refuse an over-cap one before the
-    // topology is built, and so before any draw.
-    let net = WaksmanNetwork::try_new(items)?;
-    // Fail closed BEFORE any draw: this construction can only hand back fresh
-    // sharings for a degree-`<= t` column (see `require_shufflable_column`), and a
-    // refused call must not consume a single field element of the keystream.
+    // The width is the caller's column length: refuse an over-cap one before
+    // anything at all, as a closed-form check on a public number. `try_new` below
+    // re-checks it, but `try_new` BUILDS the topology, and building it is what the
+    // cap is there to prevent — so the cap runs on its own first.
+    check_network_width("WaksmanNetwork", items)?;
+    // Then the column validation, and only then the build. Both of these fail
+    // closed BEFORE any draw: this construction can only hand back fresh sharings
+    // for a degree-`<= t` column (see `require_shufflable_column`), and a refused
+    // call must not consume a single field element of the keystream. The
+    // validation is the cheaper of the two to reach a refusal through — it walks
+    // the column the caller already holds, where the build ALLOCATES an
+    // `O(n log n)` switch list — so an invalid column no longer pays for a
+    // topology that is then thrown away.
     require_shufflable_column(&col, dealer.parties(), dealer.threshold())?;
+    let net = WaksmanNetwork::try_new(items)?;
     let n = items;
     if n == 0 {
         return Ok((col, ShuffleCost::model(n, net.switch_count())));
@@ -2168,6 +2179,66 @@ mod tests {
             8,
             "the output coefficients repeated across trials"
         );
+    }
+
+    /// **The validation ORDER guard.** `shuffle` runs the closed-form width cap
+    /// FIRST, then validates the column, and BUILDS the `O(n log n)` switch list
+    /// last — so neither refusal allocates a topology it then discards.
+    ///
+    /// The order is pinned where it is observable: on a column that is BOTH
+    /// over-cap in LENGTH and malformed in LAYOUT, the refusal must name the width
+    /// cap. Without the standalone width check, the over-cap width would only be
+    /// caught by `try_new`, which runs after the column validation, so the same
+    /// column would refuse on its layout instead.
+    #[test]
+    fn the_width_cap_refuses_before_the_column_is_even_walked() {
+        let n = 3usize;
+        let b = ShamirBackend::new_seeded(n, 0x5B0C).unwrap();
+        let mut dealer = b.dealer();
+
+        // One over-cap-length column that is ALSO non-uniform: entry 0 carries a
+        // real sharing, every other entry is empty. The entries past the first are
+        // empty vectors, so the column is cheap to build at this length.
+        let mut col: SecretColumn = Vec::with_capacity(MAX_NETWORK_WIDTH + 1);
+        col.push(dealer.share(Fp::new(7)));
+        col.resize(MAX_NETWORK_WIDTH + 1, Vec::new());
+
+        let mut probe = b.dealer();
+        let _ = probe.share(Fp::zero());
+        let expected_next = probe.draw_fp();
+
+        match shuffle(&mut dealer, col) {
+            Err(MpcError::Protocol(m)) => assert!(
+                m.contains("MAX_NETWORK_WIDTH"),
+                "the width cap must decide, not the layout check: {m}"
+            ),
+            other => panic!(
+                "an over-cap width must fail closed, got {:?}",
+                other.map(|(_, c)| c)
+            ),
+        }
+        assert_eq!(
+            dealer.draw_fp(),
+            expected_next,
+            "the refused call must have drawn nothing"
+        );
+
+        // And a legal-width malformed column still refuses on its LAYOUT, so the
+        // width check did not swallow the column validation.
+        let mut dealer = b.dealer();
+        let mut col = share_col(&mut dealer, &[1u64, 2, 3]);
+        let dup = col[0][0];
+        col[0].push(dup);
+        match shuffle(&mut dealer, col) {
+            Err(MpcError::Protocol(m)) => assert!(
+                m.contains("uniform") || m.contains("shares wide"),
+                "wrong refusal: {m}"
+            ),
+            other => panic!(
+                "a malformed column must fail closed, got {:?}",
+                other.map(|(_, c)| c)
+            ),
+        }
     }
 
     /// A column with an element above degree `t` is refused, and refused BEFORE any

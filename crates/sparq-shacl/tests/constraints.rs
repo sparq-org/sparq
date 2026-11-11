@@ -206,6 +206,153 @@ fn range_max_exclusive_boundary() {
     );
 }
 
+// ---- exact numeric ranges (#7294): xsd:decimal / integer never round through f64 ----
+
+/// Whether `value` conforms to a property shape carrying `constraints` (Turtle
+/// predicate-object pairs such as `sh:minInclusive 1`).
+fn range_conforms(constraints: &str, value: &str) -> bool {
+    let shapes = format!(
+        "ex:S a sh:NodeShape ; sh:targetNode ex:n ; sh:property [ sh:path ex:v ; {constraints} ] ."
+    );
+    run(&format!("ex:n ex:v {value} ."), &shapes).conforms
+}
+
+#[test]
+fn range_decimal_and_integer_compare_exactly() {
+    // The #7294 table: each value is distinct from its bound only beyond f64 precision,
+    // so an f64 comparison calls all four violations conforming.
+    let max_u64 = "\"18446744073709551615\"^^xsd:integer";
+    let both = format!("sh:minInclusive {max_u64} ; sh:maxInclusive {max_u64}");
+    let cases: &[(&str, &str, bool)] = &[
+        ("sh:minInclusive \"1.00000000000000002\"^^xsd:decimal", "\"1.000000000000000015\"^^xsd:decimal", false),
+        ("sh:maxInclusive \"9007199254740992.0\"^^xsd:decimal", "\"9007199254740993.0\"^^xsd:decimal", false),
+        (&both, "\"18446744073709551614\"^^xsd:integer", false),
+        (&both, "\"18446744073709551616\"^^xsd:integer", false),
+        ("sh:minInclusive \"1.00000000000000002\"^^xsd:decimal", "\"1.00000000000000002\"^^xsd:decimal", true),
+        (&both, max_u64, true),
+        // The exclusive variants at the same boundaries.
+        ("sh:minExclusive \"1.000000000000000015\"^^xsd:decimal", "\"1.00000000000000002\"^^xsd:decimal", true),
+        ("sh:minExclusive \"1.00000000000000002\"^^xsd:decimal", "\"1.00000000000000002\"^^xsd:decimal", false),
+        ("sh:maxExclusive \"18446744073709551616\"^^xsd:integer", max_u64, true),
+        ("sh:maxExclusive \"18446744073709551616\"^^xsd:integer", "\"18446744073709551616\"^^xsd:integer", false),
+        // Integer data against a decimal bound uses decimal semantics (XPath promotion).
+        ("sh:maxInclusive \"9007199254740992.5\"^^xsd:decimal", "\"9007199254740993\"^^xsd:integer", false),
+        ("sh:maxInclusive \"9007199254740993.0\"^^xsd:decimal", "\"9007199254740993\"^^xsd:integer", true),
+        // Integer subtypes, and spellings that are equal in value.
+        ("sh:minInclusive \"9223372036854775807\"^^xsd:long", "\"9223372036854775806\"^^xsd:unsignedLong", false),
+        ("sh:maxInclusive \"5.0\"^^xsd:decimal", "\"+005\"^^xsd:integer", true),
+        ("sh:minInclusive \"-0.0\"^^xsd:decimal", "\"0\"^^xsd:integer", true),
+        // Beyond i128, still exact.
+        (
+            "sh:maxInclusive \"340282366920938463463374607431768211456000\"^^xsd:integer",
+            "\"340282366920938463463374607431768211456001\"^^xsd:integer",
+            false,
+        ),
+        (
+            "sh:maxInclusive \"340282366920938463463374607431768211456001\"^^xsd:integer",
+            "\"340282366920938463463374607431768211456000\"^^xsd:integer",
+            true,
+        ),
+        ("sh:minInclusive \"-1.0000000000000000000000000000000000000000001\"^^xsd:decimal", "-1.0", true),
+    ];
+    for &(constraints, value, want) in cases {
+        assert_eq!(range_conforms(constraints, value), want, "{value} against {constraints}");
+    }
+}
+
+#[test]
+fn range_bounds_of_one_shape_stay_distinct() {
+    // Each numeric bound is prepared once per run; two bounds on one shape (and a nested
+    // shape's own bound) must not be confused.
+    let shapes = r#"
+        ex:S a sh:NodeShape ; sh:targetNode ex:n ;
+          sh:property [ sh:path ex:v ; sh:minInclusive 0 ; sh:maxInclusive 10 ;
+                        sh:node [ sh:maxExclusive 8 ] ] .
+    "#;
+    let r = run("ex:n ex:v -1 , 5 , 9 , 11 .", shapes);
+    assert_eq!(count_component(&r, "MinInclusiveConstraintComponent"), 1, "{}", r.to_text());
+    assert_eq!(count_component(&r, "MaxInclusiveConstraintComponent"), 1, "{}", r.to_text());
+    // -1 and 5 pass the nested maxExclusive 8; 9 and 11 fail it.
+    assert_eq!(count_component(&r, "NodeConstraintComponent"), 2, "{}", r.to_text());
+}
+
+#[test]
+fn range_float_and_double_keep_xpath_promotion() {
+    // A double operand promotes the pair to double: 1.00000000000000002 IS 1.0 as a double,
+    // so it is not above a decimal bound of 1.0.
+    assert!(!range_conforms("sh:minExclusive 1.0", "\"1.00000000000000002\"^^xsd:double"));
+    assert!(range_conforms("sh:minInclusive 1.0", "\"1.00000000000000002\"^^xsd:double"));
+    // A float (and no double) promotes the pair to float: 16777217 rounds to the float
+    // 16777216, so it equals that float bound rather than exceeding it.
+    assert!(range_conforms("sh:maxInclusive \"16777216\"^^xsd:float", "16777217"));
+    assert!(!range_conforms("sh:maxExclusive \"16777216\"^^xsd:float", "16777217"));
+    // NaN compares with nothing, and the XSD INF spellings order as infinities.
+    assert!(!range_conforms("sh:minInclusive 0", "\"NaN\"^^xsd:double"));
+    assert!(range_conforms("sh:minInclusive 0", "\"INF\"^^xsd:double"));
+    assert!(!range_conforms("sh:minInclusive 0", "\"-INF\"^^xsd:float"));
+    // An exact value past i128 still promotes to the floating type.
+    let huge = "\"340282366920938463463374607431768211456000\"^^xsd:integer";
+    assert!(range_conforms("sh:minInclusive \"0\"^^xsd:double", huge));
+    assert!(range_conforms("sh:maxInclusive \"INF\"^^xsd:double", huge));
+    assert!(!range_conforms("sh:maxInclusive \"1e38\"^^xsd:double", huge));
+    assert!(range_conforms("sh:minInclusive \"1\"^^xsd:float", huge));
+    assert!(range_conforms(
+        "sh:maxInclusive \"0\"^^xsd:double",
+        "\"-1.0000000000000000000000000000000000000000001\"^^xsd:decimal"
+    ));
+}
+
+#[test]
+fn range_ill_typed_numeric_is_not_comparable() {
+    // An ill-typed literal has no numeric value, so it is not in range (SPARQL `<` errors).
+    assert!(!range_conforms("sh:maxInclusive 10", "\"1.5\"^^xsd:integer"));
+    assert!(!range_conforms("sh:maxInclusive 1000", "\"300\"^^xsd:byte"));
+    assert!(!range_conforms("sh:minInclusive 0", "\" 1\"^^xsd:decimal"));
+    assert!(!range_conforms("sh:minInclusive 0", "\"1e3\"^^xsd:decimal"));
+}
+
+#[test]
+fn less_than_compares_decimals_exactly() {
+    // sh:lessThan shares the range comparison.
+    let shapes = r#"
+        ex:S a sh:NodeShape ; sh:targetNode ex:n ;
+          sh:property [ sh:path ex:a ; sh:lessThan ex:b ] .
+    "#;
+    let r = run(
+        r#"ex:n ex:a "1.000000000000000015"^^xsd:decimal ; ex:b "1.00000000000000002"^^xsd:decimal ."#,
+        shapes,
+    );
+    assert!(r.conforms, "{}", r.to_text());
+    let r = run(
+        r#"ex:n ex:a "18446744073709551614"^^xsd:integer ; ex:b "18446744073709551615"^^xsd:integer ."#,
+        shapes,
+    );
+    assert!(r.conforms, "{}", r.to_text());
+    let r = run(
+        r#"ex:n ex:a "18446744073709551616"^^xsd:integer ; ex:b "18446744073709551615"^^xsd:integer ."#,
+        shapes,
+    );
+    assert_eq!(count_component(&r, "LessThanConstraintComponent"), 1, "{}", r.to_text());
+}
+
+#[test]
+fn less_than_or_equals_compares_decimals_exactly() {
+    let shapes = r#"
+        ex:S a sh:NodeShape ; sh:targetNode ex:n ;
+          sh:property [ sh:path ex:a ; sh:lessThanOrEquals ex:b ] .
+    "#;
+    let r = run(
+        r#"ex:n ex:a "1.00000000000000002"^^xsd:decimal ; ex:b "1.000000000000000015"^^xsd:decimal ."#,
+        shapes,
+    );
+    assert_eq!(count_component(&r, "LessThanOrEqualsConstraintComponent"), 1, "{}", r.to_text());
+    let r = run(
+        r#"ex:n ex:a "9007199254740993"^^xsd:integer ; ex:b "9007199254740993.0"^^xsd:decimal ."#,
+        shapes,
+    );
+    assert!(r.conforms, "{}", r.to_text());
+}
+
 // ---- sh:minLength / sh:maxLength (char count, IRI vs literal vs blank) ----
 
 #[test]

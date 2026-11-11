@@ -29,9 +29,10 @@ npx @sparq-org/solid-server --native --port 3000 --base-url http://127.0.0.1:300
 ```
 
 `--protocol` is `solid` by default and also accepts `lws`; LWS always selects the
-native executable. npm supplies optional platform packages for Linux x64/arm64,
-Darwin x64/arm64 and Windows x64, at exactly the host version. They install with
-`ignore-scripts=true`. Runtime resolution uses installed files; a missing
+native executable. A release that publishes the platform packages (Linux x64/arm64,
+Darwin x64/arm64, Windows x64) pins them as optional dependencies at exactly the host
+version; they are not on npm yet, so until then run `sparq-lws-core` directly. They
+install with `ignore-scripts=true`. Runtime resolution uses installed files; a missing
 package is an error naming the required package, and an installed version must
 match the host. Signals reach the native child and shutdown has a deadline.
 
@@ -140,6 +141,9 @@ LWS data-resource reads carry `X-Content-Type-Options: nosniff`.
 
 ## Choose a data backend
 
+For embedded directory opens, lock lifetimes, and the optional boot-time wait for
+another live holder, see [native storage](references/native-storage.md).
+
 Set `PSS_SPARQ_BACKEND` to one of:
 
 - `memory` (default): an ephemeral in-memory test double.
@@ -157,8 +161,11 @@ Set `PSS_SPARQ_BACKEND` to one of:
   a missing outside lock or poisoned transaction journal), or stopped actor returns a
   backend error. After an indeterminate commit or job panic, the actor closes its queue and
   drops pending jobs, including sends already in flight; their callers receive the stopped-actor
-  error and must restart to recover. Dropping the last client joins its actor thread, releasing the directory
-  lock before returning. A refused compaction that leaves the graph unfrozen keeps reads and
+  error and must restart to recover. Dropping the last client joins its actor thread and drops
+  its directory locks before returning. Explicit unlock prevents descriptor copies inherited
+  between fork and exec from extending that lifetime. Embedded opens attempt once and refuse
+  live holders immediately; see [native storage](references/native-storage.md).
+  A refused compaction that leaves the graph unfrozen keeps reads and
   writes available.
 - `http`: a remote SPARQ service. Build with `--features http-sparq` and set
   `SOLID_SERVER_SPARQ_ENDPOINT` to that service's `/sparql` URL. The service must
@@ -181,7 +188,8 @@ Set `PSS_SPARQ_BACKEND` to one of:
 
   `SparqClient::begin_epoch(&LifecycleGuard) -> Result<u64, SparqError>` raises the
   reserved `urn:x-sparq-lws:writer-epoch` record before recovery, under the service's
-  lifecycle lease. `Store::begin_epoch` and pass-through wrappers forward it.
+  lifecycle lease. HTTP checks that the guard belongs to its backend before any
+  index request. `Store::begin_epoch` and pass-through wrappers forward it.
   The raise only advances the epoch and records a fresh owner nonce; startup confirms
   both the epoch and its owner, so competing starts cannot claim the same epoch.
   `sparql::update_begin_epoch(epoch, owner)` builds that raise. Every HTTP `*_fenced`
@@ -200,18 +208,48 @@ Set `PSS_SPARQ_BACKEND` to one of:
 implies `PSS_SPARQ_BACKEND=embedded`, and refuses any other explicit backend or
 a non-empty `SOLID_SERVER_SPARQ_DIR`.
 The default native build opens the filesystem blob store after acquiring the
-index lock. Builds without `embedded-sparq` or `blob-fs` refuse data-directory boot.
+index lock. Builds without `embedded-sparq` refuse data-directory boot; `blob-fs` is required
+when no object URL is configured.
 Without a data directory, the native binary uses in-memory blobs.
 
 | Variable | Meaning |
 |---|---|
-| `SOLID_SERVER_DATA_DIR` | Data root (default unset); opens a durable embedded index and filesystem blobs. |
+| `SOLID_SERVER_DATA_DIR` | Data root (default unset); opens a durable embedded index and filesystem blobs unless `SOLID_SERVER_BLOB_URL` selects object storage. |
+| `SOLID_SERVER_BLOB_URL` | Object backend URL (default unset); requires `blob-object` and `SOLID_SERVER_DATA_DIR`. Accepts `file://`, `s3://`, `az://`, `gs://` with the corresponding provider feature; no user information, query or fragment. Exact URL and backend are pinned in `format.json`; changes require migration. |
+| `SOLID_SERVER_BLOB_OPTIONS` | JSON object of provider option names to string values (default unset, empty map); requires `SOLID_SERVER_BLOB_URL`. Unknown keys fail startup. Credentials belong here or in provider-default discovery, never in the URL. Values are never logged or recorded in the marker. |
 | `SOLID_SERVER_SPARQ_DIR` | Legacy existing index snapshot (default unset); retains the durable-index/in-memory-blob refusal. A directory-backed index opened through this path also compacts on graceful shutdown. |
 | `SOLID_SERVER_WAIT_FOR_LOCK_SECS` | Non-negative integer seconds to retry the data-directory index lock (default `0`). |
 | `SOLID_SERVER_ALLOW_INCONSISTENT_DURABILITY` | `1` permits only the durable-blob/ephemeral-index mismatch (default unset). |
 
 See [native storage](references/native-storage.md) for the `format.json` contract,
 `EmbeddedSparqClient::open_or_create` / `compact`, lock ownership and shutdown.
+
+### Object-store blob plane
+
+Status: **wired**. `SOLID_SERVER_BLOB_URL` selects the native-only
+`sparq-lws-blob-object` backend through the default-off `sparq-lws-core/blob-object`
+feature; setting a URL without that feature is a startup error. The index stays
+in the data directory. LocalFileSystem is included; AWS, Azure and GCP are
+separate opt-in crate features. See the [object-store reference](references/blob-object.md)
+for constructors, immutable keys, streaming listings, and the reusable backend
+contract suite exposed by `test-support`. The same create-only contract runs over
+`InMemoryBlobStore::with_immutable_keys()` (under `test-support`), the object
+adapter, and `FsBlobStore` (in the `blob-fs` tests). Legacy in-memory constructors
+keep their replacement semantics.
+The offline directory-copy backup and restore procedure covers only the
+filesystem blob backend.
+
+The dependency-free `sparq-lws-blob-key` crate shares `POOL_MARK`, `PREFIX`,
+`parse(&str) -> Option<(&str, bool)>` (bare key and pool flag), and
+`format([u8; 16], bool, bool) -> String` (random suffix, pool flag, envelope flag)
+across key minting and validation in both filesystem and object backends.
+The object adapter advertises no generation and rejects `delete_if_unchanged`; the
+reconciler uses `BlobStore::delete` for these entries. Its `file://` backend is
+for tests and development only; see the reference for local durability limits.
+The native backend wrapper and periodic reconciler's shared handle forward
+`list_stream`, preserving backend
+streaming when the compatibility snapshot is unavailable or exceeds its limit.
+A listing error aborts its current batch immediately; earlier batches may have completed.
 
 ### Running durably in a container
 
@@ -242,7 +280,41 @@ or `persistence.existingClaim`. The shared top-level persistence block mounts
 Use a filesystem on a **block volume** (EBS, PD, Azure Disk), never a network
 filesystem (EFS, Azure Files, NFS): the index relies on file locking and fsync
 semantics. Keep **one replica**; this is a single-instance index and blob store.
-**Stop the server before backing up** the whole volume (backup procedure: #7188 P0-8).
+**Stop the server before backing up** the whole volume.
+
+### Backup and restore
+
+An offline copy of the whole data directory covers the embedded index and the
+filesystem blob backend in both Solid and LWS modes. Stop the server with SIGTERM
+and wait for exit status zero: shutdown has drained requests and completed
+compaction. Then archive the **whole** data directory, including `format.json`,
+`index/`, `blobs/` and the advisory lock files (harmless to copy).
+
+Restore by unpacking into an **empty** directory and starting the server with
+`SOLID_SERVER_DATA_DIR` pointing at it. Retain the public base URL and external
+configuration/signing keys. Online or hot backup is unsupported; copying a
+running data directory is unsafe. A backup is only as consistent as the stop
+that preceded it.
+
+With encryption enabled, the same offline procedure preserves `e1-` blobs,
+wrapped keys in the index, and the major-2 `format.json` marker. Back up the local
+KEK separately with restricted permissions and restore it before starting with
+`crypt` and `SOLID_SERVER_CRYPT_PROVIDER=local`. Retain the protocol and pod scope;
+provider `none` refuses a major-2 restore. The archive does not contain an external KEK.
+
+Archive the whole directory rather than picking files: a crash can leave
+unreferenced blob files until the reconciler runs, and they belong in the copy.
+
+In a container or Kubernetes, stop the container or scale the workload to zero,
+wait for clean exit and volume detachment, then snapshot the detached volume.
+See the [offline backup and restore procedure](references/native-storage.md#backup-and-restore)
+for commands, refusal cases, deployment references and recovery limits.
+
+With `SOLID_SERVER_BLOB_URL`, the backend record points to a separately configured
+object namespace. A data-directory copy does not guarantee a complete backup,
+including for a `file://` URL. Back up and restore those bytes while the server
+is stopped, preserving blob keys and the exact URL recorded in `format.json`.
+Changing that backend or URL requires migration.
 
 ### Child record replacement
 
@@ -269,7 +341,7 @@ operations: open sweeps `tmp/`. The caller must control this directory.
 
 Construct `CompositeStore::new(index, blobs)` with that store. The standalone API
 is synchronous; qualify async calls as `BlobStore::get(&blobs, key).await` so they
-use the blocking pool. Keys must match `($pool$)?b1-[0-9a-f]{32}` and never be
+use the blocking pool. Keys must match `($pool$)?(b1|e1)-[0-9a-f]{32}` and never be
 rewritten or reused, even after deletion; composite writes mint opaque keys with
 no resource IRI embedded. Existing keys fail. The filesystem must support hard
 links and directory sync. Fan-out initialization is synced on first use per open
@@ -293,20 +365,83 @@ They are refused on non-memory backends unless
 `SOLID_SERVER_ALLOW_SEED_NONMEMORY=1` is explicitly set. Use that escape hatch
 only for an ephemeral test instance.
 
-## Encryption at rest (in progress)
+## Encryption at rest
 
-`sparq-lws-crypt` is the native, unpublished P1-1 crate for key providers and the
-versioned `e1` blob envelope. It provides a local KEK provider with context-bound
-AES-256-GCM wrapping, zeroizing secret keys and a per-DEK seal counter. See its
-[format and API reference](../../crates/sparq-lws-crypt/README.md).
-Nothing is wired into the server yet; the blob-store decorator and environment
-configuration belong to P1-2 of [#7189](https://github.com/sparq-org/sparq/issues/7189).
+Build the native server with `cargo build -p sparq-lws-core --features crypt`
+and set `SOLID_SERVER_CRYPT_PROVIDER=local` to enable the P1-2 decorator
+`store::blob_crypt::EncryptingBlobStore` over the P1-1
+[envelope and key-provider API](../../crates/sparq-lws-crypt/README.md).
+`BlobStore::put_scoped(&BlobScope, key, body)` defaults to `put` for ordinary
+backends; `CompositeStore` uses it for every body write. The decorator refuses
+plain `put`. `BlobStore::get_scoped(&BlobScope, key)` defaults to `get` for ordinary
+backends; resource reads use it to require the authenticated DEK pod to match the
+resource pod. Unscoped `get` opens by blob key and the record's context; callers
+reading a resource use `get_scoped` to supply its pod.
+`BlobStore::requires_envelope()` defaults to `false`; encryption
+returns `true`, so body writes mint `e1-` keys (after any `$pool$` marker).
+The shared `sparq-lws-blob-key::parse` grammar accepts
+`($pool$)?(b1|e1)-[0-9a-f]{32}` for both filesystem and object backends.
+`format(suffix, pooled, envelope)` selects `e1-` when its final boolean is true,
+otherwise `b1-`; callers provide the suffix bytes.
+The encryption decorator requires these marked keys for `put_scoped`.
+Transparent decorators must forward this requirement and scoped reads and writes.
+Body-cache entries retain that pod; a different pod refuses the read
+and evicts the entry. Each DEK-cache insert sweeps expired entries. Completed
+failed lookups release idle cache slots while queued callers share their result.
+Parsed ACL reuse requires the current blob pointer as well as its ETag in both
+sequential and planned authorization. A new pointer is read through the store.
+`BlobScopePolicy` selects the storage root for LWS, the first path
+segment for Solid, or a fixed Solid identity. Wrapped keys and conservative
+seal reservations live in reserved index records, outside HTTP resources.
+Native LWS assembly uses its configured storage URL, including any path prefix.
+Library callers with such a prefix select `BlobScopePolicy::LwsStorage(BlobScope(root))`
+before `encrypt_blobs`; `BlobScopePolicy::Lws` infers an origin root.
+Resource read plans refuse this namespace in both target and ACL-candidate
+positions. With native `crypt,blob-fs`, the decorator encrypts bytes before the
+filesystem adapter publishes them; its default scoped methods store and read
+those supplied bytes. Reopen the index and blobs with the same KEK to read
+existing bodies; plaintext-derived ETags are preserved.
+Queued requests share a key-provider result, including a failed unwrap or initial
+generation. A later independent request can retry after a failed call.
 
-Once integrated, blob encryption protects lost/stolen volumes and snapshots,
-cloud/backup operators with byte-plane access and no KMS grant, and storage admins
-without the KEK. It does not protect a root admin dumping process memory or reading
-the mmap'd index on the running host (P3 scope). The sparq index directory holds
-the RDF graph in plaintext on disk; P1 requires a CMK-encrypted block volume
+| Variable | Default | Effect |
+|---|---|---|
+| `SOLID_SERVER_CRYPT_PROVIDER` | `none` | `none` keeps plaintext writes. `local` requires the default-off native `crypt` feature. `aws-kms` and `azure-kv` refuse startup as not built. |
+| `SOLID_SERVER_CRYPT_LOCAL_KEK_FILE` | unset | Required for `local`: a regular file of exactly 32 raw bytes, with no group/other permissions (for example `0600`). |
+| `SOLID_SERVER_CRYPT_DEK_TTL_SECS` | `600` | Non-negative integer seconds for every unwrapped DEK, including the current write key. `0` expires immediately; expiry re-unwraps and skips the unused reservation. |
+| `SOLID_SERVER_CRYPT_POD_SCOPE` | unset | Non-empty fixed Solid pod identity, otherwise the first path segment. LWS and subscription pools use the storage root and ignore this override. |
+
+The other encryption variables are read only when the provider is `local`.
+Native boot constructs one decorator per exclusive index, before sharing it with
+the router and reconciler. Boot checks every record's provider and local KEK
+identity, then unwraps one existing DEK plus every current DEK,
+without repeating the probe if it is current. Other DEKs unwrap lazily on first
+read through the same TTL cache and single-flight. A different local KEK fails
+startup with `WrongKek` (reported as `wrong KEK`).
+The protocol's fixed wrapping-context `scheme` is `solid` or `lws`.
+
+Opening a data directory with encryption atomically changes `format.json` to
+`"blobs":{"major":2,"encryption":"envelope-v1"}`. This is a **one-way major
+bump**: older binaries reject it, and provider `none` refuses to open it.
+Existing plaintext remains readable; subsequent writes are encrypted.
+Bodies written with encryption enabled must be envelopes; non-envelope bytes
+for them are refused, including after restart.
+**Back up the KEK independently with the index and blobs: losing the KEK makes
+encrypted data unrecoverable.** Legacy plaintext beginning with `SQLB` is treated
+as an envelope and fails closed; it is never retried as plaintext.
+See the [encryption reference](references/blob-encryption.md) for the on-disk
+contract. The wasm graph excludes this feature.
+
+Reinstate restores a held record only to its original resource, with or without
+`crypt`. Holds record that IRI in their internal directory metadata. Older holds
+without a recorded original IRI fail with a storage error when reinstated;
+they remain available for release.
+
+Blob encryption protects lost/stolen volumes and snapshots, cloud/backup
+operators with byte-plane access and no KMS grant, and storage admins without
+the KEK. It does not protect a root admin dumping process memory or reading the
+mmap'd index on the running host (P3 scope). The sparq index directory holds the
+RDF graph in plaintext on disk; P1 requires a CMK-encrypted block volume
 (EBS/Azure Disk/dm-crypt). Application-level index encryption is research
 ([#2567](https://github.com/sparq-org/sparq/issues/2567)).
 ETags derive from plaintext, so equal bodies get equal ETags across pods.
@@ -543,8 +678,10 @@ with `sparql-endpoint`, independent of the requester's readable resources.
 LWS serves its CID description at `/` with `Accept: application/lws+cid`, preserving
 its verification key and validators. It includes the storage-description service,
 protocol conformance URI, JSON Patch formats and recursive deletion; `MoveResource`
-is absent because `up` is server-managed. Notification subscription types come from
-the catalog (currently webhooks). Draft extension terms use an inline context.
+is absent; changing `up` through a linkset edit or a content replacement with
+`Prefer: set-linkset` gets `409 Conflict`.
+Notification subscription types come from the catalog (currently webhooks).
+Draft extension terms use an inline context.
 See [catalog entries and embedding](references/service-description.md) for the
 RDF terms, media maps and the `describe::ServiceCatalog` registration API.
 
@@ -605,26 +742,26 @@ because the remote index does not provide the exclusive ownership the service
 requires. HTTP metadata and containment writes carry nonce and epoch guards;
 startup establishes the epoch under the lifecycle lease before intent recovery.
 The HTTP refusal remains in place independently of those guards.
-Anyone authenticated may hold at most 16 access requests and 16 subscriptions (429 past
-that; the owner's subscriptions are not counted), and each such request body is at most 16 KiB
-(413). Every subscriber has that capacity of 16 in full: how many subscriptions anyone else
-holds never makes it smaller, and the count behind a 429 is read from the requester's own
-records alone. The server holds at most 512 access requests and 512 subscriptions in all (507),
-the storage owner's subscriptions counted apart against 512 of its own. Those totals are
-resource bounds, not capacities: a 507 says the storage is full of subscriptions (or of access
-requests) **whoever filled it** — a newcomer holding none is refused the same. One subscriber
-cannot reach a total on its own, being held to 16.
+Anyone authenticated may hold at most 16 access requests and 16 subscriptions (the owner's
+subscriptions are counted separately), and each such request body is at most 16 KiB (413).
+Both the principal's bound and the storage-wide bound return the same `429`, headers and
+problem detail: "this agent may not hold more {what} now". A subscription or access-request create refused by
+the store's service pool returns that same answer. Every subscriber has its own capacity in
+full; quarantined or held-back subscriptions count only against the owner's total, and
+quarantined access requests take no place from live requests or their authors.
+Admission bounds are 512 live access requests and 512 non-owner subscriptions, with 512
+owner subscriptions counted separately. Held-back and quarantined subscriptions count only
+against the owner's share: stored non-owner subscriptions can exceed the 512 total by the
+number of those retained records. Quarantined access requests consume no live request place.
+
 **Subscriptions have storage of their own.** In the in-memory store they are admitted against a
 service pool (`in_service_pool`, `InMemoryStoreLimits::max_pool_resource_count` and
-`max_pool_bytes`, sized for the 1,024 the notification service admits) and take nothing from the
-content ceilings (`max_resource_count`, `max_total_bytes`), so no number of subscriptions, from
-any number of identities, can make a write of content answer 507. A full pool refuses a
-subscription create (507) and nothing else. **Residual:** that 507 is an aggregate-occupancy
-signal — a requester well under its own 16 learns from it that the pool is full, which is
-something about how many subscriptions others hold. It is the occupancy of a bounded shared
-resource, as the access-request total is, and it carries no subscriber, topic or inbox; it is
-the signal a shared resource bound cannot avoid giving, kept to the subscription pool so it
-never reaches a content write.
+`max_pool_bytes`, sized for the notification service's bounds), and take nothing from the
+content ceilings (`max_resource_count`, `max_total_bytes`).
+**Residual:** `MAX_SUBSCRIPTIONS`, `MAX_REQUESTS`, the settlement places, `max_resource_count`
+and `max_total_bytes` are storage-wide. Others can fill a shared bound and cause a caller
+under its own limit to be refused. Subscription and access-request capacity refusals give
+the same answer as the caller's own limit; content ceilings keep the existing storage refusal.
 A type-search filter is at most 8 KiB and an
 access grant 256 KiB; these limits apply while the body is read. Stored requests or subscriptions
 past these bounds at startup (stored
@@ -654,7 +791,8 @@ one small record in the store's index alone (`Store::raise_marker`, under a frag
 subscriptions container that no request can name), raised in one step under the index's own
 write lock, so a raise that lands late never lowers it; it needs no blob capacity, and its index
 entry has a slot of its own, admitted however full the subscription pool is (the slot is kept for
-one IRI, the first marker stored; any other IRI of that shape takes room in the pool). The mark
+one IRI, the first marker stored; any other IRI of that shape follows the ordinary entry
+ceilings for its path). The mark
 is only as durable as the backend's own persistence: the in-memory index holds it for the life of
 the process; the directory-backed embedded index journals each raise before acknowledging it.
 Restoring an independent snapshot taken before a raise restores the earlier mark and loses
@@ -693,17 +831,27 @@ the mark; construction fails, the mark unchanged, while any of them is still sto
 once it can be removed). An `LwsState` holds a lease (`store::Lifecycle`) for as long as it
 lives. Every `Store` must keep and return one lease through the required
 `Store::lifecycle() -> Arc<Lifecycle>` method; wrappers forward their inner store's lease.
+`SparqClient::lifecycle() -> Arc<Lifecycle>` is also required: index clients retain the lease,
+clones share it, and wrappers forward it. `CompositeStore::new` takes its lease from the index,
+so separately built composites over clones of one index share it. `InMemorySparqClient` clones
+share both the index and the lease; embedded and HTTP client clones share their leases too.
 `CompositeStore` clones share their backend handles, cache, holds and lease. Every clone of
 `LwsState::store` and every `Tracked` wrapper shares that lease too, so a second `LwsState`
-built over any of them is refused before backend work. Only the holder may lower the mark
-(`Store::reset_marker` and `SparqClient::reset_marker` take its guard, which only this crate
-makes). Separately opening the same backend still creates a separate in-process lease.
+built over any of them is refused before backend work. Only the holder may lower the mark:
+`Store::reset_marker` and raw `SparqClient::reset_marker` check that the guard belongs to their
+backend's lease. Custom implementations call `lease.belongs_to(&self.lifecycle())` before
+resetting a marker. Only this crate makes a guard. Separately opening a backend creates
+a separate in-process lease.
 A state that replaces another must be built after the
 old one is dropped. Running a second process over the same store directory is unsupported, and
 nothing at this release keeps one out. The mark changes only through `Store::raise_marker` and
 `Store::reset_marker`: the generic mutators of the store (`write`, `create_in_container`,
 `restore`, `hold`, `reinstate`, `delete`, `delete_container_if_empty`) refuse an IRI shaped like
-the mark (`ServerError::Forbidden`). The raw index mutators also refuse every marker operand,
+the mark (`ServerError::Forbidden`). Marker recognition includes path-based storage roots,
+such as `https://pod.example/alice/.lws/subscriptions/#high-water`, using the exact marker suffix
+below any HTTP(S) root without a query or fragment. The `.lws/` segment at a storage root is
+reserved for services; resource creation cannot name this fragment IRI.
+The raw index mutators also refuse every marker operand,
 including either containment operand and the parent of an empty-container removal, with a fixed
 backend error before backend work. A create whose
 purge of its own expired subscriptions halts the service answers `503` and creates nothing. Once
@@ -725,7 +873,7 @@ by the process's monotonic clock, and once expired it never connects again in th
 (a socket it opened is not closed by it); none survives a restart. A
 subscriber's conditional subscription create compares its own listing, and holds only that
 listing (and the container, shared) while it is evaluated and until the new subscription is
-registered (when the store leaves the create's outcome unknown, it holds that listing shared
+registered (when the store leaves the create's outcome unknown, it normally holds that listing shared
 until the outcome is settled, so the subscriber's other creates and removals go on meanwhile):
 what it waits on is a change to its own subscriptions, the inline purge of its own expired ones
 above, or the owner's conditional create (which holds the container alone, and once queued keeps
@@ -760,7 +908,7 @@ cargo run -p sparq-lws-core
 | `SOLID_SERVER_LWS_AS_KEY_FILE`, `SOLID_SERVER_LWS_NOTIFY_KEY_FILE` | P-256 private JWKs for access tokens and webhook signatures. A missing file is created with a fresh key (mode 0600); a generated access-token key's `kid` is its RFC 7638 thumbprint (the webhook key's is `notify-key`). Without a file a key lives only for the process. |
 | `SOLID_SERVER_LWS_AS_PREVIOUS_KEY_FILE` | Key rotation: the P-256 JWK (public or private; only the public part is used) the access-token key replaced. It must exist and be a different key from the current one. Keys generated by older builds all carry `kid` `lws-as-1`; when both keys do, the current key goes by its thumbprint instead and the previous key keeps `lws-as-1`, so its tokens still verify. Startup still fails when both files hold the same key, or when the kids collide even after that. It is published in the JWKS, and tokens whose `kid` names it still validate until they expire. To rotate, move the old key file here and point `SOLID_SERVER_LWS_AS_KEY_FILE` at a new path; drop this variable once the token lifetime has passed. |
 | `SOLID_SERVER_LWS_TOKEN_TTL_SECS` | Access-token lifetime (default 300). |
-| `SOLID_SERVER_LWS_DELIVERY_QUEUE`, `SOLID_SERVER_LWS_DELIVERY_WORKERS`, `SOLID_SERVER_LWS_DELIVERY_PER_INBOX` | Webhook delivery bounds: deliveries waiting or in flight (default 1024; past it a notification is dropped and logged), deliveries in flight (default 16), and in flight to one inbox origin (default 2). |
+| `SOLID_SERVER_LWS_DELIVERY_QUEUE`, `SOLID_SERVER_LWS_DELIVERY_WORKERS`, `SOLID_SERVER_LWS_DELIVERY_PER_INBOX` | Delivery bounds: capacity of each of the independent webhook and stream-publication queues (default 1024; past either bound a notification is dropped and logged), webhook deliveries in flight (default 16), and in flight to one inbox origin (default 2). |
 | `SOLID_SERVER_LWS_RESET_SUBSCRIPTION_CLOCK` | `1` runs the notification recovery once at start, before anything is served: every stored subscription with an expiry is removed, then the clock is stored as the notification high water (the start fails, the mark unchanged, while one is left). For a mark stored while the clock had jumped forward; correct the clock first and unset it afterwards. |
 | `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH` | `1` lets the server fetch and deliver to `http:`, loopback and private addresses (CID documents, OIDC issuers, webhook inboxes), and issue HTTP/WS notification capability URLs. Test-suite use only. |
 | `SOLID_SERVER_LWS_AUTHN` | Comma-separated authentication suites to offer, of `ssi` (did:key and controlled identifiers), `openid` (OpenID Connect) and `saml` (SAML 2.0). Unset, every suite built in is offered (SAML when `SOLID_SERVER_LWS_SAML_IDPS_FILE` is set). A name that is no suite or that the build does not hold, `saml` without its identity providers, and a suite's own variable set while that suite is left out each stop the start. |
@@ -784,8 +932,13 @@ What the server exposes, all discoverable from the storage description
   the patch is charged and refuses it (`413`) past what keeps parsing it (the same reader again,
   keeping what it reads) within the linkset cost budget beyond the body itself; a number in it
   gets `422`, text that is not JSON (or nests past what the parser reads) `400`, a partial `PUT` (`Content-Range`) `400`. A linkset `PATCH` or `PUT` changes only user-managed links: the
-  server-managed `up`, `type`, `self` and `linkset` relations of the resource keep the server's
-  values, and a result that is not a linkset document gets `422`. Its relative `anchor` and
+  server-managed `type`, `self` and `linkset` relations of the resource keep the server's
+  values. A result naming an `up` for the resource's own context other than its exact
+  parent container gets `409 Conflict`, after authorization and preconditions and before
+  any write. This applies to linkset `PATCH` and `PUT`, and to `Link` headers on content
+  replacement with `Prefer: set-linkset`; the same parent is accepted. Plain content `PUT`
+  ignores `Link: rel=up`. The storage offers no `MoveResource` capability.
+  A result that is not a linkset document gets `422`. Its relative `anchor` and
   `href` values are resolved against the linkset's own URI (RFC 9264 section 4) and stored
   absolute; one that is not a URI reference gets `422`, as does a target attribute not shaped as
   RFC 9264 section 4.2.4 says (`title`, `type`, `media` strings; `hreflang` and extension
@@ -868,11 +1021,18 @@ What the server exposes, all discoverable from the storage description
   identifier types. `SOLID_SERVER_LWS_AUTHN` picks among the suites built in.
   Storage requests take `Authorization: Bearer <access token>`; a missing or bad token
   gets `401` with `WWW-Authenticate: Bearer resource_metadata="…", realm="…", as_uri="…"`.
-  RFC 9728 discovery is public at `<base>/.well-known/oauth-protected-resource`,
-  obtained by inserting the well-known path before the storage root path. Only that
-  computed path is served; other suffixes return `404`. GET and HEAD return JSON
-  with an ETag and `Cache-Control: public, max-age=300`; `If-None-Match` revalidates it.
-  The document has `resource` and `jlws_storage_description` equal to `<base>/`,
+  For paths without dot segments, each challenge names RFC 9728 metadata for the exact
+  requested resource URI, with its query removed: insert
+  `/.well-known/oauth-protected-resource` before its path.
+  Preserve percent-encoding and trailing slashes: `/c` and `/c/` have distinct metadata
+  URLs. The origin root uses `/.well-known/oauth-protected-resource` without a suffix.
+  Paths with literal or percent-encoded `.` or `..` segments keep the storage-root metadata
+  URL in challenges. GET and HEAD serve metadata for paths within the storage and service
+  endpoints, including `/.lws/subscriptions/`; paths outside these scopes or containing
+  dot segments return `404`.
+  They return JSON with an ETag and `Cache-Control: public, max-age=300`;
+  `If-None-Match` revalidates it. The document has `resource` equal to the exact resource
+  URI and `jlws_storage_description` equal to `<base>/`,
   `authorization_servers: ["<base>"]` (exactly the AS metadata issuer, without a
   trailing slash), and `bearer_methods_supported: ["header"]`. It omits `resource_name`
   and DPoP algorithm metadata: storage access uses bearer tokens; a DPoP proof on the
@@ -884,8 +1044,10 @@ What the server exposes, all discoverable from the storage description
   The first auth parameter is `resource_metadata`; `realm` equals the storage root and
   access-token audience, and `as_uri` is retained for transitioning clients. An anonymous
   challenge has no `error`; a rejected bearer token adds `error="invalid_token"`.
-  For child resource requests, validate containment within the PRM's storage-root
-  `resource`, rather than string equality with the child's URL.
+  For per-resource metadata, validate that `resource` equals the requested resource URI
+  character for character.
+  Metadata depends only on the request path and fixed server configuration; its body and
+  ETag are identical for every caller regardless of whether the resource exists.
 - **Access grants and requests** (Access Profile) under `/.lws/grants/` and
   `/.lws/requests/`. Documents need an `@context` that includes
   `https://www.w3.org/ns/lws/v1` (otherwise `400`). Grants are ODRL-style policies with
@@ -908,7 +1070,7 @@ What the server exposes, all discoverable from the storage description
   been applied yet, finds and then does nothing. Only a listing read after the fence counts
   as "not listed"; until the fence lands, the create answers `500` "not known" and keeps the
   record's lock and quota place, and the record is put in force if it landed. Until it is
-  settled, the record's narrowest listing stays held, shared: a subscriber's own listing for
+  settled, the record's narrowest listing normally stays held, shared: a subscriber's own listing for
   a subscription, the container's for a grant, a request or an owner's subscription. So a
   conditional create evaluated on that listing waits for the outcome (`503` past the lock
   wait), and two with one entity tag cannot both register. A conditional create whose
@@ -918,10 +1080,36 @@ What the server exposes, all discoverable from the storage description
   being settled nor holds up other creates. A fence is
   one triple, kept for good in the index's reserved `urn:pss:index#fences` graph (the update it
   fences may still arrive at any time): the graph grows by one triple per write that failed this
-  way. At most 256 record changes are in progress or being settled at once; past that, a new
-  create or removal answers `503` with `Retry-After`. Residual: requests and the settling of
-  outcomes the store left unknown share those 256 places, so while many outcomes wait to be
-  settled (a store that keeps failing), any caller's create or removal can get that `503`. The tasks that settle them belong to the
+  way. At most 256 record changes are in progress or being settled at once. In closed mode,
+  at most 16 unknown outcomes are being settled for one principal, identified by its subject
+  (anonymous requests share one principal). Ordinary writes and lock waits consume only a
+  shared place; the principal place starts at an unknown answer and lasts until its outcome is
+  known. Memory confirmation retains only the shared place.
+  Open mode skips the principal ceiling. Already-running changes first try a principal permit
+  without waiting. If none is free, they release the high-water gate and every listing lock
+  before waiting, retaining only their shared change place, record lock and request admission.
+  A pending-listing claim preserves conditional tag checks through memory confirmation.
+  A subscription claims only its subscriber's listing, so the owner's whole-listing conditional
+  creates continue; a record listed only in its container claims that container. Comparisons
+  on a claimed listing answer `503`; unconditional creates continue. Released subscriber and
+  container-only listing guards are not reacquired. Only a subscriber record's container is
+  held shared while its arrival or removal is confirmed, preserving the owner's whole-listing
+  conditional-create window. That guard is taken before the SPARQL publication lease.
+  New changes by a principal already at its unsettled ceiling are refused.
+  Client changes use the requesting subject, including deletion of a quarantined record;
+  automatic cancellation after a failed delivery or stream withdrawal uses the subscriber's
+  subject. Closing a stream precedes its durable removal, so settlement does not extend
+  revocation; live stream cancellation uses the shared change places, preserving the expiry
+  sweeper's separate maintenance places.
+  Both bounds answer the same `503` with `Retry-After`. Dropping a place releases every
+  permit it holds. The expiry sweeper keeps its separate maintenance places.
+  Once an outcome is known, its principal permit is released before memory confirmation.
+  The claim remains until that confirmation finishes. Its shared place follows
+  the resulting notification through selection and webhook queueing; maintenance announcements
+  retain their maintenance place through that work. Those places are released before waiting
+  on any stream publication gate. Principal bookkeeping ends with the last change.
+  Residual: the shared places can be filled by multiple principals, so a caller under its own
+  bound can still receive that same refusal. The tasks that settle them belong to the
   server's state and end when it is dropped, leaving the record as the store has it for the next
   start to load. A record is announced (`Create`) as it is
   put in force, so one confirmed only after its create answered is announced then. A revocation (or a request's withdrawal)
@@ -970,7 +1158,7 @@ What the server exposes, all discoverable from the storage description
   the start that can fail has succeeded. A stored grant or request that cannot be read stops
   the start (a later start reads it again); one listed but gone is skipped; one whose stored
   body is not a record is quarantined at every start until the owner deletes it: it grants
-  nothing, is listed and counts against its quota, and answers `500` to a read.
+  nothing, is listed without taking a place from access requests, and answers `500` to a read.
   A new request notifies the owner's inbox when the owner's JSON(-LD) identity document
   names one. A new grant notifies the inboxes of the requests its assignees made themselves,
   as well as its own `inbox`.
@@ -1017,12 +1205,16 @@ What the server exposes, all discoverable from the storage description
   resource that is set aside, even one set aside while it waits, and checks its subscription
   again once it holds the lock. An Update is announced by the task that runs the write, so a
   client that goes away mid-write does not keep subscribers from hearing of it. Who hears of a
-  change is decided while the write's locks are still held, so a change that follows cannot hide
-  it. Creating or removing an access grant, an access request or a subscription is announced to
+  change depends on the subscriptions and grants in force at commit and the resource's
+  metadata and format then. The writer captures the event, registration sequence, shared policy
+  array and resource snapshot while holding its locks, without selection work. If an owner
+  content-only PATCH omitted its early snapshot, commit may read metadata after its final
+  live/pending-reader check.
+  Selection and authorization run on a spawned task that the response never awaits. Creating or removing an access grant, an access request or a subscription is announced to
   subscriptions to its own service container (not to one to the storage root): the owner and the
   record's author may hear of it. A stored subscription that cannot be read stops the start; one
   whose stored body is not a subscription is quarantined as access records are: listed to the
-  owner, counted against both totals, `500` to a read, removed by the owner's `DELETE` as any
+  owner, counted only against the owner's total, `500` to a read, removed by the owner's `DELETE` as any
   record is. A subscription is created and cancelled as an access record is, by the same code.
   Each topic of a new subscription is checked before its lock is taken: one the subscriber may
   not read is refused (`403`, or `401` anonymous) at once, whatever its state. Access is decided
@@ -1036,17 +1228,49 @@ What the server exposes, all discoverable from the storage description
   owed. Both are counted in memory from the start, and only for a change that happened (a delete
   that fails counts nothing). The authorization for one change has no budget of its own (one
   party's subscriptions that may not read the resource could spend it before an authorized one is
-  reached): the subscription totals cap it at one check per subscription in force (at most
-  1,024). That caps the number of checks, not their cost: each reads from one snapshot of the
-  resource's access taken for the change, so its metadata is read and the grants are scanned
-  once per change. Taking a place in the delivery queue, parsing each inbox and running each
-  delivery leave the request's task before any of them is queued, on a task of their own
-  (`Notifier::send`), so a delivery target that never answers holds up neither that change nor
-  the next, and the request does not do the per-delivery work of however many subscriptions the
-  change has. When the runtime runs that task is the runtime's business: the deliveries are off
-  the request's task, which is not a promise that they happen after the response reaches the
-  client. Who hears of the change is still decided on the request's task, while its locks are
-  held.
+  reached): selection checks each subscription in force at most once. The admission totals
+  normally cap these at 1,024; already-stored records past a bound remain loaded as described above.
+  Each decision uses the commit snapshot and grant policies shared by that change.
+  `Snapshot::from_parts(meta, format)` constructs that snapshot from state the change already
+  holds, and `AccessStore::grant_policies()` returns a shared `Arc<[Policy]>`, rebuilt when a
+  grant changes. Subscriptions registered after capture are excluded. The withdrawn set is
+  also captured through an Arc snapshot: a subscription withdrawn at capture stays excluded
+  even if restored before selection; one withdrawn later remains eligible for initial selection.
+  Selection excludes subscriptions expired by the high water, and delivery still checks current
+  withdrawal and access. Selection, authorization, accounting, queue
+  admission and delivery run on the notification task (`Notifier::send`). A recursive delete
+  passes its committed changes to one task with one shared delivery bound. The response never
+  awaits that task. The task retains the request's admission slot through selection and webhook
+  queueing, then releases it before stream publication waits. Selection remains within the
+  concurrency ceiling after the response. Scheduling may still run it before
+  the response reaches the client.
+  Pending stream publications take separate storage-wide delivery places before request
+  admission is released, retaining them through publication and its access checks. Their queue
+  has the same configured capacity as the independent webhook queue; overflow is dropped and
+  logged without waiting or changing the successful write response.
+  Pending notifications retain their order within one batch. Separate commits use independent
+  tasks and have no cross-commit delivery-order guarantee; stream cursors follow publication
+  order. Trash moves (through DELETE or POST) and trash restores use the same commit capture,
+  background selection and admission handoff. A move retains the resource's pre-delete state;
+  a restore captures the new resource's creator and format. The internal CRDT room-create feed
+  also runs on that task, including when the subscription notification service is halted.
+  Content-only PATCH reuses the metadata read by its locked Read authorization check;
+  open mode needs no LWS metadata lookup because every subscriber may read. Closed-mode owner
+  PATCH reads a snapshot only when the notifier holds a non-owner subscription or a pending
+  non-owner registration, checked through constant-time counts. If the early read was omitted,
+  commit captures registration eligibility first, then checks those counts again under the
+  resource locks and reads metadata if needed. This includes subscriptions to parent and
+  ancestor containers registered during the write. Pending registrations keep their count
+  through an unknown store outcome until confirmed or absent. With no non-owner subscriptions
+  or pending registrations, owner PATCH reads no LWS metadata. Creator-only authorization
+  still parses only the creator for ordinary checks; PATCH retains full metadata from those
+  same bytes for notification capture, without another store lookup. Malformed unrelated
+  fields do not change the ordinary creator decision, but leave capture unreadable.
+  In-memory blob/index ceilings emit `BlobError::ServicePoolFull` or `SparqError::ServicePoolFull`;
+  record creates preserve them as `ServerError::ServicePoolFull`. That typed signal maps to a
+  quota `429` for subscriptions and access requests; general `InsufficientStorage` refusals retain `507`.
+  Encrypted service-pool creates preserve that signal too; writes, restores, reads and
+  wrapped-key bookkeeping map capacity refusals to `507`.
   A recursive delete too large to put back is refused before any of its
   notifications is prepared.
 - Writes and deletes are **whole or not at all**: a PUT that changes metadata, a linkset PATCH or PUT and a `DELETE`
@@ -1134,18 +1358,20 @@ What the server exposes, all discoverable from the storage description
   settled the same way from its intent, and its container touched after. A
   create needs none: its metadata is written before its content and removed after it, so no
   stop leaves content without its metadata. A container listing never shows a change in
-  flight to a member: it reads each member under that member's lock, and is read again once the
-  change is over (`503` if its members keep changing); removing a member holds its container
-  exclusively. A container whose modification time has not yet been, or could not be, moved on
-  after a change has no `Last-Modified` until it is, so `If-Modified-Since` never answers `304`
+  flight to a member: quiet listings share the container lock and only try member locks.
+  A busy member or a generation change discards that attempt and queues one exclusive
+  listing, which takes no member locks. Member changes hold that container through commit
+  or put-back; the fair queue lets the fallback finish while new changes keep arriving,
+  without a churn-based `503`. A resource set aside for recovery still answers `503`. A
+  container whose modification time has not yet been, or could not be, moved on after a
+  change has no `Last-Modified` until it is, so `If-Modified-Since` never answers `304`
   on a stale date. A listing's `Last-Modified` is the latest of the container's own time and
   every member's, so a change whose touch a stop lost still moves it on; a member whose time the
   backend does not record is listed without `modified`, and the listing then has no
   `Last-Modified`; so has one whose container's own time is not recorded. An unknown time is never
   stated as the epoch: a linkset's `self` entry then omits `modified`. Every change to the store (a request's own steps, a touch, a rollback or a
   retried undo) goes through one tracked path, and a listing made while a change to the
-  container or a member is in flight has no `Last-Modified`; one that overlapped a change is
-  made again. A PUT with `Content-Range`
+  container or a member is in flight has no `Last-Modified`. A PUT with `Content-Range`
   (a partial PUT) is refused with `400`.
 - A `Link` target that is not a URI reference is refused with `400`; entity tags in
   `If-Match`/`If-None-Match` compare byte for byte, obs-text included, and an empty list matches
@@ -1178,8 +1404,9 @@ What the server exposes, all discoverable from the storage description
 - Access grant/request IDs owned by someone else answer exactly like absent IDs for every
   method: a challenge if authentication is needed, otherwise `404`. Ownership is checked on
   a borrowed record; only a match is cloned. Subscription lookups do the same.
-- Pass-through `SparqClient` and `Store` wrappers forward `begin_epoch`, `exclusive`,
-  `call_timeout`, and supported marker operations, including `reset_marker` with its lifecycle guard. Their defaults refuse exclusive
+- Pass-through `SparqClient` and `Store` wrappers forward `lifecycle`, `begin_epoch`,
+  `exclusive`, `call_timeout`, and supported marker
+  operations, including `reset_marker` with its lifecycle guard. Their defaults refuse exclusive
   ownership and marker resets, and use the default call timeout. Generic `delete_resource`
   refuses marker operands, including the parent, before any backend call.
 - Resource-linkset `OPTIONS` returns a fixed `204` for every caller; unsupported methods such as
@@ -1269,6 +1496,11 @@ What the server exposes, all discoverable from the storage description
 Conformance runs against the public suites; the scripts and the CI floor live in
 `crates/sparq-lws-core/conformance/lws/` (`touchstone.sh <module>`, `lws-net.sh`,
 `floor.json`) and run in `.github/workflows/lws-conformance.yml`.
+The builtin LWS.net step checks exact test names against
+`lws-net-expected-failures.json`, whose entries give a category and reason. An unlisted
+failure, a listed test passing or missing, an unexpected total, or an unusable report fails
+CI. Remove an entry when its test passes. The separate `tests.yaml` step keeps the harness's
+own exit status.
 Both Touchstone and the Solid CTH driver accept `PSS_SPARQ_BACKEND=durable` to test
 an ephemeral `SOLID_SERVER_DATA_DIR` across graceful and idle hard-kill restarts.
 See the [conformance harness guide](../../crates/sparq-lws-core/conformance/README.md#durable-restart-checks)
@@ -1343,6 +1575,10 @@ reconstructed from the code and cites it line by line; it also maps the source-r
 
 History follows the resource through trash. Solid restore also requires Write on the target; LWS restore takes the create path's locks. Access-control documents ending in `.acl` or `.acr` are excluded.
 
-POST to the trash endpoint with `{"resource":"<absolute-resource-URL>"}` moves a resource to trash and returns `201 Created` with the member URL in `Location`. DELETE-to-trash remains available. POST with `{"restore":"<trash-member-URL>"}` restores; provide exactly one of `resource` or `restore`. Enabled services advertise `ssd:Versioning` / `ssd:Trash`; the version service has an IRI endpoint and a separate literal `ssd:listingTemplate`. RDF listings use the IANA `original` relation.
+POST to the trash endpoint with `{"resource":"<absolute-resource-URL>"}` moves a resource to trash and returns `201 Created` with the member URL in `Location`. DELETE-to-trash remains available. In LWS mode it returns a bare `204 No Content`, including for a caller with Delete but without Read; a settled-absent DELETE for that caller has the same response. POST retains its member `Location` response. POST with `{"restore":"<trash-member-URL>"}` restores; provide exactly one of `resource` or `restore`. Enabled services advertise `ssd:Versioning` / `ssd:Trash`; the version service has an IRI endpoint and a separate literal `ssd:listingTemplate`. RDF listings use the IANA `original` relation.
 
 See [version/trash requests, authorization, retention and storage API](references/history.md) for routes, catalog terms and client restore examples.
+
+Encrypted retained bodies use the original resource's pod scope for cached and
+decoded reads. Cloning or encrypting a `CompositeStore` preserves its history settings
+and shared lifecycle lease.

@@ -111,7 +111,7 @@ sha2 = "0.11"
 # annotation graph's dimension/level IRIs are pinned to the canonical
 # `secprop-ext.ttl` by a real crate edge rather than a copied string table. The
 # default build pulls nothing.
-sparq-secprop-vocab = { path = "../sparq-secprop-vocab", version = "0.1.6", optional = true }
+sparq-secprop-vocab = { path = "../sparq-secprop-vocab", version = "0.1.8", optional = true }
 
 # Test-only: the SHARED N3 admissibility reasoner the per-protocol annotation graph
 # is meant to be discharged by (#6186). The end-to-end test runs a real ODRL
@@ -121,6 +121,6 @@ sparq-secprop-vocab = { path = "../sparq-secprop-vocab", version = "0.1.6", opti
 # sparq-mpc's shipping graph depends on sparq-trust, and the edge direction is
 # cycle-free (sparq-trust does not depend on sparq-mpc).
 [dev-dependencies]
-sparq-trust = { path = "../sparq-trust", version = "0.1.6", features = [
+sparq-trust = { path = "../sparq-trust", version = "0.1.8", features = [
     "secprop-admissibility",
 ] }

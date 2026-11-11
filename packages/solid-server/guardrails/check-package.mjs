@@ -4,17 +4,23 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { NATIVE_PLATFORMS } from '../src/native-platforms.js';
 
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const expectedName = '@sparq-org/solid-server';
 const failures = [];
 const fail = (message) => failures.push(message);
 const manifest = JSON.parse(readFileSync(resolve(packageDir, 'package.json'), 'utf8'));
-const platforms = ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64', 'win32-x64'];
-for (const platform of platforms) {
-  const name = `@sparq-org/solid-server-native-${platform}`;
-  if (manifest.optionalDependencies?.[name] !== manifest.version) {
-    fail(`${name} must be an optional dependency at exactly ${manifest.version}`);
+// Native platform packages are pinned only at publish time, by native/pin.mjs, in a dispatch
+// that also publishes them. Either none is pinned or all are, each at exactly this version.
+const pins = manifest.optionalDependencies ?? {};
+if (Object.keys(pins).length > 0) {
+  const names = Object.keys(NATIVE_PLATFORMS).map((platform) => `@sparq-org/solid-server-native-${platform}`);
+  for (const name of names) {
+    if (pins[name] !== manifest.version) fail(`${name} must be an optional dependency at exactly ${manifest.version}`);
+  }
+  for (const name of Object.keys(pins)) {
+    if (!names.includes(name)) fail(`unexpected optional dependency ${name}`);
   }
 }
 try {

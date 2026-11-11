@@ -171,6 +171,144 @@ fn fallback_mode_still_explains() {
     assert_eq!(tree.nodes()[tree.root() as usize].premises.len(), 2);
 }
 
+/// Round 8 FIX 2: a stored backward answer with a free name remains a forward support.
+#[test]
+fn why_keeps_a_stored_backward_answer_with_an_unbound_name_as_support() {
+    use sparq_reason::n3::serialize::statement_keys;
+
+    for (stored, producer) in [
+        ([ex("cache"), ex("holds")], ":cache :holds ?f"),
+        ([ex("s"), ex("has")], ":s :has ?f"),
+    ] {
+        let rules = format!(
+            r#"
+@prefix : <http://ex/> .
+{{ ?x :has {{ ?y :inner ?z }} }} <= {{ ?x :p ?y }} .
+{{ :s :has ?f }} => {{ {producer} }} .
+{{ {producer} }} => {{ :out :got ?f }} .
+"#
+        );
+        let g = MaterializedN3Graph::new(&rules, &[[ex("s"), ex("p"), ex("v")]])
+            .expect("backward rules reason");
+        assert_eq!(g.mode(), N3Mode::Fallback);
+        let closure = g.closure();
+        let support = closure
+            .iter()
+            .find(|t| t[..2] == stored)
+            .expect("stored answer");
+        let Term::Formula(rows) = &support[2] else {
+            panic!("{support:?}")
+        };
+        assert_eq!(&rows[0][..2], &[ex("v"), ex("inner")]);
+        assert!(matches!(&rows[0][2], Term::Var(v) if v.starts_with("__bx") && v.ends_with(".z")));
+        let target = [ex("out"), ex("got"), support[2].clone()];
+        assert!(g.contains(&target));
+        let tree = g.why(&target).expect("forward consequence explains");
+        let root = &tree.nodes()[tree.root() as usize];
+        assert_eq!(root.rule, "n3-rule-1");
+        assert_eq!(root.premises.len(), 1, "{}", tree.to_text());
+        let premise = &tree.nodes()[root.premises[0] as usize];
+        assert_eq!(premise.key, statement_keys(support), "{}", tree.to_text());
+        assert_eq!(premise.rule, "n3-rule-0");
+    }
+}
+
+#[test]
+fn why_keeps_a_reproved_backward_support_after_a_later_round() {
+    use sparq_reason::n3::serialize::statement_keys;
+
+    let rules = r#"
+@prefix : <http://ex/> .
+:s :p :v .
+:a :phase :A .
+{ ?x :has { ?y :inner ?z } } <= { ?x :p ?y } .
+{ :s :has ?f . :a :phase ?phase } => { :s :has ?f . :out ?phase ?f } .
+{ :out :A ?f } => { :a :phase :B } .
+"#;
+    let g = MaterializedN3Graph::new(rules, &[]).expect("backward rules reason");
+    assert_eq!(g.mode(), N3Mode::Fallback);
+    let closure = g.closure();
+    let support = closure
+        .iter()
+        .find(|t| t[1] == ex("has"))
+        .expect("stored answer");
+    let target = [ex("out"), ex("B"), support[2].clone()];
+    assert!(g.contains(&target));
+    let tree = g.why(&target).expect("later forward consequence explains");
+    let root = &tree.nodes()[tree.root() as usize];
+    let supports: Vec<_> = root
+        .premises
+        .iter()
+        .map(|&i| tree.nodes()[i as usize].key.clone())
+        .collect();
+    assert!(
+        supports.contains(&statement_keys(support)),
+        "{}",
+        tree.to_text()
+    );
+    assert!(
+        supports.contains(&statement_keys(&[ex("a"), ex("phase"), ex("B")])),
+        "{}",
+        tree.to_text()
+    );
+    assert_eq!(supports.len(), 2, "{}", tree.to_text());
+}
+
+/// Round 9 FIX 2: quantified-premise supports need the store's escape policy too.
+#[test]
+fn why_keeps_an_escaped_formula_support_with_a_premise_universal() {
+    use sparq_reason::n3::{parser, serialize::statement_keys};
+
+    // The text parser cannot spell dotted application names. Supply the rule as a
+    // Term value, as the graph's rules-as-data API permits. Supported premise
+    // universals exclude local backward rules, so supply a live formula and its
+    // escaped stored counterpart explicitly. The equality guard selects only the
+    // live input; support lookup must use the escaped key, as emission does.
+    let formula = |name: &str| Term::Formula(vec![[ex("v"), ex("inner"), Term::Var(name.into())]]);
+    let support = [ex("cache"), ex("holds"), formula("__bx7.z")];
+    let rule = [
+        Term::Formula(vec![
+            [Term::Var("__uf.0.http://ex/u".into()), ex("p"), ex("v")],
+            [ex("cache"), ex("holds"), Term::Var("f".into())],
+            [
+                Term::Var("f".into()),
+                iri("http://www.w3.org/2000/10/swap/log#equalTo"),
+                formula("__bw7.z"),
+            ],
+        ]),
+        iri(parser::LOG_IMPLIES),
+        Term::Formula(vec![[ex("out"), ex("got"), Term::Var("f".into())]]),
+    ];
+    let g = MaterializedN3Graph::new(
+        "@prefix : <http://ex/> . @forAll :a . :a :p :v .",
+        &[
+            support.clone(),
+            [ex("cache"), ex("holds"), formula("__bw7.z")],
+            rule,
+        ],
+    )
+    .expect("supported premise universal reasons");
+    assert_eq!(g.mode(), N3Mode::Fallback);
+    let target = [ex("out"), ex("got"), formula("__bx7.z")];
+    assert!(g.contains(&target));
+    let tree = g
+        .why(&target)
+        .expect("quantified forward consequence explains");
+    let root = &tree.nodes()[tree.root() as usize];
+    let mut supports: Vec<_> = root
+        .premises
+        .iter()
+        .map(|&i| tree.nodes()[i as usize].key.clone())
+        .collect();
+    let mut expected = vec![
+        statement_keys(&support),
+        statement_keys(&[Term::Var("__ua.http://ex/a".into()), ex("p"), ex("v")]),
+    ];
+    supports.sort();
+    expected.sort();
+    assert_eq!(supports, expected, "{}", tree.to_text());
+}
+
 #[test]
 fn id_level_bridge_from_reason_n3_proof() {
     use sparq_core::dict::Dict;

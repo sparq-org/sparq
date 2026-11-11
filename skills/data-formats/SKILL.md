@@ -76,6 +76,26 @@ Writable `wal.log` and `txn.log` handles defer entry sync until their first appe
 syncing the frame data, they sync the file and, on Unix, its parent directory before
 acknowledging that append. This also covers existing entries left by an interrupted open;
 opening a clean tree without writes does not sync logs or directories.
+Atomic updates use `commit_txn_ops(&ops)`, materialize through the durable methods,
+then call `finish_txn()`. The journal frame is synced before materialization; per-slot
+WAL appends and named-layout publication defer their syncs to checkpoint. Direct
+`apply_delta` calls outside a frame still sync before returning and checkpoint earlier
+frames first. `finish_txn()` checkpoints when retained journal bytes reach the internal
+`JOURNAL_CHECKPOINT_BYTES` limit (128 KiB), bounding recovery work while amortizing
+checkpoint writes across small updates. A single frame can exceed that limit.
+`clear_txn()` requests an immediate checkpoint: dirty WALs, new slot bases, manifest
+and directory entries become durable before the journal is truncated and synced.
+Base rewrites and saves checkpoint first and refuse unfinished materialization;
+writable open checkpoints after ordered replay. Switching between parent and child
+journals checkpoints the earlier completed transaction to preserve their recovery order.
+`close(self)` consumes the handle, refuses unfinished materialization and reports checkpoint errors;
+clean drop attempts the same checkpoint. A refused
+base rewrite during validation preserves its logs through drop; an explicit checkpoint or later successful
+write restores normal close behavior. A journal append or checkpoint sync
+failure freezes the shared tree until reopen, retaining the journal for recovery.
+After a successful journal commit, a later materialization/checkpoint error can still
+leave the whole update committed; callers must reopen before accepting further writes.
+
 Compaction packs sparse named slots throughout the tree even when no graph has pending
 triples, reclaiming both interior holes and the allocation cursor left by trailing drops.
 
@@ -251,11 +271,18 @@ g.remove_triple(
 )?; // absent ⇒ no-op, never an error
 ```
 
+`Graph::fork_scoped(names)` omits every unlisted named graph, ignores absent names,
+and preserves dataset order without duplicating repeated names. It shares storage and
+mapping locks like `fork()`, carries no write-ahead log, and must only be used when the
+caller has bounded every graph the evaluation can observe. Commit resolved effects to
+the complete dataset rather than replacing it with this partial view.
+
 `sparq_core::Graph` — cheap snapshots / forks (the serving pattern):
 
 ```rust
 pub fn snapshot(&self) -> GraphSnapshot   // immutable COW view; O(pending delta), not O(triples)
 pub fn fork(&self) -> Graph               // mutable structural fork (Arc-shares base storage)
+pub fn fork_scoped(&self, names: &[Term]) -> Graph // default graph plus selected existing named graphs
 ```
 
 `sparq_core::GraphSnapshot` — `Send + Sync`, `Deref<Target = Graph>` (every read method:
@@ -686,7 +713,12 @@ are crate-internal), and every memory-mapped part of a graph carries the lock: i
 the graph, any mapped `fork()`/`snapshot()`, or a graph rebuilt
 around its dictionary (`Graph::into_dict` + `from_parts`) lives, and by the graphs `compact`,
 `vacuum` and `restore_in_place` swap in. A second holder, in another process or this one, gets
-`WouldBlock` at once. Rules that follow:
+`WouldBlock` at once. When the final graph or mapped view drops, its owning process explicitly
+unlocks the inside and outside files before closing them. Temporary descriptor copies,
+including those inherited by a child between fork and exec, do not extend that lock lifetime.
+A guard inherited by a forked child skips explicit unlock on drop, preserving the parent's
+live lock. Independent shared readers and mapped views continue to hold their own locks.
+Rules that follow:
 
 - **No save into the graph's own directory.** `g.save(dir)` into the directory `g` is open
   from (compared by file identity, so `dir/`, `x/../dir` or a link to it count) is refused

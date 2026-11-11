@@ -1213,7 +1213,7 @@ async fn duplicate_stored_capabilities_quarantine_one_record_and_preserve_the_ot
     }
     assert_eq!(
         h.subscribe_as(SSE, OWNER, &[&root], None).await.status(),
-        StatusCode::INSUFFICIENT_STORAGE
+        StatusCode::TOO_MANY_REQUESTS
     );
     h.delete(&format!("{container}{quarantined}"), OWNER).await;
     assert_eq!(
@@ -2297,4 +2297,136 @@ async fn malformed_records_of_every_kind_remain_quarantined() {
             StatusCode::NOT_FOUND
         );
     }
+}
+
+mod capacity {
+    use super::*;
+
+    #[tokio::test]
+    async fn stream_deactivation_uses_the_subscriber_s_settlement_places() {
+        use crate::lws::records::{LOCK_WAIT, MAX_SETTLING_PER_PRINCIPAL};
+        let h = Harness::new().await;
+        h.state.notify.pause_sweeper();
+        let topic = h.create("stream-cancellation").await;
+        let grant = h.grant(&[&topic]).await;
+        let mut docs = Vec::new();
+        for _ in 0..MAX_SETTLING_PER_PRINCIPAL {
+            docs.push(h.subscribe(SSE, READER, &[&topic]).await);
+        }
+        settle().await;
+        h.state
+            .access
+            .remove_grant_for_test(grant.rsplit('/').next().unwrap());
+        h.state.store.fail_delete.store(true, Ordering::SeqCst);
+        h.state.store.fail_exists.store(true, Ordering::SeqCst);
+        h.state.store.fail_list.store(true, Ordering::SeqCst);
+        for doc in &docs {
+            let response = tokio::time::timeout(LOCK_WAIT, h.stream(doc, None))
+                .await
+                .expect("automatic stream cancellation waited on settlement");
+            assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        }
+        assert_eq!(
+            h.state.settlements.pending(),
+            MAX_SETTLING_PER_PRINCIPAL,
+            "stream cancellations did not spend subscriber settlement places"
+        );
+        let body = json!({"@context": [crate::lws::LWS_CONTEXT], "type": ["AccessGrant"],
+            "storage": h.state.cfg.storage(),
+            "access": [{"type": ["AccessPolicy"], "action": ["read"],
+            "assignee": "https://other.example/"}]})
+        .to_string();
+        let before = h.state.store.creates_started.load(Ordering::SeqCst);
+        let own = h
+            .call(
+                Method::POST,
+                crate::lws::REQUESTS_PATH,
+                Some(READER),
+                &[("content-type", LWS_JSON)],
+                &body.replace("AccessGrant", "AccessRequest"),
+            )
+            .await;
+        assert_eq!(
+            own.status(),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "stream cancellations did not consume their subscriber's settlement places"
+        );
+        assert_eq!(h.state.store.creates_started.load(Ordering::SeqCst), before);
+        // Settlement still cannot read the subscription listing. Let another
+        // principal's new record pass its independent absence check.
+        h.state.store.fail_exists.store(false, Ordering::SeqCst);
+        let other = h
+            .call(
+                Method::POST,
+                crate::lws::GRANTS_PATH,
+                Some(OWNER),
+                &[("content-type", LWS_JSON)],
+                &body,
+            )
+            .await;
+        assert_eq!(other.status(), StatusCode::CREATED);
+        assert_eq!(
+            h.state.store.creates_started.load(Ordering::SeqCst),
+            before + 1,
+            "another principal did not reach the store"
+        );
+        h.state.store.fail_delete.store(false, Ordering::SeqCst);
+        h.state.store.fail_exists.store(false, Ordering::SeqCst);
+        h.state.store.fail_list.store(false, Ordering::SeqCst);
+        tokio::time::timeout(LOCK_WAIT * 8, async {
+            while h.state.settlements.pending() != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("stream cancellation settlement places were not released");
+        // Withdrawal keeps the capability unusable even when the failed removal
+        // is confirmed still stored. The subscriber can finish cancellation once
+        // its settlement places are released and storage recovers.
+        assert_eq!(
+            h.stream(&docs[0], None).await.status(),
+            StatusCode::NOT_FOUND
+        );
+        let path = docs[0]["id"]
+            .as_str()
+            .unwrap()
+            .strip_prefix(&h.state.cfg.base_url)
+            .unwrap();
+        assert_eq!(
+            h.call(Method::DELETE, path, Some(READER), &[], "")
+                .await
+                .status(),
+            StatusCode::NO_CONTENT,
+            "recovery did not free the subscriber's settlement places"
+        );
+        assert!(!h
+            .state
+            .store
+            .exists(docs[0]["id"].as_str().unwrap())
+            .await
+            .unwrap());
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn stream_subscription_expiry_defaults_and_overrides() {
+    let h = Harness::new().await;
+    let root = h.state.cfg.storage();
+    let reference = h.state.notify.high_water();
+    assert!(reference > 0);
+    h.state.notify.clock_offset.store(-3600, Ordering::SeqCst);
+    let default_until = reference + 86_400;
+    let specified_until = reference + 172_800;
+    for kind in [SSE, WEBSOCKET] {
+        let default = h.subscribe(kind, OWNER, &[&root]).await;
+        assert_eq!(default["expires"], format_rfc3339(default_until));
+        let response = h
+            .subscribe_as(kind, OWNER, &[&root], Some(specified_until))
+            .await;
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let specified = test_store::body_json(response).await;
+        assert_eq!(specified["expires"], format_rfc3339(specified_until));
+    }
+    let webhook = h.subscribe(WEBHOOK, OWNER, &[&root]).await;
+    assert!(webhook.get("expires").is_none());
 }

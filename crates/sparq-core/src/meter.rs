@@ -38,9 +38,14 @@ pub enum Dim {
     /// Facts held by successful closures, charged across closures.
     ClosureFacts,
     /// Fixed triple-term nesting guard, independent of `Limits::depth`.
+    /// A refusal tag, with no configurable limit field.
     TermDepth,
     /// Allocation failure, reported only by fallible allocation helpers.
     Alloc,
+    /// Elapsed deadline, a refusal tag supplied by a consumer; no limit field.
+    Deadline,
+    /// Generated lexical bytes, separate from source and document bytes.
+    GeneratedBytes,
 }
 
 impl Dim {
@@ -59,6 +64,8 @@ impl Dim {
             Self::ClosureFacts => "closure_facts",
             Self::TermDepth => "term_depth",
             Self::Alloc => "alloc",
+            Self::Deadline => "deadline",
+            Self::GeneratedBytes => "generated_bytes",
         }
     }
 }
@@ -71,6 +78,8 @@ pub struct Limits {
     pub source_bytes: usize,
     /// Maximum aggregate lexical and fixed-node bytes across documents.
     pub bytes: usize,
+    /// Maximum generated lexical bytes, independent of source/document bytes.
+    pub generated_bytes: usize,
     /// Maximum bytes in each document; the current value resets on opening one.
     pub document_bytes: usize,
     /// Maximum size of each term; this cap is checked but never debited by term sizing.
@@ -94,6 +103,7 @@ impl Default for Limits {
         Self {
             source_bytes: usize::MAX,
             bytes: usize::MAX,
+            generated_bytes: usize::MAX,
             document_bytes: usize::MAX,
             term_bytes: usize::MAX,
             facts: usize::MAX,
@@ -110,11 +120,12 @@ impl Default for Limits {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Exceeded {
-    /// Dimension whose limit was exceeded, or `Dim::Alloc` for allocation failure.
+    /// Dimension whose limit was exceeded, or a refusal tag (`Dim::Alloc` / `Dim::Deadline`).
     pub dim: Dim,
-    /// Configured cap, fixed triple-depth guard, or `usize::MAX` for allocation failure.
+    /// Configured cap, fixed triple-depth guard, or `usize::MAX` for a refusal tag.
     pub limit: usize,
     /// Refused total, or requested resulting element count for allocation failure.
+    /// Unused for deadline tags.
     pub reached: usize,
 }
 
@@ -132,7 +143,10 @@ impl Exceeded {
 impl fmt::Display for Exceeded {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.dim == Dim::Alloc {
-            return write!(f, "allocation for {} elements failed", self.reached);
+            return write!(f, "Allocation for {} elements failed.", self.reached);
+        }
+        if self.dim == Dim::Deadline {
+            return f.write_str("Work deadline elapsed.");
         }
         write!(
             f,
@@ -183,7 +197,8 @@ impl<'a> From<&'a Term> for TermRef<'a> {
 #[non_exhaustive]
 pub struct Ledger {
     limits: Limits,
-    spent: [usize; 12],
+    spent: [usize; 14],
+    document_open: bool,
 }
 
 impl Ledger {
@@ -191,7 +206,8 @@ impl Ledger {
     pub fn new(limits: Limits) -> Self {
         Self {
             limits,
-            spent: [0; 12],
+            spent: [0; 14],
+            document_open: true,
         }
     }
 
@@ -204,6 +220,7 @@ impl Ledger {
         match dim {
             Dim::SourceBytes => self.limits.source_bytes,
             Dim::Bytes => self.limits.bytes,
+            Dim::GeneratedBytes => self.limits.generated_bytes,
             Dim::DocumentBytes => self.limits.document_bytes,
             Dim::TermBytes => self.limits.term_bytes,
             Dim::Facts => self.limits.facts,
@@ -213,7 +230,7 @@ impl Ledger {
             Dim::JoinRows => self.limits.join_rows,
             Dim::ClosureFacts => self.limits.closure_facts,
             Dim::TermDepth => MAX_TRIPLE_DEPTH,
-            Dim::Alloc => usize::MAX,
+            Dim::Alloc | Dim::Deadline => usize::MAX,
         }
     }
 
@@ -232,13 +249,14 @@ impl Ledger {
 
     /// Checks and then debits work, using saturating counters.
     ///
-    /// `Bytes` also charges `DocumentBytes`; both checks precede either debit.
-    /// `Alloc` has no limit and is reserved for allocation diagnostics.
+    /// While a document is open, `Bytes` also charges `DocumentBytes`; both checks
+    /// precede either debit. A new ledger starts with a document open.
+    /// `Alloc` and `Deadline` have no limits and are reserved for refusal diagnostics.
     /// # Errors
     /// Returns the first exceeded limit, without debiting any counter.
     pub fn charge(&mut self, dim: Dim, n: usize) -> Result<(), Exceeded> {
         self.check(dim, self.spent(dim), n)?;
-        if dim == Dim::Bytes {
+        if dim == Dim::Bytes && self.document_open {
             self.check(Dim::DocumentBytes, self.spent(Dim::DocumentBytes), n)?;
             self.spent[Dim::DocumentBytes as usize] =
                 self.spent(Dim::DocumentBytes).saturating_add(n);
@@ -267,7 +285,14 @@ impl Ledger {
 
     /// Starts a document, resetting only its byte counter.
     pub fn open_document(&mut self) {
+        self.document_open = true;
         self.spent[Dim::DocumentBytes as usize] = 0;
+    }
+
+    /// Ends document accounting until [`Self::open_document`] is called again.
+    /// Aggregate byte charges continue; the last document's counter is preserved.
+    pub fn close_document(&mut self) {
+        self.document_open = false;
     }
 
     fn sized(&mut self, size: usize) -> Result<usize, Exceeded> {
@@ -276,7 +301,7 @@ impl Ledger {
         Ok(size)
     }
 
-    /// Sizes a term iteratively and charges its bytes, including current document bytes.
+    /// Sizes a term iteratively and charges its bytes, including an open document's bytes.
     /// # Errors
     /// Refuses excessive triple depth, one term's size, or the compound byte charge.
     pub fn term(&mut self, t: TermRef<'_>) -> Result<usize, Exceeded> {
@@ -360,7 +385,19 @@ impl Ledger {
     /// # Errors
     /// Refuses the compound byte charge, or returns `Alloc` and refunds it on reservation failure.
     pub fn mint(&mut self, parts: &[&str]) -> Result<String, Exceeded> {
-        self.mint_using(parts, |size| {
+        self.mint_using(parts, Dim::Bytes, |size| {
+            let mut out = String::new();
+            out.try_reserve_exact(size)?;
+            Ok(out)
+        })
+    }
+
+    /// Charges generated lexical bytes before fallibly allocating exact capacity.
+    /// Source and document byte counters are unaffected.
+    /// # Errors
+    /// Returns a generated-byte refusal, or `Alloc` and refunds the charge on failure.
+    pub fn mint_generated(&mut self, parts: &[&str]) -> Result<String, Exceeded> {
+        self.mint_using(parts, Dim::GeneratedBytes, |size| {
             let mut out = String::new();
             out.try_reserve_exact(size)?;
             Ok(out)
@@ -372,13 +409,16 @@ impl Ledger {
     fn mint_using(
         &mut self,
         parts: &[&str],
+        dim: Dim,
         allocate: impl FnOnce(usize) -> Result<String, std::collections::TryReserveError>,
     ) -> Result<String, Exceeded> {
         let size = parts.iter().fold(0usize, |n, s| n.saturating_add(s.len()));
-        let before = self.spent;
-        self.charge(Dim::Bytes, size)?;
+        let before_bytes = self.spent(dim);
+        let before_document = self.spent(Dim::DocumentBytes);
+        self.charge(dim, size)?;
         let mut out = allocate(size).map_err(|_| {
-            self.spent = before;
+            self.spent[dim as usize] = before_bytes;
+            self.spent[Dim::DocumentBytes as usize] = before_document;
             Exceeded::new(Dim::Alloc, usize::MAX, size)
         })?;
         for part in parts {
@@ -396,6 +436,9 @@ impl Ledger {
         additional: usize,
         dim: Dim,
     ) -> Result<(), Exceeded> {
+        if additional <= v.capacity().saturating_sub(v.len()) {
+            return self.charge(dim, additional);
+        }
         let before = self.spent;
         self.charge(dim, additional)?;
         if v.try_reserve(additional).is_err() {
@@ -452,6 +495,27 @@ mod tests {
         l.charge(Dim::Facts, 1).unwrap();
         assert_eq!(l.remaining(Dim::Facts), 0);
         assert!(l.charge(Dim::Facts, 1).is_err());
+    }
+
+    #[test]
+    fn closed_documents_preserve_their_counter_and_only_charge_the_aggregate() {
+        let mut ledger = Ledger::new(Limits {
+            bytes: 10,
+            document_bytes: 3,
+            ..Limits::default()
+        });
+        ledger.charge(Dim::Bytes, 2).unwrap();
+        ledger.close_document();
+        assert_eq!(ledger.mint(&["abcdef"]).unwrap(), "abcdef");
+        assert_eq!(ledger.spent(Dim::Bytes), 8);
+        assert_eq!(ledger.spent(Dim::DocumentBytes), 2);
+        ledger.open_document();
+        assert_eq!(ledger.spent(Dim::DocumentBytes), 0);
+        assert_eq!(ledger.charge(Dim::Bytes, 2), Ok(()));
+        assert_eq!(ledger.spent(Dim::DocumentBytes), 2);
+        assert_eq!(ledger.charge(Dim::Bytes, 1).unwrap_err().dim, Dim::Bytes);
+        assert_eq!(ledger.spent(Dim::Bytes), 10);
+        assert_eq!(ledger.spent(Dim::DocumentBytes), 2);
     }
 
     #[test]
@@ -643,13 +707,58 @@ mod tests {
     }
 
     #[test]
+    fn spare_capacity_does_not_bypass_the_fact_allowance() {
+        let mut ledger = Ledger::new(Limits {
+            facts: 1,
+            ..Limits::default()
+        });
+        let mut rows = Vec::with_capacity(2);
+        ledger.reserve(&mut rows, 1, Dim::Facts).unwrap();
+        rows.push(7u64);
+        assert_eq!(ledger.spent(Dim::Facts), 1);
+        let error = ledger.reserve(&mut rows, 1, Dim::Facts).unwrap_err();
+        assert_eq!(error.dim, Dim::Facts);
+        assert_eq!(ledger.spent(Dim::Facts), 1);
+        assert_eq!(rows, [7]);
+    }
+
+    #[test]
+    fn generated_mints_have_independent_limits_and_refund_allocation_failure() {
+        let limits = Limits {
+            bytes: 1,
+            document_bytes: 1,
+            generated_bytes: 4,
+            ..Limits::default()
+        };
+        let mut ledger = Ledger::new(limits);
+        ledger.charge(Dim::Bytes, 1).unwrap();
+        assert_eq!(ledger.mint_generated(&["ab", "cd"]).unwrap(), "abcd");
+        assert_eq!(ledger.spent(Dim::Bytes), 1);
+        assert_eq!(ledger.spent(Dim::DocumentBytes), 1);
+        assert_eq!(ledger.spent(Dim::GeneratedBytes), 4);
+        let error = ledger.mint_generated(&["e"]).unwrap_err();
+        assert_eq!(error.dim, Dim::GeneratedBytes);
+        assert_eq!(ledger.spent(Dim::GeneratedBytes), 4);
+        ledger = Ledger::new(limits);
+        let error = ledger
+            .mint_using(&["abcd"], Dim::GeneratedBytes, |_| {
+                let mut impossible = Vec::<u64>::new();
+                Err(impossible.try_reserve(usize::MAX).unwrap_err())
+            })
+            .unwrap_err();
+        assert_eq!(error.dim, Dim::Alloc);
+        assert_eq!(ledger.spent(Dim::GeneratedBytes), 0);
+        assert_eq!(ledger.spent(Dim::Bytes), 0);
+    }
+
+    #[test]
     fn mint_refunds_failed_allocation() {
         let mut l = Ledger::new(Limits::default());
         l.charge(Dim::Bytes, 3).unwrap();
         // Real exhaustion cannot be forced safely from valid string slices.
         // Inject a deterministic capacity-overflow reservation error at the allocation seam.
         let e = l
-            .mint_using(&["ab", "cd"], |size| {
+            .mint_using(&["ab", "cd"], Dim::Bytes, |size| {
                 assert_eq!(size, 4);
                 let mut out = String::new();
                 out.try_reserve_exact(usize::MAX)?;
@@ -659,7 +768,7 @@ mod tests {
         assert_eq!(e, Exceeded::new(Dim::Alloc, usize::MAX, 4));
         assert_eq!(l.spent(Dim::Bytes), 3);
         assert_eq!(l.spent(Dim::DocumentBytes), 3);
-        assert_eq!(e.to_string(), "allocation for 4 elements failed");
+        assert_eq!(e.to_string(), "Allocation for 4 elements failed.");
         assert_eq!(Dim::TermDepth.name(), "term_depth");
     }
 
@@ -675,9 +784,11 @@ mod tests {
         assert_eq!(l.spent(Dim::DocumentBytes), 4);
         assert_eq!(l.mint(&["ef"]).unwrap_err().dim, Dim::Bytes);
         assert_eq!(
-            l.mint_using(&["ef"], |_| panic!("allocation before byte refusal"))
-                .unwrap_err()
-                .dim,
+            l.mint_using(&["ef"], Dim::Bytes, |_| panic!(
+                "allocation before byte refusal"
+            ))
+            .unwrap_err()
+            .dim,
             Dim::Bytes
         );
         assert_eq!(l.spent(Dim::Bytes), 4);

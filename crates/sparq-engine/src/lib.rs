@@ -159,8 +159,10 @@ pub use explain_json::{
     explain_plan, explain_plan_analyze, explain_plan_analyze_with_budget, PlanNode, SlowQuery,
     SlowQueryRing,
 };
+mod algebra_walk;
+
 pub use update::{
-    apply_effects, apply_effects_checked, data_update_effects, parse_update_rec2013, update,
+    apply_effects, apply_effects_checked, data_update_effects, parse_update_rec2013, update, update_graph_scope,
     update_in_place, update_in_place_algebra_capturing, update_in_place_algebra_with_budget,
     update_in_place_atomic, update_in_place_atomic_with_budget, update_in_place_capturing,
     update_in_place_with_budget, where_update_effects, with_load_base, ApplyError, UpdateEffect,

@@ -188,6 +188,7 @@ pub struct HttpSparqClient {
     client: Client<HttpConnector, Full<Bytes>>,
     /// The absolute `/sparql` endpoint URL (operator-configured, trusted internal service).
     endpoint: String,
+    lifecycle: std::sync::Arc<super::Lifecycle>,
     timeout: Duration,
     /// Fences writes from earlier processes. Clones and service instances using this client in
     /// the same process share the active epoch; it is not an instance ownership mechanism.
@@ -213,6 +214,7 @@ impl HttpSparqClient {
         Self {
             client,
             endpoint: endpoint.into(),
+            lifecycle: Default::default(),
             timeout,
             epoch: Arc::new(AtomicU64::new(0)),
         }
@@ -553,6 +555,10 @@ impl HttpSparqClient {
 
 #[async_trait]
 impl SparqClient for HttpSparqClient {
+    fn lifecycle(&self) -> std::sync::Arc<super::Lifecycle> {
+        self.lifecycle.clone()
+    }
+
     async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
         let q = sparql::select_meta(iri)?;
         let (body, _ct) = self
@@ -594,8 +600,13 @@ impl SparqClient for HttpSparqClient {
         &self,
         iri: &str,
         value: i64,
-        _: &super::LifecycleGuard,
+        lease: &super::LifecycleGuard,
     ) -> Result<(), SparqError> {
+        if !lease.belongs_to(&self.lifecycle) {
+            return Err(SparqError::Backend(
+                "marker reset requires this backend's lifecycle lease".into(),
+            ));
+        }
         self.put_meta_unchecked(iri, super::sparq::marker_meta(&value.to_string()))
             .await
     }
@@ -689,7 +700,12 @@ impl SparqClient for HttpSparqClient {
         Ok(key)
     }
 
-    async fn begin_epoch(&self, _: &super::LifecycleGuard) -> Result<u64, SparqError> {
+    async fn begin_epoch(&self, lease: &super::LifecycleGuard) -> Result<u64, SparqError> {
+        if !lease.belongs_to(&self.lifecycle) {
+            return Err(SparqError::Backend(
+                "writer epoch requires this backend's lifecycle lease".into(),
+            ));
+        }
         let epoch = self
             .read_epoch()
             .await?
@@ -1442,6 +1458,25 @@ mod tests {
             "candidate"
         );
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn beginning_an_epoch_requires_its_backends_lease_before_any_http_request() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let client = HttpSparqClient::with_timeout(
+            format!("http://{}/sparql", listener.local_addr().unwrap()),
+            Duration::from_millis(50),
+        );
+        let other = HttpSparqClient::new(client.endpoint.clone());
+        let lease = other.lifecycle().acquire().unwrap();
+        assert!(matches!(
+            client.begin_epoch(&lease).await,
+            Err(SparqError::Backend(ref message))
+                if message == "writer epoch requires this backend's lifecycle lease"
+        ));
+        assert_eq!(client.epoch.load(Ordering::Acquire), 0);
+        assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock));
     }
 
     #[cfg(feature = "embedded-sparq")]
