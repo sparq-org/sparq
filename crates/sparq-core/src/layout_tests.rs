@@ -220,7 +220,7 @@ fn interrupted_replacement_log_append_keeps_acknowledged_data() {
                     *graph.wal.log().unwrap().needs_entry_sync.lock().unwrap()
                 } else {
                     assert!(graph.txn.as_ref().unwrap().poisoned());
-                    *graph.txn.as_ref().unwrap().needs_entry_sync.lock().unwrap()
+                    graph.txn.as_ref().unwrap().needs_entry_sync.load(std::sync::atomic::Ordering::Acquire)
                 };
                 assert!(pending, "a failed entry sync must remain pending");
                 assert!(graph.apply_delta(&[triple()], &[]).is_err());

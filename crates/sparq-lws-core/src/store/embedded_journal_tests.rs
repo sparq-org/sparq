@@ -1541,7 +1541,7 @@ fn queued_write_and_read_replies_wait_for_the_whole_group() {
         let journal = dir.0.join("txn.log");
         tx.send(Job {
             barrier: false,
-            run: Box::new(move |graph| {
+            run: Run::closure(move |graph| {
                 assert_eq!(
                     replied.load(Ordering::SeqCst),
                     0,
@@ -1565,7 +1565,7 @@ fn queued_write_and_read_replies_wait_for_the_whole_group() {
                         std::fs::metadata(&journal).unwrap().len() > 0,
                         "reply preceded the journal barrier"
                     );
-                    replied.fetch_add(1, Ordering::SeqCst);
+                    assert_eq!(replied.fetch_add(1, Ordering::SeqCst), i);
                 })
             }),
         })
@@ -1597,7 +1597,7 @@ fn failed_group_errors_every_reply_and_stops_before_the_next_job() {
         let errors = errors.clone();
         tx.send(Job {
             barrier: false,
-            run: Box::new(move |graph| {
+            run: Run::closure(move |graph| {
                 if i == 4 {
                     assert!(sparq_engine::ask(
                         graph,
@@ -1614,7 +1614,7 @@ fn failed_group_errors_every_reply_and_stops_before_the_next_job() {
                 }
                 Box::new(move |error| {
                     assert!(matches!(error, Some(SparqError::Backend(_))));
-                    errors.fetch_add(1, Ordering::SeqCst);
+                    assert_eq!(errors.fetch_add(1, Ordering::SeqCst), i);
                 })
             }),
         })
@@ -1623,7 +1623,7 @@ fn failed_group_errors_every_reply_and_stops_before_the_next_job() {
     }
     tx.send(Job {
         barrier: true,
-        run: Box::new(|_| panic!("actor served a later job after failed group commit")),
+        run: Run::closure(|_| panic!("actor served a later job after failed group commit")),
     })
     .ok()
     .unwrap();
@@ -1700,7 +1700,7 @@ fn busy_queue_releases_each_bounded_group_without_waiting_for_arrivals() {
         let replied = replied.clone();
         tx.send(Job {
             barrier: false,
-            run: Box::new(move |_| {
+            run: Run::closure(move |_| {
                 computed.fetch_add(1, Ordering::SeqCst);
                 Box::new(move |error| {
                     assert!(error.is_none());
@@ -1737,7 +1737,7 @@ async fn queued_compaction_is_a_barrier_between_write_groups() {
         .tx
         .send(Job {
             barrier: true,
-            run: Box::new(move |_| {
+            run: Run::closure(move |_| {
                 started.send(()).unwrap();
                 wait.recv().unwrap();
                 Box::new(|_| {})
@@ -1762,4 +1762,150 @@ async fn queued_compaction_is_a_barrier_between_write_groups() {
     last.unwrap();
     drop(client);
     assert_eq!(dir.open().get_meta(CHILD).await.unwrap(), meta("last"));
+}
+
+#[test]
+fn panic_mid_group_fails_all_requests_and_discards_staged_writes() {
+    let dir = Directory::empty();
+    group_block_on(async {
+        dir.open()
+            .put_meta(CHILD, meta("durable-before-panic"))
+            .await
+            .unwrap();
+    });
+    let graph = Graph::open(&dir.0).unwrap();
+    let (tx, rx) = mpsc::unbounded_channel();
+    let errors = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut receivers = Vec::new();
+    for i in 0..9 {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        receivers.push(reply_rx);
+        let errors = errors.clone();
+        tx.send(Job {
+            barrier: false,
+            run: Run::closure(move |graph| {
+                assert!(i <= 4, "a job ran after the panic");
+                if i == 4 {
+                    panic!("deliberate mid-group panic");
+                }
+                commit(graph, &group_update(&format!("staged-{i}")), "panic-test").unwrap();
+                Box::new(move |error| {
+                    assert_eq!(errors.fetch_add(1, Ordering::SeqCst), i);
+                    let _ = reply_tx.send(error);
+                })
+            }),
+        })
+        .ok()
+        .unwrap();
+    }
+    actor_loop(graph, rx);
+    assert!(tx.is_closed());
+    assert_eq!(errors.load(Ordering::SeqCst), 4);
+    group_block_on(async {
+        for (i, receiver) in receivers.into_iter().enumerate() {
+            if i < 4 {
+                assert!(matches!(receiver.await, Ok(Some(SparqError::Backend(_)))));
+            } else {
+                assert!(receiver.await.is_err(), "an uncompleted job replied");
+            }
+        }
+        assert_eq!(
+            dir.open().get_meta(CHILD).await.unwrap(),
+            meta("durable-before-panic")
+        );
+    });
+}
+
+#[test]
+fn lone_job_replies_without_waiting_for_another_arrival() {
+    let (tx, rx) = mpsc::unbounded_channel();
+    let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+    tx.send(Job {
+        barrier: false,
+        run: Run::closure(move |_| Box::new(move |error| reply_tx.send(error).unwrap())),
+    })
+    .ok()
+    .unwrap();
+    let actor = std::thread::spawn(move || actor_loop(Graph::new(), rx));
+    let result = reply_rx.recv_timeout(std::time::Duration::from_secs(10));
+    drop(tx);
+    actor.join().unwrap();
+    assert!(result.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn public_write_and_read_results_wait_for_group_commit() {
+    async fn pending<F: std::future::Future>(mut future: std::pin::Pin<&mut F>) {
+        std::future::poll_fn(|cx| {
+            assert!(future.as_mut().poll(cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+    }
+
+    for fail in [false, true] {
+        let dir = Directory::empty();
+        let client = dir.open();
+        client.put_meta(CHILD, meta("durable-before-public")).await.unwrap();
+        let (started, ready) = oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        client
+            .actor
+            .tx
+            .send(Job {
+                barrier: true,
+                run: Run::closure(move |_| {
+                    started.send(()).unwrap();
+                    wait.recv().unwrap();
+                    Box::new(|_| {})
+                }),
+            })
+            .ok()
+            .unwrap();
+        ready.await.unwrap();
+        let mut first = Box::pin(client.put_meta(CHILD, meta("first-public")));
+        let mut read = Box::pin(client.get_meta(CHILD));
+        let mut last = Box::pin(client.put_meta(CHILD, meta("last-public")));
+        pending(first.as_mut()).await;
+        pending(read.as_mut()).await;
+        pending(last.as_mut()).await;
+        let (computed, reached) = oneshot::channel();
+        let (commit_group, before_commit) = std::sync::mpsc::channel();
+        client
+            .actor
+            .tx
+            .send(Job {
+                barrier: false,
+                run: Run::closure(move |graph| {
+                    computed.send(()).unwrap();
+                    before_commit.recv().unwrap();
+                    if fail {
+                        graph.poison_txn();
+                    }
+                    Box::new(|_| {})
+                }),
+            })
+            .ok()
+            .unwrap();
+        release.send(()).unwrap();
+        reached.await.unwrap();
+        pending(first.as_mut()).await;
+        pending(read.as_mut()).await;
+        pending(last.as_mut()).await;
+        commit_group.send(()).unwrap();
+        let (first, read, last) = tokio::join!(first, read, last);
+        if fail {
+            assert!(matches!(first, Err(SparqError::Backend(_))));
+            assert!(matches!(read, Err(SparqError::Backend(_))));
+            assert!(matches!(last, Err(SparqError::Backend(_))));
+            assert!(client.get_meta(CHILD).await.is_err());
+        } else {
+            first.unwrap();
+            assert_eq!(read.unwrap(), meta("first-public"));
+            last.unwrap();
+        }
+        drop(client);
+        let key = if fail { "durable-before-public" } else { "last-public" };
+        assert_eq!(dir.open().get_meta(CHILD).await.unwrap(), meta(key));
+    }
 }
