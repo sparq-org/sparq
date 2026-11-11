@@ -831,41 +831,8 @@ pub(super) fn eval_compiled_exact_lexical(graph: &Graph, local: &LocalVocab, row
     }
 }
 
-/// Exact comparison of two `xsd:decimal` / integer lexical forms (no f64). `None` if
-/// either is not a well-formed decimal. Integers are decimals with an empty fraction.
-pub(super) fn cmp_decimal_str(a: &str, b: &str) -> Option<Ordering> {
-    let (na, ia, fa) = split_decimal(a)?;
-    let (nb, ib, fb) = split_decimal(b)?;
-    let a_zero = ia.is_empty() && fa.is_empty();
-    let b_zero = nb_is_zero(ib, fb);
-    if a_zero && b_zero {
-        return Some(Ordering::Equal);
-    }
-    let mag = ia
-        .len()
-        .cmp(&ib.len())
-        .then_with(|| ia.cmp(ib))
-        .then_with(|| {
-            let n = fa.len().max(fb.len());
-            // Compare fractional digits with implicit trailing-zero padding.
-            (0..n)
-                .map(|i| (fa.as_bytes().get(i).copied().unwrap_or(b'0'), fb.as_bytes().get(i).copied().unwrap_or(b'0')))
-                .find_map(|(x, y)| (x != y).then(|| x.cmp(&y)))
-                .unwrap_or(Ordering::Equal)
-        });
-    let neg_a = na && !a_zero;
-    let neg_b = nb && !b_zero;
-    Some(match (neg_a, neg_b) {
-        (true, false) => Ordering::Less,
-        (false, true) => Ordering::Greater,
-        (false, false) => mag,
-        (true, true) => mag.reverse(),
-    })
-}
-
-pub(super) fn nb_is_zero(int: &str, frac: &str) -> bool {
-    int.is_empty() && frac.is_empty()
-}
+// Keep existing callers on the substrate's single exact decimal comparator.
+pub(super) use sparq_substrate::numeric::cmp_plain_decimal as cmp_decimal_str;
 
 /// Significant decimal digits in a numeric lexical — used to decide whether the f64
 /// sargable path is precision-safe (<= 15 digits round-trips through f64 unambiguously).
@@ -935,10 +902,7 @@ pub(super) fn eval_dec(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[I
 pub(super) fn cmp_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Expression, c: &Expression, f: impl Fn(Ordering) -> bool) -> Result<Value, String> {
     if budget::strict_numeric() {
         let (x, y) = (eval_expr(graph, local, b, row, a)?, eval_expr(graph, local, b, row, c)?);
-        if let (Some(a), Some(b)) = (as_numeric(&x), as_numeric(&y)) {
-            if a.is_nan() || b.is_nan() { return Ok(Value::Bool(false)); }
-        }
-        return Ok(value_compare_strict(&x, &y).map(|o| Value::Bool(f(o))).unwrap_or(Value::Error));
+        return Ok(relational_value(&x, &y, false, f));
     }
     // EXACT path: integer/decimal arithmetic (`+ - *`) must not round through f64, which
     // can flip an ordering (`0.1 + 0.2` < `0.3` in f64). Only attempted when arithmetic is
@@ -1005,7 +969,7 @@ pub(super) fn cmp_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[I
 pub(super) fn relational_value(x: &Value, y: &Value, arith: bool, f: impl Fn(Ordering) -> bool) -> Value {
     // A NaN operand (stored NaN misses the numeric cache and lands here) is false, never a
     // type error, matching the strict-capacity path and XPath numeric comparisons.
-    if let (Some(a), Some(b)) = (as_numeric(x), as_numeric(y)) {
+    if let (Some(a), Some(b)) = (comparison_numeric(x), comparison_numeric(y)) {
         if a.is_nan() || b.is_nan() {
             return Value::Bool(false);
         }
@@ -1104,7 +1068,7 @@ pub(super) fn lit_kind(v: &Value) -> LitKind<'_> {
             }
             let dt = l.datatype();
             if is_numeric_dt(l) {
-                LitKind::Num(numeric_capacity::operand(l))
+                LitKind::Num(Num::of_literal(l))
             } else if dt == xsd::STRING {
                 LitKind::Str(l.value())
             } else if dt == xsd::BOOLEAN {
@@ -1157,20 +1121,13 @@ pub(super) fn is_nan_lexical(value: &str, datatype: &str) -> bool {
 /// ill-formed lexicals, cross-family pairs — is a TYPE ERROR (`"a"^^ex:dt != "b"^^ex:other`
 /// filters the row out rather than evaluating to true).
 pub(super) fn values_equal(x: &Value, y: &Value) -> Option<bool> {
-    if budget::strict_numeric() {
-        // Equality of identical terms may otherwise bypass every numeric consumer.
-        if let (Some(a), Some(b)) = (as_numeric(x), as_numeric(y)) {
-            // NaN is not numerically equal to itself, even with identical RDF terms.
-            return Some(num_compare(a, b) == Some(Ordering::Equal));
-        }
-    }
     if matches!(x, Value::Unbound | Value::Error) || matches!(y, Value::Unbound | Value::Error) {
         return None;
     }
     if let (Value::Term(p), Value::Term(q)) = (x, y) {
         if p == q {
             // sameTerm decides even for unknown datatypes, except a float/double NaN:
-            // op:numeric-equal(NaN, NaN) is false, matching the strict-capacity path above.
+            // op:numeric-equal(NaN, NaN) is false in both capacity modes.
             return Some(!term_is_nan_literal(p));
         }
         // RDF 1.2 triple terms compare componentwise, with VALUE equality on the
@@ -1191,8 +1148,8 @@ pub(super) fn values_equal(x: &Value, y: &Value) -> Option<bool> {
     }
     use LitKind::*;
     match (ka, kb) {
-        (Num(Some(a)), Num(Some(b))) => Some(num_compare(a, b) == Some(Ordering::Equal)),
-        (Num(_), Num(_)) => None, // ill-formed numeric (and not sameTerm)
+        (Num(Some(a)), Num(Some(b))) => Some(comparison_num_cmp(a, b) == Some(Ordering::Equal)),
+        (Num(_), Num(_)) => exact_value_cmp(x, y).map(|o| o == Ordering::Equal),
         (Str(a), Str(b)) => Some(a == b),
         (Bool(Some(a)), Bool(Some(b))) => Some(a == b),
         (Bool(_), Bool(_)) => None,
@@ -1219,7 +1176,8 @@ pub(super) fn values_equal(x: &Value, y: &Value) -> Option<bool> {
 pub(super) fn value_compare_strict(x: &Value, y: &Value) -> Option<Ordering> {
     use LitKind::*;
     match (lit_kind(x), lit_kind(y)) {
-        (Num(Some(a)), Num(Some(b))) => num_compare(a, b),
+        (Num(Some(a)), Num(Some(b))) => comparison_num_cmp(a, b),
+        (Num(_), Num(_)) => exact_value_cmp(x, y),
         (Str(a), Str(b)) => Some(a.cmp(b)),
         (Bool(Some(a)), Bool(Some(b))) => Some(a.cmp(&b)),
         (DateTime(Some(a)), DateTime(Some(b))) => ExactTimeline::compare(a, b),
@@ -1230,6 +1188,36 @@ pub(super) fn value_compare_strict(x: &Value, y: &Value) -> Option<Ordering> {
         (OtherXsd(d1, l1), OtherXsd(d2, l2)) if d1 == d2 => Some(l1.cmp(l2)),
         _ => None,
     }
+}
+
+/// Comparison does not require an arithmetic representation or consume its capacity.
+/// Keep the bounded numeric fast path first; only scale overflow or an operand
+/// beyond the tower needs the any-length lexical comparator.
+fn comparison_numeric(v: &Value) -> Option<Num> {
+    match v {
+        Value::Num(n) => Some(*n),
+        Value::Term(Term::Literal(l)) => Num::of_literal(l),
+        _ => None,
+    }
+}
+
+fn comparison_num_cmp(a: Num, b: Num) -> Option<Ordering> {
+    if let (Some(x), Some(y)) = (a.to_dec(), b.to_dec()) {
+        return x.cmp(y)
+            .or_else(|| cmp_decimal_str(&a.lexical(), &b.lexical()));
+    }
+    num_compare(a, b)
+}
+
+fn exact_value_cmp(x: &Value, y: &Value) -> Option<Ordering> {
+    let result = exact_decimal_lexical(x)
+        .zip(exact_decimal_lexical(y))
+        .and_then(|(a, b)| cmp_decimal_str(&a, &b));
+    if result.is_none() && budget::strict_numeric() {
+        // Unsupported mixed comparisons retain the checked consumer contract.
+        let _ = (as_numeric(x), as_numeric(y));
+    }
+    result
 }
 
 /// The TOTAL-order verdict for a same-family temporal pair `value_compare_strict` left
@@ -1357,7 +1345,7 @@ pub(super) fn beyond_tower_lexical(v: &Value) -> Option<&str> {
 /// tower). `None` for float/double, whose exact value is its `f64`.
 #[cold]
 pub(super) fn exact_decimal_lexical(v: &Value) -> Option<String> {
-    match as_numeric(v) {
+    match comparison_numeric(v) {
         Some(n) if n.to_dec().is_some() => Some(n.lexical()),
         Some(_) => None,
         None => beyond_tower_lexical(v).map(str::to_string),
@@ -1366,7 +1354,7 @@ pub(super) fn exact_decimal_lexical(v: &Value) -> Option<String> {
 
 pub(super) fn as_num(v: &Value) -> Option<f64> {
     if budget::strict_numeric() && !matches!(v, Value::Bool(_)) {
-        return as_numeric(v).map(Num::f64);
+        return comparison_numeric(v).map(Num::f64);
     }
     match v {
         Value::Num(n) => Some(n.f64()),
@@ -1461,12 +1449,9 @@ impl CompareTerm for Value {
         // fallback kept the collapsed f64 verdict there, which made the order
         // intransitive at the 2^53 collapse — witness 1 of sq-wjl8i). The relational
         // `<`/`=` (`cmp_expr`, via `num_compare`) deliberately KEEPS its own semantics; this total
-        // order refines only their ties. `None` (a lexical beyond the exact tower) keeps the tie.
-        match (as_numeric(self), as_numeric(other)) {
+        // order refines only their ties. Beyond-tower exact values use lexicals below.
+        match (comparison_numeric(self), comparison_numeric(other)) {
             (Some(a), Some(b)) => {
-                if !numeric_capacity::comparable(a, b) {
-                    return None;
-                }
                 // Two in-tower decimals whose scale alignment overflows i128 would fall
                 // back to their (equal) f64 images; compare their exact lexicals instead,
                 // the same exact order a beyond-tower lexical gets below, so the total
@@ -1478,8 +1463,6 @@ impl CompareTerm for Value {
                 }
                 Some(a.cmp_total(b))
             }
-            // A strict numeric budget has already failed capacity on a lexical beyond the tower.
-            _ if budget::strict_numeric() => None,
             // At least one side is beyond the i128 tower: compare exact decimal lexicals
             // (arbitrary precision), or an exact lexical against a float/double's value.
             _ => match (exact_decimal_lexical(self), exact_decimal_lexical(other)) {
@@ -1535,11 +1518,6 @@ impl CompareTerm for Value {
 /// vs a documented extension). Relational `<` / `=` semantics are UNTOUCHED.
 #[inline]
 pub(super) fn compare_values(x: &Value, y: &Value) -> Option<Ordering> {
-    if budget::strict_numeric() {
-        if let (Some(a), Some(b)) = (as_numeric(x), as_numeric(y)) {
-            return numeric_capacity::comparable(a, b).then(|| a.cmp_total(b));
-        }
-    }
     compare_terms(x, y)
 }
 
@@ -2032,10 +2010,7 @@ pub(super) fn cmp_compiled(
 ) -> Result<Value, String> {
     if budget::strict_numeric() {
         let (x, y) = (eval_compiled(graph, local, b, row, a)?, eval_compiled(graph, local, b, row, c)?);
-        if let (Some(a), Some(b)) = (as_numeric(&x), as_numeric(&y)) {
-            if a.is_nan() || b.is_nan() { return Ok(Value::Bool(false)); }
-        }
-        return Ok(value_compare_strict(&x, &y).map(|o| Value::Bool(f(o))).unwrap_or(Value::Error));
+        return Ok(relational_value(&x, &y, false, f));
     }
     let arith = compiled_expr_has_arith(a) || compiled_expr_has_arith(c);
     if arith {

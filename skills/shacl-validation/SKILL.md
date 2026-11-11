@@ -710,6 +710,16 @@ SHACL-spec-correct conforms/violations).
   each operand converted once from its lexical whatever its length. `NaN` and an ill-typed
   numeric lexical (`"1.5"^^xsd:integer`, an out-of-range `xsd:byte`, a padded value) compare
   as nothing. A numeric bound is read once per validation run.
+- **SHACL-AF numeric node expressions preserve exact digits.** With `shacl-af`,
+  `min`, `max` and `orderBy` share the range constraints' any-length exact
+  integer/decimal comparison. `min`/`max` use floating promotion for mixed pairs;
+  `orderBy` refines floating ties by exact value, matching engine sorting. `sum`
+  adds through the bounded exact decimal tower: integer-only sums stay `xsd:integer`, a decimal
+  operand produces `xsd:decimal`, and float/double operands promote as in engine
+  arithmetic (a double operand produces `xsd:double`). Arithmetic overflow follows
+  the engine's floating fallback; a valid operand beyond the arithmetic tower
+  yields no sum result. Non-numeric and ill-typed members are ignored; empty
+  input sums to integer zero.
 - **Results are NOT deduplicated** across traversal routes / component occurrences — a
   nested shape reached via two parents reports twice (intentional, matches the suite).
 - **Recursion is treated as conforming.** Re-entering the same (focus, shape) pair

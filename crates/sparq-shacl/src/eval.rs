@@ -2841,7 +2841,7 @@ fn equal_value(a: &Term, b: &Term) -> bool {
 
 /// SPARQL-operator-style comparison of two terms; `None` when not comparable
 /// (non-literals, or literals of incompatible / unordered types).
-fn cmp_terms(a: &Term, b: &Term) -> Option<Ordering> {
+pub(crate) fn cmp_terms(a: &Term, b: &Term) -> Option<Ordering> {
     match (a, b) {
         (Term::Literal(la), Term::Literal(lb)) => cmp_literals(la, lb),
         _ => None,

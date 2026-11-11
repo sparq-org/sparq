@@ -159,7 +159,11 @@ arithmetic. See [exact temporal scope](../zk-query-proofs/references/exact-tempo
 `strict_numeric_capacity: true` rejects unsupported numeric consumers as
 a sticky whole-query capacity failure; it is `false` by default. It retains the
 `i64` integer and `i128` decimal lanes, including the existing bounded decimal
-division precision, while refusing overflow fallback to floating point.
+division precision, while refusing arithmetic overflow fallback to floating point.
+Relational comparisons (`=`, `!=`, `<`, `<=`, `>`, `>=`) between well-formed
+integer/decimal values and `ORDER BY` use exact lexical comparison when the
+bounded numeric fast path cannot represent or align the values. They accept
+mantissas beyond `i128` in both capacity modes; this does not expand arithmetic.
 Direct RDF output, valid unary plus, `isNumeric` and `sameTerm` preserve large
 lexicals without asserting arithmetic support. Numeric EBV separately classifies
 validated integer/decimal digits exactly, without a floating-point conversion.
