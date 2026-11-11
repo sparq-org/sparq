@@ -492,6 +492,22 @@ impl AuthLedger {
             e.dim
         };
         let (kind, detail) = match dim {
+            Dim::Bytes | Dim::SourceBytes if iri.starts_with("ODRL ") => (
+                AuthAllowance::InputBytes,
+                format!(
+                    "the {} source contributes more than max_input_bytes ({}) to the \
+                     reasoning input; the authorization view is not built (fail-closed)",
+                    iri, self.budget.max_input_bytes
+                ),
+            ),
+            Dim::TermDepth if iri.starts_with("ODRL ") => (
+                AuthAllowance::InputTermBytes,
+                format!(
+                    "a term of the {} source exceeds the stored triple term nesting \
+                     guard ({}); the authorization view is not built (fail-closed)",
+                    iri, e.limit
+                ),
+            ),
             Dim::TermDepth => (
                 AuthAllowance::InputTermBytes,
                 format!(

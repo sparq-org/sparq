@@ -513,3 +513,32 @@ fn mixed_collection_literals_keep_first_member_reading() {
         assert!(current::parse_policy_str(&rdf, "turtle").is_ok());
     }
 }
+
+#[test]
+fn unreached_malformed_compound_collections_are_a_deliberate_difference() {
+    for operand in [
+        "rdf:nil .",
+        "_:head . _:head rdf:first <urn:atom>; rdf:rest <urn:missing> .",
+        "_:head . _:head rdf:rest rdf:nil .",
+    ] {
+        let rdf = format!(
+            "@prefix o: <http://www.w3.org/ns/odrl/2/> . \
+             @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> . \
+             <urn:p> o:permission <urn:r> . <urn:r> o:action o:read . \
+             <urn:unreached> o:and {operand}"
+        );
+        let graph = sparq_core::Graph::load_str(&rdf, "turtle").unwrap();
+        let old = main_parse::parse_policy(&graph).unwrap_err();
+        assert!(old.contains("collection"), "{old}");
+        let current = current::parse_policy(&graph);
+        assert!(
+            current.is_ok(),
+            "unreached compound was refused: {current:?}"
+        );
+        let current = current.unwrap();
+        assert_eq!(current.permissions.len(), 1);
+        assert!(
+            current::evaluate(&current, &Request::new("http://www.w3.org/ns/odrl/2/read")).allow
+        );
+    }
+}
