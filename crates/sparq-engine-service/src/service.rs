@@ -3088,6 +3088,7 @@ mod tests {
             let timeout = ureq::unversioned::transport::NextTimeout {
                 after: ureq::unversioned::transport::time::Duration::NotHappening,
                 reason: ureq::Timeout::Global,
+                ..Default::default()
             };
             EgressFilterResolver.resolve(&uri, &config, timeout)
         }
