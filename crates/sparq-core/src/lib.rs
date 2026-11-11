@@ -112,8 +112,8 @@ pub struct Graph {
     /// no extra allocation is made for graphs that never query a temporal value.
     exact_temporals: std::sync::OnceLock<rustc_hash::FxHashMap<Id, temporal::ExactCacheCell>>,
     /// (sq-lr2ii) Memoised guard against the engine's f64 sargable-FILTER fast
-    /// path deciding a comparison wrongly for an f64-INEXACT decimal. `0` = not yet computed,
-    /// `1` = known to hold NO such decimal (fast path safe), `2` = holds at least one (the
+    /// path deciding a comparison wrongly for an f64-inexact decimal or an uncached
+    /// valid exact numeric. `0` = not yet computed, `1` = fast path safe, `2` = unsafe (the
     /// engine must decline the fast path and use the exact evaluator). Lazily filled by
     /// [`has_high_precision_decimal`](Self::has_high_precision_decimal); reset to `0` by a
     /// delta that appends terms (`apply_delta_mem`) so it is recomputed over the grown
@@ -3427,35 +3427,51 @@ impl Graph {
         }
     }
 
-    /// (sq-lr2ii) `true` if the graph holds any `xsd:decimal` literal with MORE
-    /// than 15 significant digits — a value the f64 `numerics` cache CANNOT represent exactly,
+    /// `true` if the graph holds a valid integer/decimal literal missing from the
+    /// numeric cache, or a cached `xsd:decimal` with more than 15 significant digits.
+    /// Missing entries include valid values beyond the arithmetic tower: a cache-only
+    /// scan would drop them before the exact evaluator can compare their lexicals.
+    /// A high-precision decimal is a value the f64 `numerics` cache cannot represent exactly,
     /// so the engine's f64-based sargable FILTER fast path could decide `=`/`<`/`>`/`<=`/`>=`
     /// WRONGLY for it (e.g. `"1.000000000000000001"^^xsd:decimal` shares the f64 `1.0` with the
     /// constant `1`, yet is not equal to it). The engine consults this at the sargable-decision
     /// point to DECLINE that fast path and fall back to the exact general evaluator; a graph
-    /// without any such decimal keeps the fast path (a decimal of `<= 15` significant digits
+    /// without any such literal keeps the fast path (a decimal of `<= 15` significant digits
     /// round-trips through f64 unambiguously, and a large-integer collision needs a `> 15`-digit
-    /// CONSTANT, which the engine already declines). Integers/float/double are exempt: an
-    /// integer's exactness is the constant-side guard's job and a float/double's value IS its f64.
+    /// CONSTANT, which the engine already declines). Cached integers are exempt: their
+    /// exactness is the constant-side guard's job. Float/double values are their own f64;
+    /// ill-typed exact literals do not set this flag.
     ///
-    /// Memoised (see `high_precision_decimal`): the first call scans the graph's numeric terms
+    /// Memoised (see `high_precision_decimal`): the first call scans the graph's dictionary
     /// once (short-circuiting on the first offender); later calls are an atomic load. A delta
     /// that appends terms resets the memo so it is recomputed over the grown dictionary. This is
-    /// a CONSERVATIVE, graph-wide gate — one offending decimal declines the numeric fast path for
+    /// a conservative, graph-wide gate — one offending literal declines the numeric fast path for
     /// every comparison on the graph — chosen for safety (correctness is never at risk; only the
     /// pushdown optimisation is skipped for affected graphs).
+    #[inline]
     pub fn has_high_precision_decimal(&self) -> bool {
         use std::sync::atomic::Ordering::Relaxed;
         match self.high_precision_decimal.load(Relaxed) {
             2 => true,
             1 => false,
-            _ => {
-                let found = (1..=self.dict.len() as Id)
-                    .any(|id| self.numerics.lookup(id).is_some() && is_high_precision_decimal(&self.dict, id));
-                self.high_precision_decimal.store(if found { 2 } else { 1 }, Relaxed);
-                found
-            }
+            _ => self.compute_high_precision_decimal(),
         }
+    }
+
+    // Keep dictionary inspection out of the warmed numeric scan eligibility path.
+    #[cold]
+    fn compute_high_precision_decimal(&self) -> bool {
+        use std::sync::atomic::Ordering::Relaxed;
+        let found = (1..=self.dict.len() as Id).any(|id| {
+            if self.numerics.lookup(id).is_some() {
+                return is_high_precision_decimal(&self.dict, id);
+            }
+            matches!(self.dict.term_parts(id),
+                dict::TermParts::Lit { value, datatype, lang: None }
+                    if exact_numeric_literal_valid(value, datatype))
+        });
+        self.high_precision_decimal.store(if found { 2 } else { 1 }, Relaxed);
+        found
     }
 
     /// `true` if the graph holds any `xsd:float` literal. The engine's f64 sargable-FILTER
@@ -14362,8 +14378,8 @@ mod tests {
     }
 
     /// sq-lr2ii — `has_high_precision_decimal` is the engine's sargable-safety gate:
-    /// TRUE iff the graph holds an `xsd:decimal` with > 15 significant digits (an f64-inexact
-    /// value). Integers past 2^53, floats/doubles, and <=15-digit decimals do NOT set it.
+    /// Cached `xsd:decimal` values with > 15 significant digits set the guard.
+    /// Cached integers past 2^53, floats/doubles, and <=15-digit decimals do not.
     #[test]
     fn has_high_precision_decimal_flags_only_inexact_decimals() {
         let xsd_ = |ty: &str| format!("http://www.w3.org/2001/XMLSchema#{ty}");
@@ -14387,6 +14403,35 @@ mod tests {
         // NOT flagged: an empty / non-numeric graph.
         assert!(!build("\"hello\"").has_high_precision_decimal());
         assert!(!Graph::new().has_high_precision_decimal());
+    }
+
+    #[test]
+    fn has_high_precision_decimal_detects_uncached_exact_values() {
+        let huge = "340282366920938463463374607431768211456001";
+        for (value, datatype, expected) in [
+            (huge.to_owned(), "integer", true),
+            (format!("-{huge}"), "integer", true),
+            (format!("{huge}.5"), "decimal", true),
+            (format!("7.{}", "0".repeat(50)), "decimal", true),
+            (huge.to_owned(), "positiveInteger", true),
+            (huge.to_owned(), "nonNegativeInteger", true),
+            (format!("-{huge}"), "negativeInteger", true),
+            (format!("-{huge}"), "nonPositiveInteger", true),
+            ("0.1234567890123456789012345678901234567890123".to_owned(), "decimal", true),
+            (format!(" {huge}"), "integer", false),
+            (format!("{huge}.5"), "integer", false),
+            (huge.to_owned(), "byte", false),
+            (huge.to_owned(), "negativeInteger", false),
+            (huge.to_owned(), "string", false),
+            ("NaN".to_owned(), "double", false),
+        ] {
+            let data = format!("<http://ex/s> <http://ex/p> \"{value}\"^^<http://www.w3.org/2001/XMLSchema#{datatype}> .");
+            let graph = Graph::load_str(&data, "ntriples").unwrap();
+            let id = graph.iter_ids().next().unwrap()[2];
+            assert!(graph.numeric_value(id).is_none(), "fixture must miss the numeric cache");
+            assert_eq!(graph.has_high_precision_decimal(), expected, "{value}^^{datatype}");
+            assert_eq!(graph.has_high_precision_decimal(), expected, "memoised {value}^^{datatype}");
+        }
     }
 
     /// sq-lr2ii — the memoised flag must NOT go stale: inserting an f64-inexact
