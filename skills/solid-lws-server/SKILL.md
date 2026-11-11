@@ -201,6 +201,36 @@ Without a data directory, the native binary uses in-memory blobs.
 See [native storage](references/native-storage.md) for the `format.json` contract,
 `EmbeddedSparqClient::open_or_create` / `compact`, lock ownership and shutdown.
 
+### How to run the P0-9 measurement
+
+From the repository root, select a disk-backed scratch directory and inspect its
+mount before running (do not use tmpfs):
+
+```bash
+mkdir -p "$PWD/target/p09-durable"
+findmnt -T "$PWD/target/p09-durable"
+ulimit -n
+for count in 1000 10000 100000; do
+  TMPDIR="$PWD/target/p09-durable" P09_RESOURCES="$count" \
+    cargo test --release -p sparq-lws-core --test durable_measure \
+      durable_resource_measurement -- --ignored --exact --nocapture
+done
+```
+
+`P09_RESOURCES` is a required positive resource count; `TMPDIR` is a required
+absolute existing scratch directory. Each invocation uses a fresh, automatically
+removed data root. Default features supply `embedded-sparq` and `blob-fs`; no
+additional features are needed. The ignored test is manual and has no CI entry.
+Measured binary resources are root siblings. The JSON summary reports sequential
+PUT latency (nearest-rank percentiles, including the complete response), recursive regular-file
+count under the actual `index/` after SIGKILL, and replacement-process spawn to
+`/readyz`. Restart includes index recovery with a warm OS page cache, excludes
+post-readiness byte checks, and has a generous failure timeout. Setup is untimed;
+first, middle and last resource bytes are checked after restart. Repeat invocations
+for independent samples and retain JSON and machine details outside the repository.
+The current store retains per-resource journal handles; check the process descriptor
+limit for large runs. A failed create aborts rather than reporting partial percentiles.
+
 ### Object-store blob plane
 
 Status: **wired**. `SOLID_SERVER_BLOB_URL` selects the native-only
