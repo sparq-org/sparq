@@ -1,53 +1,7 @@
-//! (sq-yca1) Manifest-driven runner for the **SHACL 1.2** core test
-//! suite's `node/` `sht:Validate` entries
-//! (`shacl12-test-suite/tests/core/node/...`).
-//!
-//! `w3c_core.rs` walks the *older* `data-shapes-test-suite/tests/core` tree. The
-//! newer `shacl12-test-suite/tests/core/node` tree additionally carries a
-//! `nodeByExpression-001` `sht:Validate` entry (the constant-IRI form of
-//! `sh:nodeByExpression`, implemented under the `shacl-af` feature in sq-3w6n)
-//! **plus** the SHACL-1.2-only core constraints `sh:memberShape`,
-//! `sh:uniqueMembers`, `sh:{max,min}ListLength`, `sh:uniqueValuesFor`, the
-//! `sh:closed sh:ByTypes` close-by-types mode, and the disjunctive list spellings
-//! of `sh:datatype` / `sh:nodeKind`. (sq-vg3y) all of those are now
-//! implemented on the Core path and compared strictly; the only thing this
-//! harness still SKIPs is `sh:nodeByExpression` when `shacl-af` is off.
-//!
-//! ## SKIP-tolerance (honest floor)
-//!
-//! An entry is **SKIP**, not FAIL, exactly when its shapes graph uses a
-//! constraint-component *predicate* with no counterpart in this build
-//! ([`unimplemented`]). After sq-vg3y that is ONLY `sh:nodeByExpression`, and ONLY
-//! when `shacl-af` is off.
-//!
-//! Any entry whose shapes use **only** implemented constraints is compared
-//! strictly — a mismatch there is a FAIL, so the harness can never silently mask
-//! a regression in an implemented constraint.
-//!
-//! This is deliberately a *structural* SKIP (vocabulary) and not an
-//! outcome-driven one: an entry is classed up front by the predicates it
-//! exercises, so a wrong report on an *implemented* constraint cannot be laundered
-//! into a SKIP.
-//!
-//! The floor auto-grows as the SKIP list shrinks (bump [`BASELINE_PASS_CORE`] /
-//! [`BASELINE_PASS_AF`] then).
-//!
-//! ## Two gates
-//!
-//!   * **Suite gate** — the suite is fetched by `./fetch-shacl-tests.sh` into
-//!     `tests/shacl/` (gitignored). When absent the test SKIPS itself so
-//!     `cargo test --workspace` stays green on a fresh checkout.
-//!   * **Feature gate** — this file is *not* `#[cfg]`-gated as a whole: it runs in
-//!     **both** feature states. With `shacl-af` OFF, `sh:nodeByExpression` is
-//!     unimplemented, so `nodeByExpression-001` is a SKIP and the pass-floor is
-//!     [`BASELINE_PASS_CORE`]. With `shacl-af` ON, that entry is PASS and the
-//!     floor rises to [`BASELINE_PASS_AF`].
-//!
-//! The report-comparison policy mirrors `w3c_core.rs`: `sh:conforms` must match,
-//! and the result multisets must correspond 1:1 where each expected result's
-//! stated `sh:focusNode` / `sh:resultPath` / `sh:value` / `sh:resultSeverity` /
-//! `sh:sourceConstraintComponent` / `sh:sourceShape` / `sh:resultMessage` agree
-//! (blank nodes match any blank node).
+//! Strict report comparisons for the SHACL 1.2 Core node subset.
+//! At the current pin all 55 entries pass in both feature states. The harness
+//! retains structural skips for feature-dependent forms and skips itself when
+//! the suite checkout is absent. The full Core runner covers the other groups.
 
 use oxrdf::Term;
 use sparq_core::Graph;
@@ -87,21 +41,9 @@ fn unimplemented() -> Vec<String> {
     v
 }
 
-/// Pass-floor with the `shacl-af` feature OFF: the implemented core/node
-/// `sht:Validate` entries at the pinned suite commit, excluding
-/// `nodeByExpression-001` (which is then a SKIP). A regression below this fails
-/// the build; raising it is a deliberate bump.
-///
-/// (sq-vg3y) Bumped 32 → 44: the twelve formerly-SKIPed SHACL-1.2-only
-/// core/node entries (`closed-003/004`, `datatype-003`, `nodeKind-002`,
-/// `memberShape-001`, `uniqueMembers-001`, `{max,min}ListLength-001`,
-/// `uniqueValuesFor-001..004`) are now implemented and PASS.
-const BASELINE_PASS_CORE: usize = 44;
-
-/// Pass-floor with the `shacl-af` feature ON: [`BASELINE_PASS_CORE`] plus the
-/// `nodeByExpression-001` entry, which the SHACL-AF `sh:nodeByExpression`
-/// implementation (sq-3w6n) now validates end to end.
-const BASELINE_PASS_AF: usize = BASELINE_PASS_CORE + 1;
+/// Measured at 04ecbb4 (2026-11-12), in both feature states.
+const BASELINE_PASS_CORE: usize = 55;
+const BASELINE_PASS_AF: usize = 55;
 
 fn baseline_pass() -> usize {
     if cfg!(feature = "shacl-af") {

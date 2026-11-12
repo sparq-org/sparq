@@ -738,8 +738,7 @@ impl<'a> Validator<'a> {
         // to `None` before the composite arm's `result()` read it (a silent
         // no-op). Saving the caller's meta here (take: the nested frame starts
         // clean, so an outer override can never leak INTO nested results — those
-        // carry the nested shape's own metas, the reading recorded in
-        // research/shacl12-conformance-gap.md §6) and restoring it on exit lets
+        // carry the nested shape's own metas) and restoring it on exit lets
         // the override survive the recursion for the composite's OWN result.
         let caller_meta = self.active_meta.take();
         #[cfg(test)]
@@ -755,43 +754,50 @@ impl<'a> Validator<'a> {
             Some(f) => f,
             None => self.data.id_of(focus),
         };
-        // (sq-rnkdh) SHACL 1.2 SPARQL-valued value nodes: when the shape
-        // carries `sh:values [ sh:select … ]` / `[ sh:sparqlExpr … ]`, the value
-        // nodes are COMPUTED by the node expression (`$this` = focus node) instead
-        // of derived by traversing `sh:path`. The reported `sh:resultPath` is still
-        // the shape's path (set in `result`), so only the value-node SET changes.
-        let mut values: ValueNodes = match shape.value_expr {
-            Some(idx) => {
-                // (sq-7d3dj.33.5) Use the pre-computed batch map when
-                // available (set by `validate_graph` before the focused shape loop);
-                // fall back to per-focus eval for nested/data-graph shapes.
-                let cached = self.node_expr_cache.as_ref().and_then(|(csid, map)| {
-                    if *csid == sid {
-                        map.get(focus).cloned()
-                    } else {
-                        None
-                    }
-                });
-                ValueNodes::Terms(crate::view::dedup(cached.unwrap_or_else(|| {
-                    shapes.select_exprs[idx].eval(self.data.graph(), focus)
-                })))
+        if let Some(idx) = shape.deactivated_expr {
+            let deactivated = shapes.select_exprs[idx].eval(self.data.graph(), focus);
+            if matches!(deactivated.as_slice(), [Term::Literal(l)]
+                if l.datatype().as_str() == "http://www.w3.org/2001/XMLSchema#boolean" && matches!(l.value(), "true" | "1"))
+            {
+                self.active_meta = caller_meta;
+                return;
             }
-            None => match &shape.path {
-                Some(path) => match (&self.compiled_paths[sid], fid) {
-                    // Id fast path: walk the compiled path over ids.
-                    (Some(pids), Some(f)) => {
-                        #[cfg(test)]
-                        IDFAST_WALKS.with(|c| c.set(c.get() + 1));
-                        ValueNodes::Ids(pids.values_ids(&self.data, f))
-                    }
-                    _ => ValueNodes::Terms(path.values(&self.data, focus)),
-                },
-                // The focus node itself. Kept as the caller's EXACT term (never
-                // round-tripped through the dictionary), so a focus originating
-                // outside the data graph is reported verbatim.
-                None => ValueNodes::Terms(vec![focus.clone()]),
+        }
+        let mut values = match &shape.path {
+            Some(path) => match (&self.compiled_paths[sid], fid) {
+                (Some(pids), Some(f)) => {
+                    #[cfg(test)]
+                    IDFAST_WALKS.with(|c| c.set(c.get() + 1));
+                    ValueNodes::Ids(pids.values_ids(&self.data, f))
+                }
+                _ => ValueNodes::Terms(path.values(&self.data, focus)),
             },
+            None => ValueNodes::Terms(vec![focus.clone()]),
         };
+        if shape.value_expr.is_some()
+            || shape.value_constant.is_some()
+            || shape.default_expr.is_some()
+            || shape.default_constant.is_some()
+        {
+            let mut terms = values.materialize(&self.data).to_vec();
+            if let Some(idx) = shape.value_expr {
+                let cached = self.node_expr_cache.as_ref().and_then(|(csid, map)| {
+                    (*csid == sid).then(|| map.get(focus).cloned()).flatten()
+                });
+                terms
+                    .extend(cached.unwrap_or_else(|| {
+                        shapes.select_exprs[idx].eval(self.data.graph(), focus)
+                    }));
+            }
+            terms.extend(shape.value_constant.iter().cloned());
+            if terms.is_empty() {
+                terms.extend(shape.default_constant.iter().cloned());
+                if let Some(idx) = shape.default_expr {
+                    terms.extend(shapes.select_exprs[idx].eval(self.data.graph(), focus));
+                }
+            }
+            values = ValueNodes::Terms(crate::view::dedup(terms));
+        }
         // (sq-pb0wm) Per-constraint-statement RDF-1.2 reified-annotation
         // overrides, PARALLEL to `components`. A `{| sh:deactivated true |}` on a
         // single constraint statement suppresses ONLY that occurrence (the shape
@@ -1632,9 +1638,17 @@ impl<'a> Validator<'a> {
             // be the named class or a transitive `rdfs:subClassOf`-descendant of it
             // (reuses the `sh:class` subclass closure).
             Component::RootClass(cls) => {
-                let closure = self.data.subclass_closure(cls);
+                let classes = if matches!(cls, Term::BlankNode(_)) {
+                    GraphView::new(&self.shapes.source).list(cls)
+                } else {
+                    vec![cls.clone()]
+                };
+                let closure: FxHashSet<Term> = classes
+                    .iter()
+                    .flat_map(|c| self.data.subclass_closure(c))
+                    .collect();
                 for v in values {
-                    if !closure.contains(v) {
+                    if !matches!(v, Term::NamedNode(_)) || !closure.contains(v) {
                         out.push(self.result(
                             sid,
                             focus,
@@ -1729,13 +1743,15 @@ impl<'a> Validator<'a> {
                         Some(p) => self.reifiers_of(focus, p, v),
                         None => Vec::new(),
                     };
-                    let conforms = if reifiers.is_empty() {
-                        // No reifier: conforms unless reification is required.
-                        !*required
+                    let failures = if reifiers.is_empty() {
+                        usize::from(*required)
                     } else {
-                        reifiers.iter().all(|r| self.conforms(r, *inner))
+                        reifiers
+                            .iter()
+                            .filter(|r| !self.conforms(r, *inner))
+                            .count()
                     };
-                    if !conforms {
+                    for _ in 0..failures {
                         out.push(self.result(
                             sid,
                             focus,
@@ -2030,12 +2046,7 @@ impl<'a> Validator<'a> {
                     }
                 }
             }
-            // (sq-vg3y) `sh:uniqueValuesFor` (SHACL-1.2): the values of the
-            // listed properties of a value node must be unique across ALL target
-            // nodes of the shape. For each value node V that shares the exact same
-            // value-set (for every listed property) with another target node Other,
-            // one result with Other as sh:value. No result if V has no values for
-            // ANY of the properties.
+            // One result per value node with a duplicated key, without sh:value.
             Component::UniqueValuesFor(props) => {
                 self.eval_unique_values_for(sid, focus, values, props, out)
             }
@@ -2072,7 +2083,15 @@ impl<'a> Validator<'a> {
                 let data = self.data.graph();
                 let expr = &self.shapes.expressions[*idx];
                 for v in values {
-                    let result = crate::rules::eval_parsed_expr(data, self.shapes, expr, v);
+                    let result = expr.eval(
+                        data,
+                        &self.data,
+                        self.shapes,
+                        focus,
+                        &[("value".to_string(), vec![v.clone()])]
+                            .into_iter()
+                            .collect(),
+                    );
                     if !crate::rules::is_true_result(&result) {
                         out.push(self.result(
                             sid,
@@ -2165,7 +2184,11 @@ impl<'a> Validator<'a> {
             source_constraint: Some(constraint.node.clone()),
             source_component: sh("SPARQLConstraintComponent"),
             severity,
-            messages: shape.messages.clone(),
+            messages: if fields.messages.is_empty() {
+                shape.messages.clone()
+            } else {
+                fields.messages
+            },
             default_message: fields.default_message,
             details: Vec::new(),
         }
@@ -2290,7 +2313,7 @@ impl<'a> Validator<'a> {
                 None => return, // no usable validator for this shape kind (lenient)
             },
         };
-        let message = validator.message.clone();
+        let messages = validator.messages.clone();
         let component_iri = match &comp.node {
             Term::NamedNode(n) => n.as_str().to_string(),
             // A blank-node component has no IRI for sh:sourceConstraintComponent;
@@ -2328,13 +2351,11 @@ impl<'a> Validator<'a> {
                         bindings.push((name.as_str(), term));
                     }
                     if crate::sparql::ask_violates(query, data, &bindings) {
-                        let default_message = match &message {
-                            // {$param}/{$value}/{$this} substitution from the pre-bound terms.
-                            Some(tpl) => crate::sparql::substitute_bindings(tpl, &bindings),
-                            None => format!(
-                                "Value does not satisfy constraint component <{component_iri}>"
-                            ),
-                        };
+                        let result_messages =
+                            crate::sparql::substitute_message_bindings(&messages, &bindings);
+                        let default_message = format!(
+                            "Value does not satisfy constraint component <{component_iri}>"
+                        );
                         out.push(ValidationResult {
                             focus_node: focus.clone(),
                             path: shape_path.clone(),
@@ -2345,7 +2366,11 @@ impl<'a> Validator<'a> {
                             source_constraint: None,
                             source_component: component_iri.clone(),
                             severity: severity.clone(),
-                            messages: shape_messages.clone(),
+                            messages: if result_messages.is_empty() {
+                                shape_messages.clone()
+                            } else {
+                                result_messages
+                            },
                             default_message,
                             details: Vec::new(),
                         });
@@ -2363,7 +2388,7 @@ impl<'a> Validator<'a> {
                     data,
                     focus,
                     &bindings,
-                    message.as_deref(),
+                    &messages,
                     |fields: ComponentResultFields| ValidationResult {
                         focus_node: fields.focus,
                         path: fields.path.or_else(|| shape_path.clone()),
@@ -2374,7 +2399,11 @@ impl<'a> Validator<'a> {
                         source_constraint: None,
                         source_component: component_iri.clone(),
                         severity: severity.clone(),
-                        messages: shape_messages.clone(),
+                        messages: if fields.messages.is_empty() {
+                            shape_messages.clone()
+                        } else {
+                            fields.messages
+                        },
                         default_message: fields.default_message,
                         details: Vec::new(),
                     },
@@ -2411,10 +2440,7 @@ impl<'a> Validator<'a> {
         allowed.into_iter().collect()
     }
 
-    /// (sq-vg3y) `sh:uniqueValuesFor` evaluation: for each value node V
-    /// (with at least one value across the listed properties), report each OTHER
-    /// target node of this shape that has the exact same per-property value sets as
-    /// V (with that other node as `sh:value`, V's focus as `sh:focusNode`).
+    /// Compare each value node's exact key against the shape's target nodes.
     fn eval_unique_values_for(
         &mut self,
         sid: usize,
@@ -2430,23 +2456,17 @@ impl<'a> Validator<'a> {
             if sig_v.iter().all(|s| s.is_empty()) {
                 continue; // V has no values for any property — never a violation
             }
-            for other in &targets {
-                if other == v {
-                    continue;
-                }
-                if value_signature(&self.data, other, props) == sig_v {
-                    out.push(
-                        self.result(
-                            sid,
-                            focus,
-                            Some(other.clone()),
-                            "UniqueValuesForConstraintComponent",
-                            "Another target node has the same values for the unique \
-                         properties"
-                                .into(),
-                        ),
-                    );
-                }
+            if targets
+                .iter()
+                .any(|other| other != v && value_signature(&self.data, other, props) == sig_v)
+            {
+                out.push(self.result(
+                    sid,
+                    focus,
+                    None,
+                    "UniqueValuesForConstraintComponent",
+                    "Another target node has the same values for the unique properties".into(),
+                ));
             }
         }
     }
@@ -2695,8 +2715,7 @@ fn node_kind_matches(v: &Term, kind: &str) -> bool {
             matches!(local, "BlankNode" | "BlankNodeOrIRI" | "BlankNodeOrLiteral")
         }
         Term::Literal(_) => matches!(local, "Literal" | "BlankNodeOrLiteral" | "IRIOrLiteral"),
-        #[allow(unreachable_patterns)]
-        _ => false,
+        Term::Triple(_) => local == "TripleTerm",
     }
 }
 
@@ -2792,9 +2811,8 @@ fn node_kind_matches_id(g: &GraphView, id: Id, kind: &str) -> bool {
         TermParts::Blank(_) => {
             matches!(local, "BlankNode" | "BlankNodeOrIRI" | "BlankNodeOrLiteral")
         }
-        // A triple term matches no SHACL node kind — same as the Term-level
-        // `node_kind_matches` catch-all.
-        TermParts::Triple(_) => false,
+        // Keep the id and Term paths consistent for RDF 1.2 triple terms.
+        TermParts::Triple(_) => local == "TripleTerm",
     }
 }
 

@@ -43,9 +43,9 @@ const SH: &str = "http://www.w3.org/ns/shacl#";
 const SHACL_SPARQL_FLOOR: usize = sparq_conformance_floors::shacl::SPARQL_FLOOR;
 
 /// pre-binding/ ratchet at the pinned suite commit: the pass count may only rise
-/// and the fail count only fall (shapesGraph-001, `$shapesGraph`, is the open gap).
-const PRE_BINDING_PASS_FLOOR: usize = 13;
-const PRE_BINDING_FAIL_CEILING: usize = 1;
+/// and the fail count only fall. Includes `$shapesGraph` pre-binding.
+const PRE_BINDING_PASS_FLOOR: usize = 14;
+const PRE_BINDING_FAIL_CEILING: usize = 0;
 
 fn sparql_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -88,7 +88,7 @@ fn w3c_shacl_sparql_node_and_property() {
         pre.pass, pre.fail, pre.skip
     );
     assert!(
-        pre.pass >= PRE_BINDING_PASS_FLOOR && pre.fail <= PRE_BINDING_FAIL_CEILING,
+        pre.pass >= PRE_BINDING_PASS_FLOOR && pre.fail == PRE_BINDING_FAIL_CEILING,
         "SHACL-SPARQL pre-binding regressed: pass {} (floor {PRE_BINDING_PASS_FLOOR}), fail {} (ceiling {PRE_BINDING_FAIL_CEILING})",
         pre.pass,
         pre.fail
@@ -247,7 +247,7 @@ fn run_entry(file: &FsPath, g: &Graph, view: &GraphView, entry: &Term) -> Result
     let exp_node = view
         .object(entry, &format!("{MF}result"))
         .ok_or("entry has no mf:result")?;
-    if let Some(rejected) = support::expected_failure(&exp_node, data_g, shapes_g) {
+    if let Some(rejected) = support::expected_failure_shacl10(&exp_node, data_g, shapes_g) {
         return Ok(if rejected {
             Outcome::Pass
         } else {

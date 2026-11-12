@@ -56,3 +56,13 @@ pub fn expected_failure(
 
 pub const NOT_REJECTED: &str =
     "expected sht:Failure (validator must reject) but strict validation produced a report";
+
+/// The SHACL 1.0 suite uses its own Appendix A admission policy.
+pub fn expected_failure_shacl10(
+    expected: &oxrdf::Term,
+    data: &sparq_core::Graph,
+    shapes: &sparq_core::Graph,
+) -> Option<bool> {
+    matches!(expected, oxrdf::Term::NamedNode(n) if n.as_str() == "http://www.w3.org/ns/shacl-test#Failure")
+        .then(|| sparq_shacl::validate_strict_shacl10(data, shapes).is_err())
+}

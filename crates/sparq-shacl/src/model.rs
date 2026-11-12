@@ -109,9 +109,8 @@ pub enum Component {
     /// constraint (not parsed into a component).
     SingleLine,
     /// (sq-sx15d) `sh:rootClass` (SHACL 1.2) — each value node must be
-    /// the named class or a transitive `rdfs:subClassOf`-descendant of it
-    /// (`sh:RootClassConstraintComponent`). Reuses the `sh:class` subclass
-    /// closure.
+    /// an IRI equal to or a transitive `rdfs:subClassOf`-descendant of the class,
+    /// or any member of a class-list operand (`sh:RootClassConstraintComponent`).
     RootClass(Term),
     Not(usize),
     And(Vec<usize>),
@@ -287,7 +286,7 @@ impl PreparedComponentValidator {
         let prepared = crate::sparql::PreparedValidator::build(&substituted, self.is_ask)?;
         Some(PreparedComponentValidator {
             prepared,
-            message: self.message.clone(),
+            messages: self.messages.clone(),
             raw: substituted,
             is_ask: self.is_ask,
         })
@@ -331,7 +330,7 @@ impl ComponentDef {
 #[derive(Debug, Clone)]
 pub(crate) struct PreparedComponentValidator {
     pub prepared: crate::sparql::PreparedValidator,
-    pub message: Option<String>,
+    pub messages: Vec<Term>,
     /// The validator's full query text (prefixes already prepended) and whether
     /// it is an `sh:ask`. Retained so a `sh:propertyValidator` can be RE-PARSED
     /// per property shape with the shape's path substituted for the `$PATH`
@@ -356,11 +355,11 @@ pub(crate) struct SparqlConstraint {
     pub node: Term,
     /// The raw `sh:select` text.
     pub select: String,
+    pub current_shape: Option<Term>,
     /// PREFIX declarations assembled from `sh:prefixes` (`sh:declare` →
     /// `sh:prefix` / `sh:namespace`), prepended to `select` before parsing.
     pub prefixes: String,
-    /// The constraint's own `sh:message` template, if any (takes precedence over
-    /// a `?message` binding and over the shape's `sh:message`).
+    /// The constraint's first message template, used below a bound `?message`.
     pub message: Option<String>,
     /// (sq-rnkdh) The constraint node's own `sh:severity` IRI, if any.
     /// SHACL 1.2 lets a `sh:SPARQLConstraint` declare a `sh:severity` that
@@ -403,15 +402,20 @@ pub struct Shape {
     pub property_children: Vec<usize>,
     /// (sq-rnkdh) SHACL 1.2 `sh:values [ sh:select … ]` /
     /// `[ sh:sparqlExpr … ]`: when present, the value nodes of this (property)
-    /// shape are COMPUTED by the SPARQL node expression (index into
-    /// [`ShapesModel::select_exprs`]) instead of derived by traversing `sh:path`.
+    /// shape include the SPARQL expression outputs (index into
+    /// [`ShapesModel::select_exprs`]) as well as nodes reached through `sh:path`.
     /// The reported `sh:resultPath` is still the shape's `sh:path`.
     pub(crate) value_expr: Option<usize>,
+    pub(crate) value_constant: Option<Term>,
+    pub(crate) default_constant: Option<Term>,
+    pub(crate) default_expr: Option<usize>,
+    pub(crate) deactivated_expr: Option<usize>,
 }
 
 /// All shapes parsed from a shapes graph, indexed densely (cycle-safe).
 pub struct ShapesModel {
     pub shapes: Vec<Shape>,
+    pub(crate) source: Graph,
     by_node: FxHashMap<Term, usize>,
     /// Shapes that have at least one target — the validation entry points.
     pub targeted: Vec<usize>,
@@ -450,7 +454,7 @@ pub struct ShapesModel {
     /// (sq-0mjfd) SHACL-SPARQL pre-binding FAILURES discovered at
     /// parse: a `sh:sparql` constraint (or a SPARQL-based constraint-component
     /// validator) whose query violates the pre-binding rules (MINUS / VALUES /
-    /// SERVICE / a sub-SELECT that drops a pre-bound variable / a BIND re-binding
+    /// SERVICE / AS re-binding
     /// one). A conformant processor MUST signal a *failure* for these (W3C SHACL
     /// §3.4), surfaced through [`crate::validate_strict`]. Empty in the common
     /// (well-formed) case; the lenient default [`crate::validate`] ignores them
@@ -474,14 +478,14 @@ pub struct ShapesModel {
     pub(crate) ill_formed: Vec<IllFormedConstruct>,
 }
 
-/// (sq-0mjfd) One SHACL-SPARQL pre-binding failure recorded at parse:
-/// the offending constraint/validator node and why pre-binding is unsound. See
-/// [`ShapesModel::pre_binding_failures`].
+/// A SHACL-SPARQL processing failure: an admission violation recorded during
+/// parsing, or a solution-declared failure recorded during strict validation.
+/// [`ShapesModel::pre_binding_failures`] contains only the parse-time records.
 #[derive(Debug, Clone)]
 pub struct PreBindingFailure {
-    /// The `sh:SPARQLConstraint` / constraint-component node whose query is unsound.
+    /// The constraint or validator node associated with the failure.
     pub node: Term,
-    /// A human-readable explanation (the violated pre-binding rule).
+    /// A human-readable explanation of the processing failure.
     pub message: String,
 }
 
@@ -503,6 +507,7 @@ impl ShapesModel {
         let g = GraphView::new(shapes_graph);
         let mut m = ShapesModel {
             shapes: Vec::new(),
+            source: shapes_graph.fork(),
             by_node: FxHashMap::default(),
             targeted: Vec::new(),
             sparql: Vec::new(),
@@ -641,7 +646,7 @@ impl ShapesModel {
     /// (sq-0mjfd) The SHACL-SPARQL pre-binding FAILURES discovered while
     /// parsing this shapes graph: a `sh:sparql` constraint or constraint-component
     /// validator whose query the pre-binding rules forbid (MINUS / VALUES /
-    /// SERVICE / a sub-SELECT dropping a pre-bound variable / a BIND re-binding
+    /// SERVICE / AS re-binding
     /// one). A conformant processor MUST signal a *failure* for these (W3C SHACL
     /// §3.4); [`crate::validate_strict`] returns an `Err` when this is non-empty.
     /// Empty in the common (well-formed) case.
@@ -911,6 +916,10 @@ impl ShapesModel {
             deactivated: false,
             property_children: Vec::new(),
             value_expr: None,
+            value_constant: None,
+            default_constant: None,
+            default_expr: None,
+            deactivated_expr: None,
         });
         let mut parsed = self.parse_shape(g, node);
         // (sq-pb0wm) Resolve per-constraint-statement RDF-1.2
@@ -1068,6 +1077,10 @@ impl ShapesModel {
             ),
             property_children: Vec::new(),
             value_expr: None,
+            value_constant: None,
+            default_constant: None,
+            default_expr: None,
+            deactivated_expr: None,
         };
 
         // Targets.
@@ -1137,16 +1150,21 @@ impl ShapesModel {
             shape.targets.push(Target::ImplicitClass(node.clone()));
         }
 
-        // (sq-rnkdh) SHACL 1.2 `sh:values [ sh:select … ]` /
-        // `[ sh:sparqlExpr … ]` on a property shape: the value nodes are COMPUTED by
-        // the SPARQL node expression (`$this` = focus node) instead of derived by
-        // traversing `sh:path`. The reported `sh:resultPath` stays the shape's path.
-        // Only the SPARQL-valued `sh:values` form is handled here; the SHACL-AF
-        // node-expression value RULE form (`apply_rules`) is a separate surface.
+        // Values supplement the path; defaults apply only to an empty union.
         if let Some(v) = g.object(node, &sh("values")) {
-            if let Some(idx) = self.intern_select_expr(g, &v) {
-                shape.value_expr = Some(idx);
+            shape.value_expr = self.intern_select_expr(g, &v);
+            if matches!(v, Term::NamedNode(_) | Term::Literal(_)) {
+                shape.value_constant = Some(v);
             }
+        }
+        if let Some(v) = g.object(node, &sh("defaultValue")) {
+            shape.default_expr = self.intern_select_expr(g, &v);
+            if matches!(v, Term::NamedNode(_) | Term::Literal(_)) {
+                shape.default_constant = Some(v);
+            }
+        }
+        if let Some(v) = g.object(node, &sh("deactivated")) {
+            shape.deactivated_expr = self.intern_select_expr(g, &v);
         }
 
         let c = &mut shape.components;
@@ -1347,9 +1365,7 @@ impl ShapesModel {
                 }
             }
         }
-        // (sq-sx15d) `sh:rootClass` (SHACL 1.2): each value node must be
-        // the named class or a transitive `rdfs:subClassOf`-descendant of it. The
-        // object is a single class term.
+        // Keep the parameter term so list operands and annotations retain identity.
         for o in g.objects(node, &sh("rootClass")) {
             c.push(Component::RootClass(o));
         }
@@ -1638,7 +1654,9 @@ impl ShapesModel {
             "qualifiedValueShapesDisjoint",
         ] {
             for o in g.objects(node, &sh(pred)) {
-                if !matches!(&o, Term::Literal(l) if is_boolean_lexical(l.value())) {
+                if !(matches!(&o, Term::Literal(l) if is_boolean_lexical(l.value()))
+                    || (pred == "deactivated" && shape.deactivated_expr.is_some()))
+                {
                     self.record_ill_formed(
                         node,
                         pred,
@@ -1651,6 +1669,7 @@ impl ShapesModel {
         let shape_path = shape.path.clone();
         for sp in g.objects(node, &sh("sparql")) {
             if let Some(idx) = self.parse_sparql_constraint(g, &sp, shape_path.as_ref()) {
+                self.sparql[idx].current_shape = Some(node.clone());
                 shape.components.push(Component::Sparql(idx));
             } else {
                 // (sq-11a) No `sh:select` string literal on the
@@ -1818,6 +1837,7 @@ impl ShapesModel {
         let mut constraint = SparqlConstraint {
             node: node.clone(),
             select,
+            current_shape: None,
             prefixes,
             message,
             severity,
@@ -1882,11 +1902,21 @@ pub(crate) fn collect_prefixes_for(g: &GraphView, prefix_roots: &[Term]) -> Stri
 /// `owl:imports`, declares `sh:declare` nodes carrying `sh:prefix` (short name)
 /// and `sh:namespace` (IRI). owl:imports chasing is followed transitively
 /// (cycle-guarded). Shared by the `sh:sparql` and constraint-component paths.
-fn collect_prefixes_from(g: &GraphView, prefix_roots: &[Term]) -> String {
+pub(crate) fn collect_prefixes_from(g: &GraphView, prefix_roots: &[Term]) -> String {
     const OWL_IMPORTS: &str = "http://www.w3.org/2002/07/owl#imports";
     let mut out = String::new();
     let mut seen_decls: rustc_hash::FxHashSet<Term> = rustc_hash::FxHashSet::default();
     let mut roots: Vec<Term> = prefix_roots.to_vec();
+    if roots.is_empty() {
+        for ty in [
+            "http://www.w3.org/2002/07/owl#Ontology".to_string(),
+            sh("DataGraph"),
+            sh("ShapesGraph"),
+            sh("RulesGraph"),
+        ] {
+            roots.extend(g.instances_of(&iri(&ty)));
+        }
+    }
     let mut visited_roots: rustc_hash::FxHashSet<Term> = rustc_hash::FxHashSet::default();
     let mut i = 0;
     while i < roots.len() {
@@ -1895,6 +1925,15 @@ fn collect_prefixes_from(g: &GraphView, prefix_roots: &[Term]) -> String {
         if !visited_roots.insert(root.clone()) {
             continue;
         }
+        roots.extend(
+            g.triples(
+                None,
+                Some("http://www.w3.org/2002/07/owl#versionIRI"),
+                Some(&root),
+            )
+            .into_iter()
+            .map(|[s, _, _]| s),
+        );
         // Follow owl:imports transitively (cycle-guarded by visited_roots).
         for imp in g.objects(&root, OWL_IMPORTS) {
             roots.push(imp);
@@ -1994,9 +2033,8 @@ fn is_boolean_lexical(s: &str) -> bool {
     matches!(s, "true" | "false" | "0" | "1")
 }
 
-/// (sq-ehq4g) True iff `iri` is one of the SIX `sh:nodeKind` values
-/// (SHACL §4.6.1): `sh:BlankNode` / `sh:IRI` / `sh:Literal` and the three
-/// pairwise unions. Anything else — including another `sh:`-namespace IRI — is
+/// True iff `iri` is a supported `sh:nodeKind`: the RDF node kinds,
+/// their pairwise unions, or `sh:TripleTerm`. Anything else — including another `sh:`-namespace IRI — is
 /// an ill-formed `sh:nodeKind` value.
 fn is_node_kind_iri(iri: &str) -> bool {
     iri.strip_prefix(SH).is_some_and(|local| {
@@ -2008,6 +2046,7 @@ fn is_node_kind_iri(iri: &str) -> bool {
                 | "BlankNodeOrIRI"
                 | "BlankNodeOrLiteral"
                 | "IRIOrLiteral"
+                | "TripleTerm"
         )
     })
 }
@@ -2191,14 +2230,9 @@ fn check_component_validators(
         let Some(v) = g.object(node, &sh(slot)) else {
             continue;
         };
-        let text = match g.object(&v, &sh("ask")) {
-            Some(Term::Literal(l)) => l.value().to_string(),
-            _ => match g.object(&v, &sh("select")) {
-                Some(Term::Literal(l)) => l.value().to_string(),
-                _ => continue,
-            },
+        let Some((full, _)) = validator_query(g, &v, prefixes) else {
+            continue;
         };
-        let full = format!("{prefixes}\n{text}");
         if let Err(violation) = crate::sparql::check_validator_pre_binding(&full, pre_bound) {
             failures.push(PreBindingFailure {
                 node: node.clone(),
@@ -2257,26 +2291,33 @@ fn parse_validator(
     prefixes: &str,
 ) -> Option<PreparedComponentValidator> {
     let v = g.object(node, pred)?;
+    let (full, is_ask) = validator_query(g, &v, prefixes)?;
+    let prepared = crate::sparql::PreparedValidator::build(&full, is_ask)?;
+    let mut messages = g.objects(&v, &sh("message"));
+    if messages.is_empty() {
+        messages = g.objects(node, &sh("message"));
+    }
+    Some(PreparedComponentValidator {
+        prepared,
+        messages,
+        raw: full,
+        is_ask,
+    })
+}
+
+// Admission checking and execution parse exactly the same prefixed query.
+fn validator_query(g: &GraphView, v: &Term, prefixes: &str) -> Option<(String, bool)> {
     // sh:ask takes precedence; fall back to sh:select.
-    let (text, is_ask) = match g.object(&v, &sh("ask")) {
+    let (text, is_ask) = match g.object(v, &sh("ask")) {
         Some(Term::Literal(l)) => (l.value().to_string(), true),
-        _ => match g.object(&v, &sh("select")) {
+        _ => match g.object(v, &sh("select")) {
             Some(Term::Literal(l)) => (l.value().to_string(), false),
             _ => return None,
         },
     };
-    let full = format!("{prefixes}\n{text}");
-    let prepared = crate::sparql::PreparedValidator::build(&full, is_ask)?;
-    let message = match g.object(&v, &sh("message")) {
-        Some(Term::Literal(l)) => Some(l.value().to_string()),
-        _ => None,
-    };
-    Some(PreparedComponentValidator {
-        prepared,
-        message,
-        raw: full,
-        is_ask,
-    })
+    let own_prefixes = collect_prefixes_from(g, &g.objects(v, &sh("prefixes")));
+    let full = format!("{prefixes}\n{own_prefixes}\n{text}");
+    Some((full, is_ask))
 }
 
 /// Substitutes the `$PATH` / `?PATH` query variable (a SHACL property-shape

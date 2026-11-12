@@ -1,31 +1,8 @@
-//! (sq-3w6n) Manifest-driven runner for the W3C SHACL **node
-//! expression** test suite's `sht:Validate` entries — the `constraints/`
-//! subdirectory of `node-expr` (`expression-001`, `nodeByExpression-001`).
-//!
-//! These are full validation tests (not `sht:EvalNodeExpr` node-expression
-//! evaluations — those are covered by `w3c_node_expr.rs`): a data graph is
-//! validated against a shapes graph and the produced report is compared to the
-//! expected `sh:ValidationReport`. They exercise the SHACL-AF **constraint**
-//! surface — `sh:expression` (`sh:ExpressionConstraintComponent`, sq-mk9n) and
-//! `sh:nodeByExpression` (`sh:NodeByExpressionConstraintComponent`, sq-3w6n) —
-//! end to end through the public `validate` entry point.
-//!
-//! ## Two gates, both opt-in
-//!
-//!   * **Feature gate** — the whole runner is `#[cfg(feature = "shacl-af")]`; the
-//!     two constraint components it exercises are themselves feature-gated, so
-//!     with the feature off the file compiles to nothing.
-//!   * **Suite gate** — the suite is fetched by `./fetch-shacl-tests.sh` into
-//!     `tests/shacl/` (gitignored). When absent the test SKIPS itself so
-//!     `cargo test --workspace` stays green on a fresh checkout.
-//!
-//! The report-comparison policy mirrors `w3c_core.rs`: `sh:conforms` must match,
-//! and the result multisets must correspond 1:1 where each expected result's
-//! stated `sh:focusNode` / `sh:resultPath` / `sh:value` / `sh:resultSeverity` /
-//! `sh:sourceConstraintComponent` / `sh:sourceShape` / `sh:resultMessage` agree
-//! (blank nodes match any blank node). `sh:sourceConstraint` (a SHACL-AF-only
-//! result field this crate does not surface on `ValidationResult`) is not
-//! compared — the constraint-component IRI + source shape already pin the result.
+//! SHACL 1.2 node-expression constraint validation entries at the suite pin.
+//! With shacl-af enabled, all eight entries compare conforms and result
+//! multisets against full validation. Node-expression evaluation has its own
+//! runner. This runner does not compare sourceConstraint expression structure.
+//! A missing suite checkout skips the runner.
 
 #![cfg(feature = "shacl-af")]
 
@@ -45,10 +22,8 @@ const MF: &str = "http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#";
 const SHT: &str = "http://www.w3.org/ns/shacl-test#";
 const SH: &str = "http://www.w3.org/ns/shacl#";
 
-/// Pass-rate floor: the two `sht:Validate` entries in `node-expr/constraints/`
-/// (`expression-001`, `nodeByExpression-001`) at the pinned suite commit. A
-/// regression below this fails the build.
-const BASELINE_PASS: usize = 2;
+/// Measured at 04ecbb4 (2026-11-12), with shacl-af enabled.
+const BASELINE_PASS: usize = 8;
 
 fn suite_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

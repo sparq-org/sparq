@@ -1,64 +1,9 @@
-//! (sq-6glcr) Manifest-driven runner for the **FULL** SHACL 1.2 core
-//! test suite — the whole `shacl12-test-suite/tests/core/manifest.ttl`
-//! `mf:include` tree (`complex/`, `misc/`, `node/`, `path/`, `property/`,
-//! `targets/`, `validation-reports/`), not just the `node/` subtree that
-//! `w3c_core_shacl12.rs` gates.
-//!
-//! `w3c_core_shacl12.rs` is the tight strict gate over `core/node` only;
-//! `w3c_core.rs` walks the *older* `data-shapes-test-suite/tests/core` tree. This
-//! harness closes the gap flagged in `research/shacl12-conformance-gap.md`: until
-//! sq-6glcr the SHACL-1.2-specific behaviour exercised by `complex/` (recursive
-//! shapes, message templating), `path/` (alternative / one-or-more / zero-or-more
-//! property paths), `property/` (the full property-constraint matrix),
-//! `targets/`, and `validation-reports/` (report-shape detail) was never gated in
-//! CI, so a regression there could merge unnoticed.
-//!
-//! ## SKIP vs FAIL — and why this gate does NOT assert all-pass
-//!
-//! An entry is **SKIP**, not FAIL, exactly when its shapes graph uses a
-//! constraint-component *predicate* that is wholly out of scope for the Core
-//! validator ([`unimplemented`]) — `sh:sparql` (SPARQL-based constraints),
-//! `sh:js` (JavaScript constraints), and (with `shacl-af` off) the
-//! node-expression constraints. Those are a different surface, so counting them
-//! as FAILs would be noise.
-//!
-//! Every *other* entry is compared strictly. As of sq-pb0wm (the per-constraint-
-//! statement RDF-1.2 reified-annotation overrides
-//! `sh:datatype X {| sh:deactivated/sh:message/sh:severity … |}`,
-//! `misc/{deactivated-003,message-002,severity-003}`) the full core tree has NO
-//! honest FAILs in either feature state — the fail-ceiling is 0. This harness
-//! still does **not** hard-assert `fail == 0` as the gate; it keeps the two-sided
-//! ratchet (pass-floor + fail-ceiling) so a future regression in *either*
-//! direction is caught while the live gap map in
-//! `research/shacl12-conformance-gap.md` records the (now-empty) residual.
-//!
-//! ## Ratchet (two-sided)
-//!
-//! Instead the gate is a *ratchet*: the pass count must not drop
-//! ([`BASELINE_PASS_CORE`] / [`BASELINE_PASS_AF`]) **and** the fail count must
-//! not grow ([`BASELINE_FAIL_CORE`] / [`BASELINE_FAIL_AF`]). Together these catch
-//! a regression in either direction — a currently-passing entry breaking (pass
-//! drops) or a currently-failing entry that was being computed correctly
-//! flipping (fail grows) — while staying green today. Closing a gap means an
-//! entry moves FAIL → PASS: bump *both* baselines in the same commit. The floors
-//! were calibrated by running the harness at the pinned suite commit
-//! in-worktree.
-//!
-//! ## Two gates
-//!
-//!   * **Suite gate** — the suite is fetched by `./fetch-shacl-tests.sh` into
-//!     `tests/shacl/` (gitignored). When absent the test SKIPS itself so
-//!     `cargo test --workspace` stays green on a fresh checkout.
-//!   * **Feature gate** — this file is *not* `#[cfg]`-gated as a whole: it runs in
-//!     **both** feature states. With `shacl-af` ON, `sh:nodeByExpression` /
-//!     `sh:expression` based entries are implemented and the floor rises to
-//!     [`BASELINE_PASS_AF`].
-//!
-//! The report-comparison policy mirrors `w3c_core.rs` / `w3c_core_shacl12.rs`:
-//! `sh:conforms` must match, and the result multisets must correspond 1:1 where
-//! each expected result's stated `sh:focusNode` / `sh:resultPath` / `sh:value` /
-//! `sh:resultSeverity` / `sh:sourceConstraintComponent` / `sh:sourceShape` /
-//! `sh:resultMessage` agree (blank nodes match any blank node).
+//! Manifest-driven runner for the full SHACL 1.2 Core tree at the suite pin.
+//! Both feature states compare conforms and result multisets, including stated
+//! focus, path, value, severity, component, shape and messages. Constraints that
+//! the build does not implement are structural skips, rather than weakened
+//! comparisons. Measured pass floors and failure ceilings gate both states.
+//! A missing suite checkout skips the runner; fetch-shacl-tests.sh supplies it.
 
 mod support;
 
@@ -100,66 +45,10 @@ fn unimplemented() -> Vec<String> {
     v
 }
 
-/// Pass-floor over the FULL core tree with `shacl-af` OFF, at the pinned suite
-/// commit (`fetch-shacl-tests.sh` PIN). Calibrated by running the harness; a
-/// regression below this fails the build, raising it is a deliberate bump.
-///
-/// (sq-6glcr) Set to the measured pass count; see
-/// `research/shacl12-conformance-gap.md` for the per-category gap map. With
-/// `shacl-af` off the `nodeByExpression-001` node entry is a SKIP, so the floor
-/// is one below the `shacl-af`-on floor.
-///
-/// (sq-rnkdh) Raised 114 → 129: locks in the SHACL-1.2 core value
-/// constraints (sq-sx15d / #1267) and the 1.2 TARGET features added here —
-/// `sh:targetWhere`, the `sh:shape` data-graph link, and the `sh:ShapeClass`
-/// implicit class target (`targets/` now 10/10).
-///
-/// (sq-0mjfd / sq-5q76d) Raised 129 → 133: this wave closes the
-/// `property/reifierShape-001,002` (`sh:reifierShape` / `sh:reificationRequired`),
-/// `property/uniqueLang-003` (the `rdf:dirLangString` base-direction key) and
-/// `validation-reports/conformance-disallows-001` (shapes-graph
-/// `sh:conformanceDisallows` threading) gaps. EQUALS the measured default-state
-/// pass count exactly (not above it — see the #1271 near-failure note).
-///
-/// (sq-pb0wm, epic sq-waf9o) Raised 133 → 136: the FINAL SHACL 1.2 core
-/// conformance gap — per-constraint-statement RDF-1.2 reified-annotation overrides
-/// (`<constraint> {| sh:deactivated/sh:message/sh:severity … |}`) — now interpreted,
-/// so `misc/{deactivated-003,message-002,severity-003}` move FAIL → PASS (`misc`
-/// 10/10). EQUALS the measured default-state pass count exactly (not above it).
-const BASELINE_PASS_CORE: usize = 136;
-
-/// Pass-floor over the FULL core tree with `shacl-af` ON: the `shacl-af`
-/// `sh:nodeByExpression` core/node entry becomes implemented and PASSes, so the
-/// floor rises by one. (sq-0mjfd) Raised 130 → 134 in lock-step with
-/// [`BASELINE_PASS_CORE`].
-///
-/// (sq-pb0wm) Raised 134 → 137 in lock-step with [`BASELINE_PASS_CORE`]
-/// (the misc reified-annotation trio). With `shacl-af` ON the whole core tree now
-/// PASSes (137 pass, 0 fail, 0 skip).
-const BASELINE_PASS_AF: usize = 137;
-
-/// Fail-ceiling over the FULL core tree — the count of entries whose SHACL-1.2
-/// behaviour this crate does not yet implement (the gap map). A *new* mismatch (a
-/// previously-correct entry breaking) pushes the fail count above this and fails
-/// the build; closing a gap drops it (bump down). The same in both feature
-/// states: the `shacl-af`-gated entries flip SKIP↔PASS, never to/from FAIL.
-///
-/// (sq-rnkdh) Lowered 22 → 7: sq-sx15d (#1267) closed the value-constraint
-/// gaps and this change closes the `targets/` gaps.
-///
-/// (sq-0mjfd / sq-5q76d) Lowered 7 → 3: reifierShape ×2, uniqueLang-003 and
-/// conformance-disallows-001 now PASS. The remaining 3 were `misc/{deactivated-003,
-/// message-002, severity-003}` — each needs PER-CONSTRAINT-STATEMENT RDF-1.2
-/// reified-annotation interpretation (`sh:datatype X {| sh:deactivated/message/severity … |}`).
-///
-/// (sq-pb0wm, epic sq-waf9o) Lowered 3 → 0: that final gap is now closed
-/// (the per-statement reified-annotation overrides are interpreted), so NO full-core
-/// entry is an honest FAIL in either feature state. The two-sided ratchet still
-/// guards against a regression in either direction — a previously-correct entry
-/// breaking would push the count above this 0 ceiling and fail the build.
+/// Measured at 04ecbb4 (2026-11-12), in both feature states.
+const BASELINE_PASS_CORE: usize = 162;
+const BASELINE_PASS_AF: usize = 162;
 const BASELINE_FAIL_CORE: usize = 0;
-
-/// Fail-ceiling with `shacl-af` ON — identical to [`BASELINE_FAIL_CORE`].
 const BASELINE_FAIL_AF: usize = 0;
 
 fn baseline_pass() -> usize {
