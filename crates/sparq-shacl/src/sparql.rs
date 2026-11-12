@@ -639,9 +639,35 @@ pub(crate) fn expression_bindings(
         .collect())
 }
 
+#[cfg(feature = "shacl-af")]
+pub(crate) fn construct_bound(
+    data: &sparq_core::Graph,
+    query: &Query,
+    bindings: &[Binding],
+) -> Result<Vec<oxrdf::Triple>, String> {
+    let Query::Construct { template, dataset, pattern, base_iri } = query else {
+        return Err("Expected CONSTRUCT".into());
+    };
+    let bound = Query::Construct {
+        template: template.clone(),
+        dataset: dataset.clone(),
+        base_iri: base_iri.clone(),
+        pattern: if bindings.is_empty() {
+            pattern.clone()
+        } else {
+            inject_values(
+                pattern,
+                pre_bind_values(bindings).ok_or("Invalid rule bindings")?,
+                bindings.iter().map(|(n, _)| *n),
+            )
+        },
+    };
+    sparq_engine::construct(data, &bound.to_string())
+}
+
 /// Check admission rules in the author's algebra, including nested expressions.
 /// Local VALUES and hidden subquery projections are permitted by SHACL 1.2.
-fn check_pre_binding(
+pub(crate) fn check_pre_binding(
     pattern: &GraphPattern,
     in_scope: &[&str],
 ) -> Result<(), PreBindingViolation> {
