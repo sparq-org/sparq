@@ -5,6 +5,7 @@
 #![forbid(unsafe_code)] // sq-emay: crate has zero `unsafe`
 
 mod eval;
+mod functions;
 // (sq-uz0) sh:shapesGraph / owl:imports shapes-graph ASSEMBLY
 // (W3C SHACL §§3.1/3.3 (shapes-graph)) — OPT-IN behind the `imports` cargo feature so the base
 // validation path carries zero assembly code when off. Zero new dependencies:
@@ -78,6 +79,10 @@ pub enum FactDomain {
 /// ill-formed — e.g. an unparsable path) are skipped rather than failing; use
 /// [`validate_strict`] to report ill-formed constructs as a failure instead
 /// (the W3C test-suite `sht:Failure` outcome). (sq-11a)
+///
+/// SHACL queries use a validation-scoped function registry containing the shapes'
+/// custom functions. This temporarily replaces any ambient engine function registry;
+/// the ambient registry is restored when validation returns.
 pub fn validate(data: &Graph, shapes: &Graph) -> ValidationReport {
     let model = ShapesModel::parse(shapes);
     validate_with_model(data, &model)
@@ -90,7 +95,13 @@ pub fn validate(data: &Graph, shapes: &Graph) -> ValidationReport {
 /// `sh:conformanceDisallows` declaration ([`ShapesModel::conformance_disallows`])
 /// when present, falling back to the default {Violation, Warning, Info} set.
 pub fn validate_with_model(data: &Graph, model: &ShapesModel) -> ValidationReport {
-    let (results, mut diagnostics) = eval::validate_graph(data, model);
+    let ((results, mut diagnostics), failures) =
+        functions::with_validation(data, &model.source, || eval::validate_graph(data, model));
+    diagnostics.extend(failures.into_iter().map(|node| ShapeDiagnostic {
+        source_shape: node,
+        source_component: model::sh("failure"),
+        message: "A SPARQL solution declared a SHACL processing failure".into(),
+    }));
     // (sq-c1v3e) Surface the parse-time ill-formed-construct records
     // ([`ShapesModel::ill_formed`]) on the LENIENT path too, as report
     // diagnostics — visibility without failing: each construct is still skipped
@@ -144,16 +155,18 @@ pub fn validate_with_domain_and_model(
 /// (sq-0mjfd) A SHACL processing **failure** (W3C SHACL §3.4): the
 /// shapes graph declares something a conformant processor cannot soundly
 /// evaluate, so the spec says it signals a *failure* rather than produce a
-/// validation report. Two producers: a SHACL-SPARQL pre-binding violation (a
+/// validation report. Producers include a declared SPARQL solution failure,
+/// a SHACL-SPARQL pre-binding violation (a
 /// `sh:sparql` constraint or constraint-component validator using `MINUS` /
-/// `VALUES` / `SERVICE` / a sub-`SELECT` that drops a pre-bound variable / a
-/// `BIND` that re-binds one), and (sq-11a) an **ill-formed
+/// `VALUES` mentioning a pre-bound name / `SERVICE` / an
+/// `AS` that re-binds one), and (sq-11a) an **ill-formed
 /// shapes-graph construct** (a violated SHACL syntax rule — an unparsable
 /// `sh:path`, a non-integer `sh:minCount`, a malformed SHACL list, …). Carries
 /// the offending nodes + the violated rules for diagnostics.
 #[derive(Debug, Clone)]
 pub struct ShaclFailure {
-    /// The pre-binding failures found (may be empty when `ill_formed` is not).
+    /// SHACL-SPARQL admission or declared solution failures. The historical
+    /// field name is retained; this may be empty when `ill_formed` is not.
     pub pre_binding: Vec<model::PreBindingFailure>,
     /// (sq-11a) The ill-formed shapes-graph constructs found (may be
     /// empty when `pre_binding` is not). At least one of the two vecs is non-empty.
@@ -165,7 +178,7 @@ impl std::fmt::Display for ShaclFailure {
         // positional format args (rust/unused-variable CodeQL FP).
         write!(
             f,
-            "SHACL failure: {} unsound SHACL-SPARQL pre-binding(s), {} ill-formed shapes-graph construct(s)",
+            "SHACL failure: {} SHACL-SPARQL processing failure(s), {} ill-formed shapes-graph construct(s)",
             self.pre_binding.len(),
             self.ill_formed.len()
         )?;
@@ -196,6 +209,20 @@ pub fn validate_strict(data: &Graph, shapes: &Graph) -> Result<ValidationReport,
     validate_strict_with_model(data, &model)
 }
 
+/// Strict validation using the SHACL 1.0 Appendix A admission restrictions.
+/// Unlike [`validate_strict`] (SHACL 1.2), rejects author-written `VALUES` even
+/// for local variables and subqueries that do not project each pre-bound name.
+pub fn validate_strict_shacl10(
+    data: &Graph,
+    shapes: &Graph,
+) -> Result<ValidationReport, ShaclFailure> {
+    let mut model = ShapesModel::parse(shapes);
+    model
+        .pre_binding_failures
+        .extend(sparql::legacy_failures(&model));
+    validate_strict_with_model(data, &model)
+}
+
 /// (sq-0mjfd) [`validate_strict`] against an already-parsed model: an
 /// `Err` if the model recorded any pre-binding failure
 /// ([`ShapesModel::pre_binding_failures`]) or (sq-11a) any ill-formed
@@ -213,7 +240,24 @@ pub fn validate_strict_with_model(
             ill_formed: ill_formed.to_vec(),
         });
     }
-    Ok(validate_with_model(data, model))
+    let report = validate_with_model(data, model);
+    let failures: Vec<_> = report
+        .diagnostics
+        .iter()
+        .filter(|d| d.source_component == model::sh("failure"))
+        .map(|d| PreBindingFailure {
+            node: d.source_shape.clone(),
+            message: d.message.clone(),
+        })
+        .collect();
+    if failures.is_empty() {
+        Ok(report)
+    } else {
+        Err(ShaclFailure {
+            pre_binding: failures,
+            ill_formed: Vec::new(),
+        })
+    }
 }
 
 /// Builds a queryable [`Graph`] from already-parsed triples. The seam for
@@ -1164,6 +1208,46 @@ mod tests {
             .filter(|r| r.source_component.ends_with("SPARQLConstraintComponent"))
             .count();
         assert_eq!(sparql_hits, 30, "expected 30 negative-age violations");
+    }
+
+    #[test]
+    fn scope_and_exists_batching_matches_per_focus_including_blank_foci() {
+        let data = Graph::load_str(
+            r#"
+            @prefix ex: <urn:ex:> .
+            ex:root ex:focus ex:a, ex:b, ex:c, _:good, _:bad .
+            ex:a ex:p 1, 2; ex:q 1 . ex:b ex:p 2 .
+            _:good ex:p 1, 2; ex:q 1 .
+        "#,
+            "turtle",
+        )
+        .unwrap();
+        for (body, batchable, expected) in [
+            ("SELECT $this WHERE { FILTER NOT EXISTS {$this <urn:ex:p> ?v} }", true, 2),
+            ("SELECT $this WHERE { FILTER EXISTS {$this <urn:ex:q> ?v} }", true, 2),
+            ("SELECT $this ?value WHERE { $this <urn:ex:p> ?value FILTER NOT EXISTS {$this <urn:ex:q> ?value} }", true, 3),
+            ("SELECT $this WHERE { FILTER EXISTS {OPTIONAL {$this <urn:ex:p> ?v} FILTER(!BOUND(?v))} }", true, 2),
+            ("SELECT $this WHERE { {SELECT $this ?v WHERE {$this <urn:ex:p> ?v}} FILTER(?v = 2) }", true, 3),
+            ("SELECT $this WHERE { {SELECT $this (COUNT(*) AS ?n) WHERE {$this <urn:ex:p> ?v} GROUP BY $this} FILTER(?n > 1) }", true, 2),
+            ("SELECT $this WHERE { OPTIONAL {{SELECT ?v WHERE {$this <urn:ex:p> ?v}}} FILTER(!BOUND(?v)) }", false, 2),
+            ("SELECT $this ?v WHERE {$this <urn:ex:p> ?v} LIMIT 1", false, 3),
+            ("SELECT $this WHERE { OPTIONAL {{SELECT $this ?v WHERE {$this <urn:ex:p> ?v} LIMIT 1}} FILTER(!BOUND(?v)) }", false, 2),
+            ("SELECT (COUNT(?v) AS ?n) WHERE {$this <urn:ex:p> ?v}", false, 5),
+        ] {
+            let shapes = Graph::load_str(&format!(r#"
+                @prefix sh: <http://www.w3.org/ns/shacl#> .
+                <urn:S> sh:targetObjectsOf <urn:ex:focus>; sh:sparql [sh:select """{body}"""] .
+            "#), "turtle").unwrap();
+            let model = ShapesModel::parse(&shapes);
+            assert_eq!(model.sparql[0].prepared.as_ref().unwrap().is_batchable(), batchable, "{body}");
+            let before = sparql::exec_count();
+            let batched = validate_with_model(&data, &model);
+            assert_eq!(sparql::exec_count() - before, if batchable { 3 } else { 5 }, "{body}");
+            let per_focus = eval::with_sparql_batching_disabled(|| validate_with_model(&data, &model));
+            assert_eq!(batched.results.len(), expected, "{body}");
+            assert_eq!(batched.conforms, per_focus.conforms, "{body}");
+            assert_eq!(result_keys(&batched), result_keys(&per_focus), "{body}");
+        }
     }
 
     /// (sq-7d3dj.33.1) Local, NON-canonical measurement of the batched vs

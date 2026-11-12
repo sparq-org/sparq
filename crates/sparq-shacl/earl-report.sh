@@ -23,8 +23,10 @@ runners=(w3c_core w3c_sparql w3c_sparql_component
 
 # Report against the suite as it stands upstream unless SHACL_TESTS_PIN names a
 # revision. (Afterwards, fetch-shacl-tests.sh with no override restores the pin.)
-SHACL_TESTS_PIN="${SHACL_TESTS_PIN:-$(git ls-remote https://github.com/w3c/data-shapes HEAD | cut -f1)}" \
-  "$root/crates/sparq-shacl/fetch-shacl-tests.sh"
+report_pin="${SHACL_TESTS_PIN:-$(git ls-remote https://github.com/w3c/data-shapes HEAD | cut -f1)}"
+if [ "$(git -C "$suite" rev-parse HEAD 2>/dev/null || true)" != "$report_pin" ]; then
+  SHACL_TESTS_PIN="$report_pin" "$root/crates/sparq-shacl/fetch-shacl-tests.sh"
+fi
 mkdir -p "$out"
 raw="$out/outcomes.tsv"
 rm -f "$raw"
