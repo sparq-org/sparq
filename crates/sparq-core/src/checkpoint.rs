@@ -19,7 +19,7 @@ pub(super) struct Pending {
 }
 
 struct DirtyWal {
-    needs_entry_sync: std::sync::Arc<std::sync::Mutex<bool>>,
+    needs_entry_sync: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl TreeState {
@@ -112,9 +112,9 @@ impl TreeState {
 
     pub(super) fn checkpoint(&self) -> std::io::Result<()> {
         let _permit = self.write_permit();
-        if self.materializing() {
+        if self.materializing() || self.grouping() {
             return Err(std::io::Error::other(
-                "finish transaction materialization before checkpoint",
+                "finish transaction materialization and commit the group before checkpoint",
             ));
         }
         if self.poisoned() {
@@ -185,14 +185,7 @@ impl Pending {
         for (path, wal) in &self.wals {
             let file = open_log(path)?;
             sync_log_data(&file, path)?;
-            sync_log_entry(
-                &file,
-                path,
-                &mut wal
-                    .needs_entry_sync
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner()),
-            )?;
+            sync_log_entry(&file, path, &wal.needs_entry_sync)?;
         }
         // Children first: no parent manifest may publish an incomplete child tree.
         let mut manifests: Vec<_> = self.manifests.iter().collect();
@@ -236,6 +229,7 @@ impl Drop for TreeState {
     fn drop(&mut self) {
         if !self.poisoned()
             && !self.materializing()
+            && !self.grouping()
             && !std::thread::panicking()
             && self
                 .checkpoint_on_drop
