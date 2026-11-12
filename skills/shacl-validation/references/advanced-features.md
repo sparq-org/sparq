@@ -163,6 +163,10 @@ rules); `Some(&rule_set_iri)` selects that set and its transitive
 `sh:includesRuleSet` members. The existing `apply_rules` and `expand` APIs retain
 SHACL-AF behavior, including its property value rules.
 
+Known follow-up under #7326: reduce the new executor's schedule and snapshot
+bookkeeping overhead. On a matched monotonic workload it is materially slower
+than the legacy SHACL-AF executor; the APIs have different scheduling contracts.
+
 The 1.2 entry point supports global and shape rules, SPARQL rule templates
 with required/optional parameters, `sh:TripleRule` operands defaulting to the
 focus node, `sh:condition` including shape-class superclasses, deactivation,
@@ -183,8 +187,11 @@ The strict expression subset supports constants, `sh:this`, empty/list
 expressions, path values, `shnex:count`, single-IRI `shnex:instancesOf`,
 `sparql:multiply`, `sh:select` and `sh:sparqlExpr`. Unsupported expressions,
 rule types/processors, invalid queries and expression/query failures return
-`Err`. The iteration limit is applied separately to each layer and also
-returns `Err`, rather than a partial successful result.
+`Err`. Processor requirements are checked on every rule and rule set in the
+shapes graph before selection or deactivation, including requirements inherited
+from included sets. No custom processor values are currently supported; omit
+`sh:ruleProcessor` to use the default algorithm. The iteration limit applies
+separately to each layer and returns `Err` when exhausted.
 
 With the feature on, validation automatically runs declared
 `sh:entailment sh:RulesEntailment` or named `sh:RuleSet` regimes. Multiple regimes
@@ -197,4 +204,5 @@ validation uses the supplied data as before.
 and separately checks validation reports and expected failures.
 `w3c_sparql_rl_shacl12` reports all listed entries as failures because the
 SPARQL-RL language processor is unavailable; unsupported negative tests do not
-count as successful rejections.
+count as successful rejections. This census remains separate from the SHACL 1.2
+EARL report, which excludes `tests/sparql-rl` until a processor exists.

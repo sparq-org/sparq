@@ -18,7 +18,7 @@ Addresses #7326.
 | `w3c_sparql_shacl12` | 98 / 0 / 0 | 98 / 0 / 0 | 24 |
 | `w3c_node_expr_constraints` | feature disabled | 8 / 0 / 0 | 2 |
 | `w3c_node_expr` | feature disabled | 123 / 9 / 152 | 63 |
-| `w3c_inference_rules_shacl12` | 0 / 0 / 47 | 45 / 2 / 0 | new runner |
+| `w3c_inference_rules_shacl12` | 0 / 0 / 47 | 46 / 1 / 0 | new runner |
 | `w3c_sparql_rl_shacl12` | 0 / 342 / 0 | 0 / 342 / 0 | new runner |
 | `w3c_sparql` (SHACL 1.0 pre-binding subset) | 14 / 0 / 0 | 14 / 0 / 0 | 13 |
 
@@ -95,7 +95,9 @@ behavior. Rules are selected by identity, with global rules and the union of
 shape targets, and scheduled by exact decimal layer/order values. Run-once
 rules execute before iterating rules; equal-order rules read one snapshot.
 Each layer settles before advancing. Explicit rule sets follow transitive
-`sh:includesRuleSet`, including processor requirements from included sets.
+`sh:includesRuleSet`. Unsupported processors on any rule or rule set in the
+shapes graph produce a failure before selection or deactivation, including
+requirements inherited from included sets.
 
 SPARQL rule templates bind required/optional parameters through the shared
 algebraic pre-binding machinery. Triple-rule operands default to the focus
@@ -106,7 +108,7 @@ also infers them. Temporary triples and their annotations are removed after
 all layers. Declared rule entailments run before validation; strict validation
 returns rule failures through its existing failure channel.
 
-The inference runner visits all 47 manifest entries: 39 pass and two fail in
+The inference runner visits all 47 manifest entries: 40 pass and one fails in
 the top folder, and all six `rdfs/` entries pass. Without `shacl-af`, all 47
 entries skip locally and emit failures to EARL. Inferred graphs are compared
 by complete RDF graph isomorphism, including shared blank-node identity and
@@ -114,18 +116,24 @@ nested triple terms. The folder's validation entries expect empty reports;
 the runner checks both conformance and absence of results. Expected failures
 require a production error.
 
-Two entries remain failing without changing behavior to fit the test:
+There are no identified spec/test divergences in the inference entries.
+`ruleProcessor-unknown-at-ruleset` now passes: an unknown processor on an
+unselected rule set is a processing failure, as required by Custom Rule
+Processors.
 
-| Entry | Pinned specification text followed | Divergence |
-| --- | --- | --- |
-| `ruleProcessor-unknown-at-ruleset` | Rule Sets: “The default rule set of a graph is the set of all rules in the graph, regardless of whether they are also members of other rule sets.” Custom Rule Processors propagates processor values from an **included** rule set to the including set. | The action selects no named rule set and declares no entailment. It expects failure because an unselected named set containing the rule has an unknown processor. The default set does not include that named set; selecting it explicitly does fail. |
-| `SPARQLRuleTemplate-example-Multiply` | Execution of Rules Based on SPARQL Rule Templates: evaluate the query “like a corresponding SPARQL Rule but using the extra pre-bound variables.” Execution of SPARQL Rules: “infer the constructed triples.” | The engine constructs `"6.561680"^^xsd:decimal`; the expected graph contains `"6.56168"^^xsd:decimal`. The pinned rules text imposes no decimal lexical normalization. These equal numeric values are different RDF terms, so graph isomorphism correctly fails. The runner does not normalize either graph. |
+`SPARQLRuleTemplate-example-Multiply` remains failing until the separate
+engine change for canonical computed `xsd:decimal` forms lands. The engine
+currently constructs `"6.561680"^^xsd:decimal`, while the expected graph has
+`"6.56168"^^xsd:decimal`. This is an implementation gap, not a specification
+divergence. No numeric formatting or graph normalization is changed here;
+the decimal failure's ratchet allowance remains in place. The processor fix
+raises the inference pass floor to 46; the failure ceiling stays at two.
 
 SPARQL-RL has no language processor in the crate. Its six manifests list 342
 entries: `eval` 65, `eval2` 6, `examples` 5, `stratification` 21, `syntax` 212
-and `wellformed` 33. All are reported as failures in both feature states,
-including negative tests. The runner identifies each test type and reads its
-local action resources and expected inference graph where present. It does
+and `wellformed` 33. The standalone runner records all as failures in both
+feature states, including negative tests. The runner identifies each test type
+and reads its local action resources and expected inference graph where present. It does
 not claim a syntax rejection when no syntax implementation exists. The
 manifests also describe two evaluation resources outside their entry lists;
 those descriptions are not additional test entries.
@@ -133,8 +141,11 @@ those descriptions are not additional test entries.
 The SPARQL-RL draft defines separate syntax and rule-set-evaluation
 conformance criteria, variable-scope well-formedness, and stratification with
 no cyclic closed dependency. The current SHACL-AF scheduler does not supply
-those language stages. Unsupported SPARQL-RL entries remain visible in EARL;
-none are omitted or counted as successful negative tests.
+those language stages. `tests/sparql-rl` is not reported in the SHACL 1.2
+EARL report because sparq has no SPARQL-RL processor yet. The standalone
+runner retains its complete manifest census and measured ratchets; it never
+credits unsupported negative tests as successful rejections. The EARL census
+guard still rejects incomplete inference-rule outcomes.
 
 ## Reproduction
 
@@ -151,7 +162,7 @@ SHACL_TESTS_PIN=04ecbb4a5b930f4fa9df6c399ac5c98ccec672c9 \
 ```
 
 The Core and SHACL-SPARQL sections of that SHACL 1.2 report contain 162 and
-98 passed assertions, respectively, with zero failures. Inference rules contribute 45 passed and two failed assertions.
-SPARQL-RL contributes 342 failed assertions. Node-expression evaluation has 123 passes and
+98 passed assertions, respectively, with zero failures. Inference rules contribute 46 passed and one failed assertion.
+SPARQL-RL is excluded. Node-expression evaluation has 123 passes and
 153 failures (nine mismatches plus 144 unsupported forms); its separate
 constraint runner contributes eight passes.

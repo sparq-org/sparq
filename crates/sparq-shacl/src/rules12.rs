@@ -68,8 +68,10 @@ enum Kind {
 ///
 /// `rule_set = None` selects every rule in the shapes graph; `Some(iri)` selects
 /// that rule set and its transitive `sh:includesRuleSet` closure. Unsupported rule
-/// types/processors, expression/query failures and an exhausted iteration bound
-/// return `Err`. The legacy [`crate::apply_rules`] retains SHACL-AF semantics.
+/// types, expression/query failures and an exhausted iteration bound return `Err`.
+/// Unsupported processors on any rule or rule set in the shapes graph fail even
+/// when that node is unselected or deactivated. The legacy [`crate::apply_rules`]
+/// retains SHACL-AF semantics.
 pub fn apply_rules(
     data: &Graph,
     shapes: &Graph,
@@ -104,24 +106,46 @@ fn selected(g: &GraphView, sets: &[Term], all: bool) -> Result<Vec<Term>, String
         if !typed(g, &set, "RuleSet") {
             return Err(format!("Unknown rule set {set}"));
         }
-        if !g.objects(&set, &sh("ruleProcessor")).is_empty() {
-            return Err(format!("Unsupported rule processor on {set}"));
-        }
         out.extend(g.objects(&set, &sh("hasRule")));
         todo.extend(g.objects(&set, &sh("includesRuleSet")));
     }
     if all {
-        for local in ["Rule", "SPARQLRule", "TripleRule"] {
-            out.extend(g.instances_of(&iri(&sh(local))));
-        }
-        for template in g.instances_of(&iri(&sh("SPARQLRuleTemplate"))) {
-            out.extend(g.instances_of(&template));
-        }
-        for [_, _, rule] in g.triples(None, Some(&sh("rule")), None) {
-            out.push(rule);
-        }
+        out.extend(all_rules(g));
     }
     Ok(crate::view::dedup(out))
+}
+
+fn all_rules(g: &GraphView) -> Vec<Term> {
+    let mut out = Vec::new();
+    for local in ["Rule", "SPARQLRule", "TripleRule"] {
+        out.extend(g.instances_of(&iri(&sh(local))));
+    }
+    for template in g.instances_of(&iri(&sh("SPARQLRuleTemplate"))) {
+        out.extend(g.instances_of(&template));
+    }
+    for [_, _, rule] in g.triples(None, Some(&sh("rule")), None) {
+        out.push(rule);
+    }
+    out
+}
+
+fn check_processors(g: &GraphView) -> Result<(), String> {
+    // Processor requirements apply across the shapes graph, before selection or
+    // deactivation. Checking included sets also covers their inherited values:
+    // no custom processor is currently supported by this executor.
+    let mut nodes = all_rules(g);
+    nodes.extend(g.instances_of(&iri(&sh("RuleSet"))));
+    for local in ["hasRule", "includesRuleSet"] {
+        for [set, _, member] in g.triples(None, Some(&sh(local)), None) {
+            nodes.extend([set, member]);
+        }
+    }
+    for node in crate::view::dedup(nodes) {
+        if !g.objects(&node, &sh("ruleProcessor")).is_empty() {
+            return Err(format!("Unsupported rule processor on {node}"));
+        }
+    }
+    Ok(())
 }
 
 fn parse(shapes: &Graph, model: &mut ShapesModel, nodes: Vec<Term>) -> Result<Vec<Rule>, String> {
@@ -151,9 +175,6 @@ fn parse(shapes: &Graph, model: &mut ShapesModel, nodes: Vec<Term>) -> Result<Ve
                     return Err(format!("Invalid sh:{local} on {node}"));
                 }
             }
-        }
-        if !g.objects(&node, &sh("ruleProcessor")).is_empty() {
-            return Err(format!("Unsupported rule processor on {node}"));
         }
         let owners: Vec<_> = g
             .subjects(&sh("rule"), &node)
@@ -301,6 +322,7 @@ pub(crate) fn execute(
 ) -> Result<Inference, String> {
     let mut model = ShapesModel::parse(shapes);
     let g = GraphView::new(shapes);
+    check_processors(&g)?;
     let mut rules = parse(shapes, &mut model, selected(&g, sets, all)?)?;
     if !model.pre_binding_failures().is_empty() || !model.ill_formed().is_empty() {
         return Err("Ill-formed rule shapes or condition query".into());

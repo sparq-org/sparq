@@ -171,16 +171,90 @@ fn syntax_runtime_and_iteration_failures_are_errors() {
     assert!(rules12::apply_rules(&graph(""), &s, None).is_err());
 }
 
+fn processor_failure(shapes: &str, owner: &str) {
+    let shapes = graph(&format!(
+        "ex:Selected a sh:RuleSet ; sh:hasRule ex:Good .
+         ex:Good a sh:TripleRule ; sh:subject ex:a ; sh:predicate ex:p ; sh:object ex:b .
+         {shapes}"
+    ));
+    let selected = NamedNode::new_unchecked("urn:ex:Selected").into();
+    for set in [None, Some(&selected)] {
+        let error = rules12::apply_rules(&graph(""), &shapes, set).unwrap_err();
+        assert_eq!(
+            error,
+            format!("Unsupported rule processor on <urn:ex:{owner}>")
+        );
+    }
+}
+
 #[test]
-fn default_set_does_not_inherit_an_unselected_sets_processor() {
-    let shapes=graph("ex:Named a sh:RuleSet ; sh:ruleProcessor 'unsupported' ; sh:hasRule ex:R . ex:R a sh:TripleRule ; sh:subject ex:a ; sh:predicate ex:p ; sh:object ex:b .");
-    let out = rules12::apply_rules(&graph(""), &shapes, None)
-        .unwrap()
-        .triples;
-    assert_eq!(out.len(), 1);
-    assert!(has(&out, "a", "p", "b"));
-    let set = NamedNode::new_unchecked("urn:ex:Named").into();
-    assert!(rules12::apply_rules(&graph(""), &shapes, Some(&set)).is_err());
+fn unknown_processor_on_a_rule_fails_before_selection_or_deactivation() {
+    for declaration in [
+        "ex:Bad a sh:TripleRule .",
+        "ex:Bad a sh:SPARQLRule ; sh:deactivated true .",
+        "ex:Template a sh:SPARQLRuleTemplate . ex:Bad a ex:Template .",
+        "ex:Shape sh:rule ex:Bad .",
+        "ex:Set sh:hasRule ex:Bad .",
+    ] {
+        processor_failure(
+            &format!("{declaration} ex:Bad sh:ruleProcessor 'unsupported' ."),
+            "Bad",
+        );
+    }
+}
+
+#[test]
+fn unknown_processor_on_an_unselected_rule_set_fails() {
+    processor_failure(
+        "ex:Bad a sh:RuleSet ; sh:ruleProcessor 'unsupported' ; sh:hasRule ex:Good .",
+        "Bad",
+    );
+    // Empty and subclassed sets are still encountered in the shapes graph.
+    processor_failure(
+        "ex:CustomSet rdfs:subClassOf sh:RuleSet .
+         ex:Bad a ex:CustomSet ; sh:ruleProcessor ex:Unsupported .",
+        "Bad",
+    );
+}
+
+#[test]
+fn unknown_processor_on_an_included_rule_set_fails() {
+    processor_failure(
+        "ex:Selected sh:includesRuleSet ex:Middle .
+         ex:Middle a sh:RuleSet ; sh:includesRuleSet ex:Bad .
+         ex:Bad a sh:RuleSet ; sh:includesRuleSet ex:Selected ; sh:ruleProcessor 'unsupported' .",
+        "Bad",
+    );
+    processor_failure(
+        "ex:Unselected a sh:RuleSet ; sh:includesRuleSet ex:Bad .
+         ex:Bad sh:ruleProcessor 'unsupported' .",
+        "Bad",
+    );
+    let shapes = graph(
+        "ex:G sh:entailment ex:Selected .
+         ex:Selected a sh:RuleSet ; sh:includesRuleSet ex:Bad .
+         ex:Bad a sh:RuleSet ; sh:ruleProcessor 'unsupported' .",
+    );
+    let failure = sparq_shacl::validate_strict(&graph(""), &shapes).unwrap_err();
+    assert!(failure.to_string().contains("Unsupported rule processor"));
+}
+
+#[test]
+fn absent_processor_runs_default_selected_and_included_rules() {
+    let shapes = graph(
+        "ex:Selected a sh:RuleSet ; sh:includesRuleSet ex:Included .
+         ex:Included a sh:RuleSet ; sh:hasRule ex:Good .
+         ex:Good a sh:TripleRule ; sh:subject ex:a ; sh:predicate ex:p ; sh:object ex:b .
+         ex:Annotation sh:ruleProcessor 'unrelated annotation' .",
+    );
+    let selected = NamedNode::new_unchecked("urn:ex:Selected").into();
+    for set in [None, Some(&selected)] {
+        let out = rules12::apply_rules(&graph(""), &shapes, set)
+            .unwrap()
+            .triples;
+        assert_eq!(out.len(), 1);
+        assert!(has(&out, "a", "p", "b"));
+    }
 }
 
 #[test]
