@@ -483,6 +483,40 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         self.inner.exclusive()
     }
 
+    async fn begin_reclaim_with_appends(&self, blob_key: &str) -> Result<(bool, bool), SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.begin_reclaim");
+        let _g = self.counters.op_guard();
+        self.counters.count_update();
+        self.counters.count_queries(1);
+        self.inner.begin_reclaim_with_appends(blob_key).await
+    }
+
+    async fn fold_appends(
+        &self,
+        iri: &str,
+        expected: &ResourceMeta,
+        blob_key: &str,
+    ) -> Result<bool, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.fold_appends");
+        let _g = self.counters.op_guard();
+        self.counters.count_update();
+        self.counters.count_queries(1);
+        self.counters.count_update();
+        self.inner.fold_appends(iri, expected, blob_key).await
+    }
+
+    async fn publish_append(&self, iri: &str, key: &str, blob_key: &str) -> Result<(), SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.publish_append");
+        let _g = self.counters.op_guard();
+        self.counters.count_update();
+        self.counters.count_queries(1);
+        self.counters.count_update();
+        self.inner.publish_append(iri, key, blob_key).await
+    }
+
     async fn begin_reclaim(&self, blob_key: &str) -> Result<bool, SparqError> {
         #[cfg(test)]
         self.counters.record_method("index.begin_reclaim");
@@ -875,6 +909,7 @@ mod tests {
             blob_key: "k1".into(),
             etag: "\"e1\"".into(),
             last_modified: Some(SystemTime::UNIX_EPOCH),
+            append_seq: 0,
         };
         sparq.put_meta(parent, meta.clone()).await.unwrap();
         counters.take_methods();
@@ -983,6 +1018,7 @@ mod tests {
             blob_key: "k1".into(),
             etag: "\"e1\"".into(),
             last_modified: None,
+            append_seq: 0,
         };
         sparq.put_meta("https://p/c/", meta.clone()).await.unwrap();
         let s0 = counters.snapshot();

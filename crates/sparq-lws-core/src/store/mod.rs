@@ -6,6 +6,8 @@
 //! [`CompositeStore`], wires the two seams together; both seams have in-memory test doubles so the
 //! whole stack is testable without a running SPARQ or S3.
 
+#[cfg(test)]
+mod append_tests;
 pub mod blob;
 #[cfg(any(test, feature = "test-support"))]
 pub mod blob_contract;
@@ -225,7 +227,7 @@ impl ValidatedChildIri {
 ///
 /// # Consistency: read your writes
 ///
-/// Once a mutating call (`write`, `create_in_container`, `restore`, `delete`,
+/// Once a mutating call (`write`, `append`, `create_in_container`, `restore`, `delete`,
 /// `delete_container_if_empty`) has completed, every later read of current state
 /// ([`read`](Store::read), [`meta`](Store::meta), [`exists`](Store::exists),
 /// [`list_children`](Store::list_children)) must see what it committed. ([`read_at`](Store::read_at)
@@ -476,6 +478,14 @@ pub trait Store: Send + Sync {
         ))
     }
 
+    /// Store N-Triples insert lines beside the current document, charging their own
+    /// bytes and record to quota. Only Turtle, N-Triples and N-Quads admit inserts;
+    /// an absent target is `NotFound`. The default refuses.
+    async fn append(&self, iri: &str, ntriples: Bytes) -> ServerResult<()> {
+        let _ = (iri, ntriples);
+        Err(ServerError::Forbidden)
+    }
+
     /// The value last stored under `iri` by [`raise_marker`](Store::raise_marker), as written,
     /// or `None` when none is. A record under `iri` that is not a marker reads as an empty value.
     ///
@@ -523,7 +533,7 @@ pub trait Store: Send + Sync {
     /// The default refuses: a store that cannot raise atomically says so.
     ///
     /// The notification service's marker ([`is_service_marker`]) changes only through this and
-    /// [`reset_marker`](Store::reset_marker): [`CompositeStore`]'s generic mutators (`write`,
+    /// [`reset_marker`](Store::reset_marker): [`CompositeStore`]'s generic mutators (`write`, `append`,
     /// `create_in_container`, `restore`, `hold`, `reinstate`, `delete`,
     /// `delete_container_if_empty`) refuse an IRI of its shape with [`ServerError::Forbidden`].
     async fn raise_marker(&self, iri: &str, value: i64) -> ServerResult<i64> {
@@ -623,6 +633,37 @@ pub trait Store: Send + Sync {
 /// and its blob fetch, so a small bound suffices.
 pub const READ_RACE_RETRIES: usize = 3;
 
+/// A reader folds an append snapshot once its sequence reaches this threshold.
+/// Folding preserves bytes and validators, and retires the old key through reclamation.
+pub const APPEND_FOLD_THRESHOLD: u64 = 32;
+const APPEND_FETCH_CONCURRENCY: usize = 16;
+
+async fn collect_concurrently<F: std::future::Future>(futures: Vec<F>) -> Vec<F::Output> {
+    use std::task::Poll;
+    let mut pending: Vec<_> = futures.into_iter().map(|f| Some(Box::pin(f))).collect();
+    let mut results: Vec<_> = (0..pending.len()).map(|_| None).collect();
+    std::future::poll_fn(|cx| {
+        for (future, output) in pending.iter_mut().zip(&mut results) {
+            if let Some(f) = future {
+                if let Poll::Ready(value) = std::future::Future::poll(f.as_mut(), cx) {
+                    *output = Some(value);
+                    *future = None;
+                }
+            }
+        }
+        if pending.iter().all(Option::is_none) {
+            Poll::Ready(())
+        } else {
+            Poll::Pending
+        }
+    })
+    .await;
+    results
+        .into_iter()
+        .map(|value| value.expect("completed future"))
+        .collect()
+}
+
 /// How a record IRI determines the pod for a body write.
 #[derive(Debug, Clone, Default)]
 pub enum BlobScopePolicy {
@@ -702,6 +743,41 @@ pub const HELD_CONTAINER: &str = "urn:x-sparq-lws:held/";
 /// The media type a hold's records are stored with.
 const HELD_TYPE: &str = "application/x-sparq-lws-held";
 
+/// The internal directory of insert records belonging to one immutable blob key.
+pub fn append_dir(blob_key: &str) -> String {
+    format!("urn:x-sparq-lws:appends/{}/", sha_hex(blob_key))
+}
+
+async fn reclaim_append_records<S: SparqClient + ?Sized, B: BlobStore + ?Sized>(
+    sparq: &S,
+    blob: &B,
+    key: &str,
+) -> ServerResult<()> {
+    let dir = append_dir(key);
+    for name in sparq.list_children(&dir).await.map_err(map_sparq)? {
+        let record = match sparq.get_meta(&name).await {
+            Ok(record) => record,
+            Err(SparqError::NotFound) => continue,
+            Err(e) => return Err(map_sparq(e)),
+        };
+        // Remove bytes first here: the parent is already unreferenced and its
+        // reclaim marker makes the directory unreachable to a put-back.
+        match blob.delete(&record.blob_key).await {
+            Ok(()) | Err(BlobError::NotFound) => {}
+            Err(e) => return Err(ServerError::Storage(e.to_string())),
+        }
+        sparq
+            .delete_resource(&name, Some(&dir))
+            .await
+            .map_err(map_sparq)?;
+    }
+    sparq
+        .delete_meta_if_empty(&dir, None)
+        .await
+        .map_err(map_sparq)?;
+    Ok(())
+}
+
 fn sha_hex(s: &str) -> String {
     use sha2::{Digest, Sha256};
     Sha256::digest(s.as_bytes())
@@ -761,44 +837,20 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     }
 
     /// Fetch a resource's bytes through its AUTHORITATIVE metadata: body-cache first (keyed by this
-    /// request's `(blob_key, etag)` — read-4), then the blob store on a miss (inserting the fetched
+    /// request's `(blob_key, append_seq, etag)` — read-4), then the blob store on a miss (inserting the fetched
     /// bytes so the next same-version read hits). A HIT skips only the blob round-trip (blob-gets/op
     /// 1 → 0), never a decision — authorization has already run upstream of every caller (see
     /// [`body_cache`]'s no-bypass argument). `Ok(None)` means the blob is absent — see
     /// [`read_through`](Self::read_through) for why that is usually a benign race.
     async fn try_fetch_body(&self, iri: &str, meta: &ResourceMeta) -> ServerResult<Option<Bytes>> {
-        // Retained records keep their original body's pod identity. Their internal
-        // member IRIs identify index records, not a new scope for those bytes.
+        let scope = self.body_scope(iri).await?;
         let scoped = self.blob.requires_envelope();
-        let original = if scoped && iri.starts_with(history::VERSIONS) {
-            Some(
-                self.sparq
-                    .version_entry(iri)
-                    .await
-                    .map_err(map_sparq)?
-                    .ok_or(ServerError::NotFound)?
-                    .original,
-            )
-        } else if scoped && iri.starts_with(history::TRASH) {
-            Some(
-                self.sparq
-                    .trash_entry(iri)
-                    .await
-                    .map_err(map_sparq)?
-                    .ok_or(ServerError::NotFound)?
-                    .fields
-                    .original,
-            )
-        } else {
-            None
-        };
-        let scope = self.blob_scope.scope(original.as_deref().unwrap_or(iri));
         // Plaintext history can restore an immutable body at a new resource IRI.
         // Only a decoder that authenticates the pod needs a pod-bound cache entry.
         let cache_pod = if scoped { scope.0.as_str() } else { "" };
         if let Some(body) = self
             .body_cache
-            .get_for_pod(cache_pod, &meta.blob_key, &meta.etag)
+            .get_snapshot(cache_pod, &meta.blob_key, meta.append_seq, &meta.etag)
             .map_err(|e| ServerError::Storage(e.to_string()))?
         {
             return Ok(Some(body));
@@ -814,9 +866,81 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
                 return Err(ServerError::Storage("UnknownDataKey".into()));
             }
         };
-        self.body_cache
-            .insert_for_pod(cache_pod, &meta.blob_key, &meta.etag, &body);
+        let body = self.merge_appends(&scope, meta, body).await?;
+        self.body_cache.insert_snapshot(
+            cache_pod,
+            &meta.blob_key,
+            meta.append_seq,
+            &meta.etag,
+            &body,
+        );
         Ok(Some(body))
+    }
+
+    async fn body_scope(&self, iri: &str) -> ServerResult<BlobScope> {
+        // Retained records keep their original body's pod identity. Their internal
+        // member IRIs identify index records, not a new scope for those bytes.
+        let original = if self.blob.requires_envelope() && iri.starts_with(history::VERSIONS) {
+            Some(
+                self.sparq
+                    .version_entry(iri)
+                    .await
+                    .map_err(map_sparq)?
+                    .ok_or(ServerError::NotFound)?
+                    .original,
+            )
+        } else if self.blob.requires_envelope() && iri.starts_with(history::TRASH) {
+            Some(
+                self.sparq
+                    .trash_entry(iri)
+                    .await
+                    .map_err(map_sparq)?
+                    .ok_or(ServerError::NotFound)?
+                    .fields
+                    .original,
+            )
+        } else {
+            None
+        };
+        Ok(self.blob_scope.scope(original.as_deref().unwrap_or(iri)))
+    }
+
+    async fn maybe_fold_appends(&self, iri: &str, meta: &ResourceMeta, body: &Bytes) {
+        if meta.append_seq < APPEND_FOLD_THRESHOLD || !sparq::appendable(&meta.content_type) {
+            return;
+        }
+        let Ok(scope) = self.body_scope(iri).await else {
+            return;
+        };
+        let Ok(blob_key) = Self::mint_blob_key(iri, self.blob.requires_envelope()) else {
+            return;
+        };
+        // A read still succeeds when the shared write ceiling refuses maintenance.
+        if self
+            .blob
+            .put_scoped(&scope, &blob_key, body.clone())
+            .await
+            .is_err()
+        {
+            return;
+        }
+        match self.sparq.fold_appends(iri, meta, &blob_key).await {
+            Ok(true) => {
+                let pod = if self.blob.requires_envelope() {
+                    scope.0.as_str()
+                } else {
+                    ""
+                };
+                self.body_cache
+                    .insert_for_pod(pod, &blob_key, &meta.etag, body);
+                self.reclaim_blob(&meta.blob_key).await;
+            }
+            Ok(false) => {
+                self.reclaim_failed_write(&blob_key, &SparqError::NotFound)
+                    .await
+            }
+            Err(e) => self.reclaim_failed_write(&blob_key, &e).await,
+        }
     }
 
     /// Resolve `iri`'s bytes starting from a just-read metadata row, tolerating the reclaim race.
@@ -835,8 +959,13 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     async fn read_through(&self, iri: &str, mut meta: ResourceMeta) -> ServerResult<Resource> {
         let mut retries = 0;
         loop {
-            if let Some(body) = self.try_fetch_body(iri, &meta).await? {
-                return Ok(Resource { body, meta });
+            match self.try_fetch_body(iri, &meta).await {
+                Ok(Some(body)) => {
+                    self.maybe_fold_appends(iri, &meta, &body).await;
+                    return Ok(Resource { body, meta });
+                }
+                Ok(None) | Err(ServerError::ResourceChanged) => {}
+                Err(e) => return Err(e),
             }
             if retries == READ_RACE_RETRIES {
                 // The resource kept being rewritten under us: transient, so retryable (503).
@@ -850,6 +979,101 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
             }
             meta = current;
         }
+    }
+
+    /// Follow immutable predecessor links from the snapshot's append head. This
+    /// keeps a put-back's abandoned suffix hidden when a later insert branches
+    /// from that snapshot, without deleting records another hold may still need.
+    async fn merge_appends(
+        &self,
+        scope: &BlobScope,
+        meta: &ResourceMeta,
+        body: Bytes,
+    ) -> ServerResult<Bytes> {
+        if meta.append_seq == 0 || !sparq::appendable(&meta.content_type) {
+            return Ok(body);
+        }
+        let dir = append_dir(&meta.blob_key);
+        let records = self.sparq.list_children(&dir).await.map_err(map_sparq)?;
+        let mut names = std::collections::BTreeMap::new();
+        for name in records {
+            if let Some(seq) = name
+                .strip_prefix(&dir)
+                .and_then(|tail| tail.split_once('-'))
+                .and_then(|(seq, _)| seq.parse::<u64>().ok())
+                .filter(|&seq| seq <= meta.append_seq)
+            {
+                if names.insert(seq, name).is_some() {
+                    return Err(ServerError::Storage("duplicate append sequence".into()));
+                }
+            }
+        }
+        let names: Vec<_> = names.into_iter().collect();
+        let mut records = std::collections::BTreeMap::new();
+        for chunk in names.chunks(APPEND_FETCH_CONCURRENCY) {
+            let fetched =
+                collect_concurrently(
+                    chunk
+                        .iter()
+                        .map(|(sequence, name)| async move {
+                            (*sequence, self.sparq.get_meta(name).await)
+                        })
+                        .collect(),
+                )
+                .await;
+            records.extend(fetched);
+        }
+        let mut sequence = meta.append_seq;
+        let mut chain = Vec::new();
+        while sequence > 0 {
+            let record = records
+                .remove(&sequence)
+                .ok_or(ServerError::ResourceChanged)?
+                .map_err(|e| match e {
+                    SparqError::NotFound => ServerError::ResourceChanged,
+                    other => map_sparq(other),
+                })?;
+            if record.append_seq >= sequence {
+                return Err(ServerError::Storage("invalid append predecessor".into()));
+            }
+            sequence = record.append_seq;
+            chain.push(record);
+        }
+        let mut inserts = Vec::new();
+        for chunk in chain.chunks(APPEND_FETCH_CONCURRENCY) {
+            let fetched = collect_concurrently(
+                chunk
+                    .iter()
+                    .map(|record| async move {
+                        self.blob
+                            .get_scoped(scope, &record.blob_key)
+                            .await
+                            .map_err(|e| match e {
+                                BlobError::NotFound => ServerError::ResourceChanged,
+                                other => ServerError::Storage(other.to_string()),
+                            })
+                    })
+                    .collect(),
+            )
+            .await;
+            for bytes in fetched {
+                inserts.push(bytes?);
+            }
+        }
+        let mut merged = body.to_vec();
+        for bytes in inserts.into_iter().rev() {
+            if !merged.is_empty() && !merged.ends_with(b"\n") {
+                merged.push(b'\n');
+            }
+            merged.extend_from_slice(&bytes);
+        }
+        Ok(Bytes::from(merged))
+    }
+
+    /// Remove an unreferenced document's insert records and bytes. The parent's
+    /// reclaim marker is retained until this finishes, so startup can retry it.
+    async fn reclaim_appends(&self, key: &str) -> ServerResult<()> {
+        reclaim_append_records(&*self.sparq, &*self.blob, key).await
     }
 
     /// [`SparqClient::get_meta`] with the read path's error mapping (absent ⇒ [`ServerError::NotFound`]).
@@ -878,12 +1102,18 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// the holds taken through this instance may say they are held without asking (never that
     /// they are not).
     async fn reclaim_blob(&self, key: &str) {
-        if self.holds_locally(key) || !matches!(self.sparq.begin_reclaim(key).await, Ok(true)) {
+        if self.holds_locally(key) {
             return;
         }
+        let has_appends = match self.sparq.begin_reclaim_with_appends(key).await {
+            Ok((true, has_appends)) => has_appends,
+            _ => return,
+        };
         match self.blob.delete(key).await {
             Ok(()) | Err(BlobError::NotFound) => {
-                let _ = self.sparq.end_reclaim(key).await;
+                if !has_appends || self.reclaim_appends(key).await.is_ok() {
+                    let _ = self.sparq.end_reclaim(key).await;
+                }
             }
             Err(_) => {}
         }
@@ -927,6 +1157,7 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
             // A child records its holder; its directory records the original resource.
             etag: etag.to_string(),
             last_modified: None,
+            append_seq: 0,
         };
         let dir = held_dir(key);
         for _ in 0..3 {
@@ -1295,6 +1526,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             // Stamp the write instant so `If-Modified-Since` sees a real Last-Modified: a re-write
             // bumps it, so a later conditional GET correctly re-serves the changed representation.
             last_modified: Some(crate::clock::now()),
+            append_seq: 0,
         };
         if self.history.versions && history::data_resource(iri) {
             let member = history::mint(&history::version_dir(iri)).map_err(map_sparq)?;
@@ -1337,6 +1569,38 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         Ok(meta)
     }
 
+    async fn append(&self, iri: &str, ntriples: Bytes) -> ServerResult<()> {
+        refuse_marker(&[Some(iri)])?;
+        // Check only the index row. Publish the visible sequence together with
+        // the insert record after its bytes exist, never before publication.
+        let target = self.sparq.get_meta(iri).await.map_err(map_sparq)?;
+        if !sparq::appendable(&target.content_type) {
+            return Err(ServerError::Forbidden);
+        }
+        let key = target.blob_key;
+        let blob_key = Self::mint_blob_key(iri, self.blob.requires_envelope())?;
+        self.blob
+            .put_scoped(&self.blob_scope.scope(iri), &blob_key, ntriples)
+            .await
+            .map_err(|e| match e {
+                BlobError::QuotaExceeded | BlobError::ServicePoolFull => {
+                    ServerError::InsufficientStorage
+                }
+                other => ServerError::Storage(other.to_string()),
+            })?;
+        if let Err(e) = self.sparq.publish_append(iri, &key, &blob_key).await {
+            self.reclaim_failed_write(&blob_key, &e).await;
+            return Err(match e {
+                // A replacement/deletion won after the initial lookup. Restart
+                // rather than taking the handler's create-on-absent path.
+                SparqError::NotFound => ServerError::ResourceChanged,
+                SparqError::Unsupported => ServerError::Forbidden,
+                other => map_sparq(other),
+            });
+        }
+        Ok(())
+    }
+
     async fn create_in_container(
         &self,
         container: &str,
@@ -1365,6 +1629,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             // Stamp the create instant (see `write`) — the new child's Last-Modified for
             // `If-Modified-Since`.
             last_modified: Some(crate::clock::now()),
+            append_seq: 0,
         };
         match self
             .sparq
@@ -1408,6 +1673,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             })?;
         let meta = ResourceMeta {
             blob_key,
+            append_seq: 0,
             ..meta.clone()
         };
         let committed = match container {
@@ -1580,6 +1846,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         for key in self.sparq.reclaiming().await.map_err(map_sparq)? {
             match self.blob.delete(&key).await {
                 Ok(()) | Err(BlobError::NotFound) => {
+                    self.reclaim_appends(&key).await?;
                     self.sparq.end_reclaim(&key).await.map_err(map_sparq)?
                 }
                 Err(e) => return Err(ServerError::Storage(format!("{e}"))),
@@ -1759,6 +2026,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         // authoritative read-plan round, so a hit is exactly the bytes that metadata committed with
         // (the unique-per-write blob key names an immutable object).
         if let Some(body) = self.try_fetch_body(iri, meta).await? {
+            self.maybe_fold_appends(iri, meta, &body).await;
             return Ok(body);
         }
         // The blob is gone. Only now (the race path) re-read the index to say why — and NEVER serve
@@ -1991,6 +2259,7 @@ mod tests {
             blob_key: String::new(),
             etag: "\"e\"".into(),
             last_modified: None,
+            append_seq: 0,
         };
         for _ in 0..3 {
             let r = store
@@ -2235,6 +2504,24 @@ mod tests {
 
     #[async_trait]
     impl SparqClient for PutBackFirst {
+        async fn fold_appends(
+            &self,
+            iri: &str,
+            expected: &ResourceMeta,
+            blob_key: &str,
+        ) -> Result<bool, SparqError> {
+            self.inner.fold_appends(iri, expected, blob_key).await
+        }
+
+        async fn publish_append(
+            &self,
+            iri: &str,
+            key: &str,
+            blob_key: &str,
+        ) -> Result<(), SparqError> {
+            self.inner.publish_append(iri, key, blob_key).await
+        }
+
         fn lifecycle(&self) -> std::sync::Arc<Lifecycle> {
             self.inner.lifecycle()
         }
@@ -2419,6 +2706,28 @@ mod tests {
 
     #[async_trait]
     impl<T: SparqClient> SparqClient for Shared<T> {
+        async fn begin_reclaim_with_appends(&self, key: &str) -> Result<(bool, bool), SparqError> {
+            self.0.begin_reclaim_with_appends(key).await
+        }
+
+        async fn fold_appends(
+            &self,
+            iri: &str,
+            expected: &ResourceMeta,
+            blob_key: &str,
+        ) -> Result<bool, SparqError> {
+            self.0.fold_appends(iri, expected, blob_key).await
+        }
+
+        async fn publish_append(
+            &self,
+            iri: &str,
+            key: &str,
+            blob_key: &str,
+        ) -> Result<(), SparqError> {
+            self.0.publish_append(iri, key, blob_key).await
+        }
+
         fn lifecycle(&self) -> std::sync::Arc<Lifecycle> {
             self.0.lifecycle()
         }
@@ -2623,6 +2932,24 @@ mod tests {
 
     #[async_trait]
     impl SparqClient for FailsDetaching {
+        async fn fold_appends(
+            &self,
+            iri: &str,
+            expected: &ResourceMeta,
+            blob_key: &str,
+        ) -> Result<bool, SparqError> {
+            self.inner.fold_appends(iri, expected, blob_key).await
+        }
+
+        async fn publish_append(
+            &self,
+            iri: &str,
+            key: &str,
+            blob_key: &str,
+        ) -> Result<(), SparqError> {
+            self.inner.publish_append(iri, key, blob_key).await
+        }
+
         fn lifecycle(&self) -> std::sync::Arc<Lifecycle> {
             self.inner.lifecycle()
         }

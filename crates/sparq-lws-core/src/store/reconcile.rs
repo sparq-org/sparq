@@ -175,7 +175,8 @@ impl Default for ReconcileOptions {
 pub struct ReconcileReport {
     /// Total physically-stored blobs examined.
     pub scanned: usize,
-    /// Blobs still referenced by an index row (kept, untouched).
+    /// Blobs referenced at classification time. Inserts belonging to an orphaned
+    /// document can subsequently be removed as part of that document's reclaim.
     pub referenced: usize,
     /// Unreferenced blobs (orphan candidates) — the sum of the six dispositions below.
     pub orphaned: usize,
@@ -206,7 +207,7 @@ pub struct ReconcileReport {
     /// fresh-re-check + re-stat guards. It only lands here if one of those guards keeps it (referenced
     /// again / rewritten / now too young), exactly like a versioned candidate.
     pub skipped_revalidated: usize,
-    /// Orphans we tried to delete but the backend delete failed (KEPT; the sweep continued).
+    /// Candidates whose deletion or linked insert cleanup failed; the sweep continued.
     pub delete_errors: usize,
 }
 
@@ -485,7 +486,28 @@ async fn reconcile_batch<S: SparqClient + ?Sized, B: BlobStore + ?Sized>(
             continue;
         }
 
-        match plan {
+        // A stop after removing the document's row, but before beginning its
+        // reclaim, leaves its append records referenced. Claim that document
+        // before deleting its base bytes so interrupted cleanup can be resumed.
+        let append_reclaim = match sparq.exists(&super::append_dir(&key)).await {
+            Ok(false) => false,
+            Ok(true) => match sparq.begin_reclaim(&key).await {
+                Ok(true) => true,
+                Ok(false) => {
+                    report.skipped_revalidated += 1;
+                    continue;
+                }
+                Err(_) => {
+                    report.delete_errors += 1;
+                    continue;
+                }
+            },
+            Err(_) => {
+                report.delete_errors += 1;
+                continue;
+            }
+        };
+        let deleted = match plan {
             // The atomic compare-and-delete on the SNAPSHOT generation. `delete_if_unchanged` removes the
             // key ONLY while its current `generation` still equals the witness, with the compare + remove in
             // ONE critical section. This CLOSES the residual stat→delete TOCTOU (Finding 1) AND is
@@ -494,24 +516,36 @@ async fn reconcile_batch<S: SparqClient + ?Sized, B: BlobStore + ?Sized>(
             // `false` (recorded `skipped_revalidated`, NOT deleted). A genuine backend failure is recorded
             // under `delete_errors` and the sweep CONTINUES (one bad key never aborts the whole GC).
             DeletePlan::DeleteCas(snapshot_gen) => {
-                match blob.delete_if_unchanged(&key, snapshot_gen).await {
-                    Ok(true) => report.deleted += 1,
-                    // The generation changed between the fresh stat and the CAS (a rewrite landed) ⇒ the
-                    // CAS refused to delete. Not an orphan any more — record as revalidated, no clobber.
-                    Ok(false) => report.skipped_revalidated += 1,
-                    Err(_) => report.delete_errors += 1,
-                }
+                blob.delete_if_unchanged(&key, snapshot_gen).await
             }
             // The versionless unconditional-delete path (safe under unique-per-write keys). A backend delete
             // failure is recorded and the sweep CONTINUES.
-            DeletePlan::DeleteUnconditional => match blob.delete(&key).await {
-                Ok(()) => report.deleted += 1,
-                Err(_) => report.delete_errors += 1,
-            },
+            DeletePlan::DeleteUnconditional => blob.delete(&key).await.map(|_| true),
             // Unreachable: SkipRevalidated `continue`d above.
             DeletePlan::SkipRevalidated => {
                 unreachable!("revalidated candidates were already skipped")
             }
+        };
+        match deleted {
+            Ok(true) => {
+                if append_reclaim
+                    && (super::reclaim_append_records(sparq, blob, &key)
+                        .await
+                        .is_err()
+                        || sparq.end_reclaim(&key).await.is_err())
+                {
+                    report.delete_errors += 1;
+                } else {
+                    report.deleted += 1;
+                }
+            }
+            Ok(false) => {
+                if append_reclaim {
+                    let _ = sparq.end_reclaim(&key).await;
+                }
+                report.skipped_revalidated += 1;
+            }
+            Err(_) => report.delete_errors += 1,
         }
     }
 
@@ -695,6 +729,7 @@ mod tests {
             blob_key: blob_key.to_string(),
             etag: "\"e\"".into(),
             last_modified: None,
+            append_seq: 0,
         }
     }
 

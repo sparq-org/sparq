@@ -483,7 +483,7 @@ impl HttpSparqClient {
     async fn put_meta_unchecked(&self, iri: &str, meta: ResourceMeta) -> Result<(), SparqError> {
         let nonce = next_nonce()?;
         let modified = meta.last_modified.and_then(timestamp::to_xsd_datetime);
-        let u = sparql::update_put_meta_fenced(
+        let u = sparql::update_put_meta_snapshot_fenced(
             iri,
             &meta.content_type,
             &meta.blob_key,
@@ -491,6 +491,7 @@ impl HttpSparqClient {
             modified.as_deref(),
             &nonce,
             self.epoch.load(Ordering::Acquire),
+            meta.append_seq,
         )?;
         self.write_and_confirm(&u, iri, &nonce, &[iri]).await?;
         self.clear_completion(iri, &nonce).await;
@@ -588,6 +589,12 @@ impl SparqClient for HttpSparqClient {
             blob_key,
             etag,
             last_modified,
+            append_seq: row
+                .get("appendSeq")
+                .map(|s| s.parse())
+                .transpose()
+                .map_err(|_| SparqError::Backend("invalid append sequence".into()))?
+                .unwrap_or(0),
         })
     }
 
@@ -609,6 +616,94 @@ impl SparqClient for HttpSparqClient {
         }
         self.put_meta_unchecked(iri, super::sparq::marker_meta(&value.to_string()))
             .await
+    }
+
+    async fn fold_appends(
+        &self,
+        iri: &str,
+        expected: &ResourceMeta,
+        blob_key: &str,
+    ) -> Result<bool, SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri)])?;
+        let nonce = next_nonce()?;
+        let receipt = format!("urn:x-sparq-lws:append-results/{nonce}");
+        let epoch = self.epoch.load(Ordering::Acquire);
+        let update = sparql::update_fold_appends(iri, expected, blob_key, &receipt, &nonce, epoch)?;
+        let fenced = self.update_fenced(&update, &nonce, &[iri]).await?;
+        let (body, _) = self
+            .query_raw(
+                &sparql::select_append_receipt(&receipt)?,
+                ACCEPT_RESULTS_JSON,
+            )
+            .await
+            .map_err(SparqHttpError::into_sparq)?;
+        let result = parse_select_json(&body).map_err(SparqHttpError::into_sparq)?;
+        if result.rows.is_empty() {
+            self.require_epoch(epoch).await?;
+            return if fenced {
+                Err(SparqError::Backend("append fold did not commit".into()))
+            } else {
+                Ok(false)
+            };
+        }
+        let _ = self
+            .update_raw(&sparql::update_delete_resource(&receipt)?)
+            .await;
+        Ok(true)
+    }
+
+    async fn publish_append(&self, iri: &str, key: &str, blob_key: &str) -> Result<(), SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri)])?;
+        let nonce = next_nonce()?;
+        let receipt = format!("urn:x-sparq-lws:append-results/{nonce}");
+        let modified = timestamp::to_xsd_datetime(crate::clock::now())
+            .ok_or_else(|| SparqError::Backend("invalid append timestamp".into()))?;
+        let epoch = self.epoch.load(Ordering::Acquire);
+        let update =
+            sparql::update_publish_append(iri, key, blob_key, &nonce, &modified, Some(epoch))?;
+        let dir = super::append_dir(key);
+        let fenced = self.update_fenced(&update, &nonce, &[iri, &dir]).await?;
+        let (body, _) = self
+            .query_raw(
+                &sparql::select_append_receipt(&receipt)?,
+                ACCEPT_RESULTS_JSON,
+            )
+            .await
+            .map_err(SparqHttpError::into_sparq)?;
+        let result = parse_select_json(&body).map_err(SparqHttpError::into_sparq)?;
+        if result.rows.is_empty() {
+            self.require_epoch(epoch).await?;
+            return Err(if fenced {
+                SparqError::Backend("append publication did not commit".into())
+            } else {
+                SparqError::NotFound
+            });
+        }
+        let _ = self
+            .update_raw(&sparql::update_delete_resource(&receipt)?)
+            .await;
+        Ok(())
+    }
+
+    async fn begin_reclaim_with_appends(&self, blob_key: &str) -> Result<(bool, bool), SparqError> {
+        self.update_raw(&sparql::update_begin_reclaim(blob_key))
+            .await
+            .map_err(SparqHttpError::into_sparq)?;
+        let (body, _) = self
+            .query_raw(
+                &sparql::select_reclaim_with_appends(blob_key),
+                ACCEPT_RESULTS_JSON,
+            )
+            .await
+            .map_err(SparqHttpError::into_sparq)?;
+        let result = parse_select_json(&body).map_err(SparqHttpError::into_sparq)?;
+        Ok((
+            !result.rows.is_empty(),
+            result
+                .rows
+                .iter()
+                .any(|row| row.get("hasAppends").is_some_and(|s| s == "true")),
+        ))
     }
 
     async fn begin_reclaim(&self, blob_key: &str) -> Result<bool, SparqError> {
@@ -805,21 +900,11 @@ impl SparqClient for HttpSparqClient {
         // ONE atomic update: DELETE any stale child record + marker, INSERT the child record + the
         // containment edge + THIS operation's marker, guarded by the container-record EXISTS in the
         // WHERE clause. A missing container ⇒ the WHERE yields nothing ⇒ nothing inserted.
-        let modified = meta.last_modified.and_then(timestamp::to_xsd_datetime);
         //
         // An update that fails but may still commit is fenced ([`Self::update_fenced`]), so what
         // the ASK below reads is final.
         let epoch = self.epoch.load(Ordering::Acquire);
-        let u = sparql::update_create_child_fenced(
-            container,
-            child,
-            &meta.content_type,
-            &meta.blob_key,
-            &meta.etag,
-            modified.as_deref(),
-            &nonce,
-            epoch,
-        )?;
+        let u = sparql::update_create_child_meta(container, child, &meta, &nonce, Some(epoch))?;
         let fenced = self.update_fenced(&u, &nonce, &[container, child]).await?;
 
         // CONFIRM the guard matched by ASKing for OUR marker (not the shared containment edge):
@@ -957,6 +1042,12 @@ impl SparqClient for HttpSparqClient {
                 blob_key: bind("bk")?,
                 etag: bind("etag")?,
                 last_modified,
+                append_seq: row
+                    .get("appendSeq")
+                    .map(|s| s.parse())
+                    .transpose()
+                    .map_err(|_| SparqError::Backend("invalid append sequence".into()))?
+                    .unwrap_or(0),
             };
             // First row per graph wins (a well-formed index holds exactly one record per graph —
             // `update_put_meta`/`update_create_child` keep the record single-valued; this mirrors
@@ -1025,6 +1116,7 @@ mod tests {
         ResourceMeta {
             content_type: "text/plain".into(),
             blob_key: "candidate".into(),
+            append_seq: 0,
             etag: "e".into(),
             last_modified: None,
         }
@@ -1038,11 +1130,23 @@ mod tests {
             Duration::from_millis(20),
         );
         let (iri, parent) = ("https://pod.example/c/d", "https://pod.example/c/");
-        for operation in ["put", "delete", "detach", "delete_resource"] {
+        for operation in [
+            "put",
+            "delete",
+            "detach",
+            "delete_resource",
+            "append",
+            "fold",
+        ] {
             let result = match operation {
                 "put" => client.put_meta(iri, meta()).await,
                 "delete" => client.delete_meta(iri).await,
                 "detach" => client.remove_child(parent, iri).await,
+                "append" => client.publish_append(iri, "candidate", "insert").await,
+                "fold" => client
+                    .fold_appends(iri, &meta(), "folded")
+                    .await
+                    .map(|_| ()),
                 "delete_resource" => client.delete_resource(iri, Some(parent)).await.map(|_| ()),
                 _ => unreachable!(),
             };
@@ -1054,6 +1158,9 @@ mod tests {
             let mut expected = vec![iri.to_string()];
             if matches!(operation, "detach" | "delete_resource") {
                 expected.push(parent.to_string());
+            }
+            if operation == "append" {
+                expected.push(super::super::append_dir("candidate"));
             }
             expected.sort();
             assert_eq!(touches, expected, "{operation}");
@@ -1166,6 +1273,94 @@ mod tests {
             axum::serve(listener, app).await.unwrap();
         });
         (client, graph, server)
+    }
+
+    #[cfg(feature = "embedded-sparq")]
+    #[tokio::test]
+    async fn append_and_fold_follow_the_writer_epoch_and_clear_their_receipts() {
+        let (client, graph, server) = engine_endpoint().await;
+        let (parent, child) = ("https://pod.example/c/", "https://pod.example/c/d");
+        client.put_meta(parent, meta()).await.unwrap();
+        let lease = client.lifecycle().acquire().unwrap();
+        let epoch = client.begin_epoch(&lease).await.unwrap();
+        let original = ResourceMeta {
+            content_type: "application/n-triples".into(),
+            append_seq: 3,
+            ..meta()
+        };
+        client
+            .create_child(parent, child, original.clone())
+            .await
+            .unwrap();
+        assert_eq!(client.get_meta(child).await.unwrap(), original.clone());
+        // A complete snapshot written through either path retains its sequence.
+        client.put_meta(child, original.clone()).await.unwrap();
+        assert_eq!(client.get_meta(child).await.unwrap(), original);
+        client
+            .publish_append(child, "candidate", "insert")
+            .await
+            .unwrap();
+        let appended = client.get_meta(child).await.unwrap();
+        assert!(appended.append_seq > 3);
+        assert_ne!(appended.etag, "e");
+        assert!(client
+            .fold_appends(child, &appended, "folded")
+            .await
+            .unwrap());
+        let folded = client.get_meta(child).await.unwrap();
+        assert_eq!(
+            folded,
+            ResourceMeta {
+                blob_key: "folded".into(),
+                append_seq: 0,
+                ..appended.clone()
+            }
+        );
+        assert!(!client
+            .fold_appends(child, &appended, "stale-fold")
+            .await
+            .unwrap());
+        let snapshot = || {
+            sparq_engine::query_json(
+                &graph.lock().unwrap(),
+                "SELECT ?g ?s ?p ?o WHERE { GRAPH ?g { ?s ?p ?o } } ORDER BY ?g ?s ?p ?o",
+            )
+            .unwrap()
+        };
+        assert!(
+            !snapshot().contains("append-results/"),
+            "confirmed receipts cleaned up"
+        );
+        client
+            .update_raw(&sparql::update_begin_epoch(epoch + 1, "later-start"))
+            .await
+            .unwrap();
+        let before = snapshot();
+        for operation in ["append", "fold", "absent-append", "stale-fold"] {
+            let result = match operation {
+                "append" => client.publish_append(child, "folded", "later-insert").await,
+                "fold" => client
+                    .fold_appends(child, &folded, "later-fold")
+                    .await
+                    .map(|_| ()),
+                "absent-append" => {
+                    client
+                        .publish_append(child, "absent-key", "absent-insert")
+                        .await
+                }
+                "stale-fold" => client
+                    .fold_appends(child, &appended, "stale-fold")
+                    .await
+                    .map(|_| ()),
+                _ => unreachable!(),
+            };
+            assert!(
+                matches!(result, Err(SparqError::Backend(ref error)) if error == "fatal: writer epoch superseded"),
+                "{result:?}"
+            );
+            assert_eq!(snapshot(), before);
+        }
+        server.abort();
     }
 
     #[cfg(feature = "embedded-sparq")]

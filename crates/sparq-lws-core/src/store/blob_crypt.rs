@@ -128,6 +128,7 @@ impl KeyRecord {
             blob_key: String::new(),
             etag: serde_json::to_string(self).map_err(|_| invalid_record())?,
             last_modified: None,
+            append_seq: 0,
         })
     }
 }
@@ -378,6 +379,7 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
                     blob_key: String::new(),
                     etag: String::new(),
                     last_modified: None,
+                    append_seq: 0,
                 },
             )
             .await

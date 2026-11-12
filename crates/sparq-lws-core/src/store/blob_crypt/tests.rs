@@ -284,6 +284,152 @@ const BOB: &str = "https://pod.example/bob/file";
 const BODY: &[u8] = b"the original resource bytes";
 
 #[tokio::test]
+async fn encrypted_inserts_and_folds_keep_scoped_snapshots() {
+    let mut f = Fixture::new();
+    // The hold root has its own storage scope; provision it before requiring
+    // the document pod on subsequent backend operations.
+    f.plain()
+        .write(
+            crate::store::HELD_CONTAINER,
+            Bytes::new(),
+            "application/x-sparq-lws-held",
+        )
+        .await
+        .unwrap();
+    f.backend.required_scope = Some(BlobScope("https://pod.example/alice/".into()));
+    let mut store = f.encrypted().await;
+    store.body_cache = Arc::new(BodyCache::new(65536));
+    store
+        .write(ALICE, Bytes::from_static(b"base\n"), "text/turtle")
+        .await
+        .unwrap();
+    store
+        .append(ALICE, Bytes::from_static(b"insert\n"))
+        .await
+        .unwrap();
+    let first = store.read(ALICE).await.unwrap();
+    assert_eq!(first.body, "base\ninsert\n");
+    assert_eq!(store.read_at(ALICE, &first.meta).await.unwrap(), first.body);
+    let held = store.hold(ALICE, "scope-test").await.unwrap().unwrap();
+    let mut expected = first.body.to_vec();
+    for _ in 0..32 {
+        store
+            .append(ALICE, Bytes::from_static(b"next\n"))
+            .await
+            .unwrap();
+        expected.extend_from_slice(b"next\n");
+    }
+    let before = store.meta(ALICE).await.unwrap().unwrap();
+    assert_eq!(store.read(ALICE).await.unwrap().body, expected);
+    let folded = store.meta(ALICE).await.unwrap().unwrap();
+    assert_eq!(folded.append_seq, 0);
+    assert_ne!(folded.blob_key, before.blob_key);
+    assert!(envelope_key(&folded.blob_key));
+    assert_eq!(store.read(ALICE).await.unwrap().body, expected);
+    store.body_cache = Arc::new(BodyCache::disabled());
+    assert_eq!(store.read(ALICE).await.unwrap().body, expected);
+    assert_eq!(store.read_at(ALICE, &held).await.unwrap(), first.body);
+    store.release(&held, "scope-test").await.unwrap();
+    assert_eq!(f.backend.unscoped_reads.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn folding_retained_inserts_uses_the_original_pod() {
+    let mut f = Fixture::new();
+    f.backend.required_scope = Some(BlobScope("https://pod.example/alice/".into()));
+    let store = f
+        .encrypted()
+        .await
+        .with_history(crate::store::history::HistoryConfig {
+            versions: true,
+            ..Default::default()
+        })
+        .unwrap();
+    store
+        .write(ALICE, Bytes::from_static(b"base\n"), "text/turtle")
+        .await
+        .unwrap();
+    let mut expected = b"base\n".to_vec();
+    for _ in 0..33 {
+        store
+            .append(ALICE, Bytes::from_static(b"insert\n"))
+            .await
+            .unwrap();
+        expected.extend_from_slice(b"insert\n");
+    }
+    assert!(store.versions(Some(ALICE)).await.unwrap().is_empty());
+    store
+        .write(ALICE, Bytes::from_static(b"replacement"), "text/turtle")
+        .await
+        .unwrap();
+    let version = store.versions(Some(ALICE)).await.unwrap().pop().unwrap();
+    assert_eq!(
+        store.read_at(&version.member, &version.meta).await.unwrap(),
+        expected
+    );
+    let folded = store.version_entry(&version.member).await.unwrap().unwrap();
+    assert_eq!(store.versions(Some(ALICE)).await.unwrap().len(), 1);
+    assert_eq!(folded.meta.append_seq, 0);
+    assert_ne!(folded.meta.blob_key, version.meta.blob_key);
+    assert_eq!(
+        store.read_at(&folded.member, &folded.meta).await.unwrap(),
+        expected
+    );
+    assert_eq!(store.read(ALICE).await.unwrap().body, "replacement");
+    assert_eq!(f.backend.unscoped_reads.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn folding_trashed_inserts_uses_the_original_pod() {
+    let mut f = Fixture::new();
+    f.backend.required_scope = Some(BlobScope("https://pod.example/alice/".into()));
+    let store = f
+        .encrypted()
+        .await
+        .with_history(crate::store::history::HistoryConfig {
+            trash: true,
+            ..Default::default()
+        })
+        .unwrap();
+    store
+        .write(ALICE, Bytes::from_static(b"base\n"), "text/turtle")
+        .await
+        .unwrap();
+    let mut expected = b"base\n".to_vec();
+    for _ in 0..33 {
+        store
+            .append(ALICE, Bytes::from_static(b"insert\n"))
+            .await
+            .unwrap();
+        expected.extend_from_slice(b"insert\n");
+    }
+    let member = store
+        .trash_resource(
+            ALICE,
+            None,
+            crate::store::history::TrashFields {
+                original: ALICE.into(),
+                trashed_at: crate::clock::now(),
+                deleted_by: None,
+                deleter_could_read: true,
+            },
+        )
+        .await
+        .unwrap();
+    let entry = store.trash_entry(&member).await.unwrap().unwrap();
+    assert_eq!(store.read_at(&member, &entry.meta).await.unwrap(), expected);
+    let folded = store.trash_entry(&member).await.unwrap().unwrap();
+    assert_eq!(folded.meta.append_seq, 0);
+    assert_ne!(folded.meta.blob_key, entry.meta.blob_key);
+    assert_eq!(
+        store.read_at(&member, &folded.meta).await.unwrap(),
+        expected
+    );
+    assert_eq!(store.trash_entries().await.unwrap().len(), 1);
+    assert_eq!(f.backend.unscoped_reads.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
 async fn encrypted_pool_capacity_is_typed_only_for_resource_creates() {
     use crate::{error::ServerError, store::InMemoryStoreLimits};
 
@@ -854,12 +1000,19 @@ async fn unscoped_reads_authenticate_by_key_and_scoped_reads_use_the_resource_po
     assert_eq!(store.blob.get(&meta.blob_key).await.unwrap(), BODY);
     assert!(store
         .blob
-        .get_scoped(&BlobScope("https://pod.example/bob/".into()), &meta.blob_key)
+        .get_scoped(
+            &BlobScope("https://pod.example/bob/".into()),
+            &meta.blob_key
+        )
         .await
         .is_err());
     let mut bytes = f.backend.bytes.get(&meta.blob_key).await.unwrap().to_vec();
     *bytes.last_mut().unwrap() ^= 1;
-    f.backend.bytes.put(&meta.blob_key, bytes.into()).await.unwrap();
+    f.backend
+        .bytes
+        .put(&meta.blob_key, bytes.into())
+        .await
+        .unwrap();
     assert!(store.blob.get(&meta.blob_key).await.is_err());
 }
 
@@ -2368,12 +2521,18 @@ async fn retained_bodies_keep_their_original_pod_after_encryption_and_cloning() 
     let version = store.versions(Some(ALICE)).await.unwrap().pop().unwrap();
     assert!(envelope_key(&version.meta.blob_key));
     assert_eq!(
-        cloned.read_at(&version.member, &version.meta).await.unwrap(),
+        cloned
+            .read_at(&version.member, &version.meta)
+            .await
+            .unwrap(),
         BODY
     );
     assert!(cloned.read_at(BOB, &version.meta).await.is_err());
     assert_eq!(
-        cloned.read_at(&version.member, &version.meta).await.unwrap(),
+        cloned
+            .read_at(&version.member, &version.meta)
+            .await
+            .unwrap(),
         BODY
     );
     assert_eq!(cloned.read(ALICE).await.unwrap().body, "second");

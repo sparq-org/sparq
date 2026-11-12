@@ -150,6 +150,16 @@ bytes)` is the opt-in persistent constructor: the same in-memory pod behind a jo
 decorator. `snapshot()` returns the bytes to persist (`undefined` for a pod built with `new`), and
 `snapshotRevision()` is a monotonic mutation counter so a host can skip a flush when nothing moved.
 
+The Solid host's persistence journal also records `Store::append` insert lines without
+reading the target. Journal format version 2 replays these append records after their
+resource is created; the decoder still accepts version 1 snapshots. A replacement or
+delete folds away earlier append records when no retained container dependency prevents
+that fold. Insert-only PATCH without Read refuses every `If-Match` and
+`If-None-Match` header, including `*`, before looking up the target. Reader-triggered
+folding and complete merged-body caching use the core store's snapshot rules
+(see [stored inserts](../solid-lws-server/SKILL.md#stored-inserts)); a layout-only
+fold needs no journal mutation because replay reconstructs the same resource bytes.
+
 ```js
 const previous = await readFile(statePath).catch(() => new Uint8Array());
 const pod = SolidServer.withSnapshot("https://pod.example", owner, previous);
@@ -162,7 +172,9 @@ IndexedDB) and the flush policy stay in the host. A `Store` that awaits a JS pro
 is not available: the trait is `Send + Sync` and every `JsValue` is `!Send`. The encoding folds
 superseded writes and deleted resources away, so it tracks current contents rather than full
 history. Restart replays the writes, so `Last-Modified` becomes the replay instant, while the
-body-derived `ETag` is unchanged — a pre-restart `If-None-Match` still gets its 304. An owner ACL is provisioned only when the
+body-derived `ETag` of a full write is unchanged. Replayed inserts receive fresh
+opaque ETags; a pre-restart `If-None-Match` for those resources receives a fresh
+representation. An owner ACL is provisioned only when the
 restored pod has none, so a restart never reverts an ACL the owner edited; a snapshot that cannot be
 decoded or replayed is refused rather than booting a partly-populated pod.
 

@@ -3582,6 +3582,10 @@ pub(crate) mod test_store {
 
     #[async_trait]
     impl Store for FlakyStore {
+        async fn append(&self, iri: &str, ntriples: Bytes) -> ServerResult<()> {
+            self.inner.append(iri, ntriples).await
+        }
+
         async fn begin_epoch(&self, lease: &crate::store::LifecycleGuard) -> ServerResult<u64> {
             self.traced("begin_epoch", "");
             self.inner.begin_epoch(lease).await

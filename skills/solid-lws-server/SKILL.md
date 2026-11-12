@@ -173,11 +173,12 @@ Set `PSS_SPARQ_BACKEND` to one of:
   update committed (one `sparq-server` does). An eventually consistent or replicated
   endpoint that can lag is not supported, because the LWS server decides what a failed
   write left behind by reading the store straight after it. Metadata upserts,
-  resource graph deletes, containment edge removals, child creates and conditional
-  empty-container deletes carry a nonce fence and writer epoch in their `WHERE`.
+  resource graph deletes, containment edge removals, child creates, append and fold
+  publication, and conditional empty-container deletes carry a nonce fence and writer
+  epoch in their `WHERE`.
   A resource delete detaches its parent edge in the same update and captures the
   removed blob key in an operation receipt. Every acknowledged update is confirmed
-  through its completion marker, including updates whose guard matched nothing.
+  through its completion marker or receipt, including updates whose guard matched nothing.
   An acknowledged update carrying a superseded writer epoch is reported as refused with
   `Backend("fatal: writer epoch superseded")`, including child creates and conditional
   empty-container deletes. After confirmation and any receipt read, the client removes
@@ -345,6 +346,70 @@ including for a `file://` URL. Back up and restore those bytes while the server
 is stopped, preserving blob keys and the exact URL recorded in `format.json`.
 Changing that backend or URL requires migration.
 
+### Stored inserts
+
+Insert-only PATCH without Read refuses every `If-Match` or `If-None-Match` header,
+including `*`, with the caller's usual denial before looking up the target.
+A container IRI is also refused without Read (`403` for an authenticated caller,
+`401` for an anonymous caller), whether or not it exists.
+
+`ResourceMeta::append_seq` identifies a document snapshot's last published insert
+(default `0` for old index rows). Insert records use the same field for their immutable
+predecessor, and the internal directory uses it as an allocation high-water mark.
+This preserves earlier snapshots and branches correctly when a held version is put back.
+
+The metadata mapping persists `pss:appendSeq`. Retained public metadata builders
+seed zero; internal helpers preserve complete metadata snapshots. The unused
+metadata-only `bump_append` API and its Update builder have been removed.
+
+`Store::append(iri, ntriples: Bytes)` stores request-derived N-Triples insert lines;
+its default refuses. `CompositeStore` checks only the target's index row, stores a
+fresh blob, then calls `SparqClient::publish_append(iri, key, blob_key)`. This new
+primitive atomically publishes the insert record and directory, allocates its visible
+sequence and refreshes validators while the target still names `key`. Its default
+refuses. Composite append uses publication rather than a preliminary metadata bump,
+so a read snapshot cannot acquire an insert after its validators were issued.
+HTTP append and fold publication uses both the nonce fence and the active writer
+epoch, with confirmation through a unique receipt under the same serial-update
+backend assumption as reclamation. A superseded epoch is reported as refused before
+classifying an absent receipt as a missing target or a changed snapshot.
+
+Insert records live under `store::append_dir(blob_key)`. Each insert charges its own
+bytes and one content slot; the zero-byte directory is bookkeeping, bounded by the
+retained or reclaiming document keys, and consumes no content slot. `read` and `read_at` follow immutable
+predecessor links from the snapshot's sequence and concatenate in publication order,
+only for the three line-compatible types. They insert a newline when needed. Metadata
+and insert bytes are fetched in bounded concurrent batches. Complete merged bodies
+are cached by `(blob_key, append_seq, etag)`; a cached snapshot includes all its inserts.
+Once a snapshot reaches `store::APPEND_FOLD_THRESHOLD`, a reader stores its merged
+bytes under a fresh key and uses `SparqClient::fold_appends` to compare the complete
+snapshot and atomically switch the key and clear the sequence. Validators and bytes
+stay the same. The native index locks serialize the comparison and publication; HTTP
+uses a fenced Update and unique receipt. A concurrent change cancels the fold.
+Scoped storage reads insert bytes and writes folded bytes in the original pod;
+retained version and trash records keep that same pod when folded, and their
+catalog metadata follows the new pointer in the same index transaction.
+The old directory is reclaimed when no live record, version or hold names its key.
+The first uncached read assembles the chain; a successful fold lets later reads use
+the folded base. Folding is best effort: a full shared quota or unsupported index
+can defer it while the original snapshot remains intact and readable.
+
+Individual inserts do not create history versions, even with version retention
+enabled. A fold changes storage layout only and also creates no history version.
+A later full replacement retains the then-current merged snapshot when versions are
+enabled. Replacements mint a new key and hide the old inserts;
+`reinstate` restores held metadata and its insert chain. `restore` copies already-merged
+bytes to a fresh key and resets its sequence.
+
+Reclamation removes a retired key's directory, records and blobs; interrupted reclaim
+work is retried at startup. Orphan reconciliation also claims and removes the insert
+records when it discovers document bytes left after a stop before reclaim began.
+Its report counts base-blob candidates; linked insert cleanup is part of that candidate.
+`SparqClient::begin_reclaim_with_appends` returns `(claimed, has_append_directory)`
+in the existing reclaim step. The native clients and HTTP confirmation include that
+observation, so ordinary reads and writes with no appends retain their backend counts.
+Its default conservatively requests a directory check after a successful claim.
+
 ### Child record replacement
 
 `SparqClient::replace_child(container, child, meta)` commits the child record and
@@ -473,7 +538,8 @@ mmap'd index on the running host (P3 scope). The sparq index directory holds the
 RDF graph in plaintext on disk; P1 requires a CMK-encrypted block volume
 (EBS/Azure Disk/dm-crypt). Application-level index encryption is research
 ([#2567](https://github.com/sparq-org/sparq/issues/2567)).
-ETags derive from plaintext, so equal bodies get equal ETags across pods.
+Full replacements derive ETags from plaintext. Stored inserts use fresh opaque
+ETags, so equal bodies need not have equal tags.
 
 ## Authenticate requests
 
@@ -493,10 +559,17 @@ must grant the requested `acl:Read`, `acl:Write`, `acl:Append`, or
 `acl:Control` mode. An N3 `PATCH` with a `solid:where` or `solid:deletes` reads the target, so
 it needs `acl:Read` too (`acl:Control` for an `.acl`). A `PUT`'s or `PATCH`'s response carries
 the new `ETag` only to a writer that may read the target. An insert-only `PATCH` by a writer
-without `acl:Read` appends the statements as N-Triples lines to a stored Turtle, N-Triples or
-N-Quads document without parsing it, so whether it succeeds does not depend on what is stored;
-any other stored type (JSON-LD, ...) is refused to it as a write without access is. The stored
-bytes are still read and rewritten whole, so the time an append takes follows their size. A
+without `acl:Read` stores N-Triples lines beside the document, without reading or rewriting
+its bytes. Readers see those lines in its Turtle, N-Triples or N-Quads representation,
+with a newline between the original bytes and the inserts when needed. The response is
+`204`, with no `Location` or `ETag`, whether it appended to an existing document or created
+one. Container IRIs are refused from their trailing slash alone. Other stored types
+(including JSON-LD and non-RDF types) remain refused (`403` for an authenticated writer),
+using the index's type alone: accepting lines that no representation shows would lose the
+inserted data. Creating a missing target also needs
+`acl:Append` on its container; appending to an existing document does not. CTH
+`web-access-control/protected-operation/write-access-bob.feature`, "Bob can PATCH rdf no A",
+pins the latter behavior. A full store still answers `507` against the shared ceilings. A
 reader's `PATCH` reads the document by the same stored type, keeps that type, and leaves an
 N-Quads document's named graphs as stored: a `PATCH` changes the default graph. Blank nodes a
 `PATCH` inserts are always new ones. Deleting a container also needs `acl:Read` on it
@@ -626,9 +699,11 @@ Solid/SPARQL patch forms, and `DELETE` removes a resource or an empty
 container. Use `If-Match`, `If-None-Match` and `If-Unmodified-Since` for
 conditional mutations. A concrete tag in `If-Match` or `If-None-Match`
 requires the target's read permission (`Control` for an ACL document).
-LDP exempts bare `*`: writers without Read can use `If-None-Match: *` to create
-without overwriting, or `If-Match: *` to require an existing target. Unconditional
-LDP PUT and DELETE already disclose existence through their status codes.
+LDP PUT, POST and DELETE exempt bare `*`: writers without Read can use
+`If-None-Match: *` to create without overwriting, or `If-Match: *` to require
+an existing target. Insert-only PATCH without Read refuses either header,
+including `*`, before any target lookup. Unconditional LDP PUT and DELETE already
+disclose existence through their status codes.
 `If-Unmodified-Since` is ignored when `If-Match` is
 present, when the date is not one valid HTTP-date (IMF-fixdate, RFC 850 or
 asctime; a date sent on several header lines is none), and for containers, whose
@@ -1478,7 +1553,10 @@ What the server exposes, all discoverable from the storage description
     same split (an authorized absent parent is `404`).
   - LDP DELETE retains absent `401`/`403` versus present `204`: CTH `write-access-bob.feature`,
     "Bob cannot DELETE fictive W inherited [403]" and "Bob can DELETE plain W inherited".
-  - LDP insert-only PATCH status remains deferred to the later brief.
+  - Insert-only PATCH without Read answers `204` for both append and create. Creation
+    needs container Append, whereas an existing document does not; CTH
+    `write-access-bob.feature`, "Bob can PATCH rdf no A", pins the existing case.
+    Types other than Turtle, N-Triples and N-Quads remain refused from index metadata.
 
 - A resource's types come from two places, kept apart: `Link: <…>; rel="type"` headers and
   `<> a <…>` statements in Turtle content. A PUT replaces the content-stated types, and replaces

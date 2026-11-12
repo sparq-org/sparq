@@ -576,6 +576,12 @@ fn meta_from_result(result: &sparq_engine::QueryResult) -> Result<ResourceMeta, 
         blob_key,
         etag,
         last_modified,
+        append_seq: var_col(result, "appendSeq")
+            .and_then(|col| term_value(row.get(col).and_then(|c| c.as_ref())))
+            .map(|s| s.parse())
+            .transpose()
+            .map_err(|_| SparqError::Backend("invalid append sequence".into()))?
+            .unwrap_or(0),
     })
 }
 
@@ -586,12 +592,13 @@ impl EmbeddedSparqClient {
         // all-or-nothing, so a re-write never leaves a half-deleted record (the safe public default
         // for a direct library consumer, per the sparq-engine docs).
         let modified = meta.last_modified.and_then(timestamp::to_xsd_datetime);
-        let u = sparql::update_put_meta(
+        let u = sparql::update_put_meta_with_append_seq(
             iri,
             &meta.content_type,
             &meta.blob_key,
             &meta.etag,
             modified.as_deref(),
+            meta.append_seq,
         )?;
         self.dispatch(move |graph| {
             commit(graph, &u, "put_meta")
@@ -617,16 +624,7 @@ impl EmbeddedSparqClient {
             .then(|| sparql::select_meta(child))
             .transpose()?;
         let nonce = next_nonce();
-        let modified = meta.last_modified.and_then(timestamp::to_xsd_datetime);
-        let create_u = sparql::update_create_child(
-            container,
-            child,
-            &meta.content_type,
-            &meta.blob_key,
-            &meta.etag,
-            modified.as_deref(),
-            &nonce,
-        )?;
+        let create_u = sparql::update_create_child_meta(container, child, &meta, &nonce, None)?;
         self.dispatch(move |graph| {
             // Container must exist (else 404). Checked inside the same job as the insert, so no
             // concurrent delete can race between this check and the insert.
@@ -706,12 +704,13 @@ impl SparqClient for EmbeddedSparqClient {
         // operation can interleave: the returned record is exactly the one this update replaced.
         let q = sparql::select_meta(iri)?;
         let modified = meta.last_modified.and_then(timestamp::to_xsd_datetime);
-        let u = sparql::update_put_meta(
+        let u = sparql::update_put_meta_with_append_seq(
             iri,
             &meta.content_type,
             &meta.blob_key,
             &meta.etag,
             modified.as_deref(),
+            meta.append_seq,
         )?;
         self.dispatch(move |graph| {
             let result =
@@ -809,6 +808,72 @@ impl SparqClient for EmbeddedSparqClient {
         true
     }
 
+    async fn fold_appends(
+        &self,
+        iri: &str,
+        expected: &ResourceMeta,
+        blob_key: &str,
+    ) -> Result<bool, SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri)])?;
+        let q = sparql::select_meta(iri)?;
+        let modified = expected.last_modified.and_then(timestamp::to_xsd_datetime);
+        let update = sparql::update_put_meta_with_append_seq(
+            iri,
+            &expected.content_type,
+            blob_key,
+            &expected.etag,
+            modified.as_deref(),
+            0,
+        )?;
+        let expected = expected.clone();
+        self.dispatch(move |graph| {
+            let result = sparq_engine::query(graph, &q).map_err(|e| engine_err("fold/read", e))?;
+            match meta_from_result(&result) {
+                Ok(current) if current == expected => {}
+                Ok(_) | Err(SparqError::NotFound) => return Ok(false),
+                Err(e) => return Err(e),
+            }
+            commit(graph, &update, "fold_appends")?;
+            Ok(true)
+        })
+        .await
+    }
+
+    async fn publish_append(&self, iri: &str, key: &str, blob_key: &str) -> Result<(), SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri)])?;
+        let q = sparql::select_meta(iri)?;
+        let directory_q = sparql::select_meta(&super::append_dir(key))?;
+        let iri = iri.to_string();
+        let key = key.to_string();
+        let blob_key = blob_key.to_string();
+        self.dispatch(move |graph| {
+            let result =
+                sparq_engine::query(graph, &q).map_err(|e| engine_err("append/read", e))?;
+            let mut meta = meta_from_result(&result)?;
+            if meta.blob_key != key {
+                return Err(SparqError::NotFound);
+            }
+            let directory = sparq_engine::query(graph, &directory_q)
+                .map_err(|e| engine_err("append/directory", e))?;
+            match meta_from_result(&directory) {
+                Ok(directory) => meta.append_seq = meta.append_seq.max(directory.append_seq),
+                Err(SparqError::NotFound) => {}
+                Err(e) => return Err(e),
+            }
+            super::sparq::advance_append(&mut meta)?;
+            let nonce = meta.etag.trim_matches('"').to_owned();
+            let modified = meta
+                .last_modified
+                .and_then(timestamp::to_xsd_datetime)
+                .ok_or_else(|| SparqError::Backend("invalid append timestamp".into()))?;
+            let u = sparql::update_publish_append(&iri, &key, &blob_key, &nonce, &modified, None)?;
+            let cleanup =
+                sparql::update_delete_resource(&format!("urn:x-sparq-lws:append-results/{nonce}"))?;
+            commit(graph, &format!("{u}; {cleanup}"), "publish_append")
+        })
+        .await
+    }
+
     async fn raise_marker(&self, iri: &str, value: i64) -> Result<i64, SparqError> {
         // Read and written in ONE actor job, so no other index operation lands in between.
         let q = sparql::select_meta(iri)?;
@@ -824,12 +889,13 @@ impl SparqClient for EmbeddedSparqClient {
             let raised = stored.map_or(value, |t| t.max(value));
             if stored != Some(raised) {
                 let meta = super::sparq::marker_meta(&raised.to_string());
-                let u = sparql::update_put_meta(
+                let u = sparql::update_put_meta_with_append_seq(
                     &iri,
                     &meta.content_type,
                     &meta.blob_key,
                     &meta.etag,
                     None,
+                    meta.append_seq,
                 )?;
                 commit(graph, &u, "raise_marker")?;
             }
@@ -842,6 +908,24 @@ impl SparqClient for EmbeddedSparqClient {
         let q = sparql::ask_exists(iri)?;
         self.dispatch(move |graph| {
             sparq_engine::ask(graph, &q).map_err(|e| engine_err("ask_exists", e))
+        })
+        .await
+    }
+
+    async fn begin_reclaim_with_appends(&self, blob_key: &str) -> Result<(bool, bool), SparqError> {
+        let referenced = sparql::ask_blob_referenced(blob_key);
+        let update = sparql::update_begin_reclaim(blob_key);
+        let appends = sparql::ask_exists(&super::append_dir(blob_key))?;
+        self.dispatch(move |graph| {
+            if sparq_engine::ask(graph, &referenced)
+                .map_err(|e| engine_err("reclaim/referenced", e))?
+            {
+                return Ok((false, false));
+            }
+            commit(graph, &update, "begin_reclaim")?;
+            let has_appends =
+                sparq_engine::ask(graph, &appends).map_err(|e| engine_err("reclaim/appends", e))?;
+            Ok((true, has_appends))
         })
         .await
     }
@@ -1170,6 +1254,12 @@ impl SparqClient for EmbeddedSparqClient {
                     blob_key,
                     etag,
                     last_modified,
+                    append_seq: var_col(&result, "appendSeq")
+                        .and_then(|col| term_value(row.get(col).and_then(|c| c.as_ref())))
+                        .map(|s| s.parse())
+                        .transpose()
+                        .map_err(|_| SparqError::Backend("invalid append sequence".into()))?
+                        .unwrap_or(0),
                 });
             }
 
@@ -1259,6 +1349,7 @@ mod tests {
             blob_key: bk.into(),
             etag: etag.into(),
             last_modified: None,
+            append_seq: 0,
         }
     }
 

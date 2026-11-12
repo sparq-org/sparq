@@ -24,8 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **sparq-lws-core:** metadata writes, resource deletes and containment removals use
-  fenced HTTP updates. Resource deletion detaches its parent edge in the same write.
+- **sparq-lws-core:** metadata writes, resource deletes, containment removals and
+  append/fold publication use fenced HTTP updates. Resource deletion detaches its
+  parent edge in the same write.
   Journals retain unsettled write and metadata-delete fences through rollback and
   commit, including removal of legacy membership edges. Regression coverage checks
   that unsettled rewrites retain their fence and candidate bytes.
@@ -45,6 +46,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **sparq-lws-core:** insert-only LDP PATCH without Read stores inserts beside a
+  Turtle, N-Triples or N-Quads document and returns `204` with no Location or ETag
+  for both append and creation. Other stored types remain refused from index
+  metadata; creation still requires Append on the container. New public
+  `Store::append` and `SparqClient::publish_append` support
+  merged reads, replacement, put-back and reclamation. Reader-triggered folding uses
+  `SparqClient::fold_appends` to replace a matching snapshot with merged bytes while
+  preserving its validators; merged snapshots are cached and insert fetches overlap.
+  Individual inserts and layout-only folds do not create history versions.
+  The wasm persistence journal
+  records and replays stored inserts.
+  **Breaking:** `ResourceMeta` gains the public `append_seq: u64` field; downstream
+  struct literals must initialize it. Insert-only PATCH on a container by a writer
+  without Read now returns `403` (`401` for anonymous callers), whether present or
+  absent. All `If-Match` and `If-None-Match` headers on that path require Read,
+  including `*`. The unused metadata-only `bump_append` API has been removed.
 - **Breaking — sparq-lws-core:** the public `update_create_child_fenced` and
   `update_delete_container_if_empty_fenced` builders take an `epoch` parameter after
   their nonce. Other public `*_fenced` builders also require the epoch. The internal

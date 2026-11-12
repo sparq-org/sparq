@@ -487,6 +487,19 @@ impl FailingIndex {
 
 #[async_trait]
 impl SparqClient for FailingIndex {
+    async fn fold_appends(
+        &self,
+        iri: &str,
+        expected: &ResourceMeta,
+        blob_key: &str,
+    ) -> Result<bool, SparqError> {
+        self.inner.fold_appends(iri, expected, blob_key).await
+    }
+
+    async fn publish_append(&self, iri: &str, key: &str, blob_key: &str) -> Result<(), SparqError> {
+        self.inner.publish_append(iri, key, blob_key).await
+    }
+
     fn lifecycle(&self) -> std::sync::Arc<crate::store::Lifecycle> {
         self.inner.lifecycle()
     }
