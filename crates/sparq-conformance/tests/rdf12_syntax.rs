@@ -60,19 +60,19 @@ fn reports_every_rdf12_lane_even_when_ratchets_fail() {
 
 #[test]
 fn rdf12_syntax_ratchets() {
-    let explicit = std::env::var_os("SPARQ_RDF12_ROOT");
-    let root = explicit.clone().map(PathBuf::from).unwrap_or_else(|| {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../target/earl/suites/rdf-tests/rdf/rdf12")
-    });
-    if !root.is_dir() {
+    // The suite is fetched outside the repository (earl-report.sh, CI), so it is only read
+    // from an explicit root; without one the ratchet self-skips unless an EARL run needs it.
+    let Some(root) = std::env::var_os("SPARQ_RDF12_ROOT").map(PathBuf::from) else {
         assert!(
-            explicit.is_none() && std::env::var_os("SPARQ_EARL_OUT").is_none(),
+            std::env::var_os("SPARQ_EARL_OUT").is_none(),
             "RDF 1.2 suite missing"
         );
-        eprintln!("SKIP: RDF 1.2 suite absent; run crates/sparq-conformance/earl-report.sh rdf12");
+        eprintln!(
+            "SKIP: SPARQ_RDF12_ROOT unset; run crates/sparq-conformance/earl-report.sh rdf12"
+        );
         return;
-    }
+    };
+    assert!(root.is_dir(), "RDF 1.2 suite missing at {}", root.display());
     let mut regressions = Vec::new();
     for &(dir, lane, floor) in sparq_conformance::floors::rdf12::LANES {
         let manifest = root.join(dir).join(lane).join("manifest.ttl");

@@ -17,11 +17,11 @@ script-owned clones. Reports require complete outcomes and invalidate stale arti
 `RDF_TESTS_PIN`, `RDF_CANON_TESTS_PIN`, `JSONLD_TESTS_PIN`, `JSONLD_FRAMING_TESTS_PIN` override
 upstream HEAD for rdf-tests, rdf-canon, json-ld-api, json-ld-framing; `revisions.tsv` records commits.
 `SPARQ_EARL_PROFILE` selects the Cargo correctness-test profile (default `dev`). Direct tests accept
-`SPARQ_EARL_OUT` (unset: no append-only IRI/verdict file); `SPARQ_RDF12_ROOT` (default
-`target/earl/suites/rdf-tests/rdf/rdf12`); `SPARQ_RDF_CANON_ROOT` (default vendored tests);
+`SPARQ_EARL_OUT` (unset: no append-only IRI/verdict file); `SPARQ_RDF12_ROOT` (no default;
+unset skips the RDF 1.2 ratchet); `SPARQ_RDF_CANON_ROOT` (default vendored tests);
 `SPARQ_JSONLD_ROOT` / `SPARQ_JSONLD_FRAME_ROOT` (default `tests/w3c/json-ld-api/tests` /
-`tests/w3c/json-ld-framing/tests`). Explicit missing roots fail. Absent default RDF 1.2/JSON-LD
-fixtures self-skip offline; the vendored RDFC fixtures are required.
+`tests/w3c/json-ld-framing/tests`). Explicit missing roots fail. Absent default JSON-LD fixtures
+self-skip offline; the vendored RDFC fixtures are required.
 Withdrawn RDF entries are omitted. JSON-LD entries with `option.specVersion` or `option.processingMode`
 equal to `json-ld-1.0` are omitted as not applicable to the 1.1 processor. Other skips, optional `requires`,
 HTML, remote documents and unreadable fixtures fail. Syntax C14N compares shipping writer bytes;
