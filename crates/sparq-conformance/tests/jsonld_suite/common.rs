@@ -318,20 +318,20 @@ pub fn not_implemented_counts(root: &Path) -> BTreeMap<&'static str, usize> {
 // sq-hmd7l.15 — the `json_ld_equal` comparator unit tests moved to the
 // lib-side `sparq_conformance::jsonld_bench` module together with the comparator.
 
-/// EARL reports all manifest entries; a local SKIP is a failure, not an omission.
-/// This includes optional requirements, HTML and remote-document cases.
+/// EARL omits JSON-LD 1.0-only entries as not applicable to a 1.1 processor.
+/// Other local skips, including optional requirements, HTML and remote documents, fail.
 pub fn report(root: &Path, cat: &str, score: &Score) {
     if std::env::var_os("SPARQ_EARL_OUT").is_none() {
         return;
     }
     let entries = read_manifest(root, cat).expect("EARL manifest must be readable");
-    let rows = outcome_rows(cat, entries.iter().map(|e| e.id.as_str()), score);
+    let rows = outcome_rows(cat, entries.iter(), score);
     crate::earl::emit(rows.iter().map(|(id, passed)| (id.as_str(), *passed)));
 }
 
 fn outcome_rows<'a>(
     cat: &str,
-    ids: impl Iterator<Item = &'a str>,
+    entries: impl Iterator<Item = &'a Entry>,
     score: &Score,
 ) -> Vec<(String, bool)> {
     let base = if cat == "frame" {
@@ -339,15 +339,21 @@ fn outcome_rows<'a>(
     } else {
         SUITE_BASE
     };
-    ids.map(|id| {
-        let iri = if id.starts_with("https://") || id.starts_with("http://") {
-            id.to_owned()
-        } else {
-            format!("{base}{cat}-manifest{id}")
-        };
-        (iri, score.passed.contains(id))
-    })
-    .collect()
+    entries
+        .filter(|e| {
+            e.spec_version.as_deref() != Some("json-ld-1.0")
+                && e.processing_mode.as_deref() != Some("json-ld-1.0")
+        })
+        .map(|e| {
+            let id = e.id.as_str();
+            let iri = if id.starts_with("https://") || id.starts_with("http://") {
+                id.to_owned()
+            } else {
+                format!("{base}{cat}-manifest{id}")
+            };
+            (iri, score.passed.contains(id))
+        })
+        .collect()
 }
 
 #[test]
@@ -356,6 +362,10 @@ fn outcomes_cover_skips_and_distinguish_manifest_iris() {
     score.pass("#same");
     score.fail("#bad", "failure".into());
     score.skip();
+    // Omit 1.0-only entries even when a compatibility path happened to pass them.
+    score.pass("#ten-spec");
+    score.pass("#ten-mode");
+    let fixture = crate::earl::Fixture::new();
     for cat in [
         "toRdf",
         "fromRdf",
@@ -366,7 +376,19 @@ fn outcomes_cover_skips_and_distinguish_manifest_iris() {
         "html",
         "remote-doc",
     ] {
-        let rows = outcome_rows(cat, ["#same", "#bad", "#skip"].into_iter(), &score);
+        fixture.write(
+            &format!("{cat}-manifest.jsonld"),
+            serde_json::to_vec(&serde_json::json!({"sequence": [
+                {"@id": "#same", "option": {"specVersion": "json-ld-1.1", "processingMode": "json-ld-1.1"}},
+                {"@id": "#bad"},
+                {"@id": "#skip", "requires": "optional"},
+                {"@id": "#ten-spec", "option": {"specVersion": "json-ld-1.0"}},
+                {"@id": "#ten-mode", "option": {"specVersion": "json-ld-1.1", "processingMode": "json-ld-1.0"}},
+                {"@id": "#ten-both", "option": {"specVersion": "json-ld-1.0", "processingMode": "json-ld-1.0"}}
+            ]})).unwrap(),
+        );
+        let entries = read_manifest(fixture.root(), cat).unwrap();
+        let rows = outcome_rows(cat, entries.iter(), &score);
         let base = if cat == "frame" {
             "https://w3c.github.io/json-ld-framing/tests/"
         } else {
@@ -381,13 +403,6 @@ fn outcomes_cover_skips_and_distinguish_manifest_iris() {
             ]
         );
     }
-    assert_eq!(
-        outcome_rows("html", ["#unimplemented"].into_iter(), &Score::default()),
-        vec![(
-            "https://w3c.github.io/json-ld-api/tests/html-manifest#unimplemented".into(),
-            false
-        )]
-    );
 }
 
 #[test]

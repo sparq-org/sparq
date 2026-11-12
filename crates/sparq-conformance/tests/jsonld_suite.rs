@@ -34,15 +34,15 @@
 //! documentation. `expand`, `flatten`, `html`, and `remote-doc` were the algorithm
 //! categories sparq did not gate historically; `expand`/`flatten` graduated,
 //! `html`/`remote-doc` remain the documented NOT-IMPLEMENTED buckets the runner
-//! reports separately in local runs. EARL includes those entries as failed.
+//! reports separately in local runs. EARL includes those entries as failed, except
+//! entries with specVersion or processingMode json-ld-1.0 (not applicable).
 //!
 //! ## Feature gating (both states)
 //!
 //! The whole lane is behind this crate's opt-in `jsonld-suite` feature
-//! (forwards to `sparq-core/jsonld` + `sparq-engine/serialize-rdf`). With the
-//! feature OFF this file compiles to a single self-SKIP `#[test]` (no oxjsonld /
-//! writer code links), so the default `cargo test -p sparq-conformance` and the
-//! `--workspace` shards stay green and lean. With it ON the runner executes and
+//! (forwards to `sparq-core/jsonld`). With the
+//! feature OFF this file compiles to a single self-SKIP `#[test]`.
+//! With it ON the runner executes and
 //! asserts the pinned floors. The toRdf/fromRdf/compact fixtures are fetched by
 //! `scripts/fetch-jsonld-tests.sh` into the gitignored `tests/w3c/json-ld-api/`,
 //! and the frame fixtures by `scripts/fetch-jsonld-framing-tests.sh` into
@@ -53,10 +53,8 @@
 #[path = "support/earl.rs"]
 mod earl;
 
-// When the lane feature is OFF the runner is a single self-SKIP test
-// so the default + `--workspace` builds neither link oxjsonld/the writer nor go
-// red on a fresh checkout. (cfg gate, not a runtime branch, so zero JSON-LD code
-// compiles in the default state — the lean-core invariant.)
+// When the lane feature is OFF this test binary contains only a self-SKIP test.
+// The RDF writers are enabled independently for syntax C14N and Eval.
 #[cfg(not(feature = "jsonld-suite"))]
 #[test]
 fn jsonld_suite_skipped_without_feature() {

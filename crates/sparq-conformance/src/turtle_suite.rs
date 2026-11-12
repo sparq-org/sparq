@@ -46,18 +46,7 @@ pub fn run_manifest(
     base: Option<&str>,
 ) -> Result<Vec<(String, TestResult)>, String> {
     crate::syntax_suite::run_manifest(manifest, base, "rdf-turtle", "TestTurtle", |text, base| {
-        let (dict, ids) = sparq_core::Graph::parse_to_triples_with_base(text, "turtle", base)?;
-        Ok(ids
-            .iter()
-            .map(|&[s, p, o]| {
-                [
-                    dict.term(s).to_string(),
-                    dict.term(p).to_string(),
-                    dict.term(o).to_string(),
-                    String::new(),
-                ]
-            })
-            .collect())
+        sparq_core::Graph::load_str_with_base(text, "turtle", base)
     })
 }
 

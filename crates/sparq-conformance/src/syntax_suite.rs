@@ -4,12 +4,13 @@ use crate::inference::report::{Outcome, TestResult};
 use crate::rdf::{as_node, iri_to_path, MiniGraph};
 use oxrdf::dataset::CanonicalizationAlgorithm;
 use oxrdf::{Dataset, Term};
+use sparq_core::Graph;
 use std::path::Path;
 
 const MF: &str = "http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#";
 const RDFT: &str = "http://www.w3.org/ns/rdftest#";
 
-type Parse = fn(&str, &str) -> Result<Vec<[String; 4]>, String>;
+type Parse = fn(&str, &str) -> Result<Graph, String>;
 
 pub(crate) fn run_manifest(
     manifest: &Path,
@@ -85,6 +86,7 @@ pub(crate) fn run_manifest(
                         &action_base,
                         kind.strip_prefix(stem).unwrap_or("unknown"),
                         parse,
+                        stem == "TestNTriples" || stem == "TestTurtle",
                     )
                 }
                 None => Outcome::Fail("missing or nonlocal mf:action".into()),
@@ -105,7 +107,14 @@ pub(crate) fn run_manifest(
     Ok(out)
 }
 
-fn evaluate(action: &Path, result: Option<&Path>, base: &str, kind: &str, parse: Parse) -> Outcome {
+fn evaluate(
+    action: &Path,
+    result: Option<&Path>,
+    base: &str,
+    kind: &str,
+    parse: Parse,
+    triples: bool,
+) -> Outcome {
     // A missing fixture or invalid UTF-8 is a runner failure, even for a negative test.
     let text = match std::fs::read_to_string(action) {
         Ok(t) => t,
@@ -136,9 +145,34 @@ fn evaluate(action: &Path, result: Option<&Path>, base: &str, kind: &str, parse:
         Ok(b) => b,
         Err(e) => return Outcome::Fail(format!("read {}: {e}", result.display())),
     };
-    // Same term Display and line layout as the shipping N-Triples/N-Quads writers.
+    // Exercise the shipping CLI/library writers over the loaded graph/dataset.
     // Do not sort lines or relabel blank nodes here: this is syntax C14N, not RDFC-1.0.
-    let rendered = render(&parsed);
+    let rendered = if triples {
+        let triples = parsed
+            .iter_ids()
+            .map(|[s, p, o]| {
+                Ok(oxrdf::Triple {
+                    subject: parsed
+                        .dict()
+                        .term(s)
+                        .try_into()
+                        .map_err(|e| format!("{e}"))?,
+                    predicate: parsed
+                        .dict()
+                        .term(p)
+                        .try_into()
+                        .map_err(|e| format!("{e}"))?,
+                    object: parsed.dict().term(o),
+                })
+            })
+            .collect::<Result<Vec<_>, String>>();
+        match triples {
+            Ok(triples) => sparq_engine::triples_to_ntriples(&triples),
+            Err(e) => return Outcome::Fail(format!("writer input: {e}")),
+        }
+    } else {
+        sparq_engine::serialize::graph_to_nquads(&parsed)
+    };
     if kind == "PositiveC14N" {
         return if rendered.as_bytes() == expected {
             Outcome::Pass
@@ -161,19 +195,6 @@ fn evaluate(action: &Path, result: Option<&Path>, base: &str, kind: &str, parse:
         (Ok(_), Ok(_)) => Outcome::Fail("parsed dataset not isomorphic to reference".into()),
         (Err(e), _) | (_, Err(e)) => Outcome::Fail(format!("comparison parse error: {e}")),
     }
-}
-
-fn render(quads: &[[String; 4]]) -> String {
-    let mut out = String::new();
-    for q in quads {
-        use std::fmt::Write;
-        if q[3].is_empty() {
-            writeln!(out, "{} {} {} .", q[0], q[1], q[2]).unwrap();
-        } else {
-            writeln!(out, "{} {} {} {} .", q[0], q[1], q[2], q[3]).unwrap();
-        }
-    }
-    out
 }
 
 #[cfg(test)]
@@ -263,10 +284,10 @@ mod tests {
         for suite in [LineSuite::NTriples, LineSuite::NQuads, LineSuite::TriG] {
             let parse: Parse = match suite {
                 LineSuite::NTriples => {
-                    |t, b| line_syntax::parse_sparq_quads(LineSuite::NTriples, t, b)
+                    |t, b| line_syntax::parse_sparq_graph(LineSuite::NTriples, t, b)
                 }
-                LineSuite::NQuads => |t, b| line_syntax::parse_sparq_quads(LineSuite::NQuads, t, b),
-                LineSuite::TriG => |t, b| line_syntax::parse_sparq_quads(LineSuite::TriG, t, b),
+                LineSuite::NQuads => |t, b| line_syntax::parse_sparq_graph(LineSuite::NQuads, t, b),
+                LineSuite::TriG => |t, b| line_syntax::parse_sparq_graph(LineSuite::TriG, t, b),
             };
             for kind in ["NegativeSyntax", "NegativeEval"] {
                 assert!(matches!(
@@ -275,18 +296,33 @@ mod tests {
                         None,
                         "https://example.test/",
                         kind,
-                        parse
+                        parse,
+                        suite == LineSuite::NTriples,
                     ),
                     Outcome::Fail(_)
                 ));
                 let bad_utf8 = f.write("bad-utf8", [0xff]);
                 assert!(matches!(
-                    evaluate(&bad_utf8, None, "https://example.test/", kind, parse),
+                    evaluate(
+                        &bad_utf8,
+                        None,
+                        "https://example.test/",
+                        kind,
+                        parse,
+                        suite == LineSuite::NTriples
+                    ),
                     Outcome::Fail(_)
                 ));
                 let invalid = f.write("invalid", "<s>");
                 assert!(matches!(
-                    evaluate(&invalid, None, "https://example.test/", kind, parse),
+                    evaluate(
+                        &invalid,
+                        None,
+                        "https://example.test/",
+                        kind,
+                        parse,
+                        suite == LineSuite::NTriples
+                    ),
                     Outcome::Pass
                 ));
             }
@@ -295,14 +331,18 @@ mod tests {
 
     #[test]
     fn canonical_form_is_byte_comparison() {
-        for suite in [LineSuite::NTriples, LineSuite::NQuads] {
+        for (suite, named) in [
+            (LineSuite::NTriples, false),
+            (LineSuite::NQuads, false),
+            (LineSuite::NQuads, true),
+        ] {
             let f = Fixture::new();
             let stem = if suite == LineSuite::NTriples {
                 "TestNTriples"
             } else {
                 "TestNQuads"
             };
-            let graph = if suite == LineSuite::NQuads {
+            let graph = if named {
                 " <https://example.test/g>"
             } else {
                 ""

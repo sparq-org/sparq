@@ -106,6 +106,6 @@ if [[ "$suite" == jsonld || "$suite" == all ]]; then
     base="https://w3c.github.io/$repo/tests/"
     grep -F "$base" "$raw" > "$out/$repo.tsv"
     report "$out/$repo.tsv" "$base" "sparq-$repo-earl" "$repo" \
-      "JSON-LD 1.1 processor outcomes. All manifest entries are reported: local skips, optional requirements, unsupported HTML and remote-document cases are failed."
+      "JSON-LD 1.1 processor outcomes. JSON-LD 1.0-only entries (specVersion or processingMode json-ld-1.0) are omitted as not applicable; other local skips, optional requirements, unsupported HTML and remote-document cases are failed."
   done
 fi

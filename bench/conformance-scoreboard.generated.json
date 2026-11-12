@@ -84,7 +84,7 @@
       "floor_basis": "pass",
       "is_extension": false,
       "label": "W3C RDF 1.2 N-Triples C14N",
-      "note": "w3c/rdf-tests RDF 1.2; per-manifest assumed base; C14N uses syntax layout, not RDFC-1.0",
+      "note": "w3c/rdf-tests RDF 1.2; per-manifest assumed base; C14N compares shipping triples_to_ntriples bytes, not RDFC-1.0",
       "ratchet_floor": 41,
       "runner": {
         "crate": "sparq-conformance",
@@ -114,7 +114,7 @@
       "floor_basis": "pass",
       "is_extension": false,
       "label": "W3C RDF 1.2 N-Quads C14N",
-      "note": "w3c/rdf-tests RDF 1.2; per-manifest assumed base; C14N uses syntax layout, not RDFC-1.0",
+      "note": "w3c/rdf-tests RDF 1.2; per-manifest assumed base; C14N compares shipping graph_to_nquads bytes, not RDFC-1.0",
       "ratchet_floor": 41,
       "runner": {
         "crate": "sparq-conformance",

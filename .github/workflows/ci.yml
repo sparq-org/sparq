@@ -1041,7 +1041,10 @@ jobs:
           # Save on main only (canonical note on the `build-archive` cache step).
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Fetch W3C test suites (pinned)
-        run: ./scripts/fetch-conformance.sh
+        run: |
+          ./scripts/fetch-conformance.sh
+          RDF_TESTS_PIN=7b5afb91857a9c282c03d2e45d3f76485797c901 \
+            crates/sparq-conformance/earl-report.sh rdf12 "$RUNNER_TEMP/rdf12-earl" --fetch-only
       - name: Run conformance suites
         # --bin is REQUIRED: the crate now ships three binaries
         # (sparq-conformance + sparq-inference-conformance + the consolidated
@@ -1092,8 +1095,6 @@ jobs:
       - name: RDF 1.2 syntax, eval and canonical-form ratchets
         run: |
           python3 scripts/tests/test_earl_report_runner.py
-          RDF_TESTS_PIN=7b5afb91857a9c282c03d2e45d3f76485797c901 \
-            crates/sparq-conformance/earl-report.sh rdf12 "$RUNNER_TEMP/rdf12-earl" --fetch-only
           SPARQ_RDF12_ROOT="$RUNNER_TEMP/rdf12-earl/suites/rdf-tests/rdf/rdf12" \
             cargo test --profile release-fast -p sparq-conformance --test rdf12_syntax -- --nocapture
       - name: Consolidated conformance scoreboard (all suites + floors)

@@ -101,6 +101,20 @@ pub fn parse_sparq_quads(
     }
 }
 
+/// Load through the same entry points as `parse_sparq_quads`, retaining the store
+/// for the shipping writers used by syntax C14N and evaluation.
+pub(crate) fn parse_sparq_graph(
+    suite: LineSuite,
+    text: &str,
+    base: &str,
+) -> Result<sparq_core::Graph, String> {
+    match suite {
+        LineSuite::NTriples => sparq_core::Graph::load_str(text, "ntriples"),
+        LineSuite::NQuads => sparq_core::Graph::load_dataset(text, "nquads"),
+        LineSuite::TriG => sparq_core::Graph::load_dataset_with_base(text, "trig", base),
+    }
+}
+
 /// Run one manifest with its declared base, or an explicit base override.
 /// Returns each test IRI with its named outcome, including failures to run a test.
 pub fn run_manifest(
@@ -114,21 +128,21 @@ pub fn run_manifest(
             base,
             suite.label(),
             suite.kind_stem(),
-            |text, base| parse_sparq_quads(LineSuite::NTriples, text, base),
+            |text, base| parse_sparq_graph(LineSuite::NTriples, text, base),
         ),
         LineSuite::NQuads => crate::syntax_suite::run_manifest(
             manifest,
             base,
             suite.label(),
             suite.kind_stem(),
-            |text, base| parse_sparq_quads(LineSuite::NQuads, text, base),
+            |text, base| parse_sparq_graph(LineSuite::NQuads, text, base),
         ),
         LineSuite::TriG => crate::syntax_suite::run_manifest(
             manifest,
             base,
             suite.label(),
             suite.kind_stem(),
-            |text, base| parse_sparq_quads(LineSuite::TriG, text, base),
+            |text, base| parse_sparq_graph(LineSuite::TriG, text, base),
         ),
     }
 }
