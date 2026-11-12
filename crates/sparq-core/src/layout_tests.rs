@@ -217,10 +217,12 @@ fn interrupted_replacement_log_append_keeps_acknowledged_data() {
                 );
                 assert!(hits > 0, "log sync crash point was not reached");
                 let pending = if log == "wal.log" {
-                    *graph.wal.log().unwrap().needs_entry_sync.lock().unwrap()
+                    graph.wal.log().unwrap().needs_entry_sync
+                        .load(std::sync::atomic::Ordering::Acquire)
                 } else {
                     assert!(graph.txn.as_ref().unwrap().poisoned());
-                    graph.txn.as_ref().unwrap().needs_entry_sync.load(std::sync::atomic::Ordering::Acquire)
+                    graph.txn.as_ref().unwrap().needs_entry_sync
+                        .load(std::sync::atomic::Ordering::Acquire)
                 };
                 assert!(pending, "a failed entry sync must remain pending");
                 assert!(graph.apply_delta(&[triple()], &[]).is_err());

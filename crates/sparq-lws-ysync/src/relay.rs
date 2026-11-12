@@ -40,6 +40,7 @@ pub trait RoomStore: Send + Sync + 'static {
     async fn read(&self, file: &str) -> Result<Vec<u8>, Fault>;
     /// Ordinary member creation attributed to `agent`; return only after confirmed creation.
     async fn create(&self, room: &str, agent: &Agent, file: &LogFile) -> Result<String, Fault>;
+    /// Return `Fault::NotFound` when an authorized deletion finds the member absent.
     async fn delete(&self, room: &str, agent: &Agent, file: &str) -> Result<(), Fault>;
 }
 
@@ -128,6 +129,13 @@ struct Pending {
     file: LogFile,
     retry: Instant,
     delay: Duration,
+    failed: Option<FailedCreate>,
+}
+
+#[derive(Clone, Copy)]
+struct FailedCreate {
+    revision: u64,
+    key: (u64, u32),
 }
 
 #[derive(Clone, Copy)]
@@ -537,6 +545,7 @@ impl<B: RoomStore + Authorizer> Relay<B> {
                         let (retry, delay) = existing
                             .map(|p| (p.retry, p.delay))
                             .unwrap_or((Instant::now(), Duration::from_millis(500)));
+                        let failed = existing.and_then(|p| p.failed);
                         let random = nonce()?;
                         room.doc.replace(state, doc);
                         room.sequence += 1;
@@ -556,6 +565,7 @@ impl<B: RoomStore + Authorizer> Relay<B> {
                                 file,
                                 retry,
                                 delay,
+                                failed,
                             },
                         );
                         room.remember_writer(&session.agent, self.0.limits.peers_per_room);
@@ -866,11 +876,14 @@ impl<B: RoomStore + Authorizer> Relay<B> {
         agent: &Agent,
         folded: &[(String, LogKind)],
     ) -> Result<(), Fault> {
-        // Snapshot deletion precedes update deletion. Any failure keeps all folded updates.
+        // Delete folded snapshots first so a failure there preserves all folded updates.
         for kind in [LogKind::Snapshot, LogKind::Update] {
             for (file, _) in folded.iter().filter(|(_, k)| *k == kind) {
                 if room.lock().await.files.contains_key(file) {
-                    self.0.backend.delete(name, agent, file).await?;
+                    match self.0.backend.delete(name, agent, file).await {
+                        Ok(()) | Err(Fault::NotFound) => {}
+                        Err(error) => return Err(error),
+                    }
                 }
                 let mut guard = room.lock().await;
                 if let Some(removed) = guard.files.remove(file) {
@@ -903,6 +916,46 @@ impl<B: RoomStore + Authorizer> Relay<B> {
     async fn flush(&self, name: &str, room: &Arc<Mutex<Room>>) {
         let authors: Vec<_> = room.lock().await.pending.keys().cloned().collect();
         for agent in authors {
+            let failed = {
+                let guard = room.lock().await;
+                let Some(batch) = guard.pending.get(&agent) else {
+                    continue;
+                };
+                if batch.retry > Instant::now() {
+                    continue;
+                }
+                batch.failed
+            };
+            if let Some(failed) = failed {
+                // A failed response does not prove the create failed. Refresh before
+                // reserving another copy, even when that copy would exceed the bounds.
+                if self.reload(name, room).await.is_err() {
+                    let mut guard = room.lock().await;
+                    if let Some(held) = guard.pending.get_mut(&agent) {
+                        held.retry = Instant::now() + held.delay;
+                        held.delay = (held.delay * 2).min(Duration::from_secs(30));
+                    }
+                    continue;
+                }
+                let mut guard = room.lock().await;
+                let present = guard
+                    .files
+                    .values()
+                    .any(|file| file.kind == LogKind::Update && file.key == failed.key)
+                    && guard.cutoff.is_none_or(|cutoff| failed.key.0 >= cutoff.0);
+                if present
+                    && guard
+                        .pending
+                        .get(&agent)
+                        .is_some_and(|p| p.revision == failed.revision)
+                {
+                    guard.pending.remove(&agent);
+                    continue;
+                }
+                if let Some(held) = guard.pending.get_mut(&agent) {
+                    held.failed = None;
+                }
+            }
             let batch = {
                 let mut guard = room.lock().await;
                 let Some(batch) = guard.pending.get(&agent) else {
@@ -911,8 +964,6 @@ impl<B: RoomStore + Authorizer> Relay<B> {
                 if batch.retry > Instant::now() {
                     continue;
                 }
-                // A failed create may already have produced a retained resource.
-                // Keep its retry pending until another copy fits the replay bounds.
                 if guard.files.len() >= self.0.limits.max_log_files
                     || guard
                         .retained_bytes
@@ -938,6 +989,10 @@ impl<B: RoomStore + Authorizer> Relay<B> {
                 Ok(file) => file,
                 Err(_) => {
                     if let Some(held) = guard.pending.get_mut(&agent) {
+                        held.failed = Some(FailedCreate {
+                            revision: batch.revision,
+                            key: (batch.file.millis, batch.file.nonce),
+                        });
                         held.retry = Instant::now() + held.delay;
                         held.delay = (held.delay * 2).min(Duration::from_secs(30));
                     }

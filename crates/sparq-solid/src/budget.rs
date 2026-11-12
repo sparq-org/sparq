@@ -305,6 +305,12 @@ impl AuthLedger {
         n: usize,
         iri: &str,
     ) -> Result<(), String> {
+        self.document_row_bytes(n, iri)?;
+        self.reserve(out, n, Dim::Nodes)
+    }
+
+    /// The same stored-row lower bound for streaming admission, without allocating rows.
+    pub(crate) fn document_row_bytes(&self, n: usize, iri: &str) -> Result<(), String> {
         let row_bytes = 3 * sparq_core::meter::TERM_NODE_BYTES;
         for (dim, limit) in [
             (Dim::DocumentBytes, self.budget.max_document_bytes),
@@ -324,7 +330,7 @@ impl AuthLedger {
                 ));
             }
         }
-        self.reserve(out, n, Dim::Nodes)
+        Ok(())
     }
 
     /// Fallible input-sized vector growth, charged before reserving memory.

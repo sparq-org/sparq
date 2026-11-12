@@ -91,7 +91,8 @@ impl Lifecycle {
 }
 
 /// A held [`Lifecycle`] lease: the authority of the one service running over a backend, which
-/// alone may lower a marker ([`Store::reset_marker`]). Only this crate makes one.
+/// alone may reset a marker ([`Store::reset_marker`]) or begin a writer epoch
+/// ([`Store::begin_epoch`]). Only this crate makes one.
 #[derive(Debug)]
 pub struct LifecycleGuard {
     lease: std::sync::Arc<Lifecycle>,
@@ -99,7 +100,8 @@ pub struct LifecycleGuard {
 
 impl LifecycleGuard {
     /// Whether this guard holds the supplied backend's lifecycle lease.
-    /// Store and raw index implementations check this before resetting a marker.
+    /// Store and raw index implementations check this before resetting a marker or
+    /// beginning a durable writer epoch.
     ///
     /// ```
     /// use sparq_lws_core::store::{LifecycleGuard, SparqClient};
@@ -496,6 +498,13 @@ pub trait Store: Send + Sync {
     /// built with, `HttpSparqClient::with_timeout`).
     fn call_timeout(&self) -> std::time::Duration {
         STORE_CALL_TIMEOUT
+    }
+
+    /// Begin the index's writer epoch under the held lifecycle lease, before recovery.
+    /// Wrappers forward this to their backend. In-process stores need no durable epoch.
+    async fn begin_epoch(&self, lease: &LifecycleGuard) -> ServerResult<u64> {
+        let _ = lease;
+        Ok(0)
     }
 
     /// The lease shared by every handle to this backend.
@@ -1107,14 +1116,22 @@ impl CompositeStore<InMemorySparqClient, InMemoryBlobStore> {
     }
 }
 
-/// Refuse a generic mutation naming the notification service's marker
-/// ([`is_service_marker`]): the marker changes only through [`Store::raise_marker`], which never
-/// lowers it, and [`Store::reset_marker`], which takes the service's lease.
+/// Refuse generic mutations of lifecycle records. The notification marker
+/// ([`is_service_marker`]) changes through [`Store::raise_marker`] and [`Store::reset_marker`];
+/// the writer epoch changes through [`Store::begin_epoch`].
 fn refuse_marker(iris: &[Option<&str>]) -> ServerResult<()> {
-    if iris.iter().flatten().any(|iri| limits::is_data_key_record(iri)) {
+    if iris
+        .iter()
+        .flatten()
+        .any(|iri| limits::is_data_key_record(iri))
+    {
         return Err(ServerError::NotFound);
     }
-    if iris.iter().flatten().any(|iri| is_service_marker(iri)) {
+    if iris
+        .iter()
+        .flatten()
+        .any(|iri| is_service_marker(iri) || *iri == sparql::WRITER_EPOCH)
+    {
         return Err(ServerError::Forbidden);
     }
     Ok(())
@@ -1122,6 +1139,10 @@ fn refuse_marker(iris: &[Option<&str>]) -> ServerResult<()> {
 
 #[async_trait]
 impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
+    async fn begin_epoch(&self, lease: &LifecycleGuard) -> ServerResult<u64> {
+        self.sparq.begin_epoch(lease).await.map_err(map_sparq)
+    }
+
     fn lifecycle(&self) -> std::sync::Arc<Lifecycle> {
         self.lifecycle.clone()
     }
@@ -2953,13 +2974,20 @@ mod tests {
                 "{r:?}"
             );
         };
-        for root in [
+        let mut records: Vec<_> = [
             "https://pod.example",
             "https://pod.example/alice",
             "https://pod.example/teams/alice",
-        ] {
+        ]
+        .into_iter()
+        .map(|root| {
             let container = format!("{root}{SERVICE_POOL_PATH}");
             let marker = format!("{container}{SERVICE_MARKER_FRAGMENT}");
+            (container, marker)
+        })
+        .collect();
+        records.push((MARKER_CONTAINER.into(), sparql::WRITER_EPOCH.into()));
+        for (container, marker) in records {
             refused(client.put_meta(&marker, lower()).await);
             refused(client.replace_meta(&marker, lower()).await.map(|_| ()));
             refused(client.delete_meta(&marker).await);
@@ -3027,6 +3055,19 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[tokio::test]
+    async fn generic_store_writes_refuse_the_writer_epoch_record() {
+        let store = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        assert!(matches!(
+            store
+                .write(sparql::WRITER_EPOCH, Bytes::new(), "text/plain")
+                .await,
+            Err(ServerError::Forbidden)
+        ));
+        assert!(store.blob.list().await.unwrap().is_empty());
+        assert!(!store.sparq.exists(sparql::WRITER_EPOCH).await.unwrap());
     }
 
     #[tokio::test]
@@ -3196,8 +3237,15 @@ mod tests {
             axum::routing::post(move |headers: axum::http::HeaderMap, body: String| {
                 let sent = sent.clone();
                 async move {
+                    use axum::response::IntoResponse;
+                    let query =
+                        headers[axum::http::header::CONTENT_TYPE] == "application/sparql-query";
                     sent.send((headers, body)).unwrap();
-                    axum::http::StatusCode::NO_CONTENT
+                    if query {
+                        axum::Json(serde_json::json!({"boolean": true})).into_response()
+                    } else {
+                        axum::http::StatusCode::NO_CONTENT.into_response()
+                    }
                 }
             }),
         );
@@ -3224,6 +3272,20 @@ mod tests {
         );
         assert!(update.contains("https://pod.example/.lws/subscriptions/#high-water"));
         assert!(update.contains("\"2\""));
+        let (headers, confirm) = received.try_recv().unwrap();
+        assert_eq!(
+            headers[axum::http::header::CONTENT_TYPE],
+            "application/sparql-query"
+        );
+        assert!(confirm.starts_with("ASK"));
+        assert!(confirm.contains("deleteMarker"));
+        let (headers, cleanup) = received.try_recv().unwrap();
+        assert_eq!(
+            headers[axum::http::header::CONTENT_TYPE],
+            "application/sparql-update"
+        );
+        assert!(cleanup.starts_with("DELETE"));
+        assert!(cleanup.contains("deleteMarker"));
         assert!(received.try_recv().is_err());
         server.abort();
     }

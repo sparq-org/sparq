@@ -6,9 +6,9 @@ use std::path::PathBuf;
 
 pub(super) struct Group {
     owner: PathBuf,
-    journal: Option<TxnJournal>,
+    needs_entry_sync: std::sync::Arc<std::sync::atomic::AtomicBool>,
     frames: Vec<u8>,
-    wals: BTreeMap<PathBuf, (std::fs::File, Vec<u8>)>,
+    wals: BTreeMap<PathBuf, Vec<u8>>,
 }
 
 impl TreeState {
@@ -25,7 +25,7 @@ impl TreeState {
         self.prepare_journal(journal)?;
         *self.group.lock().unwrap_or_else(|e| e.into_inner()) = Some(Group {
             owner: TxnJournal::path(&journal.dir),
-            journal: None,
+            needs_entry_sync: std::sync::Arc::clone(&journal.needs_entry_sync),
             frames: Vec::new(),
             wals: BTreeMap::new(),
         });
@@ -50,15 +50,6 @@ impl TreeState {
                 ));
             }
             let frame = journal.frame(ops)?;
-            if group.journal.is_none() {
-                group.journal = Some(TxnJournal {
-                    file: journal.file.try_clone()?,
-                    needs_entry_sync: std::sync::Arc::clone(&journal.needs_entry_sync),
-                    dir: journal.dir.clone(),
-                    poisoned: false,
-                    format_marked: true,
-                });
-            }
             if group.frames.is_empty() {
                 group.frames = frame;
             } else {
@@ -85,10 +76,10 @@ impl TreeState {
             let path = Wal::path(&wal.dir);
             match group.wals.entry(path) {
                 std::collections::btree_map::Entry::Vacant(entry) => {
-                    entry.insert((wal.file.try_clone()?, bytes));
+                    entry.insert(bytes);
                 }
                 std::collections::btree_map::Entry::Occupied(mut entry) => {
-                    entry.get_mut().1.extend_from_slice(&bytes);
+                    entry.get_mut().extend_from_slice(&bytes);
                 }
             }
             Ok(())
@@ -104,18 +95,16 @@ impl TreeState {
                 "group commit refused: reopen the frozen tree",
             ));
         }
-        let mut group = self
+        let group = self
             .group
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .take()
             .ok_or_else(|| std::io::Error::other("no group is active"))?;
         let result = (|| {
-            if let Some(journal) = group.journal.as_mut() {
-                journal.write_frames(&group.frames)?;
-            }
-            for (path, (file, bytes)) in &mut group.wals {
-                Wal::write_frame(file, path, bytes)?;
+            TxnJournal::write_frames(&group.owner, &group.needs_entry_sync, &group.frames)?;
+            for (path, bytes) in &group.wals {
+                Wal::write_frame(&mut open_log(path)?, path, bytes)?;
             }
             self.group_active
                 .store(false, std::sync::atomic::Ordering::Release);

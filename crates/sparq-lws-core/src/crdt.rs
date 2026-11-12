@@ -359,14 +359,31 @@ impl<S: Store + 'static> RoomStore for Backend<S> {
             .path()
             .to_string();
         let response = match self {
-            Self::Solid(s) => delete_handler(
-                State(s.clone()),
-                Extension(token(agent)),
-                path.parse::<Uri>().map_err(|_| Fault::Store)?,
-                headers(agent),
-            )
-            .await
-            .map_err(|_| Fault::Store)?,
+            Self::Solid(s) => {
+                match delete_handler(
+                    State(s.clone()),
+                    Extension(token(agent)),
+                    path.parse::<Uri>().map_err(|_| Fault::Store)?,
+                    headers(agent),
+                )
+                .await
+                {
+                    Ok(response) => response,
+                    Err(error) => {
+                        return Err(match error {
+                            crate::error::ServerError::NotFound => Fault::NotFound,
+                            // Ordinary Solid deletion also represents absence as a denial.
+                            // Confirm absence before completing cleanup on that response.
+                            crate::error::ServerError::Forbidden
+                                if matches!(s.store.exists(file).await, Ok(false)) =>
+                            {
+                                Fault::NotFound
+                            }
+                            _ => Fault::Store,
+                        })
+                    }
+                }
+            }
             Self::Lws(w) => {
                 let state = w.upgrade().ok_or(Fault::Store)?;
                 lws::resources::handle(
@@ -377,6 +394,9 @@ impl<S: Store + 'static> RoomStore for Backend<S> {
                 .await
             }
         };
+        if response.status() == StatusCode::NOT_FOUND {
+            return Err(Fault::NotFound);
+        }
         if !response.status().is_success() {
             return Err(Fault::Store);
         }

@@ -7,8 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **sparq-lws-core:** lifecycle starts establish a writer epoch before intent recovery.
+  HTTP index updates carry that epoch alongside their per-operation nonce guards.
+  In-memory and embedded clients need no durable epoch. The HTTP backend remains
+  refused for LWS because it does not assure exclusive index ownership.
+
 ### Fixed
 
+- **sparq-lws-core:** metadata writes, resource deletes and containment removals use
+  fenced HTTP updates. Resource deletion detaches its parent edge in the same write.
+  Journals retain unsettled write and metadata-delete fences through rollback and
+  commit, including removal of legacy membership edges. Regression coverage checks
+  that unsettled rewrites retain their fence and candidate bytes.
 - **sparq-lws-core (LWS):** authentication challenges for paths without dot segments
   name RFC 9728 metadata for the requested resource or service endpoint, preserving
   encoded paths and trailing slashes.
@@ -18,11 +30,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   edits that change `up`, and content replacements with `Prefer: set-linkset` that change it,
   return `409 Conflict` before writing when they declare a different parent; plain content
   replacements leave `up` unchanged. Quiet container listings run concurrently; a busy
-  member or generation change falls back once through the fair exclusive queue, waiting
-  for commit or put-back. Storage descriptions also link the root container type. The builtin
-  LWS.net ratchet checks exact expected failure names and requires their removal when they pass.
+  member or generation change redoes the listing once under the exclusive container lock,
+  waiting for commit or put-back. Acquiring that lock uses the usual lock wait and answers
+  `503` with `Retry-After` on timeout. Storage descriptions also link the root container type.
+  The builtin LWS.net ratchet checks exact expected failure names and requires their removal when they pass.
 
 ### Changed
+
+- **Breaking — sparq-lws-core:** the public `update_create_child_fenced` and
+  `update_delete_container_if_empty_fenced` builders take an `epoch` parameter after
+  their nonce. Other public `*_fenced` builders also require the epoch. The internal
+  `fence_guard` takes `Option<u64>` in place of a boolean; `None` selects an unfenced
+  update. `update_begin_epoch(epoch, owner)` records the start's owner nonce alongside
+  the epoch. HTTP updates carrying a superseded epoch are reported as refused.
+  Confirmed completion markers and delete receipts are removed with best-effort cleanup.
 
 - **Release cadence guard:** the one-release v0.1.8 exception is removed now that v0.1.8 is
   out; only the v0.1.3 recovery evidence can shorten the 24-hour minimum again.

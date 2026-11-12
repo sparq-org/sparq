@@ -738,32 +738,38 @@ fn torn_group_journal_keeps_only_complete_frames_and_never_writes_wals() {
 
 #[test]
 fn grouped_first_entry_sync_failure_stays_pending_and_is_never_retried() {
-    let tmp = TempDir::new();
-    let (mut graph, mut model) = seed(&tmp.0);
-    graph.begin_group().unwrap();
-    let ops = resolve(&mut model, &[(0, 0, 1), (0, 1, 1)]);
-    commit(&mut graph, &ops);
-    let journal = TxnJournal::path(&tmp.0);
-    fault::fail_every(move |step, path| step == "log-file-synced" && path == journal);
-    assert!(graph.commit_group().is_err());
-    assert!(graph.txn.as_ref().unwrap().needs_entry_sync.load(std::sync::atomic::Ordering::Acquire));
-    assert!(graph.is_frozen());
-    assert!(graph.commit_group().is_err());
-    drop(graph);
-    assert_eq!(fault::disarm(), 1);
-    assert_eq!(state(&Graph::open(&tmp.0).unwrap()), expected(&model));
+    for step in ["log-file-synced", "log-opened"] {
+        let tmp = TempDir::new();
+        let (mut graph, mut model) = seed(&tmp.0);
+        graph.begin_group().unwrap();
+        let ops = resolve(&mut model, &[(0, 0, 1), (0, 1, 1)]);
+        commit(&mut graph, &ops);
+        let journal = TxnJournal::path(&tmp.0);
+        fault::fail_every(move |event, path| event == step && path == journal);
+        assert!(graph.commit_group().is_err());
+        assert!(graph
+            .txn
+            .as_ref()
+            .unwrap()
+            .needs_entry_sync
+            .load(std::sync::atomic::Ordering::Acquire));
+        assert!(graph.is_frozen());
+        assert!(graph.commit_group().is_err());
+        drop(graph);
+        assert_eq!(fault::disarm(), 1);
+        assert_eq!(state(&Graph::open(&tmp.0).unwrap()), expected(&model));
+    }
 }
 
 #[test]
 fn successful_groups_share_the_completed_entry_barrier() {
     let tmp = TempDir::new();
     let (mut graph, mut model) = seed(&tmp.0);
-    let entries = std::rc::Rc::new(std::cell::Cell::new(0));
+    let entries = std::rc::Rc::new(std::cell::RefCell::new(BTreeMap::new()));
     let observed = entries.clone();
-    let journal = TxnJournal::path(&tmp.0);
     fault::observe(move |step, path| {
-        if step == "log-file-synced" && path == journal {
-            observed.set(observed.get() + 1);
+        if step == "log-file-synced" {
+            *observed.borrow_mut().entry(path.to_path_buf()).or_insert(0) += 1;
         }
     });
     for i in 1..3 {
@@ -771,9 +777,29 @@ fn successful_groups_share_the_completed_entry_barrier() {
         let ops = resolve(&mut model, &[(0, 0, i), (0, 1, i)]);
         commit(&mut graph, &ops);
         graph.commit_group().unwrap();
-        assert!(!graph.txn.as_ref().unwrap().needs_entry_sync.load(std::sync::atomic::Ordering::Acquire));
+        assert!(!graph
+            .txn
+            .as_ref()
+            .unwrap()
+            .needs_entry_sync
+            .load(std::sync::atomic::Ordering::Acquire));
+        graph.clear_txn().unwrap();
+        assert!(!graph
+            .wal
+            .log()
+            .unwrap()
+            .needs_entry_sync
+            .load(std::sync::atomic::Ordering::Acquire));
     }
-    assert_eq!(entries.get(), 1);
+    // Immediate appends share the barriers completed by groups and their checkpoints.
+    let ops = resolve(&mut model, &[(0, 0, 3), (0, 1, 3)]);
+    commit(&mut graph, &ops);
+    graph.clear_txn().unwrap();
+    graph.apply_delta(&[triple(4)], &[]).unwrap();
+    model.get_mut(&0).unwrap().insert(4);
+    let entries = entries.borrow();
+    assert_eq!(entries.len(), 3);
+    assert!(entries.values().all(|count| *count == 1));
     fault::disarm();
     graph.close().unwrap();
     assert_eq!(state(&Graph::open(&tmp.0).unwrap()), expected(&model));

@@ -2583,7 +2583,7 @@ impl Graph {
         }
         // Replay any write-ahead log into the delta-overlay (recovery after a crash or a
         // plain not-yet-compacted close), stopping cleanly at the first torn record and
-        // truncating the log there — then keep the log open for further appends.
+        // truncating the log there, ready for further appends.
         for (insert, t) in Wal::replay(dir)? {
             if insert {
                 g.apply_delta_mem(&[t], &[]);
@@ -2597,8 +2597,8 @@ impl Graph {
         g.txn = Some(TxnJournal::open(dir)?);
         g.share_tree();
         let txn_ops = TxnJournal::replay(dir)?;
-        if g.txn.as_ref().expect("attached journal").file.metadata()?.len() != 0 {
-            g.tree.retain_journal(g.txn.as_ref().expect("attached journal"))?;
+        if std::fs::metadata(TxnJournal::path(dir))?.len() != 0 {
+            g.tree.retain_journal(g.txn.as_ref().expect("attached journal"));
             g.tree.materializing.store(true, std::sync::atomic::Ordering::Release);
             for op in txn_ops {
                 if let Err(e) = g.redo_txn_op(op) {
@@ -3742,7 +3742,7 @@ impl Graph {
                 WriteState::Durable(w) => {
                     if tree.materializing() {
                         tree.append_wal(w, inserts, deletes)
-                            .and_then(|()| tree.dirty_wal(w))
+                            .map(|()| tree.dirty_wal(w))
                             .map_err(|e| e.to_string())
                     } else {
                         tree.checkpoint().map_err(|e| e.to_string())?;
@@ -3889,10 +3889,7 @@ impl Graph {
                 return Err((true, format!("txn journal commit failed: {}", e)));
             }
             if let Some(j) = &self.txn {
-                if let Err(e) = tree.retain_journal(j) {
-                    self.poison_txn();
-                    return Err((true, e.to_string()));
-                }
+                tree.retain_journal(j);
                 tree.materializing.store(true, std::sync::atomic::Ordering::Release);
                 tree.checkpoint_on_drop.store(true, std::sync::atomic::Ordering::Release);
             }
@@ -7758,20 +7755,21 @@ fn open_log(path: &std::path::Path) -> std::io::Result<std::fs::File> {
 }
 
 /// Makes the entry durable after the first frame's data sync, before acknowledging the append.
+/// The tree's writer permit serializes barriers; descriptor closure preserves this shared state.
 #[cfg(feature = "mmap")]
 fn sync_log_entry(
     file: &std::fs::File,
     path: &std::path::Path,
-    needs_entry_sync: &mut bool,
+    needs_entry_sync: &std::sync::atomic::AtomicBool,
 ) -> std::io::Result<()> {
-    if *needs_entry_sync {
+    if needs_entry_sync.load(std::sync::atomic::Ordering::Acquire) {
         file.sync_all()?;
         #[cfg(test)]
         crash::synced(path);
         fault_point("log-file-synced", path)?;
         fsync_dir(path.parent().unwrap_or_else(|| std::path::Path::new(".")))?;
         fault_point("log-opened", path)?;
-        *needs_entry_sync = false;
+        needs_entry_sync.store(false, std::sync::atomic::Ordering::Release);
     }
     Ok(())
 }
@@ -7818,9 +7816,8 @@ fn truncate_log(file: &mut std::fs::File) -> std::io::Result<()> {
 /// appends defer that sync until checkpoint.
 #[cfg(feature = "mmap")]
 struct Wal {
-    file: std::fs::File,
     dir: std::path::PathBuf,
-    needs_entry_sync: std::sync::Arc<std::sync::Mutex<bool>>,
+    needs_entry_sync: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// Test-only thread-local append faults and path-scoped file-sync faults.
@@ -7902,11 +7899,11 @@ impl Wal {
     }
 
     fn open(dir: &std::path::Path) -> std::io::Result<Wal> {
-        let file = open_log(&Self::path(dir))?;
+        open_log(&Self::path(dir))?;
         // Even an existing entry may come from an interrupted open, so the first append syncs it.
         Ok(Wal {
-            file, dir: dir.to_path_buf(),
-            needs_entry_sync: std::sync::Arc::new(std::sync::Mutex::new(true)),
+            dir: dir.to_path_buf(),
+            needs_entry_sync: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
         })
     }
 
@@ -7929,10 +7926,11 @@ impl Wal {
         inserts: &[[Term; 3]],
         deletes: &[[Term; 3]],
     ) -> std::io::Result<()> {
-        self.append_batch_deferred(inserts, deletes)?;
-        sync_log_data(&self.file, &Self::path(&self.dir))?;
-        sync_log_entry(&self.file, &Self::path(&self.dir),
-            &mut self.needs_entry_sync.lock().unwrap_or_else(|e| e.into_inner()))
+        let path = Self::path(&self.dir);
+        let mut file = open_log(&path)?;
+        Self::write_frame(&mut file, &path, &Self::frame(inserts, deletes)?)?;
+        sync_log_data(&file, &path)?;
+        sync_log_entry(&file, &path, &self.needs_entry_sync)
     }
 
     fn append_batch_deferred(
@@ -7941,7 +7939,8 @@ impl Wal {
         deletes: &[[Term; 3]],
     ) -> std::io::Result<()> {
         let buf = Self::frame(inserts, deletes)?;
-        Self::write_frame(&mut self.file, &Self::path(&self.dir), &buf)
+        let path = Self::path(&self.dir);
+        Self::write_frame(&mut open_log(&path)?, &path, &buf)
     }
 
     fn frame(inserts: &[[Term; 3]], deletes: &[[Term; 3]]) -> std::io::Result<Vec<u8>> {
@@ -8013,7 +8012,7 @@ impl Wal {
     /// Empties the log (after a compaction persisted the folded base).
     fn truncate(&mut self) -> std::io::Result<()> {
         fault_point("wal-truncate", &self.dir)?;
-        truncate_log(&mut self.file)
+        truncate_log(&mut open_log(&Self::path(&self.dir))?)
     }
 
     /// Reads `dir`'s log into `(is_insert, triple)` ops in append order, batch by batch.
@@ -8487,8 +8486,9 @@ fn decode_slot(bytes: &[u8], pos: usize) -> Result<(Option<Term>, usize), String
 /// The parent-level redo journal (`txn.log`) is the commit point for an atomic
 /// multi-operation update. A group concatenates complete frames into one write and
 /// data sync; singleton updates use the same writer. Individual frames remain the
-/// recovery units: a failed group sync may leave a prefix of unacknowledged frames. Materialization is visible in
-/// memory inside a group, but all WAL bytes are buffered until that sync succeeds.
+/// recovery units: a failed group sync may leave a prefix of unacknowledged frames.
+/// Materialization is visible in memory inside a group, but all WAL bytes are buffered
+/// until that sync succeeds.
 /// The first append also completes [`sync_log_entry`]. During
 /// materialization, WAL frames are appended without syncing and named-layout changes
 /// are retained in the shared tree until checkpoint. Direct writes checkpoint first
@@ -8535,7 +8535,6 @@ fn decode_slot(bytes: &[u8], pos: usize) -> Result<(Option<Term>, usize), String
 /// frame — so a torn frame is discarded WHOLE, never partially applied.
 #[cfg(feature = "mmap")]
 struct TxnJournal {
-    file: std::fs::File,
     needs_entry_sync: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// The store directory this journal belongs to — needed to announce the journal's format to
     /// older binaries (see [`TxnJournal::mark_store_format`]).
@@ -8568,9 +8567,8 @@ impl TxnJournal {
     }
 
     fn open(dir: &std::path::Path) -> std::io::Result<TxnJournal> {
-        let file = open_log(&Self::path(dir))?;
+        open_log(&Self::path(dir))?;
         Ok(TxnJournal {
-            file,
             needs_entry_sync: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
             dir: dir.to_path_buf(),
             poisoned: false,
@@ -8621,7 +8619,11 @@ impl TxnJournal {
     /// carries no atomicity obligation).
     fn append(&mut self, records: &[TxnOp]) -> std::io::Result<()> {
         let buf = self.frame(records)?;
-        self.write_frames(&buf)
+        let written = Self::write_frames(&Self::path(&self.dir), &self.needs_entry_sync, &buf);
+        if written.is_err() {
+            self.poisoned = true;
+        }
+        written
     }
 
     fn frame(&mut self, records: &[TxnOp]) -> std::io::Result<Vec<u8>> {
@@ -8683,40 +8685,31 @@ impl TxnJournal {
         Ok(buf)
     }
 
-    fn write_frames(&mut self, buf: &[u8]) -> std::io::Result<()> {
+    fn write_frames(
+        path: &std::path::Path,
+        needs_entry_sync: &std::sync::atomic::AtomicBool,
+        buf: &[u8],
+    ) -> std::io::Result<()> {
         use std::io::Write;
         if buf.is_empty() {
             return Ok(());
         }
+        let mut file = open_log(path)?;
         // Test-only partial-frame append failure.
         #[cfg(test)]
         if let Some(drop_tail) = io_fault::take(&io_fault::JOURNAL_DROP_TAIL) {
             let keep = buf.len().saturating_sub(drop_tail);
-            let partial = self
-                .file
+            let partial = file
                 .write_all(&buf[..keep])
-                .and_then(|()| self.file.sync_data());
-            self.poisoned = true;
+                .and_then(|()| file.sync_data());
             partial?;
             return Err(std::io::Error::other(
                 "injected txn journal append fault: a partial frame is on disk",
             ));
         }
-        let written = std::io::Seek::seek(&mut self.file, std::io::SeekFrom::End(0))
-            .and_then(|_| self.file.write_all(buf))
-            .and_then(|()| sync_log_data(&self.file, &Self::path(&self.dir)))
-            .and_then(|()| {
-                if self.needs_entry_sync.load(std::sync::atomic::Ordering::Acquire) {
-                    let mut pending = true;
-                    sync_log_entry(&self.file, &Self::path(&self.dir), &mut pending)?;
-                    self.needs_entry_sync.store(false, std::sync::atomic::Ordering::Release);
-                }
-                Ok(())
-            });
-        if written.is_err() {
-            self.poisoned = true;
-        }
-        written
+        file.write_all(buf)?;
+        sync_log_data(&file, path)?;
+        sync_log_entry(&file, path, needs_entry_sync)
     }
 
     /// Whether an append failed, so the journal takes no further frame.
@@ -8733,7 +8726,7 @@ impl TxnJournal {
                 "txn journal kept: an earlier commit failed; reopen the graph",
             ));
         }
-        truncate_log(&mut self.file)?;
+        truncate_log(&mut open_log(&Self::path(&self.dir))?)?;
         fault_point("journal-truncated", &self.dir)
     }
 
