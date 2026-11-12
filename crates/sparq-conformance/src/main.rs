@@ -182,6 +182,7 @@ fn main() {
     let mut strict = false;
     let mut filter: Option<String> = None;
     let mut verbose = false;
+    let mut earl: Option<std::fs::File> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -190,9 +191,19 @@ fn main() {
             "--strict" => strict = true,
             "--filter" => filter = Some(args.next().expect("--filter needs a substring")),
             "--verbose" | "-v" => verbose = true,
+            // One `<test IRI>\t<passed|failed>` line per test run, for
+            // scripts/earl-report.py. A documented divergence is a failure there:
+            // the report states what sparq returns, not why.
+            "--earl" => {
+                let path = args.next().expect("--earl needs a path");
+                earl = Some(
+                    std::fs::File::create(&path)
+                        .unwrap_or_else(|e| panic!("create --earl file {path}: {e}")),
+                );
+            }
             other => {
                 eprintln!("unknown argument: {other}");
-                eprintln!("usage: sparq-conformance [--root DIR] [--report FILE] [--filter SUBSTR] [--strict] [--verbose]");
+                eprintln!("usage: sparq-conformance [--root DIR] [--report FILE] [--earl FILE] [--filter SUBSTR] [--strict] [--verbose]");
                 std::process::exit(2);
             }
         }
@@ -262,6 +273,19 @@ fn main() {
                     }
                 };
                 total_run += 1;
+                if let Some(f) = earl.as_mut() {
+                    let verdict = match &status {
+                        Status::Pass => Some("passed"),
+                        // A withdrawn test is not part of the suite; any other
+                        // skip is a test sparq could not run.
+                        Status::Skip(_) if entry.withdrawn => None,
+                        Status::Fail(_) | Status::Skip(_) => Some("failed"),
+                    };
+                    if let Some(v) = verdict {
+                        use std::io::Write;
+                        writeln!(f, "{}\t{v}", entry.id).expect("write --earl file");
+                    }
+                }
                 let divergence = match &status {
                     Status::Fail(reason) => min_fixture_divergence::classify(entry, reason).or_else(|| DOCUMENTED_DIVERGENCES
                         .iter()
