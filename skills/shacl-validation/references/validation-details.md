@@ -119,7 +119,6 @@
   `tests/w3c_sparql_component.rs`); the crate README documents them under its
   "SHACL-SPARQL + custom §6 components" feature bullet.
 
-
 *Id-level core-constraint fast path (perf, sq-7d3dj.33.4).* Core constraints are
 evaluated at the **dictionary-id level**: each shape's `sh:path` is compiled once per
 `validate` (predicate IRIs → ids), the per-focus path walk and dedup run over `u32`
@@ -132,4 +131,3 @@ lazy-DFA cache on every match). All of it is internal — no API or feature flag
 report is byte-identical to the Term-level route: a focus node absent from the data
 dictionary (e.g. a `sh:targetNode` naming a ghost IRI) falls back to the Term-level walk,
 and the in-crate `idfast_*` differential tests diff full reports fast-vs-forced-slow.
-

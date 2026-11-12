@@ -154,4 +154,3 @@ runtime query error) are pinned directly by the in-`src/sparql.rs` unit module
 `VALUES` table lands BELOW the modifier / inside every branch so `$this`/`$value`/
 `$param` stays in scope) and semantically (a real validator over real data yields the
 SHACL-spec-correct conforms/violations).
-
