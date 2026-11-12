@@ -19,6 +19,10 @@
 //! this test SKIPS itself so `cargo test --workspace` stays green on a fresh
 //! checkout. Comparison policy mirrors `w3c_sparql.rs`.
 
+mod support;
+
+use support::Outcome;
+
 use oxrdf::Term;
 use sparq_core::Graph;
 use sparq_shacl::view::GraphView;
@@ -98,6 +102,7 @@ struct Scoreboard {
 
 impl Scoreboard {
     fn record(&mut self, id: &str, outcome: Outcome) {
+        support::earl(id, &outcome);
         match outcome {
             Outcome::Pass => self.pass += 1,
             Outcome::Fail(why) => {
@@ -112,11 +117,6 @@ impl Scoreboard {
     }
 }
 
-enum Outcome {
-    Pass,
-    Fail(String),
-    Skip(String),
-}
 
 fn file_iri(path: &FsPath) -> String {
     format!("file://{}", path.display())

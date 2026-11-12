@@ -47,6 +47,10 @@
 //! `sh:sourceConstraintComponent` / `sh:sourceShape` / `sh:resultMessage` agree
 //! (blank nodes match any blank node).
 
+mod support;
+
+use support::Outcome;
+
 use oxrdf::Term;
 use sparq_core::Graph;
 use sparq_shacl::view::GraphView;
@@ -173,6 +177,7 @@ struct Scoreboard {
 
 impl Scoreboard {
     fn record(&mut self, group: &str, id: &str, outcome: Outcome) {
+        support::earl(id, &outcome);
         let e = self.by_group.entry(group.to_string()).or_default();
         match outcome {
             Outcome::Pass => e.pass += 1,
@@ -188,11 +193,6 @@ impl Scoreboard {
     }
 }
 
-enum Outcome {
-    Pass,
-    Fail(String),
-    Skip(String),
-}
 
 fn file_iri(path: &FsPath) -> String {
     format!("file://{}", path.display())
@@ -304,13 +304,11 @@ fn run_entry(file: &FsPath, g: &Graph, view: &GraphView, entry: &Term) -> Result
     // genuine FAIL when it does NOT (the validator should have rejected but did
     // not). The 7 such shacl12 entries were previously counted as ExpectedFailure
     // (the rejection channel was unbuilt).
-    if matches!(&exp_node, Term::NamedNode(n) if n.as_str() == format!("{SHT}Failure")) {
-        return Ok(match sparq_shacl::validate_strict(data_g, shapes_g) {
-            Err(_) => Outcome::Pass,
-            Ok(_) => Outcome::Fail(
-                "expected sht:Failure (validator must reject) but strict validation produced a report"
-                    .to_string(),
-            ),
+    if let Some(rejected) = support::expected_failure(&exp_node, data_g, shapes_g) {
+        return Ok(if rejected {
+            Outcome::Pass
+        } else {
+            Outcome::Fail(support::NOT_REJECTED.into())
         });
     }
 

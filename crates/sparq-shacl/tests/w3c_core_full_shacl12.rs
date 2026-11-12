@@ -60,6 +60,10 @@
 //! `sh:resultSeverity` / `sh:sourceConstraintComponent` / `sh:sourceShape` /
 //! `sh:resultMessage` agree (blank nodes match any blank node).
 
+mod support;
+
+use support::Outcome;
+
 use oxrdf::Term;
 use sparq_core::Graph;
 use sparq_shacl::view::GraphView;
@@ -245,6 +249,7 @@ struct Scoreboard {
 
 impl Scoreboard {
     fn record(&mut self, group: &str, id: &str, outcome: Outcome) {
+        support::earl(id, &outcome);
         let e = self.by_group.entry(group.to_string()).or_default();
         match outcome {
             Outcome::Pass => e.0 += 1,
@@ -260,11 +265,6 @@ impl Scoreboard {
     }
 }
 
-enum Outcome {
-    Pass,
-    Fail(String),
-    Skip(String),
-}
 
 fn file_iri(path: &FsPath) -> String {
     format!("file://{}", path.display())
