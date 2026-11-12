@@ -38,10 +38,15 @@ fn bounded(baseline: usize) {
     );
 }
 
-fn create(dir: &Path, transactional: bool) {
+fn create(dir: &Path, mode: &str) {
+    let transactional = mode != "direct";
+    let grouped = mode == "grouped";
     let mut graph = Graph::open_or_create(dir, &Graph::new()).unwrap();
     let baseline = descriptors();
-    if transactional {
+    if grouped {
+        graph.begin_group().unwrap();
+    }
+    if transactional && !grouped {
         // Keep all materialization pending together, including its dirty WAL state.
         let ops: Vec<_> = (0..GRAPHS)
             .map(|i| TxnOp::Insert {
@@ -52,14 +57,30 @@ fn create(dir: &Path, transactional: bool) {
         graph.commit_txn_ops(&ops).unwrap();
     }
     for i in 0..GRAPHS {
+        if grouped {
+            graph
+                .commit_txn_ops(&[TxnOp::Insert {
+                    slot: Some(name(i)),
+                    triple: triple(i),
+                }])
+                .unwrap();
+        }
         let index = graph.ensure_named(&name(i)).unwrap();
         graph
             .apply_delta_to_named(index, &[triple(i)], &[])
             .unwrap();
+        if grouped {
+            graph.finish_txn().unwrap();
+        }
         bounded(baseline);
     }
-    if transactional {
+    if transactional && !grouped {
         graph.finish_txn().unwrap();
+        bounded(baseline);
+    }
+    if grouped {
+        // No per-graph handles may accumulate while buffering or during commit.
+        graph.commit_group().unwrap();
         bounded(baseline);
     }
     // The parent kills us with the graph and its retained journal still live.
@@ -114,8 +135,7 @@ fn directory_journal_descriptors_are_bounded() {
     if let Ok(mode) = std::env::var("SPARQ_DESCRIPTOR_CHILD") {
         let dir = std::env::var_os("SPARQ_DESCRIPTOR_DIR").unwrap();
         match mode.as_str() {
-            "direct" => create(Path::new(&dir), false),
-            "transactional" => create(Path::new(&dir), true),
+            "direct" | "transactional" | "grouped" => create(Path::new(&dir), &mode),
             "verify" => verify(Path::new(&dir)),
             _ => panic!("unknown child mode"),
         }
@@ -130,10 +150,19 @@ fn directory_journal_descriptors_are_bounded() {
             .as_nanos(),
     ));
     std::fs::create_dir(&directory).unwrap();
-    for mode in ["direct", "transactional"] {
+    for mode in ["direct", "transactional", "grouped"] {
         let dir = directory.join(mode);
         let command = |mode: &str| {
-            let mut command = Command::new(std::env::current_exe().unwrap());
+            // The limit also catches handles accumulated transiently inside commit,
+            // where the before/after descriptor counts alone would miss a regression.
+            let mut command = Command::new("sh");
+            command
+                .args([
+                    "-c",
+                    "ulimit -n 64 || exit; exec \"$@\"",
+                    "descriptor-child",
+                ])
+                .arg(std::env::current_exe().unwrap());
             command
                 .args([
                     "--exact",

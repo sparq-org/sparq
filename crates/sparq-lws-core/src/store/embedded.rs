@@ -72,7 +72,9 @@
 //! on-disk snapshot is taken with [`EmbeddedSparqClient::save`] — itself an actor job, so a snapshot
 //! is consistent by construction (it cannot interleave with a write). Directory-backed writes
 //! capture effects on a disposable fork and commit them to the authoritative graph through one
-//! fsync'd transaction frame before materialization. An indeterminate commit stops the actor;
+//! journal group. Already-queued jobs share one sync; their replies, including reads,
+//! are withheld until it succeeds. Save and compaction jobs form queue barriers.
+//! An indeterminate commit stops the actor;
 //! callers must restart to recover before serving any further operations.
 
 use std::panic::AssertUnwindSafe;
@@ -97,15 +99,86 @@ const ACTOR_THREAD_NAME: &str = "sparq-embedded-graph";
 /// Reopen the graph before serving any further operations.
 const ACTOR_STOPPED: &str = "fatal: embedded graph actor stopped; restart to recover";
 
-/// One unit of work for the [`GraphActor`]: a closure run ON the actor thread with EXCLUSIVE
-/// `&mut Graph` access. The job is type-erased (it carries and completes its OWN reply channel
-/// internally), so the channel stays monomorphic across every differently-typed engine call.
-type Job = Box<dyn FnOnce(&mut ActorGraph) + Send + 'static>;
+type ReplyFn = Box<dyn FnOnce(Option<SparqError>) + Send + 'static>;
+
+trait DeferredCall: Send {
+    fn run(&mut self, graph: &mut ActorGraph);
+    fn reply(self: Box<Self>, error: Option<SparqError>);
+}
+
+struct Call<F, T> {
+    operation: Option<F>,
+    result: Option<Result<T, SparqError>>,
+    sender: oneshot::Sender<Result<T, SparqError>>,
+}
+
+impl<F, T> DeferredCall for Call<F, T>
+where
+    F: FnOnce(&mut ActorGraph) -> Result<T, SparqError> + Send + 'static,
+    T: Send + 'static,
+{
+    fn run(&mut self, graph: &mut ActorGraph) {
+        self.result = Some(self.operation.take().expect("job runs once")(graph));
+    }
+
+    fn reply(self: Box<Self>, error: Option<SparqError>) {
+        let Self { result, sender, .. } = *self;
+        let _ = sender.send(match error {
+            Some(error) => Err(error),
+            None => result.expect("job finishes before replying"),
+        });
+    }
+}
+
+enum Run {
+    Call(Box<dyn DeferredCall>),
+    Closure(Box<dyn FnOnce(&mut ActorGraph) -> ReplyFn + Send + 'static>),
+}
+
+impl Run {
+    fn closure(f: impl FnOnce(&mut ActorGraph) -> ReplyFn + Send + 'static) -> Self {
+        Self::Closure(Box::new(f))
+    }
+
+    fn execute(self, graph: &mut ActorGraph) -> Reply {
+        match self {
+            Self::Call(mut call) => {
+                call.run(graph);
+                Reply::Call(call)
+            }
+            Self::Closure(f) => Reply::Closure(f(graph)),
+        }
+    }
+}
+
+/// Reuse the job's allocation for its result until the group's durability barrier.
+enum Reply {
+    Call(Box<dyn DeferredCall>),
+    Closure(ReplyFn),
+}
+
+impl Reply {
+    fn send(self, error: Option<SparqError>) {
+        match self {
+            Self::Call(call) => call.reply(error),
+            Self::Closure(f) => f(error),
+        }
+    }
+}
+
+struct Job {
+    run: Run,
+    barrier: bool,
+}
+
+/// Bound work between acknowledgments without waiting for more arrivals.
+const MAX_GROUP_JOBS: usize = 16;
 
 /// The authoritative graph and the actor's fail-closed commit state.
 struct ActorGraph {
     graph: Graph,
     stopped: bool,
+    stop_reason: Option<String>,
     #[cfg(test)]
     apply_failure: Option<sparq_engine::ApplyError>,
 }
@@ -171,13 +244,31 @@ impl GraphActor {
         F: FnOnce(&mut ActorGraph) -> Result<T, SparqError> + Send + 'static,
         T: Send + 'static,
     {
+        self.call_inner(f, false).await
+    }
+
+    async fn call_barrier<T, F>(&self, f: F) -> Result<T, SparqError>
+    where
+        F: FnOnce(&mut ActorGraph) -> Result<T, SparqError> + Send + 'static,
+        T: Send + 'static,
+    {
+        self.call_inner(f, true).await
+    }
+
+    async fn call_inner<T, F>(&self, f: F, barrier: bool) -> Result<T, SparqError>
+    where
+        F: FnOnce(&mut ActorGraph) -> Result<T, SparqError> + Send + 'static,
+        T: Send + 'static,
+    {
         let (reply_tx, reply_rx) = oneshot::channel();
-        let job: Job = Box::new(move |graph| {
-            // A dropped receiver means the caller's future was cancelled. The op still ran to
-            // completion on the actor thread (same as a dropped `spawn_blocking` handle), so the
-            // graph state is well-defined; only the unobserved result is discarded.
-            let _ = reply_tx.send(f(graph));
-        });
+        let job = Job {
+            run: Run::Call(Box::new(Call {
+                operation: Some(f),
+                result: None,
+                sender: reply_tx,
+            })),
+            barrier,
+        };
         self.tx
             .send(job)
             .map_err(|_| SparqError::Backend(ACTOR_STOPPED.into()))?;
@@ -189,7 +280,13 @@ impl GraphActor {
 
 impl Drop for GraphActor {
     fn drop(&mut self) {
-        let _ = self.tx.send(Box::new(|graph| graph.stopped = true));
+        let _ = self.tx.send(Job {
+            run: Run::closure(|graph| {
+                graph.stopped = true;
+                Box::new(|_| {})
+            }),
+            barrier: true,
+        });
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -238,15 +335,73 @@ fn actor_loop(graph: Graph, mut rx: mpsc::UnboundedReceiver<Job>) {
     let mut graph = ActorGraph {
         graph,
         stopped: false,
+        stop_reason: None,
         #[cfg(test)]
         apply_failure: None,
     };
-    // `blocking_recv` is correct here precisely because this thread is NOT a tokio worker — it has
-    // no runtime context, so parking it blocks nothing but itself.
-    while let Some(job) = rx.blocking_recv() {
-        // `AssertUnwindSafe`: on a caught panic we never touch `graph` again (the loop breaks), so a
-        // logically-torn index can never be observed — which is exactly the unwind-safety obligation.
-        if std::panic::catch_unwind(AssertUnwindSafe(|| job(&mut graph))).is_err() || graph.stopped {
+    let mut pending = None;
+    while let Some(first) = pending.take().or_else(|| rx.blocking_recv()) {
+        let barrier = first.barrier;
+        let mut jobs = Vec::new();
+        if !barrier {
+            while jobs.len() + 1 < MAX_GROUP_JOBS {
+                match rx.try_recv() {
+                    Ok(job) if job.barrier => {
+                        pending = Some(job);
+                        break;
+                    }
+                    Ok(job) => jobs.push(job),
+                    Err(_) => break,
+                }
+            }
+        }
+        // A lone job uses the immediate journal writer: an implicit group of one.
+        let grouped = !barrier && !jobs.is_empty();
+        let mut first_reply = None;
+        let mut replies = Vec::new();
+        // A panic discards every withheld result and stops the actor. Never commit
+        // or serve the potentially partial in-memory state after unwinding.
+        let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            if grouped {
+                graph
+                    .begin_group()
+                    .map_err(|e| engine_err("begin_group", e))?;
+            }
+            for job in std::iter::once(first).chain(jobs) {
+                let reply = job.run.execute(&mut graph);
+                if first_reply.is_none() {
+                    first_reply = Some(reply);
+                } else {
+                    replies.push(reply);
+                }
+                if graph.stopped && !barrier {
+                    return Err(SparqError::Backend(
+                        graph
+                            .stop_reason
+                            .take()
+                            .unwrap_or_else(|| ACTOR_STOPPED.into()),
+                    ));
+                }
+            }
+            if grouped {
+                graph
+                    .commit_group()
+                    .map_err(|e| engine_err("commit_group", e))?;
+            }
+            Ok::<_, SparqError>(())
+        }));
+        let error = match result {
+            Ok(Ok(())) => None,
+            Ok(Err(error)) => Some(error.to_string()),
+            Err(_) => Some(ACTOR_STOPPED.to_owned()),
+        };
+        if error.is_some() {
+            graph.poison_txn();
+        }
+        for reply in first_reply.into_iter().chain(replies) {
+            reply.send(error.as_ref().map(|e| SparqError::Backend(e.clone())));
+        }
+        if error.is_some() || graph.stopped {
             break;
         }
     }
@@ -320,7 +475,7 @@ impl EmbeddedSparqClient {
     /// This maintenance job does not increment [`Self::engine_round_trips`].
     pub async fn compact(&self) -> Result<(), SparqError> {
         self.actor
-            .call(|graph| {
+            .call_barrier(|graph| {
                 refuse_frozen(graph)?;
                 graph.compact().map_err(|e| engine_err("compact", e))
             })
@@ -424,7 +579,7 @@ impl EmbeddedSparqClient {
     pub async fn save(&self, dir: &Path) -> Result<(), SparqError> {
         let dir = dir.to_path_buf();
         self.actor
-            .call(move |graph| {
+            .call_barrier(move |graph| {
                 refuse_frozen(graph)?;
                 // Resolve through any newly created components, retaining only directories
                 // used by a successful snapshot to a separate destination.
@@ -512,10 +667,9 @@ fn commit(graph: &mut ActorGraph, sparql: &str, op: &str) -> Result<(), SparqErr
     result.map_err(|error| {
         if error.applied {
             graph.stopped = true;
-            engine_err(
-                op,
-                format!("indeterminate commit: {}; restart to recover", error.message),
-            )
+            let reason = format!("indeterminate commit: {}; restart to recover", error.message);
+            graph.stop_reason = Some(reason.clone());
+            engine_err(op, reason)
         } else {
             engine_err(op, error.message)
         }
