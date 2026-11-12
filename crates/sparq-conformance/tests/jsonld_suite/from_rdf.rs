@@ -188,7 +188,7 @@ pub fn run_fromrdf(root: &Path) -> Score {
         // NegativeEvaluationTests: the exact spec error code must be raised.
         if e.is_negative {
             match (&outcome, e.expect_error_code.as_deref()) {
-                (Err(err), Some(want)) if err.code().as_str() == want => s.pass(),
+                (Err(err), Some(want)) if err.code().as_str() == want => s.pass(&e.id),
                 (Err(err), want) => s.fail(
                     &e.id,
                     format!("raised {:?}, expected {:?}", err.code().as_str(), want),
@@ -261,7 +261,7 @@ pub fn run_fromrdf(root: &Path) -> Score {
                 }
             }
         }
-        s.pass();
+        s.pass(&e.id);
     }
     s
 }

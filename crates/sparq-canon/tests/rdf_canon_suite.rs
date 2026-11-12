@@ -15,12 +15,18 @@
 //! - `rdfc:RDFC10NegativeEvalTest`: canonicalization must FAIL (poison graphs;
 //!   the HNDQ call-limit guard).
 
+#[path = "../../sparq-conformance/tests/support/earl.rs"]
+mod earl;
+
 use oxrdf::Triple;
 use sparq_core::Graph;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 fn testdata() -> PathBuf {
+    if let Some(root) = std::env::var_os("SPARQ_RDF_CANON_ROOT") {
+        return root.into();
+    }
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/rdf-canon-testdata")
 }
 
@@ -45,7 +51,9 @@ fn manifest_entries() -> Vec<Entry> {
         PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
         PREFIX rdfc: <https://w3c.github.io/rdf-canon/tests/vocab#>
         SELECT ?test ?type ?action ?result ?hash WHERE {
-            ?test a ?type ; mf:action ?action .
+            ?manifest mf:entries/rdf:rest*/rdf:first ?test .
+            OPTIONAL { ?test a ?type }
+            OPTIONAL { ?test mf:action ?action }
             OPTIONAL { ?test mf:result ?result }
             OPTIONAL { ?test rdfc:hashAlgorithm ?hash }
         } ORDER BY ?test
@@ -65,25 +73,27 @@ fn manifest_entries() -> Vec<Entry> {
         };
         out.push(Entry {
             name: iri(0).unwrap(),
-            kind: iri(1).unwrap(),
-            action: iri(2).unwrap(),
+            kind: iri(1).unwrap_or_default(),
+            action: iri(2).unwrap_or_default(),
             result: iri(3),
             hash_algorithm,
         });
     }
-    assert_eq!(out.len(), 86, "expected the full 86-entry manifest");
+    if std::env::var_os("SPARQ_RDF_CANON_ROOT").is_none() {
+        assert_eq!(out.len(), 86, "expected the full 86-entry manifest");
+    }
     out
 }
 
 /// Loads a test input `.nq` as oxrdf 0.3 quads (suite inputs include both
 /// default-graph and named-graph datasets; the public API canonicalizes at the
 /// dataset/quad level).
-fn load_quads(path: &Path) -> Vec<oxrdf::Quad> {
-    let bytes = std::fs::read(path).unwrap();
+fn load_quads(path: &Path) -> Result<Vec<oxrdf::Quad>, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
     oxttl::NQuadsParser::new()
         .for_slice(&bytes)
         .collect::<Result<Vec<_>, _>>()
-        .unwrap()
+        .map_err(|e| e.to_string())
 }
 
 /// Canonicalize through the crate's PUBLIC dataset API (default SHA-256, or the
@@ -109,59 +119,75 @@ fn local_path(iri: &str) -> PathBuf {
     testdata().join("rdfc10").join(tail)
 }
 
+fn run_entry(e: &Entry) -> Result<(), String> {
+    let input = load_quads(&local_path(&e.action))?;
+    let sha384 = match e.hash_algorithm.as_deref() {
+        None | Some("SHA256") => false,
+        Some("SHA384") => true,
+        Some(other) => return Err(format!("unsupported hash algorithm {other}")),
+    };
+    let expected = || -> Result<String, String> {
+        let result = e.result.as_deref().ok_or("missing mf:result")?;
+        std::fs::read_to_string(local_path(result)).map_err(|e| e.to_string())
+    };
+    match e.kind.rsplit('#').next().unwrap_or("") {
+        "RDFC10EvalTest" => {
+            let want = expected()?;
+            let got = canonicalize(&input, sha384)?;
+            if got == want {
+                Ok(())
+            } else {
+                Err("canonical output mismatch".into())
+            }
+        }
+        "RDFC10MapTest" => {
+            let want: HashMap<String, String> =
+                serde_json::from_str(&expected()?).map_err(|e| e.to_string())?;
+            if issue(&input, sha384)? == want {
+                Ok(())
+            } else {
+                Err("issued map mismatch".into())
+            }
+        }
+        "RDFC10NegativeEvalTest" => match canonicalize(&input, sha384) {
+            Err(_) => Ok(()),
+            Ok(_) => Err("poison graph canonicalized (must fail closed)".into()),
+        },
+        other => Err(format!("unknown test type {other}")),
+    }
+}
+
 #[test]
 fn w3c_rdf_canon_suite() {
     let entries = manifest_entries();
     let (mut eval, mut map, mut neg) = (0, 0, 0);
     let mut failures: Vec<String> = Vec::new();
 
+    let mut outcomes = Vec::new();
     for e in &entries {
-        let input = load_quads(&local_path(&e.action));
-        let sha384 = e.hash_algorithm.as_deref() == Some("SHA384");
-        match e.kind.as_str() {
-            t if t.ends_with("RDFC10EvalTest") => {
-                eval += 1;
-                let expected =
-                    std::fs::read_to_string(local_path(e.result.as_ref().unwrap())).unwrap();
-                match canonicalize(&input, sha384) {
-                    Ok(got) if got == expected => {}
-                    Ok(got) => failures.push(format!(
-                        "{}: canonical output mismatch\n  got:      {:?}\n  expected: {:?}",
-                        e.name, got, expected
-                    )),
-                    Err(err) => failures.push(format!("{}: failed: {err}", e.name)),
-                }
-            }
-            t if t.ends_with("RDFC10MapTest") => {
-                map += 1;
-                let expected_json =
-                    std::fs::read_to_string(local_path(e.result.as_ref().unwrap())).unwrap();
-                let expected: HashMap<String, String> =
-                    serde_json::from_str(&expected_json).unwrap();
-                match issue(&input, sha384) {
-                    Ok(got) if got == expected => {}
-                    Ok(got) => failures.push(format!(
-                        "{}: issued map mismatch\n  got:      {:?}\n  expected: {:?}",
-                        e.name, got, expected
-                    )),
-                    Err(err) => failures.push(format!("{}: failed: {err}", e.name)),
-                }
-            }
-            t if t.ends_with("RDFC10NegativeEvalTest") => {
-                neg += 1;
-                if let Ok(got) = canonicalize(&input, sha384) {
-                    failures.push(format!(
-                        "{}: poison graph canonicalized (must fail closed): {} quads -> {} bytes",
-                        e.name,
-                        input.len(),
-                        got.len()
-                    ));
-                }
-            }
-            other => failures.push(format!("{}: unknown test type {other}", e.name)),
+        match e.kind.rsplit('#').next().unwrap_or("") {
+            "RDFC10EvalTest" => eval += 1,
+            "RDFC10MapTest" => map += 1,
+            "RDFC10NegativeEvalTest" => neg += 1,
+            _ => {}
         }
+        // Fixture errors and unexpected panics are failures, including negative tests.
+        let outcome = std::panic::catch_unwind(|| run_entry(e))
+            .unwrap_or_else(|_| Err("runner panicked".into()));
+        if let Err(why) = &outcome {
+            failures.push(format!("{}: {why}", e.name));
+        }
+        outcomes.push((e.name.as_str(), outcome.is_ok()));
     }
-
+    earl::emit(outcomes.iter().copied());
+    if std::env::var_os("SPARQ_EARL_OUT").is_some() {
+        println!(
+            "TOTAL rdf-canon {} {}",
+            entries.len() - failures.len(),
+            failures.len()
+        );
+        println!("EARL complete rdf-canon");
+    }
     assert_eq!((eval, map, neg), (64, 21, 1), "suite composition drifted");
     assert!(
         failures.is_empty(),
@@ -183,7 +209,7 @@ fn default_graph_tests_via_single_graph_api() {
         if !e.kind.ends_with("RDFC10EvalTest") || e.hash_algorithm.is_some() {
             continue; // the commitment pipeline canonicalizes with the default SHA-256
         }
-        let quads = load_quads(&local_path(&e.action));
+        let quads = load_quads(&local_path(&e.action)).unwrap();
         if !quads
             .iter()
             .all(|q| q.graph_name == oxrdf::GraphName::DefaultGraph)
@@ -203,5 +229,59 @@ fn default_graph_tests_via_single_graph_api() {
     assert!(
         covered >= 40,
         "expected most eval tests to be default-graph-only, got {covered}"
+    );
+}
+
+#[test]
+fn unreadable_negative_fixture_is_a_failure() {
+    let e = Entry {
+        name: "https://example.test/manifest#missing".into(),
+        kind: "https://w3c.github.io/rdf-canon/tests/vocab#RDFC10NegativeEvalTest".into(),
+        action: format!("rdfc10/absent-{}.nq", std::process::id()),
+        result: None,
+        hash_algorithm: None,
+    };
+    let why = run_entry(&e).expect_err("a missing negative fixture must fail");
+    assert!(
+        why.starts_with("read "),
+        "fixture error must not be a canonicalization rejection: {why}"
+    );
+}
+
+#[test]
+fn reports_canon_entries_even_when_ratchet_fails() {
+    let fixture = earl::Fixture::new();
+    fixture.write(
+        "manifest.ttl",
+        r#"
+        @prefix mf: <http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#> .
+        @prefix rdfc: <https://w3c.github.io/rdf-canon/tests/vocab#> .
+        <> mf:entries (<#ok> <#missing> <#unknown>) .
+        <#ok> a rdfc:RDFC10EvalTest; mf:action <rdfc10/input.nq>; mf:result <rdfc10/expected.nq> .
+        <#missing> a rdfc:RDFC10NegativeEvalTest; mf:action <rdfc10/absent.nq> .
+        <#unknown> a rdfc:UnknownTest; mf:action <rdfc10/input.nq> .
+    "#,
+    );
+    for name in ["input.nq", "expected.nq"] {
+        fixture.write(
+            &format!("rdfc10/{name}"),
+            "<https://example.test/s> <https://example.test/p> <https://example.test/o> .\n",
+        );
+    }
+    fixture.assert_report(
+        "w3c_rdf_canon_suite",
+        "EARL complete rdf-canon",
+        &[("SPARQ_RDF_CANON_ROOT", fixture.root())],
+        &[
+            ("https://w3c.github.io/rdf-canon/tests/#ok".into(), true),
+            (
+                "https://w3c.github.io/rdf-canon/tests/#missing".into(),
+                false,
+            ),
+            (
+                "https://w3c.github.io/rdf-canon/tests/#unknown".into(),
+                false,
+            ),
+        ],
     );
 }

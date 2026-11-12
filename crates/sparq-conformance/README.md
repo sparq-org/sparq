@@ -23,7 +23,7 @@ lanes; the `scoreboard` rustdoc documents each lane's scope, floor and divergenc
 
 > **Internal dev-only harness — not published** (`publish = false`). Test data is
 > fetched by `scripts/fetch-conformance.sh` + the sibling `fetch-inference-suites.sh`
-> / `fetch-jsonld*` / `fetch-odrl-suite.sh` scripts. Contributing: [`AGENTS.md`](../../AGENTS.md).
+> / `fetch-jsonld*` / `fetch-odrl-suite.sh` scripts. Contributing: [`AGENTS.md`](../../AGENTS.md). EARL reports: [`EARL.md`](EARL.md).
 
 ## License
 

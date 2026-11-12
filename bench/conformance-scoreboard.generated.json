@@ -4,6 +4,126 @@
   "suites": [
     {
       "ci_job": "conformance",
+      "command": "cargo test -p sparq-conformance --test rdf12_syntax",
+      "family": "W3C RDF syntax",
+      "floor_basis": "pass",
+      "is_extension": false,
+      "label": "W3C RDF 1.2 Turtle syntax",
+      "note": "w3c/rdf-tests RDF 1.2; per-manifest assumed base; C14N uses syntax layout, not RDFC-1.0",
+      "ratchet_floor": 77,
+      "runner": {
+        "crate": "sparq-conformance",
+        "kind": "crate-test",
+        "target": "rdf12_syntax"
+      }
+    },
+    {
+      "ci_job": "conformance",
+      "command": "cargo test -p sparq-conformance --test rdf12_syntax",
+      "family": "W3C RDF syntax",
+      "floor_basis": "pass",
+      "is_extension": false,
+      "label": "W3C RDF 1.2 Turtle eval",
+      "note": "w3c/rdf-tests RDF 1.2; per-manifest assumed base; C14N uses syntax layout, not RDFC-1.0",
+      "ratchet_floor": 32,
+      "runner": {
+        "crate": "sparq-conformance",
+        "kind": "crate-test",
+        "target": "rdf12_syntax"
+      }
+    },
+    {
+      "ci_job": "conformance",
+      "command": "cargo test -p sparq-conformance --test rdf12_syntax",
+      "family": "W3C RDF syntax",
+      "floor_basis": "pass",
+      "is_extension": false,
+      "label": "W3C RDF 1.2 TriG syntax",
+      "note": "w3c/rdf-tests RDF 1.2; per-manifest assumed base; C14N uses syntax layout, not RDFC-1.0",
+      "ratchet_floor": 38,
+      "runner": {
+        "crate": "sparq-conformance",
+        "kind": "crate-test",
+        "target": "rdf12_syntax"
+      }
+    },
+    {
+      "ci_job": "conformance",
+      "command": "cargo test -p sparq-conformance --test rdf12_syntax",
+      "family": "W3C RDF syntax",
+      "floor_basis": "pass",
+      "is_extension": false,
+      "label": "W3C RDF 1.2 TriG eval",
+      "note": "w3c/rdf-tests RDF 1.2; per-manifest assumed base; C14N uses syntax layout, not RDFC-1.0",
+      "ratchet_floor": 26,
+      "runner": {
+        "crate": "sparq-conformance",
+        "kind": "crate-test",
+        "target": "rdf12_syntax"
+      }
+    },
+    {
+      "ci_job": "conformance",
+      "command": "cargo test -p sparq-conformance --test rdf12_syntax",
+      "family": "W3C RDF syntax",
+      "floor_basis": "pass",
+      "is_extension": false,
+      "label": "W3C RDF 1.2 N-Triples syntax",
+      "note": "w3c/rdf-tests RDF 1.2; per-manifest assumed base; C14N uses syntax layout, not RDFC-1.0",
+      "ratchet_floor": 34,
+      "runner": {
+        "crate": "sparq-conformance",
+        "kind": "crate-test",
+        "target": "rdf12_syntax"
+      }
+    },
+    {
+      "ci_job": "conformance",
+      "command": "cargo test -p sparq-conformance --test rdf12_syntax",
+      "family": "W3C RDF syntax",
+      "floor_basis": "pass",
+      "is_extension": false,
+      "label": "W3C RDF 1.2 N-Triples C14N",
+      "note": "w3c/rdf-tests RDF 1.2; per-manifest assumed base; C14N uses syntax layout, not RDFC-1.0",
+      "ratchet_floor": 41,
+      "runner": {
+        "crate": "sparq-conformance",
+        "kind": "crate-test",
+        "target": "rdf12_syntax"
+      }
+    },
+    {
+      "ci_job": "conformance",
+      "command": "cargo test -p sparq-conformance --test rdf12_syntax",
+      "family": "W3C RDF syntax",
+      "floor_basis": "pass",
+      "is_extension": false,
+      "label": "W3C RDF 1.2 N-Quads syntax",
+      "note": "w3c/rdf-tests RDF 1.2; per-manifest assumed base; C14N uses syntax layout, not RDFC-1.0",
+      "ratchet_floor": 31,
+      "runner": {
+        "crate": "sparq-conformance",
+        "kind": "crate-test",
+        "target": "rdf12_syntax"
+      }
+    },
+    {
+      "ci_job": "conformance",
+      "command": "cargo test -p sparq-conformance --test rdf12_syntax",
+      "family": "W3C RDF syntax",
+      "floor_basis": "pass",
+      "is_extension": false,
+      "label": "W3C RDF 1.2 N-Quads C14N",
+      "note": "w3c/rdf-tests RDF 1.2; per-manifest assumed base; C14N uses syntax layout, not RDFC-1.0",
+      "ratchet_floor": 41,
+      "runner": {
+        "crate": "sparq-conformance",
+        "kind": "crate-test",
+        "target": "rdf12_syntax"
+      }
+    },
+    {
+      "ci_job": "conformance",
       "command": "cargo run --release -p sparq-conformance --bin sparq-conformance",
       "family": "W3C SPARQL",
       "floor_basis": "pass + documented divergence",
@@ -560,8 +680,8 @@
   ],
   "title": "sparq conformance scoreboard",
   "totals": {
-    "conformance_floor_total": 5456,
-    "conformance_suites": 25,
+    "conformance_floor_total": 5776,
+    "conformance_suites": 33,
     "extension_assertion_total": 19708,
     "extension_suites": 11
   }

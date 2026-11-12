@@ -34,7 +34,7 @@
 //! documentation. `expand`, `flatten`, `html`, and `remote-doc` were the algorithm
 //! categories sparq did not gate historically; `expand`/`flatten` graduated,
 //! `html`/`remote-doc` remain the documented NOT-IMPLEMENTED buckets the runner
-//! reports separately (never failed).
+//! reports separately in local runs. EARL includes those entries as failed.
 //!
 //! ## Feature gating (both states)
 //!
@@ -48,6 +48,10 @@
 //! and the frame fixtures by `scripts/fetch-jsonld-framing-tests.sh` into
 //! `tests/w3c/json-ld-framing/`; when either is absent the runner SKIPS that lane
 //! so a fresh offline checkout stays green.
+
+#[cfg(feature = "jsonld-suite")]
+#[path = "support/earl.rs"]
+mod earl;
 
 // When the lane feature is OFF the runner is a single self-SKIP test
 // so the default + `--workspace` builds neither link oxjsonld/the writer nor go
@@ -101,6 +105,11 @@ mod gated {
     fn jsonld_conformance_ratchet() {
         let root = suite_root();
         if !root.exists() {
+            assert!(
+                std::env::var_os("SPARQ_JSONLD_ROOT").is_none()
+                    && std::env::var_os("SPARQ_EARL_OUT").is_none(),
+                "configured JSON-LD suite missing"
+            );
             eprintln!(
                 "SKIP: W3C JSON-LD suite not present at {} — run scripts/fetch-jsonld-tests.sh",
                 root.display()
@@ -134,7 +143,32 @@ mod gated {
         // ratchet is asserted below.
         let frame_root = frame_suite_root();
         let frame = frame_root.exists().then(|| frame::run_frame(&frame_root));
+        // Emit before ratchet assertions, including local skips and unsupported buckets.
+        for (cat, score) in [
+            ("toRdf", &tordf),
+            ("fromRdf", &fromrdf),
+            ("compact", &compact),
+            ("expand", &expand),
+            ("flatten", &flatten),
+        ] {
+            crate::common::report(&root, cat, score);
+        }
+        for (cat, _) in NOT_IMPLEMENTED_CATS {
+            crate::common::report(&root, cat, &crate::common::Score::default());
+        }
+        if let Some(score) = &frame {
+            crate::common::report(&frame_root, "frame", score);
+        } else {
+            assert!(
+                std::env::var_os("SPARQ_JSONLD_FRAME_ROOT").is_none()
+                    && std::env::var_os("SPARQ_EARL_OUT").is_none(),
+                "configured JSON-LD framing suite missing"
+            );
+        }
 
+        if std::env::var_os("SPARQ_EARL_OUT").is_some() {
+            println!("EARL complete jsonld");
+        }
         println!(
             "\nW3C JSON-LD 1.1 conformance scoreboard (pinned w3c/json-ld-api + json-ld-framing)"
         );

@@ -102,7 +102,7 @@ pub fn run_frame(root: &Path) -> Score {
         if e.is_negative || e.expect_error_code.is_some() {
             let want_code = e.expect_error_code.as_deref().unwrap_or("");
             match &framed {
-                Err(err) if err.code().as_str() == want_code => s.pass(),
+                Err(err) if err.code().as_str() == want_code => s.pass(&e.id),
                 Err(err) => s.fail(
                     &e.id,
                     format!(
@@ -153,7 +153,7 @@ pub fn run_frame(root: &Path) -> Score {
         // context can coerce a term to `@json` or alias `@value`/`@type`, hiding a
         // `@json` payload from the document-level comparator's ordered-array rule.
         match json_ld_output_equal(&got, &want, &opts, &NoopLoader) {
-            Ok(()) => s.pass(),
+            Ok(()) => s.pass(&e.id),
             Err(why) => s.fail(&e.id, format!("framed JSON mismatch for {} ({why})", e.id)),
         }
     }
