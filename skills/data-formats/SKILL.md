@@ -81,12 +81,28 @@ first append before acknowledgement. Journal-covered WAL appends defer that barr
 until checkpoint. This also covers existing entries left by an interrupted open;
 opening a clean tree without writes does not sync logs or directories.
 Atomic updates use `commit_txn_ops(&ops)`, materialize through the durable methods,
-then call `finish_txn()`. The journal frame is synced before materialization; per-slot
-WAL appends and named-layout publication defer their syncs to checkpoint. Direct
+then call `finish_txn()`. Outside a group, the journal frame is synced before
+materialization; per-slot WAL appends and named-layout publication defer their syncs
+to checkpoint. Direct
 `apply_delta` calls outside a frame still sync before returning and checkpoint earlier
 frames first. `finish_txn()` checkpoints when retained journal bytes reach the internal
 `JOURNAL_CHECKPOINT_BYTES` limit (128 KiB), bounding recovery work while amortizing
 checkpoint writes across small updates. A single frame can exceed that limit.
+
+For an actor or other serial writer, call `begin_group()?`, run journaled updates
+with their usual materialization and `finish_txn()`, then `commit_group()?` before
+releasing any results. This includes reads that observed a grouped write. The group
+buffers complete journal frames and WAL bytes in memory, writes the journal frames
+together and syncs once, then appends WAL bytes without syncing. Each log opens once
+for the group's append and closes before the next log opens; buffered groups retain
+paths, bytes and shared entry-sync state. Single updates use the same journal writer.
+Nested groups, direct writes, base rewrites and checkpoints are refused while a group
+is active; serialize maintenance after `commit_group()`.
+`rebuild_default` and `replace_default` also refuse an active durable group.
+A failed sync can leave a prefix of unacknowledged frames for recovery.
+A group failure freezes the tree: discard the handle and reopen. Dropping an
+unfinished group does not checkpoint its uncommitted memory. In-memory groups are no-ops.
+
 `clear_txn()` requests an immediate checkpoint: dirty WALs, new slot bases, manifest
 and directory entries become durable before the journal is truncated and synced.
 Base rewrites and saves checkpoint first and refuse unfinished materialization;
