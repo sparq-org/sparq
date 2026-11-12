@@ -14,6 +14,10 @@
 //! `sh:resultMessage` all agree (blank nodes match any blank node — they have
 //! no cross-graph identity).
 
+mod support;
+
+use support::Outcome;
+
 use oxrdf::Term;
 use sparq_core::Graph;
 use sparq_shacl::view::GraphView;
@@ -115,11 +119,6 @@ impl Scoreboard {
     }
 }
 
-enum Outcome {
-    Pass,
-    Fail(String),
-    Skip(String),
-}
 
 fn file_iri(path: &FsPath) -> String {
     format!("file://{}", path.display())
@@ -197,6 +196,10 @@ fn walk_manifest(path: &FsPath, root: &FsPath, score: &mut Scoreboard) {
                 };
                 let outcome = run_entry(&path, &g, &view, &entry)
                     .unwrap_or_else(|e| Outcome::Fail(format!("harness error: {e}")));
+                // The EARL report needs the entry's full IRI, not the root-relative id.
+                if let Term::NamedNode(n) = &entry {
+                    support::earl(n.as_str(), &outcome);
+                }
                 score.record(&suite, &id, outcome);
             }
         }

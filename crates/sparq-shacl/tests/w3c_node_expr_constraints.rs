@@ -29,6 +29,10 @@
 
 #![cfg(feature = "shacl-af")]
 
+mod support;
+
+use support::Outcome;
+
 use oxrdf::Term;
 use sparq_core::Graph;
 use sparq_shacl::view::GraphView;
@@ -99,11 +103,6 @@ struct Scoreboard {
     outcomes: BTreeMap<String, Outcome>,
 }
 
-enum Outcome {
-    Pass,
-    Fail(String),
-    Skip(String),
-}
 
 fn file_iri(path: &FsPath) -> String {
     format!("file://{}", path.display())
@@ -157,6 +156,7 @@ fn walk_manifest(path: &FsPath, score: &mut Scoreboard) {
                 };
                 let outcome = run_entry(&path, &g, &view, &entry)
                     .unwrap_or_else(|e| Outcome::Fail(format!("harness error: {e}")));
+                support::earl(&id, &outcome);
                 score.outcomes.insert(id, outcome);
             }
         }
