@@ -207,11 +207,11 @@ pub(super) fn compiled_expr_has_arith(e: &CompiledExpr) -> bool {
 // since the substrate must not know about the engine's `Value`/`Term`. Everything else is
 // the substrate's `Num` verbatim, so behaviour is unchanged.
 
-/// The numeric value as a TERM in strict canonical form (see [`Num::canonical_lexical`]).
-/// Engine-side because it constructs the engine's `Value`; the value/lexical logic lives in
-/// the shared substrate.
+/// A numeric aggregate result as a term. Decimal canonicalisation is engine-side;
+/// floating tiers retain the conventions of [`Num::canonical_lexical`].
 pub(super) fn num_canonical_term(n: Num) -> Value {
-    Value::Term(Term::Literal(Literal::new_typed_literal(n.canonical_lexical(), n.datatype())))
+    Value::Term(Term::Literal(Literal::new_typed_literal(
+        if matches!(n, Num::Dec(_)) { numeric_lexical(n) } else { n.canonical_lexical() }, n.datatype())))
 }
 
 pub(super) fn effective_boolean(v: &Value, semantics: crate::EbvSemantics) -> bool {
@@ -1575,7 +1575,7 @@ pub(super) fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
         F::Str => match ev(0)? {
             Value::Term(Term::NamedNode(n)) => simple(n.as_str().to_string()),
             Value::Term(Term::Literal(l)) => simple(l.value().to_string()),
-            Value::Num(n) => simple(n.lexical()),
+            Value::Num(n) => simple(numeric_lexical(n)),
             Value::Bool(b) => simple(b.to_string()),
             _ => Value::Error,
         },
@@ -1712,7 +1712,7 @@ pub(super) fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
             _ => Value::Bool(false),
         },
         // ABS/CEIL/FLOOR/ROUND preserve the argument's numeric DATATYPE
-        // (CEIL("2.5"^^xsd:decimal) is "3"^^xsd:decimal, not xsd:integer).
+        // (CEIL("2.5"^^xsd:decimal) is "3.0"^^xsd:decimal, not xsd:integer).
         F::Abs => as_numeric(&ev(0)?).and_then(|n| numeric_capacity::unary(n, Num::abs)).map(Value::Num).unwrap_or(Value::Error),
         F::Ceil => as_numeric(&ev(0)?).and_then(|n| numeric_capacity::unary(n, Num::ceil)).map(Value::Num).unwrap_or(Value::Error),
         F::Floor => as_numeric(&ev(0)?).and_then(|n| numeric_capacity::unary(n, Num::floor)).map(Value::Num).unwrap_or(Value::Error),
@@ -2337,19 +2337,90 @@ pub(super) fn plain_min1(f: f64) -> String {
     }
 }
 
-/// A decimal lexical with trailing fraction zeros trimmed but AT LEAST one fraction
-/// digit kept ("33.3300" -> "33.33", "0" -> "0.0") — the xsd:decimal cast convention.
-pub(super) fn dec_trim_min1(d: Dec) -> String {
-    let mut d = d;
-    while d.scale > 1 && d.mant % 10 == 0 {
-        d.mant /= 10;
-        d.scale -= 1;
+/// XSD 1.1 canonical mapping for a validated, plain decimal lexical. This is
+/// only for computed values; asserted RDF literals must retain their spelling.
+fn canonical_decimal_lexical(mut lexical: String) -> String {
+    if lexical.starts_with('+') {
+        lexical.remove(0);
     }
-    if d.scale == 0 {
-        // Adding a lexical fraction digit must not overflow the numeric mantissa.
-        return format!("{}.0", d.mant);
+    let sign = usize::from(lexical.starts_with('-'));
+    let zeros = lexical[sign..].bytes().take_while(|b| *b == b'0').count();
+    if zeros > 0 {
+        // Retain one zero when the integer part is entirely zero.
+        let remove = if lexical
+            .as_bytes()
+            .get(sign + zeros)
+            .is_some_and(u8::is_ascii_digit)
+        {
+            zeros
+        } else {
+            zeros - 1
+        };
+        lexical.drain(sign..sign + remove);
     }
-    d.lexical()
+    if lexical.as_bytes().get(sign) == Some(&b'.') {
+        lexical.insert(sign, '0');
+    }
+    if let Some(point) = lexical.find('.') {
+        let end = lexical.trim_end_matches('0').len().max(point + 2);
+        lexical.truncate(end);
+        if lexical.ends_with('.') {
+            lexical.push('0');
+        }
+    } else {
+        lexical.push_str(".0");
+    }
+    if lexical == "-0.0" {
+        lexical.remove(0);
+    }
+    lexical
+}
+
+#[cfg(test)]
+mod canonical_decimal_tests {
+    use super::canonical_decimal_lexical;
+
+    #[test]
+    fn canonical_mapping() {
+        for (lexical, expected) in [
+            ("+0001.5000", "1.5"),
+            ("000100", "100.0"),
+            (".500", "0.5"),
+            ("-02.2500", "-2.25"),
+            ("-0.0000", "0.0"),
+            ("-000", "0.0"),
+            ("0", "0.0"),
+            ("1.", "1.0"),
+            ("1.0", "1.0"),
+            (
+                "100000000000000000000000000000000000000000.000",
+                "100000000000000000000000000000000000000000.0",
+            ),
+            (
+                "-0.00000000000000000000000000000000000000000010",
+                "-0.0000000000000000000000000000000000000000001",
+            ),
+        ] {
+            assert_eq!(
+                canonical_decimal_lexical(lexical.to_string()),
+                expected,
+                "{lexical}"
+            );
+            assert_eq!(
+                canonical_decimal_lexical(expected.to_string()),
+                expected,
+                "idempotence"
+            );
+        }
+    }
+}
+
+/// Numeric result spelling, with decimal canonicalisation confined to the engine.
+pub(super) fn numeric_lexical(n: Num) -> String {
+    match n {
+        Num::Dec(d) => canonical_decimal_lexical(d.lexical()),
+        _ => n.lexical(),
+    }
 }
 
 /// Trim ALL trailing fraction zeros ("0.0" -> "0", "2.50" -> "2.5") — the xsd:string
@@ -2366,8 +2437,8 @@ pub(super) fn dec_trim(d: Dec) -> String {
 /// The XSD constructor-cast table. `None` when `target` is not a recognised cast IRI
 /// (the caller reports an unsupported function); `Some(Value::Error)` for a cast that
 /// fails per XPath (invalid source lexical, wrong source type, NaN/INF to exact types).
-/// The result LEXICAL forms follow the conventions of the W3C cast test expected
-/// results (which track the reference implementations), varying by source type.
+/// Decimal results use the XSD 1.1 canonical mapping. Other result lexical
+/// forms follow the conventions of the W3C cast test expected results.
 pub(super) fn eval_cast(target: &str, v: &Value) -> Option<Value> {
     // The source as a STRING lexical only when it is a simple/xsd:string literal
     // (language-tagged literals and non-string types are NOT castable as strings).
@@ -2479,15 +2550,12 @@ pub(super) fn eval_cast(target: &str, v: &Value) -> Option<Value> {
         }
         if let Some(n) = src_num() {
             return Some(match n {
-                // integer -> N.0 (zero prints bare, per the reference results)
-                Num::Int(0) => typed("0".to_string(), xsd::DECIMAL),
                 Num::Int(i) => typed(format!("{i}.0"), xsd::DECIMAL),
-                // decimal -> decimal keeps its lexical
-                Num::Dec(d) => typed(d.lexical(), xsd::DECIMAL),
+                Num::Dec(d) => typed(numeric_lexical(Num::Dec(d)), xsd::DECIMAL),
                 Num::Float(_) | Num::Double(_) => {
                     let f = n.f64();
                     if f.is_finite() {
-                        typed(plain_min1(f), xsd::DECIMAL)
+                        typed(canonical_decimal_lexical(plain_min1(f)), xsd::DECIMAL)
                     } else {
                         Value::Error
                     }
@@ -2499,7 +2567,7 @@ pub(super) fn eval_cast(target: &str, v: &Value) -> Option<Value> {
         return Some(
             src_str()
                 .and_then(|s| numeric_capacity::decimal_cast(&s))
-                .map(|d| typed(dec_trim_min1(d), xsd::DECIMAL))
+                .map(|d| typed(numeric_lexical(Num::Dec(d)), xsd::DECIMAL))
                 .unwrap_or(Value::Error),
         );
     }
@@ -2826,12 +2894,8 @@ pub(super) fn datetime_field(v: &Value, idx: usize) -> Value {
                 None => {
                     // Accessor output is lexical, not bounded-decimal arithmetic.
                     // Preserve every validated fractional digit without f64/i128 rounding.
-                    let (whole, fraction) = lex.split_once('.').unwrap_or((lex, ""));
-                    let whole = whole.trim_start_matches('0');
-                    let fraction = fraction.trim_end_matches('0');
                     Value::Term(Term::Literal(Literal::new_typed_literal(
-                        format!("{}.{}", if whole.is_empty() { "0" } else { whole },
-                            if fraction.is_empty() { "0" } else { fraction }),
+                        canonical_decimal_lexical(lex.to_string()),
                         xsd::DECIMAL,
                     )))
                 }
@@ -2889,7 +2953,7 @@ pub(super) fn value_str(v: &Value) -> Option<String> {
         Value::Term(Term::NamedNode(n)) => Some(n.as_str().to_string()),
         Value::Term(Term::BlankNode(b)) => Some(b.as_str().to_string()),
         Value::Bool(b) => Some(b.to_string()),
-        Value::Num(n) => Some(n.lexical()),
+        Value::Num(n) => Some(numeric_lexical(*n)),
         Value::Unbound | Value::Error => None,
         Value::Term(_) => None,
     }
@@ -2907,7 +2971,7 @@ pub(super) fn num_to_id(graph: &Graph, n: Num) -> Result<Id, String> {
             return Ok(id);
         }
     }
-    let lex = n.lexical();
+    let lex = numeric_lexical(n);
     match graph.dict().lookup_lit(&lex, n.datatype().as_str(), None) {
         NO_ID => Err(lex),
         id => Ok(id),
@@ -2961,7 +3025,7 @@ pub(super) fn value_as_term(v: &Value) -> Option<Term> {
     Some(match v {
         Value::Unbound | Value::Error => return None,
         Value::Bool(b) => Term::Literal(Literal::new_typed_literal(b.to_string(), xsd::BOOLEAN)),
-        Value::Num(n) => Term::Literal(Literal::new_typed_literal(n.lexical(), n.datatype())),
+        Value::Num(n) => Term::Literal(Literal::new_typed_literal(numeric_lexical(*n), n.datatype())),
         Value::Term(t) => t.clone(),
     })
 }

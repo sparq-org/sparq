@@ -17,6 +17,13 @@ permutation-indexed in-memory RDF store). You load RDF into a `Graph`, then call
 `sparq_engine` to run SELECT/ASK/CONSTRUCT/DESCRIBE and SPARQL Update. Results come back either as a
 typed `QueryResult` (rows of `Option<oxrdf::Term>`) or directly as a SPARQL-1.1-JSON string.
 
+Computed `xsd:decimal` results (arithmetic, SUM/AVG, numeric functions, SECONDS,
+and decimal casts) use the [XSD 1.1 canonical mapping](https://www.w3.org/TR/xmlschema11-2/#decimal-canonical-representation):
+`2.0 * 3.280840` returns `"6.56168"^^xsd:decimal`; integral results retain `.0`
+and zero is `0.0`. Plain projections of data/query literals preserve their exact
+lexical form, as do MIN/MAX/SAMPLE when they select an input term. Result writers
+preserve those terms; they do not canonicalise asserted literals.
+
 [Correlated EXISTS with MINUS](exists-minus.md) documents the bounded published-2013
 solution-domain correction and the remaining native practical fallbacks.
 

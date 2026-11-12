@@ -70,8 +70,8 @@
 //!   included) → type error.
 //! * three-valued logic is exactly SPARQL's: `err||true=true`, `err||false=err`,
 //!   `err&&false=false`, `!err=err`; a FILTER error drops the row.
-//! * `BIND` arithmetic: int+int → canonical integer; decimal+int keeps the operand's
-//!   scale ("1.50"+1 → "2.50"); a type-error BIND leaves the variable UNBOUND and
+//! * `BIND` arithmetic: int+int → canonical integer; decimal+int uses the canonical
+//!   decimal spelling ("1.50"+1 → "2.5"); a type-error BIND leaves the variable UNBOUND and
 //!   keeps the row. Computed booleans render as `"true|false"^^xsd:boolean`.
 //! * computed xsd:double lexicals (sq-ilweo): a double+int BIND promotes to double
 //!   and renders via the arithmetic convention (`Num::lexical` → `fmt_xsd_double`):
@@ -161,8 +161,8 @@ enum T {
     /// language-tagged string: (lexical, lowercase tag).
     Lang(String, String),
     Int(i64),
-    /// xsd:decimal as (mantissa, scale), scale ≥ 1; lexical is the canonical
-    /// scaled rendering (`render_dec`).
+    /// xsd:decimal as (mantissa, scale), scale ≥ 1; lexical preserves the
+    /// supplied scale (`render_dec`), including for asserted non-canonical terms.
     Dec(i128, u32),
     /// xsd:double as (lexical form, value): data-sourced from the fixed pool, or
     /// computed by a `PlusK` BIND (lexical via `fmt_double_oracle` — sq-ilweo).
@@ -710,7 +710,15 @@ fn eval_bind(b: &Bind, row: &Row) -> Option<T> {
     match b {
         Bind::PlusK(v, k) => match row[*v as usize].as_ref()? {
             T::Int(n) => Some(T::Int(n + k)),
-            T::Dec(m, s) => Some(T::Dec(m + (*k as i128) * 10i128.pow(*s), *s)),
+            T::Dec(m, s) => {
+                let mut mantissa = m + (*k as i128) * 10i128.pow(*s);
+                let mut scale = *s;
+                while scale > 1 && mantissa % 10 == 0 {
+                    mantissa /= 10;
+                    scale -= 1;
+                }
+                Some(T::Dec(mantissa, scale))
+            },
             // double + int promotes to double (XPath promotion); the computed
             // lexical is re-derived independently of the engine (sq-ilweo).
             T::Dbl(_, v) => {
@@ -1652,7 +1660,7 @@ fn oracle_known_answer_bind_forms() {
     let cells: std::collections::HashSet<String> =
         oracle.iter().map(|r| r[2].clone().unwrap_or_else(|| "UNBOUND".to_string())).collect();
     assert!(cells.contains(&format!("\"42\"^^<{}integer>", XSD)), "int + 1");
-    assert!(cells.contains(&format!("\"2.50\"^^<{}decimal>", XSD)), "decimal scale preserved");
+    assert!(cells.contains(&format!("\"2.5\"^^<{}decimal>", XSD)), "computed decimal is canonical");
     assert!(cells.contains("UNBOUND"), "type-error BIND leaves the var unbound");
 }
 

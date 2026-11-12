@@ -223,13 +223,13 @@ fn xsd_decimal_from_bool() {
     );
 }
 
-/// `xsd:decimal` from integer 0 (special Num::Int(0) → bare "0" arm).
+/// `xsd:decimal` from integer zero uses the canonical "0.0" spelling.
 #[test]
 fn xsd_decimal_from_integer_zero() {
     let pfx = "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ";
     assert_eq!(
         sel(&format!("{}SELECT (xsd:decimal(0) AS ?v) WHERE {{}}", pfx)),
-        Some(typed_lit("0", "decimal"))
+        Some(typed_lit("0.0", "decimal"))
     );
 }
 
@@ -256,8 +256,8 @@ fn xsd_decimal_from_decimal() {
     );
 }
 
-/// `xsd:decimal` from a string (src_str → dec_trim_min1 arm): trailing zeros
-/// are trimmed but at least one fraction digit is kept.
+/// `xsd:decimal` from a string: trailing zeros are trimmed, retaining
+/// at least one fraction digit.
 #[test]
 fn xsd_decimal_from_string() {
     let pfx = "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ";
@@ -717,7 +717,7 @@ fn xsd_decimal_from_infinite_float() {
     );
 }
 
-/// `xsd:decimal` from an integer-string "3" (dec_trim_min1 scale-0 arm): forces
+/// `xsd:decimal` from an integer-string "3": canonicalisation forces
 /// at least one fraction digit → "3.0".
 #[test]
 fn xsd_decimal_from_integer_string() {
@@ -895,7 +895,7 @@ fn datetime_accessors() {
     // SECONDS returns a decimal
     assert_eq!(
         sel(&format!("{}SELECT (SECONDS({}) AS ?v) WHERE {{}}", pfx, dt)),
-        Some(typed_lit("45", "decimal"))
+        Some(typed_lit("45.0", "decimal"))
     );
 }
 
