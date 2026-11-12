@@ -253,11 +253,11 @@ fn datetime_accessors_read_validated_components() {
     let graph = Graph::load_str("", "ntriples").unwrap();
     for (lexical, expected) in [
         ("-0044-03-15T12:30:05.250+01:00", ["-44", "3", "15", "12", "30", "5.25"]),
-        ("2023-12-31T24:00:00Z", ["2024", "1", "1", "0", "0", "0.0"]),
+        ("2023-12-31T24:00:00Z", ["2024", "1", "1", "0", "0", "0"]),
         // XSD 1.1 year zero: a leap year, reached from 1 BCE's last midnight.
-        ("-0001-12-31T24:00:00Z", ["0", "1", "1", "0", "0", "0.0"]),
-        ("0000-02-29T01:02:03Z", ["0", "2", "29", "1", "2", "3.0"]),
-        ("123456-02-28T07:08:09", ["123456", "2", "28", "7", "8", "9.0"]),
+        ("-0001-12-31T24:00:00Z", ["0", "1", "1", "0", "0", "0"]),
+        ("0000-02-29T01:02:03Z", ["0", "2", "29", "1", "2", "3"]),
+        ("123456-02-28T07:08:09", ["123456", "2", "28", "7", "8", "9"]),
     ] {
         let query = format!(
             "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (YEAR(?d) AS ?y) (MONTH(?d) AS ?mo) (DAY(?d) AS ?da) (HOURS(?d) AS ?h) (MINUTES(?d) AS ?mi) (SECONDS(?d) AS ?s) {{ BIND(\"{lexical}\"^^xsd:dateTime AS ?d) }}"

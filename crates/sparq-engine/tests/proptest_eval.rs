@@ -70,9 +70,9 @@
 //!   included) → type error.
 //! * three-valued logic is exactly SPARQL's: `err||true=true`, `err||false=err`,
 //!   `err&&false=false`, `!err=err`; a FILTER error drops the row.
-//! * `BIND` arithmetic: int+int → canonical integer; decimal+int uses the canonical
-//!   decimal spelling ("1.50"+1 → "2.5"); a type-error BIND leaves the variable UNBOUND and
-//!   keeps the row. Computed booleans render as `"true|false"^^xsd:boolean`.
+//! * `BIND` arithmetic: int+int → canonical integer; decimal+int trims trailing
+//!   fractional zeros beyond the first digit ("1.50"+1 → "2.5"); a type-error BIND
+//!   leaves the variable UNBOUND and keeps the row. Computed booleans render as `"true|false"^^xsd:boolean`.
 //! * computed xsd:double lexicals (sq-ilweo): a double+int BIND promotes to double
 //!   and renders via the arithmetic convention (`Num::lexical` → `fmt_xsd_double`):
 //!   `NaN`/`INF`/`-INF` keep their XSD spellings; an INTEGRAL value with |v| < 1e15
@@ -1660,7 +1660,7 @@ fn oracle_known_answer_bind_forms() {
     let cells: std::collections::HashSet<String> =
         oracle.iter().map(|r| r[2].clone().unwrap_or_else(|| "UNBOUND".to_string())).collect();
     assert!(cells.contains(&format!("\"42\"^^<{}integer>", XSD)), "int + 1");
-    assert!(cells.contains(&format!("\"2.5\"^^<{}decimal>", XSD)), "computed decimal is canonical");
+    assert!(cells.contains(&format!("\"2.5\"^^<{}decimal>", XSD)), "computed decimal fraction is trimmed");
     assert!(cells.contains("UNBOUND"), "type-error BIND leaves the var unbound");
 }
 

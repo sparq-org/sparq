@@ -200,21 +200,21 @@ fn numeric_builtins() {
         },
         Row {
             builtin: "CEIL",
-            valid: ("CEIL(2.1)", "\"3.0\"^^<http://www.w3.org/2001/XMLSchema#decimal>"),
+            valid: ("CEIL(2.1)", "\"3\"^^<http://www.w3.org/2001/XMLSchema#decimal>"),
             type_err: "CEIL(\"foo\")",
-            boundary: Some(("CEIL(-2.1)", "\"-2.0\"^^<http://www.w3.org/2001/XMLSchema#decimal>")),
+            boundary: Some(("CEIL(-2.1)", "\"-2\"^^<http://www.w3.org/2001/XMLSchema#decimal>")),
         },
         Row {
             builtin: "FLOOR",
-            valid: ("FLOOR(2.9)", "\"2.0\"^^<http://www.w3.org/2001/XMLSchema#decimal>"),
+            valid: ("FLOOR(2.9)", "\"2\"^^<http://www.w3.org/2001/XMLSchema#decimal>"),
             type_err: "FLOOR(<http://ex/o>)",
-            boundary: Some(("FLOOR(-2.1)", "\"-3.0\"^^<http://www.w3.org/2001/XMLSchema#decimal>")),
+            boundary: Some(("FLOOR(-2.1)", "\"-3\"^^<http://www.w3.org/2001/XMLSchema#decimal>")),
         },
         Row {
             builtin: "ROUND",
-            valid: ("ROUND(2.4)", "\"2.0\"^^<http://www.w3.org/2001/XMLSchema#decimal>"),
+            valid: ("ROUND(2.4)", "\"2\"^^<http://www.w3.org/2001/XMLSchema#decimal>"),
             type_err: "ROUND(\"foo\")",
-            boundary: Some(("ROUND(2.5)", "\"3.0\"^^<http://www.w3.org/2001/XMLSchema#decimal>")),
+            boundary: Some(("ROUND(2.5)", "\"3\"^^<http://www.w3.org/2001/XMLSchema#decimal>")),
         },
     ];
     run_table(&table);
@@ -315,7 +315,7 @@ fn datetime_builtins() {
         mk("DAY", "15", "integer"),
         mk("HOURS", "13", "integer"),
         mk("MINUTES", "45", "integer"),
-        mk("SECONDS", "30.0", "decimal"),
+        mk("SECONDS", "30", "decimal"),
         Row {
             builtin: "TZ",
             // No timezone in the lexical form → empty simple literal (NOT an error).
