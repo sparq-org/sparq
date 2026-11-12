@@ -79,6 +79,10 @@ pub enum FactDomain {
 /// ill-formed — e.g. an unparsable path) are skipped rather than failing; use
 /// [`validate_strict`] to report ill-formed constructs as a failure instead
 /// (the W3C test-suite `sht:Failure` outcome). (sq-11a)
+///
+/// SHACL queries use a validation-scoped function registry containing the shapes'
+/// custom functions. This temporarily replaces any ambient engine function registry;
+/// the ambient registry is restored when validation returns.
 pub fn validate(data: &Graph, shapes: &Graph) -> ValidationReport {
     let model = ShapesModel::parse(shapes);
     validate_with_model(data, &model)
@@ -92,7 +96,7 @@ pub fn validate(data: &Graph, shapes: &Graph) -> ValidationReport {
 /// when present, falling back to the default {Violation, Warning, Info} set.
 pub fn validate_with_model(data: &Graph, model: &ShapesModel) -> ValidationReport {
     let ((results, mut diagnostics), failures) =
-        functions::with_validation(&model.source, || eval::validate_graph(data, model));
+        functions::with_validation(data, &model.source, || eval::validate_graph(data, model));
     diagnostics.extend(failures.into_iter().map(|node| ShapeDiagnostic {
         source_shape: node,
         source_component: model::sh("failure"),
@@ -1204,6 +1208,46 @@ mod tests {
             .filter(|r| r.source_component.ends_with("SPARQLConstraintComponent"))
             .count();
         assert_eq!(sparql_hits, 30, "expected 30 negative-age violations");
+    }
+
+    #[test]
+    fn scope_and_exists_batching_matches_per_focus_including_blank_foci() {
+        let data = Graph::load_str(
+            r#"
+            @prefix ex: <urn:ex:> .
+            ex:root ex:focus ex:a, ex:b, ex:c, _:good, _:bad .
+            ex:a ex:p 1, 2; ex:q 1 . ex:b ex:p 2 .
+            _:good ex:p 1, 2; ex:q 1 .
+        "#,
+            "turtle",
+        )
+        .unwrap();
+        for (body, batchable, expected) in [
+            ("SELECT $this WHERE { FILTER NOT EXISTS {$this <urn:ex:p> ?v} }", true, 2),
+            ("SELECT $this WHERE { FILTER EXISTS {$this <urn:ex:q> ?v} }", true, 2),
+            ("SELECT $this ?value WHERE { $this <urn:ex:p> ?value FILTER NOT EXISTS {$this <urn:ex:q> ?value} }", true, 3),
+            ("SELECT $this WHERE { FILTER EXISTS {OPTIONAL {$this <urn:ex:p> ?v} FILTER(!BOUND(?v))} }", true, 2),
+            ("SELECT $this WHERE { {SELECT $this ?v WHERE {$this <urn:ex:p> ?v}} FILTER(?v = 2) }", true, 3),
+            ("SELECT $this WHERE { {SELECT $this (COUNT(*) AS ?n) WHERE {$this <urn:ex:p> ?v} GROUP BY $this} FILTER(?n > 1) }", true, 2),
+            ("SELECT $this WHERE { OPTIONAL {{SELECT ?v WHERE {$this <urn:ex:p> ?v}}} FILTER(!BOUND(?v)) }", false, 2),
+            ("SELECT $this ?v WHERE {$this <urn:ex:p> ?v} LIMIT 1", false, 3),
+            ("SELECT $this WHERE { OPTIONAL {{SELECT $this ?v WHERE {$this <urn:ex:p> ?v} LIMIT 1}} FILTER(!BOUND(?v)) }", false, 2),
+            ("SELECT (COUNT(?v) AS ?n) WHERE {$this <urn:ex:p> ?v}", false, 5),
+        ] {
+            let shapes = Graph::load_str(&format!(r#"
+                @prefix sh: <http://www.w3.org/ns/shacl#> .
+                <urn:S> sh:targetObjectsOf <urn:ex:focus>; sh:sparql [sh:select """{body}"""] .
+            "#), "turtle").unwrap();
+            let model = ShapesModel::parse(&shapes);
+            assert_eq!(model.sparql[0].prepared.as_ref().unwrap().is_batchable(), batchable, "{body}");
+            let before = sparql::exec_count();
+            let batched = validate_with_model(&data, &model);
+            assert_eq!(sparql::exec_count() - before, if batchable { 3 } else { 5 }, "{body}");
+            let per_focus = eval::with_sparql_batching_disabled(|| validate_with_model(&data, &model));
+            assert_eq!(batched.results.len(), expected, "{body}");
+            assert_eq!(batched.conforms, per_focus.conforms, "{body}");
+            assert_eq!(result_keys(&batched), result_keys(&per_focus), "{body}");
+        }
     }
 
     /// (sq-7d3dj.33.1) Local, NON-canonical measurement of the batched vs

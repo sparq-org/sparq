@@ -439,6 +439,14 @@ Beyond `sh:targetNode`/`Class`/`SubjectsOf`/`ObjectsOf` + implicit class targets
 - A constraint-level **`sh:severity`** on a `sh:SPARQLConstraint` overrides the shape's
   default severity for the results it produces.
 
+`$shapesGraph` is bound to a fresh blank node naming the shapes graph for this
+validation. That named graph is exposed only to queries referencing `$shapesGraph`;
+other queries, including `GRAPH ?g`, see the original data dataset.
+
+Validation installs a scoped engine function registry. It temporarily replaces any
+ambient registry installed with `sparq_engine::with_functions`; ambient functions
+are unavailable to SHACL queries and the previous registry is restored afterwards.
+
 Custom SPARQL functions declared as `sh:ListParameterExpressionFunction` are
 available during validation. Supported body expressions include `shnex:arg`,
 `shnex:count`, `shnex:instancesOf`, `sh:select` and `sh:sparqlExpr`. A call must

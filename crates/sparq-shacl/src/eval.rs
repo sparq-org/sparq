@@ -2323,12 +2323,11 @@ impl<'a> Validator<'a> {
 
         // Parameter pre-bindings, common to every value node / the SELECT run.
         // `$paramName` ← bound arg; absent optionals contribute no binding.
-        let mut param_bindings: Vec<(String, Term)> = Vec::with_capacity(args.len());
-        for (p, arg) in comp.parameters.iter().zip(args.iter()) {
-            if let Some(term) = arg {
-                param_bindings.push((p.var.clone(), term.clone()));
-            }
-        }
+        let param_bindings = comp
+            .parameters
+            .iter()
+            .zip(args.iter())
+            .filter_map(|(p, arg)| arg.as_ref().map(|term| (p.var.as_str(), term)));
         // `$PATH` (SHACL §6.3): a property PATH, not a term, so it cannot ride the
         // VALUES table the `$this`/`$value`/`$paramName` bindings use. Instead the
         // chosen validator is RE-PARSED per property shape with the path's SPARQL
@@ -2347,8 +2346,8 @@ impl<'a> Validator<'a> {
                 // violation reported on that value (SHACL §6.3).
                 for v in values {
                     let mut bindings: Vec<(&str, &Term)> = vec![("this", focus), ("value", v)];
-                    for (name, term) in &param_bindings {
-                        bindings.push((name.as_str(), term));
+                    for (name, term) in param_bindings.clone() {
+                        bindings.push((name, term));
                     }
                     if crate::sparql::ask_violates(query, data, &bindings) {
                         let result_messages =
@@ -2380,8 +2379,8 @@ impl<'a> Validator<'a> {
             PreparedValidator::Select(query) => {
                 // One SELECT per focus node; each solution is a violation.
                 let mut bindings: Vec<(&str, &Term)> = vec![("this", focus)];
-                for (name, term) in &param_bindings {
-                    bindings.push((name.as_str(), term));
+                for (name, term) in param_bindings {
+                    bindings.push((name, term));
                 }
                 crate::sparql::select_validate(
                     query,

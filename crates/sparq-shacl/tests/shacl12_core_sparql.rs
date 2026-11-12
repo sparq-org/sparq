@@ -386,3 +386,35 @@ SELECT $this ?value WHERE {
         Some(Literal::new_simple_literal("false false false urn:ex:ok").into())
     );
 }
+
+#[test]
+fn graph_variable_does_not_enumerate_the_shapes_graph() {
+    let mut data = graph("ex:a ex:p 1 .");
+    data.add_named(iri("dataGraph"), graph("ex:b ex:q 2 ."))
+        .unwrap();
+    let shapes = graph(
+        r#"
+        ex:S sh:targetNode ex:a; sh:sparql
+            [sh:select "SELECT $this WHERE { GRAPH $shapesGraph {?s ?p ?o} FILTER(false) }"],
+            [sh:select "SELECT $this ?value WHERE { GRAPH ?g {?s ?p ?value} }"] .
+    "#,
+    );
+    let report = validate_strict(&data, &shapes).unwrap();
+    assert_eq!(report.results.len(), 1);
+    assert_eq!(report.results[0].value, Some(Literal::from(2).into()));
+    let empty = graph("");
+    assert!(validate_strict(&empty, &shapes).unwrap().conforms);
+}
+
+#[test]
+fn validation_restores_the_ambient_function_registry() {
+    let data = graph("");
+    let shapes = constraint("SELECT $this WHERE {FILTER(BOUND($this))}");
+    let mut ambient = sparq_engine::FunctionRegistry::new();
+    ambient.register("urn:ambient", |_| Ok(Literal::from(7).into()));
+    sparq_engine::with_functions(&ambient, || {
+        assert_eq!(validate(&data, &shapes).results.len(), 1);
+        let result = sparq_engine::query(&data, "SELECT (<urn:ambient>() AS ?v) WHERE {}").unwrap();
+        assert_eq!(result.rows[0][0], Some(Literal::from(7).into()));
+    });
+}

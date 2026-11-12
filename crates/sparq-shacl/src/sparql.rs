@@ -114,6 +114,8 @@ pub(crate) struct PreparedSparql {
     query: PreparedQuery,
     /// Whether the query has no scope/modifier requiring per-focus evaluation.
     batchable: bool,
+    shapes_graph: bool,
+    current_shape: bool,
 }
 
 impl PreparedSparql {
@@ -136,11 +138,15 @@ impl PreparedSparql {
             other => other,
         };
         check_pre_binding(body, PRE_BOUND_THIS)?;
-        let batchable = query_batchable(pattern)
-            && !scope_boundary(body)
-            && !constraint.select.contains("shapesGraph")
-            && !constraint.select.contains("currentShape");
-        Ok(Some(PreparedSparql { query, batchable }))
+        let shapes_graph = mentions_variable(pattern, "shapesGraph");
+        let current_shape = mentions_variable(pattern, "currentShape");
+        let batchable = query_batchable(pattern) && !shapes_graph && !current_shape;
+        Ok(Some(PreparedSparql {
+            query,
+            batchable,
+            shapes_graph,
+            current_shape,
+        }))
     }
 
     /// (sq-7d3dj.33.1) Whether this constraint may be evaluated for all
@@ -165,20 +171,30 @@ impl PreparedSparql {
         mut make_result: impl FnMut(ResultFields) -> ValidationResult,
         out: &mut Vec<ValidationResult>,
     ) {
-        let shapes_graph = crate::functions::shapes_graph();
-        let mut bindings = vec![("this", focus)];
-        if let Some(shape) = &constraint.current_shape {
-            bindings.push(("currentShape", shape));
+        let shapes_graph = self
+            .shapes_graph
+            .then(crate::functions::shapes_graph)
+            .flatten();
+        let mut bindings = [("this", focus); 3];
+        let mut binding_count = 1;
+        if self.current_shape {
+            if let Some(shape) = &constraint.current_shape {
+                bindings[binding_count] = ("currentShape", shape);
+                binding_count += 1;
+            }
         }
-        if let Some(name) = &shapes_graph {
-            bindings.push(("shapesGraph", name));
+        if self.shapes_graph {
+            if let Some(name) = &shapes_graph {
+                bindings[binding_count] = ("shapesGraph", name);
+                binding_count += 1;
+            }
         }
-        let Some(bound) = pre_bind_select(self.query.query(), &bindings) else {
+        let Some(bound) = pre_bind_select(self.query.query(), &bindings[..binding_count]) else {
             return; // focus node not expressible as a VALUES ground term (unreachable today)
         };
         bump_exec_count();
         let prepared = self.query.with_query(bound);
-        let Ok(result) = crate::functions::query(data, &prepared) else {
+        let Ok(result) = crate::functions::query(data, &prepared, self.shapes_graph) else {
             return; // a runtime query error → no solutions (lenient; never panics validate())
         };
         // Map QueryResult var positions to our cached projection indices: the
@@ -216,7 +232,7 @@ impl PreparedSparql {
         let mut grouped: FxHashMap<Term, Vec<ValidationResult>> = FxHashMap::default();
         let ground: Vec<&Term> = foci
             .iter()
-            .filter(|f| term_to_ground(f).is_some())
+            .filter(|f| is_ground(f))
             .collect();
         for f in &ground {
             grouped.entry((*f).clone()).or_default();
@@ -227,7 +243,7 @@ impl PreparedSparql {
             };
             bump_exec_count();
             let prepared = self.query.with_query(bound);
-            let Ok(result) = crate::functions::query(data, &prepared) else {
+            let Ok(result) = crate::functions::query(data, &prepared, false) else {
                 continue; // runtime query error → no solutions for this chunk (lenient)
             };
             let pos = |name: &str| result.vars.iter().position(|v| v.as_str() == name);
@@ -317,18 +333,138 @@ fn row_to_fields(
     }
 }
 
-/// Top-level solution modifiers that can safely share a multi-focus table.
-/// `scope_boundary` separately excludes nested scopes and correlated EXISTS.
+/// A shared focus table is safe while every scope retains the partition key.
 fn query_batchable(pattern: &GraphPattern) -> bool {
+    partitioned(pattern, true)
+}
+
+fn partitioned(pattern: &GraphPattern, outer_projection: bool) -> bool {
+    let expr_safe = |expr: &Expression| {
+        let mut safe = true;
+        walk_expr(&mut expr.clone(), &mut |p| safe &= partitioned(p, false));
+        safe
+    };
     match pattern {
         GraphPattern::Slice { .. } | GraphPattern::Reduced { .. } => false,
-        GraphPattern::Group { variables, .. } => variables.iter().any(|v| v.as_str() == "this"),
+        GraphPattern::Project { inner, variables } => {
+            (outer_projection || variables.iter().any(|v| v.as_str() == "this"))
+                && partitioned(inner, false)
+        }
+        GraphPattern::Group {
+            inner,
+            variables,
+            aggregates,
+        } => {
+            variables.iter().any(|v| v.as_str() == "this")
+                && partitioned(inner, false)
+                && aggregates.iter().all(|(_, a)| match a {
+                    spargebra::algebra::AggregateExpression::FunctionCall { expr, .. } => {
+                        expr_safe(expr)
+                    }
+                    _ => true,
+                })
+        }
+        GraphPattern::Filter { inner, expr }
+        | GraphPattern::Extend {
+            inner,
+            expression: expr,
+            ..
+        } => expr_safe(expr) && partitioned(inner, outer_projection),
+        GraphPattern::LeftJoin {
+            left,
+            right,
+            expression,
+        } => {
+            expression.as_ref().is_none_or(expr_safe)
+                && partitioned(left, false)
+                && partitioned(right, false)
+        }
+        GraphPattern::Join { left, right }
+        | GraphPattern::Union { left, right }
+        | GraphPattern::Minus { left, right }
+        | GraphPattern::Lateral { left, right } => {
+            partitioned(left, false) && partitioned(right, false)
+        }
+        GraphPattern::OrderBy { inner, expression } => {
+            expression.iter().all(|e| match e {
+                spargebra::algebra::OrderExpression::Asc(e)
+                | spargebra::algebra::OrderExpression::Desc(e) => expr_safe(e),
+            }) && partitioned(inner, outer_projection)
+        }
         GraphPattern::Distinct { inner }
-        | GraphPattern::OrderBy { inner, .. }
-        | GraphPattern::Extend { inner, .. }
-        | GraphPattern::Filter { inner, .. }
-        | GraphPattern::Project { inner, .. } => query_batchable(inner),
-        _ => true,
+        | GraphPattern::Graph { inner, .. }
+        | GraphPattern::Service { inner, .. } => partitioned(inner, outer_projection),
+        GraphPattern::Bgp { .. } | GraphPattern::Path { .. } | GraphPattern::Values { .. } => true,
+    }
+}
+
+// Include references in expressions and hidden subqueries, not just output variables.
+fn mentions_variable(pattern: &GraphPattern, name: &str) -> bool {
+    let mut found = false;
+    pattern.on_in_scope_variable(|v| found |= v.as_str() == name);
+    if found {
+        return true;
+    }
+    let expr_mentions = |e: &Expression| expression_mentions(e, name);
+    match pattern {
+        GraphPattern::Filter { inner, expr }
+        | GraphPattern::Extend { inner, expression: expr, .. } => {
+            expr_mentions(expr) || mentions_variable(inner, name)
+        }
+        GraphPattern::LeftJoin { left, right, expression } => {
+            expression.as_ref().is_some_and(expr_mentions)
+                || mentions_variable(left, name) || mentions_variable(right, name)
+        }
+        GraphPattern::Join { left, right } | GraphPattern::Union { left, right }
+        | GraphPattern::Minus { left, right } | GraphPattern::Lateral { left, right } => {
+            mentions_variable(left, name) || mentions_variable(right, name)
+        }
+        GraphPattern::OrderBy { inner, expression } => {
+            expression.iter().any(|e| match e {
+                spargebra::algebra::OrderExpression::Asc(e)
+                | spargebra::algebra::OrderExpression::Desc(e) => expr_mentions(e),
+            }) || mentions_variable(inner, name)
+        }
+        GraphPattern::Group { inner, aggregates, .. } => {
+            aggregates.iter().any(|(_, a)| matches!(a,
+                spargebra::algebra::AggregateExpression::FunctionCall { expr, .. } if expr_mentions(expr)))
+                || mentions_variable(inner, name)
+        }
+        GraphPattern::Project { inner, .. } | GraphPattern::Distinct { inner }
+        | GraphPattern::Reduced { inner } | GraphPattern::Slice { inner, .. }
+        | GraphPattern::Graph { inner, .. } | GraphPattern::Service { inner, .. } => mentions_variable(inner, name),
+        GraphPattern::Bgp { .. } | GraphPattern::Path { .. } | GraphPattern::Values { .. } => false,
+    }
+}
+
+fn expression_mentions(e: &Expression, name: &str) -> bool {
+    use Expression::*;
+    match e {
+        Variable(v) | Bound(v) => v.as_str() == name,
+        Exists(p) => mentions_variable(p, name),
+        Or(a, b)
+        | And(a, b)
+        | Equal(a, b)
+        | SameTerm(a, b)
+        | Greater(a, b)
+        | GreaterOrEqual(a, b)
+        | Less(a, b)
+        | LessOrEqual(a, b)
+        | Add(a, b)
+        | Subtract(a, b)
+        | Multiply(a, b)
+        | Divide(a, b) => expression_mentions(a, name) || expression_mentions(b, name),
+        In(a, args) => {
+            expression_mentions(a, name) || args.iter().any(|a| expression_mentions(a, name))
+        }
+        UnaryPlus(a) | UnaryMinus(a) | Not(a) => expression_mentions(a, name),
+        If(a, b, c) => {
+            expression_mentions(a, name)
+                || expression_mentions(b, name)
+                || expression_mentions(c, name)
+        }
+        Coalesce(args) | FunctionCall(_, args) => args.iter().any(|a| expression_mentions(a, name)),
+        NamedNode(_) | Literal(_) => false,
     }
 }
 
@@ -420,7 +556,7 @@ impl PreparedSelectExpr {
         let mut grouped: FxHashMap<Term, Vec<Term>> = FxHashMap::default();
         let ground: Vec<&Term> = foci
             .iter()
-            .filter(|f| term_to_ground(f).is_some())
+            .filter(|f| is_ground(f))
             .collect();
         for f in &ground {
             grouped.entry((*f).clone()).or_default();
@@ -431,7 +567,7 @@ impl PreparedSelectExpr {
             };
             bump_exec_count();
             let prepared = self.query.with_query(bound);
-            let Ok(result) = crate::functions::query(data, &prepared) else {
+            let Ok(result) = crate::functions::query(data, &prepared, false) else {
                 continue; // runtime query error → no nodes for this chunk (lenient)
             };
             // The output nodes are the bindings of the FIRST result variable (position 0).
@@ -454,7 +590,7 @@ impl PreparedSelectExpr {
     /// bindings, skipping unbound rows. A runtime query error yields no nodes
     /// (lenient; never panics `validate`).
     fn run(data: &sparq_core::Graph, prepared: PreparedQuery) -> Vec<Term> {
-        let Ok(result) = crate::functions::query(data, &prepared) else {
+        let Ok(result) = crate::functions::query(data, &prepared, false) else {
             return Vec::new();
         };
         // The output nodes are the bindings of the FIRST result variable. For an
@@ -495,7 +631,7 @@ pub(crate) fn expression_bindings(
 ) -> Result<Vec<Term>, String> {
     let bound =
         pre_bind_select(expr.query.query(), bindings).ok_or("Invalid expression bindings")?;
-    let result = crate::functions::query(data, &expr.query.with_query(bound))?;
+    let result = crate::functions::query(data, &expr.query.with_query(bound), false)?;
     Ok(result
         .rows
         .into_iter()
@@ -737,50 +873,41 @@ fn check_expr(expr: &Expression, names: &[&str]) -> Result<(), PreBindingViolati
 }
 
 fn bind_expr(expr: &Expression, values: &GraphPattern) -> Expression {
+    // EXISTS sees the current outer row through the engine's correlation map.
+    // Rebind that row's terms at the leaves, including empty OPTIONAL branches.
+    let batched = matches!(values, GraphPattern::Values { bindings, .. } if bindings.len() > 1);
+    let correlated;
+    let values = if let GraphPattern::Values {
+        variables,
+        bindings,
+    } = values
+    {
+        if bindings.len() > 1 {
+            correlated = variables.iter().fold(
+                GraphPattern::Bgp {
+                    patterns: Vec::new(),
+                },
+                |inner, variable| GraphPattern::Extend {
+                    inner: Box::new(inner),
+                    variable: variable.clone(),
+                    expression: Expression::Variable(variable.clone()),
+                },
+            );
+            &correlated
+        } else {
+            values
+        }
+    } else {
+        values
+    };
     let mut expr = expr.clone();
-    walk_expr(&mut expr, &mut |p| *p = push_values_down(p, values));
+    walk_expr(&mut expr, &mut |p| {
+        // BGP and path correlation already work directly in the engine.
+        if !batched || !matches!(p, GraphPattern::Bgp { .. } | GraphPattern::Path { .. }) {
+            *p = push_values_down(p, values);
+        }
+    });
     expr
-}
-
-// Nested solution modifiers must run independently for each focus. The same
-// conservative rule covers EXISTS correlation and hidden subquery projections.
-fn scope_boundary(p: &GraphPattern) -> bool {
-    match p {
-        GraphPattern::Project { .. } | GraphPattern::Slice { .. } | GraphPattern::Group { .. } => {
-            true
-        }
-        GraphPattern::Filter { expr, inner }
-        | GraphPattern::Extend {
-            expression: expr,
-            inner,
-            ..
-        } => {
-            let mut exists = false;
-            walk_expr(&mut expr.clone(), &mut |_| exists = true);
-            exists || scope_boundary(inner)
-        }
-        GraphPattern::LeftJoin {
-            left,
-            right,
-            expression,
-        } => {
-            let mut exists = false;
-            if let Some(expr) = expression {
-                walk_expr(&mut expr.clone(), &mut |_| exists = true);
-            }
-            exists || scope_boundary(left) || scope_boundary(right)
-        }
-        GraphPattern::Join { left, right }
-        | GraphPattern::Union { left, right }
-        | GraphPattern::Minus { left, right }
-        | GraphPattern::Lateral { left, right } => scope_boundary(left) || scope_boundary(right),
-        GraphPattern::OrderBy { inner, .. }
-        | GraphPattern::Distinct { inner }
-        | GraphPattern::Reduced { inner }
-        | GraphPattern::Graph { inner, .. }
-        | GraphPattern::Service { inner, .. } => scope_boundary(inner),
-        GraphPattern::Bgp { .. } | GraphPattern::Path { .. } | GraphPattern::Values { .. } => false,
-    }
 }
 
 fn term_expression(term: &Term) -> Expression {
@@ -808,9 +935,15 @@ fn term_expression(term: &Term) -> Expression {
 }
 
 fn solution_failure(vars: &[Variable], row: &[Option<Term>]) -> bool {
-    vars.iter().position(|v| v.as_str() == "failure").and_then(|i| row.get(i))
-        .is_some_and(|v| matches!(v, Some(Term::Literal(l))
-            if l.datatype().as_str() == "http://www.w3.org/2001/XMLSchema#boolean" && matches!(l.value(), "true" | "1")))
+    let Some(Some(Term::Literal(value))) = vars
+        .iter()
+        .position(|v| v.as_str() == "failure")
+        .and_then(|i| row.get(i))
+    else {
+        return false;
+    };
+    value.datatype().as_str() == "http://www.w3.org/2001/XMLSchema#boolean"
+        && matches!(value.value(), "true" | "1")
 }
 
 fn substitute_literal(l: &oxrdf::Literal, vars: &[String], row: &[Option<Term>]) -> Term {
@@ -831,8 +964,8 @@ fn substitute_literal(l: &oxrdf::Literal, vars: &[String], row: &[Option<Term>])
 /// each `(name, term)` in `bindings`. Returns `None` if any value is not
 /// expressible as a SPARQL ground term (e.g. a blank node — see `term_to_ground`).
 fn pre_bind_values(bindings: &[Binding]) -> Option<GraphPattern> {
-    let mut variables = Vec::new();
-    let mut row = Vec::new();
+    let mut variables = Vec::with_capacity(bindings.len());
+    let mut row = Vec::with_capacity(bindings.len());
     let mut extra = Vec::new();
     for (name, term) in bindings {
         if let Some(ground) = term_to_ground(term) {
@@ -892,7 +1025,7 @@ fn pre_bind_select_multi(query: &Query, name: &str, foci: &[&Term]) -> Option<Qu
     let values = pre_bind_values_multi(name, foci)?;
     Some(Query::Select {
         dataset: dataset.clone(),
-        pattern: inject_values(pattern, values, &[name]),
+        pattern: inject_values(pattern, values, std::iter::once(name)),
         base_iri: base_iri.clone(),
     })
 }
@@ -912,10 +1045,10 @@ fn pre_bind_select(query: &Query, bindings: &[Binding]) -> Option<Query> {
         return None;
     };
     let values = pre_bind_values(bindings)?;
-    let names: Vec<&str> = bindings.iter().map(|(n, _)| *n).collect();
+    let names = bindings.iter().map(|(n, _)| *n);
     Some(Query::Select {
         dataset: dataset.clone(),
-        pattern: inject_values(pattern, values, &names),
+        pattern: inject_values(pattern, values, names),
         base_iri: base_iri.clone(),
     })
 }
@@ -937,16 +1070,44 @@ fn pre_bind_ask(query: &Query, bindings: &[Binding]) -> Option<Query> {
     // so the VALUES lands in its body while the ASK projection stays unchanged.
     let bound_pattern = match pattern {
         GraphPattern::Project { inner, variables } => GraphPattern::Project {
-            inner: Box::new(push_values_down(inner, &values)),
+            inner: Box::new(push_values_owned(inner, values)),
             variables: variables.clone(),
         },
-        other => push_values_down(other, &values),
+        other => push_values_owned(other, values),
     };
     Some(Query::Ask {
         dataset: dataset.clone(),
         pattern: bound_pattern,
         base_iri: base_iri.clone(),
     })
+}
+
+// Move a binding table through common unary scopes; branch scopes share the
+// borrowed insertion below. Both paths apply the same expression pre-binding.
+fn push_values_owned(pattern: &GraphPattern, values: GraphPattern) -> GraphPattern {
+    match pattern {
+        GraphPattern::Filter { expr, inner } => GraphPattern::Filter {
+            expr: bind_expr(expr, &values),
+            inner: Box::new(push_values_owned(inner, values)),
+        },
+        GraphPattern::Extend {
+            inner,
+            variable,
+            expression,
+        } => GraphPattern::Extend {
+            expression: bind_expr(expression, &values),
+            variable: variable.clone(),
+            inner: Box::new(push_values_owned(inner, values)),
+        },
+        leaf @ (GraphPattern::Bgp { .. }
+        | GraphPattern::Path { .. }
+        | GraphPattern::Values { .. }
+        | GraphPattern::Service { .. }) => GraphPattern::Join {
+            left: Box::new(values),
+            right: Box::new(leaf.clone()),
+        },
+        other => push_values_down(other, &values),
+    }
 }
 
 /// Apply Values Insertion throughout the algebra. Expressions are traversed so
@@ -1099,19 +1260,23 @@ fn push_values_down(pattern: &GraphPattern, values: &GraphPattern) -> GraphPatte
 /// `Project`'s inner and adds every pre-bound `names` variable to the projection
 /// if absent. If there is no `Project` (`SELECT *`), it joins at that point — the
 /// pre-bound variables surface regardless.
-fn inject_values(pattern: &GraphPattern, values: GraphPattern, names: &[&str]) -> GraphPattern {
+fn inject_values<'a>(
+    pattern: &GraphPattern,
+    values: GraphPattern,
+    names: impl Iterator<Item = &'a str>,
+) -> GraphPattern {
     match pattern {
         GraphPattern::Project { inner, variables } => {
             let mut variables = variables.clone();
             for name in names {
-                if !variables.iter().any(|v| v.as_str() == *name) {
-                    variables.push(Variable::new_unchecked(*name));
+                if !variables.iter().any(|v| v.as_str() == name) {
+                    variables.push(Variable::new_unchecked(name));
                 }
             }
             // Push the VALUES down through the WHERE pattern so a pre-bound
             // variable used only inside a FILTER/BIND is still in scope there.
             GraphPattern::Project {
-                inner: Box::new(push_values_down(inner, &values)),
+                inner: Box::new(push_values_owned(inner, values)),
                 variables,
             }
         }
@@ -1135,7 +1300,17 @@ fn inject_values(pattern: &GraphPattern, values: GraphPattern, names: &[&str]) -
             expression: expression.clone(),
         },
         // No projection wrapper (SELECT *): push down; the bound vars surface regardless.
-        other => push_values_down(other, &values),
+        other => push_values_owned(other, values),
+    }
+}
+
+fn is_ground(term: &Term) -> bool {
+    match term {
+        Term::NamedNode(_) | Term::Literal(_) => true,
+        Term::BlankNode(_) => false,
+        Term::Triple(t) => {
+            matches!(t.subject, oxrdf::NamedOrBlankNode::NamedNode(_)) && is_ground(&t.object)
+        }
     }
 }
 
@@ -1275,6 +1450,9 @@ fn substitute_bindings(template: &str, bindings: &[Binding]) -> String {
 }
 
 pub(crate) fn substitute_message_bindings(messages: &[Term], bindings: &[Binding]) -> Vec<Term> {
+    if messages.is_empty() {
+        return Vec::new();
+    }
     let names: Vec<String> = bindings.iter().map(|(n, _)| (*n).to_string()).collect();
     let row: Vec<_> = bindings.iter().map(|(_, t)| Some((*t).clone())).collect();
     messages
@@ -1334,12 +1512,19 @@ pub(crate) fn select_validate(
         return;
     };
     let prepared = query.with_query(bound);
-    let Ok(result) = crate::functions::query(data, &prepared) else {
+    let Ok(result) = crate::functions::query(data, &prepared, false) else {
         return;
     };
+    if result.rows.is_empty() {
+        return;
+    }
     let pos = |name: &str| result.vars.iter().position(|v| v.as_str() == name);
     let (vpos, ppos, mpos) = (pos("value"), pos("path"), pos("message"));
-    let result_vars: Vec<String> = result.vars.iter().map(|v| v.as_str().to_string()).collect();
+    let result_vars: Vec<String> = if mpos.is_some() || !messages.is_empty() {
+        result.vars.iter().map(|v| v.as_str().to_string()).collect()
+    } else {
+        Vec::new()
+    };
     for row in &result.rows {
         if solution_failure(&result.vars, row) {
             crate::functions::record_failure(focus);
@@ -2739,16 +2924,10 @@ mod tests {
     fn pre_binding_accepts_subselect_dropping_this() {
         // SHACL 1.2 permits a sub-SELECT that hides the pre-bound variable.
         let q = "SELECT $this WHERE { $this ?x ?any . { SELECT ?other ?b WHERE { ?other ?b ?c } } }";
-        assert_eq!(
-            check_select(q),
-            Ok(())
-        );
+        assert_eq!(check_select(q), Ok(()));
         // The table reaches the inner BGP without expanding SELECT *'s projection.
         let star = "SELECT $this WHERE { { SELECT * WHERE { FILTER ($this = <http://e/x>) } } }";
-        assert_eq!(
-            check_select(star),
-            Ok(())
-        );
+        assert_eq!(check_select(star), Ok(()));
     }
 
     #[test]
@@ -2810,60 +2989,126 @@ mod tests {
 
     // --- (sq-7d3dj.33.1) focus-node batching ----------------------
 
-    fn top_pattern(q: &str) -> GraphPattern {
-        match SparqlParser::new().parse_query(q).unwrap() {
-            Query::Select { pattern, .. } => pattern,
-            other => panic!("expected SELECT, got {:?}", other),
+    fn full_batchable(q: &str) -> bool {
+        let constraint = SparqlConstraint {
+            current_shape: None,
+            node: iri("urn:constraint"),
+            select: q.into(),
+            prefixes: String::new(),
+            message: None,
+            severity: None,
+            deactivated: false,
+            prepared: None,
+        };
+        PreparedSparql::build(&constraint)
+            .unwrap()
+            .unwrap()
+            .is_batchable()
+    }
+
+    #[test]
+    fn batch_exists_rebinds_only_the_correlated_row() {
+        let a = iri("urn:a");
+        let b = iri("urn:b");
+        let table = pre_bind_values_multi("this", &[&a, &b]).unwrap();
+        for text in [
+            "SELECT ?this WHERE {FILTER NOT EXISTS {?this <urn:p> ?v}}",
+            "SELECT ?this WHERE {FILTER EXISTS {OPTIONAL {?this <urn:p> ?v} FILTER(!BOUND(?v))}}",
+        ] {
+            let Query::Select { pattern, .. } = SparqlParser::new().parse_query(text).unwrap()
+            else {
+                unreachable!()
+            };
+            let GraphPattern::Project { inner, .. } = pattern else {
+                unreachable!()
+            };
+            let GraphPattern::Filter { expr, .. } = *inner else {
+                unreachable!()
+            };
+            let bound = bind_expr(&expr, &table);
+            // EXISTS receives row-local correlation, never the multi-focus table.
+            assert!(!bound.to_string().contains("VALUES"), "{bound}");
+            if text.contains("OPTIONAL") {
+                assert!(bound.to_string().contains("BIND"), "{bound}");
+            } else {
+                assert_eq!(bound, expr);
+            }
+        }
+    }
+
+    #[test]
+    fn full_batchable_scope_and_exists_cases() {
+        for text in [
+            "SELECT ?this WHERE { FILTER EXISTS { ?this <urn:p> ?v } }",
+            "SELECT ?this WHERE { FILTER NOT EXISTS { ?this <urn:p> ?v } }",
+            "SELECT ?this WHERE { FILTER EXISTS { FILTER NOT EXISTS { ?this <urn:p> ?v } } }",
+            "SELECT ?this WHERE { { SELECT ?this ?v WHERE { ?this <urn:p> ?v } } }",
+            "SELECT ?this WHERE { { SELECT ?this (COUNT(*) AS ?n) WHERE { ?this <urn:p> ?v } GROUP BY ?this } }",
+            "SELECT ?this WHERE { FILTER(STR(?this) != \"$shapesGraph\") }",
+        ] {
+            assert!(full_batchable(text), "{text}");
+        }
+        for text in [
+            "SELECT ?this WHERE { { SELECT ?v WHERE { ?this <urn:p> ?v } } }",
+            "SELECT ?this WHERE { { SELECT ?this WHERE { ?this <urn:p> ?v } LIMIT 1 } }",
+            "SELECT ?this WHERE { { SELECT ?this WHERE { ?this <urn:p> ?v } OFFSET 1 } }",
+            "SELECT ?this WHERE { { SELECT (COUNT(*) AS ?n) WHERE { ?this <urn:p> ?v } } }",
+            "SELECT ?this WHERE { FILTER EXISTS { { SELECT ?this WHERE {?this <urn:p> ?v} LIMIT 1 } } }",
+            "SELECT ?this WHERE { FILTER(BOUND($shapesGraph)) }",
+            "SELECT ?this WHERE { GRAPH $shapesGraph {?s ?p ?o} }",
+            "SELECT ?this WHERE { FILTER($currentShape = <urn:S>) }",
+        ] {
+            assert!(!full_batchable(text), "{text}");
         }
     }
 
     #[test]
     fn query_batchable_plain_select_is_batchable() {
         // A plain BGP+FILTER SELECT (the common sh:sparql shape) batches.
-        assert!(query_batchable(&top_pattern(
+        assert!(full_batchable(
             "SELECT ?this ?value WHERE { ?this <http://x/p> ?value . FILTER(?value < 0) }"
-        )));
+        ));
     }
 
     #[test]
     fn query_batchable_distinct_and_orderby_are_batchable() {
         // DISTINCT includes the distinct ?this (collapses per-focus); ORDER BY is
         // irrelevant to the violation bag — both stay batchable.
-        assert!(query_batchable(&top_pattern(
+        assert!(full_batchable(
             "SELECT DISTINCT ?this ?value WHERE { ?this <http://x/p> ?value } ORDER BY ?value"
-        )));
+        ));
     }
 
     #[test]
     fn query_batchable_rejects_top_level_limit() {
         // A top-level LIMIT is a GLOBAL row cap — not equivalent per focus.
-        assert!(!query_batchable(&top_pattern(
+        assert!(!full_batchable(
             "SELECT ?this ?value WHERE { ?this <http://x/p> ?value } LIMIT 5"
-        )));
+        ));
     }
 
     #[test]
     fn query_batchable_allows_group_by_this() {
         // GROUP BY $this = each focus is its own group → per-focus-equivalent.
-        assert!(query_batchable(&top_pattern(
+        assert!(full_batchable(
             "SELECT ?this (COUNT(?value) AS ?c) WHERE { ?this <http://x/p> ?value } GROUP BY ?this"
-        )));
+        ));
     }
 
     #[test]
     fn query_batchable_rejects_implicit_aggregate() {
         // An implicit single group (no GROUP BY) aggregates across ALL foci.
-        assert!(!query_batchable(&top_pattern(
+        assert!(!full_batchable(
             "SELECT (COUNT(?value) AS ?c) WHERE { ?this <http://x/p> ?value }"
-        )));
+        ));
     }
 
     #[test]
     fn query_batchable_rejects_group_by_other() {
         // GROUP BY a non-$this variable mixes rows from different foci into one group.
-        assert!(!query_batchable(&top_pattern(
+        assert!(!full_batchable(
             "SELECT ?p (COUNT(?value) AS ?c) WHERE { ?this ?p ?value } GROUP BY ?p"
-        )));
+        ));
     }
 
     #[test]
@@ -2871,11 +3116,11 @@ mod tests {
         // A NESTED aggregate sub-select is fine: the pre-binding check forces it to
         // project (hence GROUP BY) $this, so the multi-row VALUES join partitions it
         // per focus. Only the TOP-level chain is inspected.
-        assert!(query_batchable(&top_pattern(
+        assert!(full_batchable(
             "SELECT ?this WHERE { ?this <http://x/p> ?v . \
              { SELECT ?this (COUNT(*) AS ?c) WHERE { ?this <http://x/q> ?w } GROUP BY ?this } \
              FILTER(?c > 1) }"
-        )));
+        ));
     }
 
     #[test]
