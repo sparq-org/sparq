@@ -5619,6 +5619,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "sparq-merkle-suite"
+version = "0.1.8"
+dependencies = [
+ "ark-ff",
+ "ed25519-dalek",
+ "oxrdf 0.3.3",
+ "oxttl 0.2.3",
+ "serde_json",
+ "sha2 0.10.9",
+ "sparq-canon",
+ "sparq-core",
+ "sparq-engine",
+ "sparq-zk",
+]
+
+[[package]]
 name = "sparq-metamorph"
 version = "0.1.8"
 dependencies = [

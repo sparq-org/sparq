@@ -1,0 +1,23 @@
+[package]
+name = "sparq-merkle-suite"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Research-grade RDF Merkle credential suites shared by native and Noir callers"
+readme = "README.md"
+
+[dependencies]
+oxrdf.workspace = true
+oxttl.workspace = true
+sha2 = "0.10"
+ed25519-dalek = "2"
+sparq-canon = { path = "../sparq-canon" }
+sparq-zk = { path = "../sparq-zk" }
+ark-ff = { version = "0.6", default-features = false }
+
+[dev-dependencies]
+sparq-core = { path = "../sparq-core" }
+sparq-engine = { path = "../sparq-engine" }
+serde_json = "1"
