@@ -154,7 +154,7 @@ impl Compiler {
         now: impl Fn() -> u64,
     ) -> Result<Presentation, Error> {
         let envelope = request.envelope_inputs()?;
-        envelope.require_consumer()?;
+        request.require_envelope_consumer(&envelope)?;
         let plan = request.plan()?;
         let compiled = self.checked_key(request, &plan)?;
         freshness(request, now())?;
@@ -225,7 +225,7 @@ impl Compiler {
     ) -> Result<Answer, Error> {
         let encoder = &SuiteEncoder;
         let envelope = request.envelope_inputs()?;
-        envelope.require_consumer()?;
+        request.require_envelope_consumer(&envelope)?;
         if request.stored().audience() != expected_audience {
             return Err(Error::Invalid("request audience".into()));
         }

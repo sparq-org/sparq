@@ -470,7 +470,7 @@ static NUMERIC_BOOLEAN_DATATYPES: std::sync::LazyLock<Vec<Word>> = std::sync::La
     .collect()
 });
 fn string_cell(cell: Cell) -> bool {
-    cell.kind == 3 && (matches!(cell.key_class, 6 | 7) || cell.dt == *LANGUAGE_STRING_DATATYPE)
+    cell.kind == 3 && matches!(cell.key_class, 6 | 7)
 }
 
 fn compare(op: Compare, a: Value, b: Value) -> Result<Value, Error> {
@@ -527,6 +527,11 @@ fn compare(op: Compare, a: Value, b: Value) -> Result<Value, Error> {
         }
         if op == Compare::Equal && string_cell(a) && string_cell(b) {
             return Ok(Value::Boolean(a.same_term(b), false));
+        }
+        if op == Compare::Equal
+            && (a.dt == *LANGUAGE_STRING_DATATYPE || b.dt == *LANGUAGE_STRING_DATATYPE)
+        {
+            return Ok(Value::Boolean(a.same_term(b), !a.same_term(b)));
         }
         if op == Compare::Equal && (string_cell(a) || string_cell(b)) {
             return Ok(Value::Boolean(false, true));

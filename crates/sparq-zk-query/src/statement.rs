@@ -48,6 +48,26 @@ pub struct EnvelopeInputs {
     /// Earliest acceptable creation instant in Unix epoch milliseconds.
     pub earliest_created: u64,
 }
+impl From<crate::envelope_policy::PublicPolicy> for EnvelopeInputs {
+    fn from(policy: crate::envelope_policy::PublicPolicy) -> Self {
+        Self {
+            issuer_root: policy.issuer_root,
+            issuer_depth: policy.issuer_depth,
+            holder_required: policy.holder_required,
+            holder_issuers_present: policy.holder_issuers_present,
+            holder_issuer_count: policy.holder_issuer_count,
+            holder_issuers: policy.holder_issuers,
+            status_required: policy.status_required,
+            allow_missing_status: policy.allow_missing_status,
+            snapshot_root: policy.snapshot_root,
+            snapshot_depth: policy.snapshot_depth,
+            validity_required: policy.validity_required,
+            now: policy.now,
+            freshness_required: policy.freshness_required,
+            earliest_created: policy.earliest_created,
+        }
+    }
+}
 impl EnvelopeInputs {
     /// Existing issuer-membership profile, pending the canonical policy-root integration.
     pub fn issuer_only(issuer_root: Word) -> Self {
@@ -117,8 +137,9 @@ impl EnvelopeInputs {
         Ok(words)
     }
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn require_consumer(&self) -> Result<(), Error> {
-        if self.issuer_depth != crate::credential::ISSUER_DEPTH
+    pub(crate) fn require_consumer(&self, canonical_policy: bool) -> Result<(), Error> {
+        if canonical_policy
+            || self.issuer_depth != crate::credential::ISSUER_DEPTH
             || self.holder_required
             || self.status_required
             || self.validity_required
@@ -535,7 +556,13 @@ mod literal_tests {
     #[test]
     fn require_consumer_refuses_each_pending_policy_independently() {
         let base = EnvelopeInputs::issuer_only(number(1));
-        assert_eq!(base.require_consumer(), Ok(()));
+        assert_eq!(base.require_consumer(false), Ok(()));
+        assert_eq!(
+            base.require_consumer(true),
+            Err(Error::Unsupported(
+                "credential envelope policy integration".into()
+            ))
+        );
         for case in 0..5 {
             let mut policy = base.clone();
             match case {
@@ -547,7 +574,7 @@ mod literal_tests {
                 _ => unreachable!(),
             }
             assert_eq!(
-                policy.require_consumer(),
+                policy.require_consumer(false),
                 Err(Error::Unsupported(
                     "credential envelope policy integration".into()
                 )),

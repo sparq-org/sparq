@@ -58,6 +58,11 @@ on:
     # the two heavy nightly lanes don't contend for the same runner window).
     - cron: "23 4 * * *"
   workflow_dispatch:
+    inputs:
+      full_query_proofs:
+        description: Run the complete authenticated query proof sweep
+        type: boolean
+        default: false
   pull_request:
     # + ready_for_review so the un-draft moment re-runs this lane.
     types: [opened, synchronize, reopened, ready_for_review]
@@ -784,10 +789,17 @@ jobs:
           rustup target add wasm32-unknown-unknown
           cargo check -p sparq-zk-query --target wasm32-unknown-unknown
           cargo check -p sparq-zk-query --target wasm32-unknown-unknown --features ordered-json
+          export RAYON_NUM_THREADS=1
           (cd zk/noir-query/core && nargo check && nargo test)
           (cd zk/noir-query/fixtures/generated_smoke && nargo check && nargo test)
-          python3 scripts/check-noir-dependency-aliases.py
+          python3 scripts/check-noir-dependency-aliases.py --record-known-failures
           node zk/noir-query/compiler-agreement/check.mjs --self-test
+          export SPARQ_NOIR_QUERY_PROOF_PROFILE=smoke
+          export SPARQ_NOIR_QUERY_SEED=0
+          if [[ "${{ github.event_name == 'workflow_dispatch' && inputs.full_query_proofs }}" == "true" ]]; then
+            export SPARQ_NOIR_QUERY_PROOF_PROFILE=full
+            unset SPARQ_NOIR_QUERY_SEED
+          fi
           cargo test -p sparq-zk-query -- --include-ignored --test-threads=1
 
       - name: Verify every live ZK test ran

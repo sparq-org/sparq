@@ -275,8 +275,12 @@ fn seeded_engine_interpreter_and_circuit_differential() {
     let mut workspaces = std::collections::BTreeMap::new();
     for seed in seeds {
         let (rdf, _, _) = fixture_support::generated_dataset(seed);
-        let credentials = vec![authenticated::sign(&rdf, seed)];
-        let data = vec![credentials[0].cells(0).unwrap()];
+        let credential = authenticated::sign(&rdf, seed);
+        assert_eq!(
+            credential.issuer_root().unwrap(),
+            authenticated::issuer_root()
+        );
+        let data = vec![credential.cells(0).unwrap()];
         for query in fixture_support::DIFFERENTIAL_QUERIES {
             let plan = lower(
                 query,
@@ -289,20 +293,13 @@ fn seeded_engine_interpreter_and_circuit_differential() {
             .unwrap();
             let trace = evaluate(&plan, &data, &FixtureEncoder).unwrap();
             fixture_support::assert_engine(query, &rdf, &trace.result);
-            let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+            let package = sparq_zk_query::codegen::generate_operator_fixture(&plan).unwrap();
             let workspace = workspaces
                 .entry(plan.hash())
                 .or_insert_with(|| Workspace::new(&package));
             let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
-            let input = sparq_zk_query::witness::prover_toml_authenticated(
-                &plan,
-                &credentials,
-                &trace,
-                [7; 32],
-                [3; 32],
-                authenticated::issuer_root(),
-            )
-            .unwrap();
+            let input =
+                prover_toml(&plan, &data, &FixtureEncoder, &trace, [7; 32], [3; 32]).unwrap();
             driver
                 .execute(&input, "differential")
                 .unwrap_or_else(|e| panic!("seed={seed}, {query}: {e}"));
@@ -314,15 +311,9 @@ fn seeded_engine_interpreter_and_circuit_differential() {
                     } else {
                         altered.tables[node].rows.remove(row);
                     }
-                    let input = sparq_zk_query::witness::prover_toml_authenticated(
-                        &plan,
-                        &credentials,
-                        &altered,
-                        [7; 32],
-                        [3; 32],
-                        authenticated::issuer_root(),
-                    )
-                    .unwrap();
+                    let input =
+                        prover_toml(&plan, &data, &FixtureEncoder, &altered, [7; 32], [3; 32])
+                            .unwrap();
                     assert!(
                         driver.execute(&input, "altered_row").is_err(),
                         "seed={seed}, {query}, table={node}, row={row}"
@@ -425,11 +416,11 @@ fn mixed_string_classes_execute_and_refuse_rebound_wrong_traces() {
     let cases = fixture_support::mixed_string_queries();
     let traces = cases
         .iter()
-        .map(|(query, expected)| {
+        .map(|(query, expected, engine_expected)| {
             let plan = lower(query, bounds).unwrap();
             let trace = evaluate(&plan, &[], &FixtureEncoder).unwrap();
             assert_eq!(trace.result, ResultValue::Ask(*expected), "{query}");
-            fixture_support::assert_engine(query, "", &trace.result);
+            fixture_support::assert_engine(query, "", &ResultValue::Ask(*engine_expected));
             (plan, trace)
         })
         .collect::<Vec<_>>();

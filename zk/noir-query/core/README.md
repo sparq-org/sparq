@@ -81,16 +81,13 @@ a default-only assertion. Constant-list evaluation uses `evaluate_indexed` with
 the public active-length index. The canonical policy-root consumer and graph
 dispatch remain separate integrations.
 
-The `ops_core_profile` adapter constructs compact credential cells through the suite
-openers. Resource fields omit datatype and language payloads; a private literal tag
-selects a fixed datatype and its checked key constructor. Scalar lexical bounds are
-separate from resource and string bounds. The default graph is constructed for each
-active quad, and padding remains canonical. This adapter returns internal cells for
-the authenticated metadata opener; it does not authenticate a credential by itself.
-`open_quads` checks supported literal keys as well as constructing their identities.
-`open_identity_quads` constructs the root's complete identity table; its callers
-must use checked lexical openings for every value consumed by a comparison,
-function or aggregate. This follows the suite's separate identity/value contract.
+The `ops_core_profile` adapter holds raw witness structs and normalization only.
+It constructs zero resource datatype, language and key fields and derives bound
+flags and the default graph. `ops_core_suite::open_bounded_one` delegates the
+complete signed opening once to `suite::open_bounded_credential_hidden`.
+Value consumers use fixed datatype `term::open_key_checked` calls with separate
+scalar bounds. Envelope wiring can share `authenticate_bounded`'s opaque suite
+object and convert it through `from_authenticated_bounded` after policy checks.
 
 Packing combines short checked chunks into the unchanged field-word encoding.
 Its private split hint is checked by an exact quotient/remainder relation and

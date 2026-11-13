@@ -122,7 +122,7 @@ fn native_proof_reconstructs_inputs_and_consumes_only_after_acceptance() {
     let compiler = Compiler::new(tmp.path(), &zk)
         .unwrap()
         .with_crs_path(std::env::temp_dir().join("sparq_noir_query_crs"));
-    let query = "SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x >= 1 && ?x < 3)}";
+    let query = "SELECT ?s WHERE {?s <urn:p> ?x}";
     let prepared = compiler.prepare(query, B).unwrap();
     let prepared_again = compiler.prepare(query, B).unwrap();
     assert_eq!(prepared.verification_key, prepared_again.verification_key);
@@ -282,7 +282,7 @@ fn native_proof_reconstructs_inputs_and_consumes_only_after_acceptance() {
             .unwrap_err(),
         Error::Invalid("verification key mismatch".into())
     );
-    let changed_query = "SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x >= 1 && ?x < 2)}";
+    let changed_query = "SELECT ?s WHERE {?s <urn:q> ?x}";
     let wrong_request = authenticated_request(
         stored(&prepared, changed_query, 7, "urn:verifier", None),
         B,
@@ -375,11 +375,42 @@ fn native_proof_reconstructs_inputs_and_consumes_only_after_acceptance() {
     support::complete(gate);
 }
 
+fn native_proof_cases(profile: Option<&str>) -> Result<Vec<fixture_support::N0Case>, &'static str> {
+    match profile {
+        None | Some("full") => Ok(fixture_support::n0_cases()),
+        Some("smoke") => Ok(vec![fixture_support::N0Case {
+            name: "authenticated-ask-smoke",
+            query: "ASK {?s <urn:p> ?o}",
+            sources: vec!["<urn:s> <urn:p> <urn:o> .".into()],
+        }]),
+        _ => Err("invalid native proof profile"),
+    }
+}
+
+#[test]
+fn native_proof_profiles_preserve_the_acceptance_sweep_and_refuse_unknown_profiles() {
+    let expected = fixture_support::n0_cases()
+        .into_iter()
+        .map(|c| c.name)
+        .collect::<Vec<_>>();
+    let default = native_proof_cases(None).unwrap();
+    assert_eq!(default.iter().map(|c| c.name).collect::<Vec<_>>(), expected);
+    let full = native_proof_cases(Some("full")).unwrap();
+    assert_eq!(full.iter().map(|c| c.name).collect::<Vec<_>>(), expected);
+    let smoke = native_proof_cases(Some("smoke")).unwrap();
+    assert_eq!(
+        smoke.iter().map(|c| c.name).collect::<Vec<_>>(),
+        ["authenticated-ask-smoke"]
+    );
+    assert_eq!(smoke[0].sources, ["<urn:s> <urn:p> <urn:o> ."]);
+    assert!(native_proof_cases(Some("other")).is_err());
+}
+
 #[test]
 #[ignore = "requires the pinned native query toolchain"]
-fn n0_native_proofs_match_the_engine_and_refuse_altered_answers() {
+fn n0_native_proof_profile_matches_the_engine_and_refuses_altered_answers() {
     let Some(gate) = support::gate(
-        "n0_native_proofs_match_the_engine_and_refuse_altered_answers",
+        "n0_native_proof_profile_matches_the_engine_and_refuses_altered_answers",
         &["nargo", "bb"],
     ) else {
         return;
@@ -389,12 +420,23 @@ fn n0_native_proofs_match_the_engine_and_refuse_altered_answers() {
     let compiler = Compiler::new(temp.path(), zk)
         .unwrap()
         .with_crs_path(std::env::temp_dir().join("sparq_noir_query_crs"));
-    let bounds = Bounds {
-        credentials: 2,
-        ..B
+    let profile = match std::env::var("SPARQ_NOIR_QUERY_PROOF_PROFILE") {
+        Ok(value) => Some(value),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(std::env::VarError::NotUnicode(_)) => panic!("invalid native proof profile"),
     };
+    let cases =
+        native_proof_cases(profile.as_deref()).expect("native proof profile is full or smoke");
+    eprintln!(
+        "Native proof profile: {}",
+        profile.as_deref().unwrap_or("full")
+    );
     let store = Store::default();
-    for (index, case) in fixture_support::n0_cases().into_iter().enumerate() {
+    for (index, case) in cases.into_iter().enumerate() {
+        let bounds = Bounds {
+            credentials: case.sources.len() as u32,
+            ..B
+        };
         let start = std::time::Instant::now();
         let prepared = compiler.prepare(case.query, bounds).unwrap();
         let prepare_seconds = start.elapsed().as_secs_f64();
@@ -890,4 +932,183 @@ fn request_admission_refuses_a_present_empty_holder_issuer_list() {
         Request::new_authenticated_with_policy(stored, B, key, policy, None).unwrap_err(),
         Error::Invalid("empty holder issuer list".into())
     );
+}
+
+#[test]
+fn request_derives_canonical_policy_roots_and_exact_millisecond_words() {
+    use oxrdf::NamedNode;
+    use sparq_zk_query::envelope_policy::{
+        self, AcceptedSnapshots, HolderBinding, PolicyInput, TrustMember,
+    };
+    let plan = sparq_zk_query::lower::lower("ASK {}", B).unwrap();
+    let key = b"typed-envelope-fixture".to_vec();
+    let prepared = Prepared {
+        descriptor: sparq_zk_query::request::descriptor(&plan, &key).unwrap(),
+        plan,
+        verification_key: key.clone(),
+        artifact: serde_json::Value::Null,
+    };
+    let mut spec = request_spec(&stored(&prepared, "ASK {}", 1, "urn:receiver", None));
+    let mut requirements = requirements_spec(&spec.requirements);
+    requirements.source_evidence = Some(SourceEvidence::IssuerAuthenticated);
+    requirements.holder = Some(HolderPolicy::Required);
+    requirements.status = Some(StatusPolicy::Required);
+    requirements.accepted_suites = vec![id(sparq_zk_query::request::SUITE)];
+    spec.requirements = QueryRequirements::new(requirements).unwrap();
+    let stored = StoredRequest::new(spec).unwrap();
+    let issuer = NamedNode::new("urn:issuer").unwrap();
+    let mut policy = PolicyInput {
+        trust_members: vec![TrustMember {
+            issuer: issuer.clone(),
+            verification_method: NamedNode::new("urn:issuer#key").unwrap(),
+            key: sparq_zk::sig::SecretKey::from_seed(19).public_key(),
+        }],
+        holder_binding: Some(HolderBinding {
+            issuers: Some(vec![issuer.clone()]),
+        }),
+        accepted_snapshots: Some(AcceptedSnapshots {
+            digests: vec![sparq_zk_query::statement::number(7)],
+            allow_missing: false,
+        }),
+        validity_time: Some(1_794_614_400_123),
+        earliest_created: Some(1_794_528_000_456),
+    };
+    let request = Request::new_authenticated_with_envelope(
+        stored.clone(),
+        B,
+        key.clone(),
+        policy.clone(),
+        None,
+    )
+    .unwrap();
+    let expected = envelope_policy::public_words(&policy).unwrap();
+    let words_request = Request::new_authenticated_with_policy(
+        stored.clone(),
+        B,
+        key.clone(),
+        envelope_policy::derive(&policy).unwrap().into(),
+        None,
+    )
+    .unwrap();
+    assert_eq!(request.canonical_rdf(), words_request.canonical_rdf());
+    assert_eq!(request.digest(), words_request.digest());
+    assert_eq!(
+        request.envelope_inputs().unwrap().words().unwrap(),
+        expected
+    );
+    assert_eq!(request.envelope_inputs().unwrap().now, 1_794_614_400_123);
+    assert_eq!(
+        request.envelope_inputs().unwrap().earliest_created,
+        1_794_528_000_456
+    );
+    assert_eq!(request.envelope_inputs().unwrap().issuer_depth, 0);
+    policy.trust_members.push(policy.trust_members[0].clone());
+    policy
+        .holder_binding
+        .as_mut()
+        .unwrap()
+        .issuers
+        .as_mut()
+        .unwrap()
+        .push(issuer);
+    let canonical = Request::new_authenticated_with_envelope(
+        stored.clone(),
+        B,
+        key.clone(),
+        policy.clone(),
+        None,
+    )
+    .unwrap();
+    assert_eq!(request.digest(), canonical.digest());
+    policy.validity_time = policy.validity_time.map(|v| v + 1);
+    let altered = Request::new_authenticated_with_envelope(
+        stored.clone(),
+        B,
+        key.clone(),
+        policy.clone(),
+        None,
+    )
+    .unwrap();
+    assert_ne!(request.digest(), altered.digest());
+    assert_eq!(
+        request.envelope_inputs().unwrap().words().unwrap(),
+        expected
+    );
+    policy.holder_binding.as_mut().unwrap().issuers = Some(vec![]);
+    assert_eq!(
+        Request::new_authenticated_with_envelope(stored, B, key, policy, None).unwrap_err(),
+        Error::Invalid("empty holder issuer list".into())
+    );
+}
+
+#[test]
+fn canonical_policy_requires_its_consumer_even_when_tree_depth_matches() {
+    use oxrdf::NamedNode;
+    use sparq_zk_query::envelope_policy::{PolicyInput, TrustMember};
+    let plan = sparq_zk_query::lower::lower("ASK {}", B).unwrap();
+    let key = b"canonical-policy-refusal-fixture".to_vec();
+    let prepared = Prepared {
+        descriptor: sparq_zk_query::request::descriptor(&plan, &key).unwrap(),
+        plan,
+        verification_key: key.clone(),
+        artifact: serde_json::Value::Null,
+    };
+    let base = authenticated_request(
+        stored(&prepared, "ASK {}", 7, "urn:verifier", None),
+        B,
+        key.clone(),
+    )
+    .unwrap();
+    let policy = PolicyInput {
+        trust_members: (0..(1 << sparq_zk_query::credential::ISSUER_DEPTH))
+            .map(|i| TrustMember {
+                issuer: NamedNode::new(format!("urn:issuer:{i}")).unwrap(),
+                verification_method: NamedNode::new(format!("urn:issuer:{i}#key")).unwrap(),
+                key: sparq_zk::sig::SecretKey::from_seed(19).public_key(),
+            })
+            .collect(),
+        ..PolicyInput::default()
+    };
+    let request =
+        Request::new_authenticated_with_envelope(base.stored().clone(), B, key, policy, None)
+            .unwrap();
+    assert_eq!(
+        request.envelope_inputs().unwrap().issuer_depth,
+        sparq_zk_query::credential::ISSUER_DEPTH
+    );
+    let tmp = tempfile::tempdir().unwrap();
+    let compiler = Compiler::new(
+        tmp.path(),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../zk"),
+    )
+    .unwrap();
+    let expected = Error::Unsupported("credential envelope policy integration".into());
+    assert_eq!(
+        compiler
+            .prove(&request, &[], &[], &FixtureEncoder, [3; 32], || NOW)
+            .unwrap_err(),
+        expected
+    );
+    let presentation = sparq_zk_query::method::Presentation {
+        request_digest: request.digest(),
+        input_commitment: [0; 32],
+        signature_mode: 1,
+        result: Answer::Ask(true),
+        proof: vec![],
+    };
+    let store = Store::default();
+    assert_eq!(
+        compiler
+            .verify(
+                &request,
+                &presentation,
+                &FixtureEncoder,
+                &id("urn:verifier"),
+                &store,
+                || NOW
+            )
+            .unwrap_err(),
+        expected
+    );
+    assert!(store.0.lock().unwrap().is_empty());
 }

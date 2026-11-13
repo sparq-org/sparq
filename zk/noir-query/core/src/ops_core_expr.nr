@@ -39,14 +39,14 @@ fn numeric_or_boolean(dt:Field) -> bool {
         | (dt == DT_UNSIGNEDSHORT) | (dt == DT_UNSIGNEDBYTE) | (dt == DT_POSITIVEINTEGER)
 }
 fn is_string(cell:TermCell) -> bool {
-    cell.bound & (cell.kind == 3) & ((cell.key_class == 6) | (cell.key_class == 7) | (cell.dt == DT_LANGSTRING))
+    cell.bound & (cell.kind == 3) & ((cell.key_class == 6) | (cell.key_class == 7))
 }
 
 // Equality uses a term-identity token only for strings of the same datatype. Ordering uses the checked
 // short-string key, whose zero padding preserves the lexical order. Neither
 // representation is exposed as a lexical opening to other expression gadgets.
-// Different string types use only their plain/language class; different value
-// families pass through the shared comparison without a lexical token.
+// Other literal types, including language-tagged literals, retain the shared
+// RDF term equality/error dispatch without a lexical token.
 fn scalar(cell: TermCell, equality: bool, effective_boolean: bool, class_only:bool) -> (Lane<Scalar<32>>, bool) {
     let mut value = Scalar {
         tag: TERM, valid: true, boolean: false, number: zero_numeric(),
@@ -86,8 +86,12 @@ fn scalar(cell: TermCell, equality: bool, effective_boolean: bool, class_only:bo
             value.boolean = cell.key != prefix;
         } else if (cell.key_class == 3) | (cell.key_class == 4) | (cell.key_class == 8) {
             value.tag = if cell.key_class == 8 { DATE } else { DATETIME };
-            value.temporal = TemporalLane { key_class: cell.key_class, key: cell.key - prefix };
-        } else if (cell.key_class == 6) | (cell.key_class == 7) | (cell.dt == DT_LANGSTRING) {
+            let bytes=cell.key.to_be_bytes::<32>();
+            let mut instant:u64=0;
+            for i in 2..10 {instant=instant*256+bytes[i] as u64;}
+            for i in 10..32 {assert(bytes[i]==0,"temporal key zero tail");}
+            value.temporal = TemporalLane { key_class: cell.key_class, key: instant as Field };
+        } else if (cell.key_class == 6) | (cell.key_class == 7) {
             value.tag = STRING;
             value.string.lang = if cell.dt == DT_STRING { 0 } else { cell.lang };
             if class_only {
@@ -138,7 +142,7 @@ fn compare(op: u8, a: Value, b: Value, membership: bool) -> (Lane<bool>, bool) {
         if !a.bound | !b.bound { truth(false, true) } else {
         if a.bound & b.bound & (a.kind == 3) & (b.kind == 3) {
             assert((a.key_class != 2) & (b.key_class != 2), "floating-point comparison not yet supported");
-            assert((op != 0) | ((a.key_class != 0) & (b.key_class != 0)) | is_string(a) | is_string(b), "literal equality without a supported value key");
+            assert((op != 0) | ((a.key_class != 0) & (b.key_class != 0)) | is_string(a) | is_string(b) | (a.dt == DT_LANGSTRING) | (b.dt == DT_LANGSTRING), "literal equality without a supported value key");
             let strings = is_string(a) & is_string(b);
             assert((op == 0) | !strings | ((a.dt != DT_LANGSTRING) & (b.dt != DT_LANGSTRING)
                 & ((a.lang == 0) | (a.dt == DT_STRING)) & ((b.lang == 0) | (b.dt == DT_STRING))), "language-tagged string ordering not yet supported");

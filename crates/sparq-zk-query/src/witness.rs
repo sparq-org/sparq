@@ -254,12 +254,13 @@ pub fn prover_toml_authenticated_with_envelope(
                 return Err(Error::Invalid("issuer membership root".into()));
             }
             for q in credential.quads()? {
-                quads.push(serde_json::json!([
-                    term_opening(Some(&oxrdf::Term::from(q.subject)))?,
-                    term_opening(Some(&oxrdf::Term::NamedNode(q.predicate)))?,
-                    term_opening(Some(&q.object))?,
-                    term_opening(None)?,
-                ]));
+                let mut object = term_opening_with_capacity(Some(&q.object), LEXICAL_CAPACITY)?;
+                object.as_object_mut().unwrap().remove("bound");
+                quads.push(serde_json::json!({
+                    "subject":resource_opening(Some(&oxrdf::Term::from(q.subject)))?,
+                    "predicate":resource_opening(Some(&oxrdf::Term::NamedNode(q.predicate)))?,
+                    "object":object,
+                }));
             }
             let config: [u8; 32] =
                 Sha256::digest(credential.credential.proof_config.as_bytes()).into();
@@ -283,10 +284,7 @@ pub fn prover_toml_authenticated_with_envelope(
                 metadata.created.as_ref(),
                 crate::credential::CREATION_CAPACITY,
             )?;
-            let method = metadata_opening(
-                metadata.verification_method.as_ref(),
-                crate::credential::METHOD_CAPACITY,
-            )?;
+            let method = resource_opening(metadata.verification_method.as_ref())?;
             proofs.push(serde_json::json!({"created":created,"method":method,"salt":field_to_hex(&credential.credential.salt),"salts":salts,
                 "config":[u128::from_be_bytes(config[..16].try_into().unwrap()).to_string(),u128::from_be_bytes(config[16..].try_into().unwrap()).to_string()],
                 "pk":{"x":field_to_hex(&w.pk_x),"y":field_to_hex(&w.pk_y)},"r":{"x":field_to_hex(&w.r_x),"y":field_to_hex(&w.r_y)},
@@ -294,13 +292,15 @@ pub fn prover_toml_authenticated_with_envelope(
                 "issuer_siblings":credential.issuer_siblings.iter().map(field_to_hex).collect::<Vec<_>>()}));
         } else {
             proofs.push(serde_json::json!({"created":metadata_opening(None, crate::credential::CREATION_CAPACITY)?,
-                "method":metadata_opening(None, crate::credential::METHOD_CAPACITY)?,"salt":"0","salts":vec!["0";capacity as usize],"config":["0","0"],
+                "method":resource_opening(None)?,"salt":"0","salts":vec!["0";capacity as usize],"config":["0","0"],
                 "pk":{"x":"0","y":"0"},"r":{"x":"0","y":"0"},"s":"0","e":"0","e_k":"0","issuer_index":0,"issuer_siblings":vec!["0";4]}));
         }
-        let padding = serde_json::json!({"bound":false,"kind":0,"lexical":vec![0;LEXICAL_CAPACITY],"lexical_len":0,"datatype":vec![0;128],"datatype_len":0,"language":vec![0;64],"language_len":0,"key":vec![0;31]});
+        let mut object = term_opening_with_capacity(None, LEXICAL_CAPACITY)?;
+        object.as_object_mut().unwrap().remove("bound");
+        let resource = resource_opening(None)?;
         quads.resize(
             capacity as usize,
-            serde_json::json!([padding, padding, padding, padding]),
+            serde_json::json!({"subject":resource,"predicate":resource,"object":object}),
         );
         raw.push(serde_json::Value::Array(quads));
     }
@@ -373,6 +373,21 @@ pub fn prover_toml_authenticated_with_envelope(
     Ok(out)
 }
 
+fn resource_opening(term: Option<&oxrdf::Term>) -> Result<serde_json::Value, Error> {
+    let mut raw = term_opening_with_capacity(term, crate::credential::RESOURCE_CAPACITY)?;
+    let fields = raw.as_object_mut().unwrap();
+    for key in [
+        "bound",
+        "datatype",
+        "datatype_len",
+        "language",
+        "language_len",
+        "key",
+    ] {
+        fields.remove(key);
+    }
+    Ok(raw)
+}
 fn metadata_opening(
     term: Option<&oxrdf::Term>,
     capacity: usize,
@@ -382,9 +397,6 @@ fn metadata_opening(
         opening["bound"] = serde_json::json!(false);
     }
     Ok(opening)
-}
-fn term_opening(term: Option<&oxrdf::Term>) -> Result<serde_json::Value, Error> {
-    term_opening_with_capacity(term, crate::credential::LEXICAL_CAPACITY)
 }
 fn term_opening_with_capacity(
     term: Option<&oxrdf::Term>,
@@ -413,7 +425,7 @@ fn term_opening_with_capacity(
     };
     Ok(
         serde_json::json!({"bound":true,"kind":kind,"lexical":pad(text,capacity)?,"lexical_len":text.len(),
-        "datatype":pad(dt,128)?,"datatype_len":dt.len(),"language":pad(lang,64)?,"language_len":lang.len(),"key":key.as_slice()}),
+        "datatype":pad(dt,crate::credential::DATATYPE_CAPACITY)?,"datatype_len":dt.len(),"language":pad(lang,crate::credential::LANGUAGE_CAPACITY)?,"language_len":lang.len(),"key":key.as_slice()}),
     )
 }
 fn json_toml(value: &serde_json::Value) -> String {

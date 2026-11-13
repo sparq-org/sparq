@@ -122,7 +122,13 @@ fn suite_signature_opening_and_named_admission_guards_are_observable() {
         named.cells(0).unwrap_err(),
         Error::Unsupported("credential named graph".into())
     );
-    let long = authenticated::sign(&format!("<urn:{}> <urn:p> <urn:o> .", "a".repeat(40)), 0);
+    let long = authenticated::sign(
+        &format!(
+            "<urn:{}> <urn:p> <urn:o> .",
+            "a".repeat(sparq_zk_query::credential::RESOURCE_CAPACITY)
+        ),
+        0,
+    );
     assert_eq!(
         long.cells(0).unwrap_err(),
         Error::Capacity("opened lexical bytes".into())

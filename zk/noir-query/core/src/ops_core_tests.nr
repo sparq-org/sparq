@@ -325,6 +325,8 @@ fn expression_cell(class: u8, key: Field, enc: Field) -> TermCell {
         0x800000000000000000000000000000000000000000000000000000000000 + key * 1000000000000000000
     } else if (class == 5) | (class == 6) {
         key * 0x10000000000000000000000000000000000000000000000000000000000
+    } else if (class == 3) | (class == 4) | (class == 8) {
+        key * 0x100000000000000000000000000000000000000000000
     } else { key };
     TermCell {bound:true, kind:3, enc, key_class:class, key: payload + class as Field * 0x1000000000000000000000000000000000000000000000000000000000000, dt:0, lang:0, scope:0}
 }
@@ -599,7 +601,7 @@ fn expression_plain_and_language_string_equality_uses_its_type_class() {
     for plain in [plain_string_cell(6),plain_string_cell(7)] {
         for pair in [[plain,language],[language,plain]] {
             let result=mixed_string_equality(pair[0],pair[1]);
-            assert(!result.value & !result.is_error);
+            assert(!result.value & result.is_error);
         }
     }
 }
@@ -634,7 +636,7 @@ fn expression_language_string_equality_preserves_term_identity() {
     let mut a=expression_cell(0,0,11);a.dt=crate::suite_constants::DT_LANGSTRING;a.lang=7;
     let mut b=a;b.enc=12;
     let equal=mixed_string_equality(a,a);let different=mixed_string_equality(a,b);
-    assert(equal.value & !equal.is_error);assert(!different.value & !different.is_error);
+    assert(equal.value & !equal.is_error);assert(!different.value & different.is_error);
 }
 
 #[test]
@@ -665,4 +667,26 @@ fn expression_invalid_numeric_and_boolean_ebv_is_false_without_error() {
             [expr_step(0,0,0,0,0),expr_step(5,0,0,0,0)])[0];
         assert(result.value & !result.is_error);
     }
+}
+
+#[test]
+fn expression_temporal_key_normalizes_the_suite_payload() {
+    for class in [3,4,8] {
+        let a=expression_cell(class,100,11);let b=expression_cell(class,101,12);
+        let result=crate::ops_core_expr::evaluate(Table {rows:[[a]],len:1},[b],
+            [expr_step(0,0,0,0,0),expr_step(1,0,0,0,0),expr_step(2,0,1,0,1)]);
+        assert(result[0].value & !result[0].is_error);
+    }
+}
+#[test(should_fail_with="temporal key zero tail")]
+fn expression_temporal_key_tail_is_exact() {
+    let mut a=expression_cell(8,100,11);a.key=a.key+1;
+    let _result=mixed_string_equality(a,a);
+}
+
+#[test]
+fn expression_string_prefix_with_zero_payload_is_nonempty() {
+    let mut cell=expression_cell(7,0,11);cell.dt=crate::suite_constants::DT_STRING;
+    let result=crate::ops_core_expr::evaluate(Table {rows:[[cell]],len:1},[unbound()],[expr_step(0,0,0,0,0)]);
+    assert(result[0].value & !result[0].is_error);
 }

@@ -161,7 +161,13 @@ envelope, quad_bounds)` and obtain it through `Request::envelope_inputs()`.
 The existing authenticated methods retain the issuer-only profile. Enabled
 holder, status, validity and freshness policies require the statement lane's
 consumer; the current native driver refuses them by name until it is integrated.
-The canonical policy-root module remains a neighbouring-lane integration.
+Typed canonical policy inputs also require that consumer, even when their tree
+depth happens to match the issuer-only relation.
+`Request::new_authenticated_with_envelope(stored, bounds, key, policy,
+quad_bounds)` takes `envelope_policy::PolicyInput`, derives its canonical roots
+and retains it for fresh `envelope_inputs()` derivation during verification.
+Validity and freshness times are Unix epoch milliseconds. A present-empty
+holder issuer list is refused; omit holder binding to require no holder keys.
 
 Expression evaluation uses the shared typed gadgets, with a separate capacity
 channel. The generated-query coverage ratchet requires native and WebAssembly
@@ -202,17 +208,25 @@ and adds its default-only assertion. It does not supply that trust check itself.
 they were absent from the source vocabulary. Other result terms use the supplied
 vocabulary or the plan's public constants.
 
-The circuit library's `ops_core_profile::open_quads` accepts compact resource and
-object openings and returns suite cells. A private literal tag selects a supported
-fixed datatype for `term::open_key_checked`; resources pass through
-`suite_entry::open_bounded_quads` with empty metadata. The returned cells still
-require the suite's root, count, salt, signature and metadata authentication. This
-helper alone is not a credential verifier.
-`open_identity_quads` supplies the complete identity table for root authentication.
-A comparison, function or aggregate must obtain its value through a checked lexical
-opening; the identity route alone does not provide that value contract.
+The circuit library's `ops_core_profile` contains raw witness structs and
+resource normalization only. Generated credential openings call
+`ops_core_suite::open_bounded_one`, delegating the complete signed opening to
+`suite::open_bounded_credential_hidden` once per credential. Resource datatype,
+language and key bytes are zero; the default graph and active flags are derived.
+Object value consumers call `term::open_key_checked` with fixed datatype
+identifiers. Raw lexical backing is separately bounded for resources, objects
+and scalars. Shape encoding includes all these capacities.
+The additive envelope seam is `authenticate_bounded` followed by its consumer
+and `from_authenticated_bounded`. Existing unbounded fixture entry points remain
+available, with the same suite authentication relation.
 
 String equality keeps type errors distinct from false. Term-identity tokens are
 local to same-datatype string equality; mixed string types and value families
 pass through the shared comparison's type classes. These tokens must never be
 used as lexical input by string functions.
+
+The query proof tests default to `SPARQ_NOIR_QUERY_PROOF_PROFILE=full`.
+`smoke` selects a small authenticated ASK sample for hosted CI. Unknown values
+are refused; the workflow dispatch input `full_query_proofs` runs the complete
+acceptance sweep. Each selected proof still checks its engine result and refuses
+an altered answer. Local completion requires the full profile.

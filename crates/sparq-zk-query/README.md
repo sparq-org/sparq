@@ -46,9 +46,9 @@ private lexical, signature and membership material. Its encoder argument remains
 for compatibility; proof and verification use `credential::SuiteEncoder`.
 Structural requests created with `Request::new` cannot produce an authenticated proof.
 
-The current suite profile opens complete credentials, checks supported literal
-keys, hidden signatures and issuer key membership. The verifier reconstructs the
-plan and constants from its stored request, re-encodes the released RDF answer,
+The current suite profile opens complete credentials, checks hidden signatures
+and issuer key membership. Value consumers check supported literal keys.
+The verifier reconstructs the plan and constants from its stored request, re-encodes the released RDF answer,
 and consumes the shared challenge after proof verification and a final validity check.
 Supplied-cell programs are isolated operator fixtures.
 
@@ -66,10 +66,12 @@ padded rows before length. Openings, signatures, presentation salt and traces ar
 The dataset commitment binds the ordered authenticated suite messages under a
 method domain and presentation salt, separately from the detached evaluator's profile.
 
-`new_authenticated_with_policy` admits typed envelope words, returned through
-`Request::envelope_inputs`. Canonical policy derivation and the statement lane's
-consumer are still being integrated. Enabled envelope requirements retain a named
-native integration refusal until that consumer is connected.
+`new_authenticated_with_envelope` stores typed policy properties and uses
+`envelope_policy::derive` for admission and verifier reconstruction. Time values
+are Unix epoch milliseconds. Present-empty holder issuer lists are refused.
+The existing `new_authenticated_with_policy` accepts verifier-stored policy words.
+Canonical policy inputs and enabled envelope requirements retain a named native
+integration refusal until the statement lane's consumer is connected.
 The dataset helpers retain named credential copies and a default merge with
 method-generated issuer assertions. Their production wiring awaits the graph
 dispatcher and canonical issuer trust consumer.
@@ -84,6 +86,11 @@ operator program; the workflow loads committed Noir manifests unchanged.
 Native execution uses the shared live-toolchain gate. Run it with
 `cargo test -p sparq-zk-query --test execution -- --ignored`, or use
 `cargo test -p sparq-zk-query -- --include-ignored` for the full live suite.
+`SPARQ_NOIR_QUERY_PROOF_PROFILE` selects `full` (default) or `smoke` for the
+native proof sweep. Hosted CI uses the authenticated sample and an explicit
+differential seed; workflow dispatch with `full_query_proofs` selects the complete
+acceptance sweep and default seed set. Differential execution checks operator
+fixtures; authenticated altered-witness controls run separately.
 `SPARQ_NOIR_QUERY_EVIDENCE`, unset by default, accepts an external JSONL output path
 for native proof-test plans and measurements. Keep the output outside the repository.
 
