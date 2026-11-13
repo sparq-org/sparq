@@ -55,3 +55,41 @@ fn sig_digits_counts() {
     assert_eq!(sig_digits("0.00123"), 3); // leading fraction zeros are not significant
     assert_eq!(sig_digits("100.0"), 3);
 }
+
+#[test]
+fn interpreted_comparisons_keep_exact_values_beyond_the_tower() {
+    let graph = Graph::load_str("", "n-triples").unwrap();
+    let local = LocalVocab::default();
+    let bindings = Bindings::unsorted(Vec::new(), Vec::new());
+    let literal =
+        |value: &str, datatype| Expression::Literal(Literal::new_typed_literal(value, datatype));
+    let low = literal("340282366920938463463374607431768211456000", xsd::DECIMAL);
+    let high = literal("340282366920938463463374607431768211456001", xsd::INTEGER);
+    let two = Expression::Add(
+        Box::new(literal("1", xsd::INTEGER)),
+        Box::new(literal("1", xsd::INTEGER)),
+    );
+    let expressions = [
+        Expression::Greater(Box::new(high.clone()), Box::new(low.clone())),
+        Expression::Less(Box::new(low), Box::new(high.clone())),
+        Expression::Greater(Box::new(high), Box::new(two.clone())),
+        Expression::Equal(Box::new(two), Box::new(literal("2", xsd::INTEGER))),
+        Expression::Less(
+            Box::new(literal("1E0", xsd::DOUBLE)),
+            Box::new(literal("2", xsd::INTEGER)),
+        ),
+    ];
+    for strict in [false, true] {
+        let limits = crate::QueryBudget {
+            strict_numeric_capacity: strict,
+            ..crate::QueryBudget::unlimited()
+        };
+        budget::with_budget(&limits, || {
+            for expr in &expressions {
+                let result = eval_expr(&graph, &local, &bindings, &[], expr).unwrap();
+                assert!(matches!(result, Value::Bool(true)), "{expr:?}: {result:?}");
+                assert!(budget::check(0).is_ok());
+            }
+        });
+    }
+}
