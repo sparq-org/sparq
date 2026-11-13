@@ -64,6 +64,15 @@ fn legacy_plan(graph: &Graph, target: &str, candidates: &[String]) -> Result<Rea
     })
 }
 
+fn both_query_forms(candidates: Vec<String>) -> [Vec<String>; 2] {
+    let mut wide = candidates.clone();
+    wide.extend(
+        (0..=sparql::READ_PLAN_CONSTANT_CANDIDATES)
+            .map(|i| format!("https://pod.example/unindexed/{i}.acl")),
+    );
+    [candidates, wide]
+}
+
 fn fixture() -> (Graph, Vec<String>) {
     let mut graph = Graph::new();
     let mut names = vec!["https://pod.example/absent".to_string()];
@@ -131,7 +140,10 @@ async fn read_plan_matches_legacy_query_for_partial_and_malformed_records() {
             std::iter::once(target.clone())
                 .chain((0..5).map(|j| names[(i + j * 3) % 11].clone()))
                 .collect(),
-        ] {
+        ]
+        .into_iter()
+        .flat_map(both_query_forms)
+        {
             let old_target = target.clone();
             let old_candidates = candidates.clone();
             let expected = client
@@ -182,16 +194,24 @@ async fn read_plan_matches_legacy_query_for_partial_and_malformed_records() {
         names.reverse();
         names.push(target.clone());
         names.push("https://pod.example/absent".to_string());
-        let expected = legacy_plan(&graph, &target, &names);
         let client = EmbeddedSparqClient::over(graph).unwrap();
-        assert_eq!(
-            client
-                .read_plan(&target, &names)
+        for candidates in both_query_forms(names) {
+            let old_target = target.clone();
+            let old_candidates = candidates.clone();
+            let expected = client
+                .actor
+                .call(move |g| Ok(legacy_plan(g, &old_target, &old_candidates)))
                 .await
-                .map_err(|e| e.to_string()),
-            expected,
-            "multi-valued legacy parity for seed {seed}"
-        );
+                .unwrap();
+            assert_eq!(
+                client
+                    .read_plan(&target, &candidates)
+                    .await
+                    .map_err(|e| e.to_string()),
+                expected,
+                "multi-valued legacy parity for seed {seed}"
+            );
+        }
     }
 }
 
@@ -260,4 +280,61 @@ async fn read_plan_evaluates_only_distinct_requested_graphs() {
         evaluations,
         "unrelated graphs must not add metadata evaluations"
     );
+}
+
+#[tokio::test]
+async fn read_plan_long_paths_match_legacy_query() {
+    let boundary = sparql::READ_PLAN_CONSTANT_CANDIDATES;
+    for count in [boundary - 1, boundary, boundary + 1, 4096] {
+        let mut path = String::from("https://pod.example/");
+        let mut candidates = Vec::new();
+        for _ in 0..count {
+            path.push_str("a/");
+            candidates.push(format!("{path}.acl"));
+        }
+        candidates.reverse();
+        let target = format!("{path}doc");
+        let client = EmbeddedSparqClient::in_memory().unwrap();
+        if count != 4096 {
+            let metadata = ResourceMeta {
+                content_type: "text/turtle".into(),
+                blob_key: "target-blob".into(),
+                etag: "target-tag".into(),
+                last_modified: None,
+                append_seq: 0,
+            };
+            client.put_meta(&target, metadata.clone()).await.unwrap();
+            client
+                .put_meta(candidates.last().unwrap(), metadata)
+                .await
+                .unwrap();
+        }
+        let old_target = target.clone();
+        let old_candidates = candidates.clone();
+        let expected = client
+            .actor
+            .call(move |g| Ok(legacy_plan(g, &old_target, &old_candidates)))
+            .await
+            .unwrap();
+        let before = client.engine_round_trips();
+        assert_eq!(
+            client
+                .read_plan(&target, &candidates)
+                .await
+                .map_err(|e| e.to_string()),
+            expected,
+            "long-path legacy parity at candidate count {count}"
+        );
+        assert_eq!(client.engine_round_trips() - before, 1, "one snapshot job");
+        let used_values = client
+            .actor
+            .call(|g| Ok(g.read_plan_query.as_ref().unwrap().contains("VALUES ?g {")))
+            .await
+            .unwrap();
+        assert_eq!(
+            used_values,
+            count > boundary,
+            "long-path query form at candidate count {count}"
+        );
+    }
 }

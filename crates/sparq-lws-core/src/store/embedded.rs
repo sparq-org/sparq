@@ -14,8 +14,8 @@
 //!
 //! ## Why this is a net simplification over the HTTP path
 //! - **Shared query builders.** Queries and updates use the injection-safe builders in
-//!   [`super::sparql`]. The embedded read plan uses constant-graph branches to evaluate only
-//!   requested metadata records, using the same query as the HTTP plan.
+//!   [`super::sparql`]. Read plans use balanced constant-graph branches for short walks
+//!   and the VALUES plan for longer walks, using the same builder as the HTTP plan.
 //! - **Named-graph isolation is REAL here (fixes the HTTP path's DEVIATION-1).** The engine's
 //!   `query`/`update_in_place` fully support `GRAPH <g> { … }` over a single [`Graph`] that holds the
 //!   default graph PLUS named graphs (graph IRI == resource IRI, the WAC-design model). The live
@@ -1339,8 +1339,8 @@ impl SparqClient for EmbeddedSparqClient {
         .await
     }
 
-    /// Read only the target and distinct ACL candidates in one indivisible actor job.
-    /// Constant GRAPH branches keep unrelated records out of evaluation. Every IRI is
+    /// Read the target and ACL candidates in one indivisible actor job. Short walks
+    /// use balanced constant GRAPH branches; longer walks use VALUES. Every IRI is
     /// validated before dispatch; any build, execution or row error fails the whole plan.
     /// All records come from the same graph state, with the caller's candidate order and
     /// duplicate roles retained when assembling the result.

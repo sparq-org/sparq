@@ -583,7 +583,7 @@ pub trait SparqClient: Send + Sync {
     /// The DEFAULT implementation loops [`get_meta`](SparqClient::get_meta) — semantically exact,
     /// one round-trip per IRI — so every existing impl (the embedded engine) works unchanged. The
     /// in-memory double overrides it with one atomic index pass and the HTTP client overrides it
-    /// with one combined SELECT over constant GRAPH branches. Fail-closed: any backend error
+    /// with one combined SELECT over balanced branches or VALUES. Fail-closed: any backend error
     /// on any part of the plan fails the WHOLE plan — there is no per-candidate partial-degrade
     /// path (design invariant 4).
     async fn read_plan(

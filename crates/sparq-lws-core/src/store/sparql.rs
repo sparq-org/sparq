@@ -325,31 +325,71 @@ pub fn select_meta(resource: &str) -> Result<String, BuildError> {
     ))
 }
 
-/// SELECT the target and distinct ACL candidates in one query. Each constant GRAPH
-/// branch evaluates only that graph's reserved record; absent records yield no row.
-/// The engine evaluates a variable GRAPH before joining VALUES, so a VALUES-bound
-/// graph variable would evaluate unrelated records too.
+// Comparative measurements favor a conservative boundary beyond ordinary pod walks.
+// Larger walks retain VALUES rather than repeating graph-name lookups for every candidate.
+pub(super) const READ_PLAN_CONSTANT_CANDIDATES: usize = 64;
+
+/// SELECT the target and ACL candidates in one query. Short walks use balanced
+/// constant GRAPH branches; longer walks retain the VALUES plan.
+/// Absent records yield no row in either form.
 ///
 /// Every name passes through the fallible [`iri`] builder before dispatch. Duplicate
 /// names are evaluated once; the reader restores the caller's candidate order and roles.
 pub fn select_read_plan(target: &str, acl_candidates: &[String]) -> Result<String, BuildError> {
-    let mut arms = Vec::with_capacity(1 + acl_candidates.len());
-    let mut seen = Vec::with_capacity(1 + acl_candidates.len());
-    for raw in std::iter::once(target).chain(acl_candidates.iter().map(String::as_str)) {
-        if seen.contains(&raw) {
-            continue;
+    let names = read_plan_names(target, acl_candidates);
+    if acl_candidates.len() > READ_PLAN_CONSTANT_CANDIDATES {
+        let mut values = String::new();
+        for name in names {
+            let name = name?;
+            if !values.is_empty() {
+                values.push(' ');
+            }
+            values.push_str(&name);
         }
-        seen.push(raw);
-        let graph = iri(raw)?;
-        arms.push(format!(
-            "{{ BIND({graph} AS ?g) {record} }}",
-            record = read_plan_record(&graph),
+        return Ok(format!(
+            "SELECT ?g ?ct ?bk ?etag ?mod ?appendSeq WHERE {{ VALUES ?g {{ {values} }} {record} }}",
+            record = read_plan_record("?g"),
         ));
     }
-    Ok(format!(
-        "SELECT ?g ?ct ?bk ?etag ?mod ?appendSeq WHERE {{ {} }}",
-        arms.join(" UNION "),
-    ))
+    let names = names.collect::<Result<Vec<_>, _>>()?;
+    let mut query = String::from("SELECT ?g ?ct ?bk ?etag ?mod ?appendSeq WHERE { ");
+    read_plan_union(&names, &mut query);
+    query.push_str(" }");
+    Ok(query)
+}
+
+fn read_plan_names<'a>(
+    target: &'a str,
+    candidates: &'a [String],
+) -> impl Iterator<Item = Result<String, BuildError>> + 'a {
+    let mut seen = Vec::with_capacity(1 + candidates.len());
+    std::iter::once(target)
+        .chain(candidates.iter().map(String::as_str))
+        .filter_map(move |raw| {
+            if seen.contains(&raw) {
+                None
+            } else {
+                seen.push(raw);
+                Some(iri(raw))
+            }
+        })
+}
+
+fn read_plan_union(names: &[String], output: &mut String) {
+    if let [graph] = names {
+        output.push_str("{ BIND(");
+        output.push_str(graph);
+        output.push_str(" AS ?g) ");
+        output.push_str(&read_plan_record(graph));
+        output.push_str(" }");
+        return;
+    }
+    let (left, right) = names.split_at(names.len() / 2);
+    output.push_str("{ ");
+    read_plan_union(left, output);
+    output.push_str(" UNION ");
+    read_plan_union(right, output);
+    output.push_str(" }");
 }
 
 // Keep all rows of a multi-valued record: the reader validates every row before
@@ -1831,6 +1871,84 @@ mod tests {
             "marker predicate: {q}"
         );
         assert!(q.contains("\"op-abc\""), "nonce as a literal: {q}");
+    }
+
+    // Require explicit binary groups before counting their UNION depth: adjacent
+    // UNION tokens in a group would otherwise associate implicitly.
+    fn read_plan_union_depth(query: &str) -> usize {
+        let mut groups: Vec<(usize, usize)> = Vec::new();
+        let mut depth = 0;
+        let bytes = query.as_bytes();
+        for (i, byte) in bytes.iter().enumerate() {
+            match byte {
+                b'{' => groups.push((0, 0)),
+                b'}' => {
+                    let (unions, children) = groups.pop().unwrap();
+                    assert!(unions <= 1, "read-plan UNION groups must be binary");
+                    let nested = children + usize::from(unions == 1);
+                    if let Some((_, maximum)) = groups.last_mut() {
+                        *maximum = (*maximum).max(nested);
+                    } else {
+                        depth = depth.max(nested);
+                    }
+                }
+                _ if bytes[i..].starts_with(b"UNION ") => groups.last_mut().unwrap().0 += 1,
+                _ => {}
+            }
+        }
+        assert!(groups.is_empty(), "read-plan groups must be balanced");
+        depth
+    }
+
+    #[test]
+    fn select_read_plan_bounds_union_nesting_and_retains_values() {
+        let boundary = READ_PLAN_CONSTANT_CANDIDATES;
+        for count in (0..=boundary + 1).chain([4096]) {
+            let candidates: Vec<_> = (0..count)
+                .map(|i| format!("https://pod.example/acl-{i}"))
+                .collect();
+            let query = select_read_plan("https://pod.example/doc", &candidates).unwrap();
+            let depth = read_plan_union_depth(&query);
+            if count <= boundary {
+                let names = count + 1;
+                let expected_depth = (usize::BITS - (names - 1).leading_zeros()) as usize;
+                assert_eq!(
+                    depth, expected_depth,
+                    "logarithmic UNION nesting at candidate count {count}"
+                );
+                assert_eq!(
+                    query.matches("GRAPH <").count(),
+                    names,
+                    "constant branches below the boundary"
+                );
+                assert!(
+                    !query.contains("VALUES ?g"),
+                    "constant form below the boundary"
+                );
+            } else {
+                assert!(
+                    query.contains("VALUES ?g {"),
+                    "VALUES form above the boundary"
+                );
+                assert!(
+                    query.contains("GRAPH ?g {"),
+                    "variable graph in the VALUES form"
+                );
+                assert_eq!(depth, 0, "VALUES form has no UNION nesting");
+            }
+        }
+        let target = "https://pod.example/.acl";
+        let duplicates = vec![target.to_string(); boundary + 1];
+        let query = select_read_plan(target, &duplicates).unwrap();
+        assert!(
+            query.contains("VALUES ?g {"),
+            "walk length selects the query form"
+        );
+        assert_eq!(
+            query.matches(&iri_const(target)).count(),
+            1,
+            "VALUES names remain deduplicated"
+        );
     }
 
     #[test]
