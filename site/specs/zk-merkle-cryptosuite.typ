@@ -1,6 +1,6 @@
 // Merkle-root cryptosuites for RDF verifiable credentials. Normative computations
-// mirror zk/sparql-evaluator/model/src/merkle_suite.rs; the fixed vectors in
-// section 10 are asserted by zk/sparql-evaluator/model/tests/merkle_suite.rs.
+// mirror crates/sparq-merkle-suite and zk/noir-query/core. The frozen SHA vectors
+// also remain asserted by zk/sparql-evaluator/model/tests/merkle_suite.rs.
 
 #import "_lib/spec.typ": spec-head, sotd, intro-section, references, dfn, note, cite
 
@@ -20,8 +20,8 @@
   comparison key: an order-preserving encoding of its value under the SPARQL
   relational operators, for numbers, date-times, booleans and `xsd:string`
   prefixes. A zero-knowledge proof can then authenticate a credential
-  without canonicalizing it, and compare typed values without parsing lexical
-  forms. The suite family has three members that share the encoding and the
+  without canonicalizing it, and reuse a checked key for typed comparisons.
+  The suite family has three members that share the encoding and the
   tree shape: `eddsa-sha256-merkle-2026` for hash-accelerated zkVMs,
   `schnorr-poseidon2-merkle-2026` for arithmetic circuits, and the post-quantum
   `mldsa44-sha256-merkle-2026`.
@@ -62,7 +62,7 @@ in RFC 2119 #cite("RFC2119") when, and only when, they appear in capitals.
   [`eddsa-sha256-merkle-2026`], [SHA-256], [Ed25519 #cite("RFC8032")],
     [Implemented in the sparq zkVM relation and its issuer function],
   [`schnorr-poseidon2-merkle-2026`], [Poseidon2 over BN254], [Schnorr over Baby Jubjub],
-    [Specified here; not yet implemented],
+    [Implemented in the native suite and Noir credential library; research grade and externally unaudited],
   [`mldsa44-sha256-merkle-2026`], [SHA-256], [ML-DSA-44 #cite("FIPS204")],
     [Specified here; not yet implemented],
 )
@@ -80,7 +80,10 @@ A credential secured with one of these suites carries a `DataIntegrityProof`
   bytes followed by the 32-byte tree salt.
 
 The salt is secret to the issuer and the holder. A holder MUST NOT disclose the
-salt to a verifier.
+salt to a verifier. For the Poseidon2 member it is the canonical, unsigned
+32-byte big-endian encoding of a uniformly sampled field element; encodings at
+or above the field modulus MUST be rejected. The SHA-256 members use uniformly
+sampled byte salts.
 
 = Encoding
 
@@ -108,7 +111,7 @@ The #dfn[term encoding] `enc(t)` of a term `t` is:
 A literal's #dfn[comparison key] is one class byte and 30 payload bytes,
 computed from its datatype and lexical form only. It is an order-preserving
 encoding of the literal's value: for two literals whose keys have the same class
-from `0x01` to `0x06`, comparing the keys as unsigned big-endian integers gives
+from `0x01` to `0x06`, or class `0x08`, comparing the keys as unsigned big-endian integers gives
 the result of the SPARQL operators `=`, `!=`, `<`, `>`, `<=` and `>=` on the
 literals #cite("SPARQL11-QUERY"). Each class holds only datatypes that SPARQL
 compares with one another.
@@ -126,7 +129,7 @@ In every other case, a proof uses the lexical form.
 #table(
   columns: (auto, 1fr, 1.6fr),
   [*Class*], [*Literals*], [*Payload*],
-  [`0x01`], [valid `xsd:integer` and `xsd:decimal`],
+  [`0x01`], [valid `xsd:integer`, its built-in derived datatypes, and `xsd:decimal`],
     [the value times 10#super[18] plus 2#super[239], as 30 bytes; integers and
      decimals with equal values share a key],
   [`0x02`], [valid `xsd:double` and `xsd:float`],
@@ -140,10 +143,12 @@ In every other case, a proof uses the lexical form.
   [`0x06`], [`xsd:string` of at most 30 bytes and no U+0000],
     [the lexical bytes],
   [`0x07`], [other `xsd:string`], [the first 30 lexical bytes],
+  [`0x08`], [timezone-free `xsd:date`],
+    [8 bytes: proleptic Gregorian days since 1970-01-01 plus 2#super[63]],
   [`0x7F`], [valid values the key cannot represent],
     [none: decimals with more than 18 fractional digits or a magnitude of at least
      2#super[239]/10#super[18]; NaN; date-times whose year is not four digits from
-     0001, that end at 24:00:00, or that have sub-millisecond precision],
+     0001, that end at 24:00:00, or that have sub-millisecond precision; dates with a timezone or a year outside the date-time profile],
   [`0x00`], [every other literal, including `rdf:langString` and ill-typed
     literals], [none],
 )
@@ -172,7 +177,8 @@ Certificate Transparency #cite("RFC6962").
 
 == Signed message
 
-Let `n` be the number of quads, `root` the tree root, `salt` the 32-byte salt,
+For the SHA-256 members, let `n` be the number of quads, `root` the tree root,
+`salt` the 32-byte salt,
 and `config` the SHA-256 digest of the RDFC-1.0 canonical proof configuration
 (the proof without `proofValue`). The #dfn[signed message] is the 32 bytes
 
@@ -185,6 +191,10 @@ where `id` is the ASCII suite identifier.
 = Algorithms
 
 == Proof creation
+
+The SHA-256 members use the following steps. The Poseidon2 member uses its
+field-native tree and message below, samples a canonical field salt, and signs
+with the existing Schnorr-over-Baby-Jubjub scheme instead.
 
 + Canonicalize the credential and the proof configuration with RDFC-1.0.
 + Draw a fresh, uniformly random 32-byte salt.
@@ -204,22 +214,24 @@ small-order keys.
 == Use in proofs of query answers
 
 A proof system that evaluates a SPARQL query over credentials secured with these
-suites receives the quads in leaf order, the configuration and the salt as
-private input. It recomputes every leaf from the terms, checks that the leaves
-are strictly increasing, and rebuilds the signed message. The answer is then
-computed over exactly those quads. Because every comparison key is recomputed
-from its lexical form, a malformed key in a credential makes the proof fail. A
-holder can hold the same credential under several salts, so a proof that rejects
-duplicate credentials MUST identify a credential by its quad count and unsalted
-root, not by its signed message. Any order the proof makes public, such as the
+suites receives the quads in the member's canonical order, the configuration and
+the salt as private input. It recomputes every leaf from the terms, checks strict
+leaf order for the SHA-256 members or strict quad-hash order for the Poseidon2
+member, and rebuilds the signed message. The answer is then computed over exactly
+those quads. Whenever a proof consumes a comparison key for value semantics, it
+MUST recompute the key from a bound lexical opening; a mismatching key makes the
+proof fail. A holder can hold the same credential under several salts, so a proof
+that rejects duplicate credentials MUST compare their private canonical quad
+sequences, or the SHA-256 member's unsalted root, rather than their salted messages. Any order the proof makes public, such as the
 order of revealed messages, MUST depend only on salted values; an order by the
 unsalted root would let a verifier compare a private credential with a known
 one.
 
 - In `hidden` mode the signature is also private input, and the proof verifies
   it against a key the verifier authorized.
-- In `revealed` mode the proof outputs the signed message and the verification
-  method. The verifier checks the presented signature over that message. The
+- In `revealed` mode the proof outputs the signed message; the verification
+  method is carried by the outer presentation. The verifier checks the presented
+  signature over that message. The
   holder reveals only the signature bytes, never the full `proofValue`: the tree
   salt MUST stay private to the holder, because a verifier that learns it can
   confirm guesses of the credential's content. The
@@ -233,30 +245,87 @@ the keys it compares.
 
 = The Poseidon2 member
 
-`schnorr-poseidon2-merkle-2026` uses field elements of the BN254 scalar field
-and the Poseidon2 sponge `P` with width 4, rate 3, 8 full and 56 partial rounds,
-as defined by the zkSPARQL draft #cite("ZKSPARQL") and Noir's standard library.
+`schnorr-poseidon2-merkle-2026` is implemented by the native
+`sparq-merkle-suite` crate and `zk/noir-query/core`. It is research grade and
+externally unaudited. It uses the existing Poseidon2 sponge over the BN254 scalar
+field, with width 4, rate 3, 8 full and 56 partial rounds, and the existing Schnorr
+over Baby Jubjub relation. The older commitment methods are unchanged.
 
-- `h(x)` is SHA-256 of the bytes `x`, keeping its low 31 bytes as an integer.
-- The field term encoding is `encF(t) = P(k, h(enc'(t)), key(t))`, where `k` is
-  the term's tag byte, `enc'(t)` is `enc(t)` without the comparison key, and
-  `key(t)` is the 31-byte comparison key as an integer (zero for non-literals).
-- A leaf is `P(1, encF(s), encF(p), encF(o), encF(g))`, and an inner node is
-  `P(2, left, right)`. The padding leaf is zero, and leaves are sorted as
-  integers.
-- The signed message is `P(3, suite, salt, n, root, c1, c0)`, where `suite` is
-  `h("schnorr-poseidon2-merkle-2026")`, `salt` is the 32-byte salt reduced
-  modulo the field order and `c1`, `c0` are the high and low 128 bits of the
-  configuration digest. As in the SHA-256 members, the suite identifier is
-  signed, so a signature cannot be reused under another suite.
-- The signature is a Schnorr signature over Baby Jubjub with a Poseidon2
-  challenge, as defined by the zkSPARQL draft's issuer attestation.
+== Domains and byte packing
 
-A circuit compares two class-`0x01` keys with one range check on their
-difference, instead of opening a hashed lexical form.
+A domain is the unsigned big-endian integer of its eight-byte ASCII label:
+`MS26TERM`, `MS26QUAD`, `MS26SALT`, `MS26LEAF`, `MS26NODE`, `MS26MESG`,
+`MS26TYPE`, `MS26LANG` and `MS26SUIT`. These denote term bytes, quad hashes,
+leaf-salt derivation, salted leaves, tree nodes, signed messages, datatype
+identifiers, language identifiers and suite identifiers respectively.
 
-#note[This member has no implementation in this revision. Its constants and
-message layout may change when it is implemented and given fixed vectors.]
+Let `B(domain, bytes)` be `P(domain, byte_length, chunks...)`. Pack each consecutive
+group of at most 31 bytes as an unsigned big-endian field integer; the last group
+retains its actual width, with no appended zero bytes. The byte length is always
+absorbed. An empty byte string has no chunks. These integers fit strictly below
+the field modulus, and the existing sponge also binds its field-input length.
+A bounded lexical opening MUST constrain all bytes beyond its length to zero.
+Changing a circuit's byte capacity does not change the hash.
+
+== Terms, quads and salted trees
+
+The field encoding is `encF(t) = P(kind(t), B(term_domain, enc'(t)), key(t))`,
+where `enc'(t)` is the typed byte encoding without its comparison key and the
+complete key is one field integer, zero for non-literals. Datatype and language
+identifiers use `B` under their own domains. A term cell MUST bind its kind,
+encoding, key class, key, datatype and language identifiers to the same opening.
+Blank-node cells also carry the credential's dataset position; equality includes
+that scope. Triple terms are not admitted.
+
+A quad hash is `q = P(quad_domain, encF(s), encF(p), encF(o), encF(g))`.
+The issuer orders quads by their canonical unsigned `q` values, strictly
+increasing, rejecting duplicates. For the zero-based index `i`, derive
+`salt_i = P(salt_domain, salt, i)` and the leaf
+`P(leaf_domain, q_i, salt_i)`. The private tree salt is a fresh uniformly sampled
+canonical field element. It MUST NOT appear as a public input or output.
+Pad leaves with zero to the next power of two and hash inner nodes as
+`P(node_domain, left, right)`. A sole leaf is its own root. The tree is the
+minimal tree for the exact positive count, independent of compiled capacity.
+Padding quad cells and leaf-salt witness slots MUST be canonical zero.
+
+== Message and signature modes
+
+The suite identifier is `B(suite_domain, "schnorr-poseidon2-merkle-2026")`.
+Let `c1` and `c0` be the unsigned high and low 128-bit halves of the SHA-256
+digest of the canonical proof configuration. The signed message is
+`P(message_domain, suite, salt, n, root, c1, c0)`. A signature therefore binds
+the suite, private salt, exact quad count, salted root and complete configuration.
+Use the existing Poseidon2-challenge Schnorr signer and verifier over Baby Jubjub.
+
+In hidden mode, the issuer-key coordinates and verifier-agreed configuration
+digest halves are public inputs; the circuit checks the signature and releases
+no credential output. In revealed mode, the agreed configuration digest halves
+are public inputs and the sole credential output is the salted signed message.
+The verifier checks its signature externally. Both modes keep term openings,
+keys, quad hashes, count, root, tree salt, leaf salts and signature witnesses
+private. No public credential value is an unsalted hash or ordered by one.
+
+== Lexical comparison-key checks
+
+Every value-consuming gadget MUST open the lexical bytes and recompute both
+comparison-key class and payload. Only that constructor produces a key-checked
+cell. Integer-derived built-in datatypes use the decimal class after checking
+their datatype's value bounds. XML Schema supplies no other built-in non-integer
+derivatives of decimal; unknown custom datatype IRIs have no key.
+
+Timezone-free dates get class `0x08`. A valid timezoned date gets `0x7F`, because
+the day ordinal cannot retain timezone offsets or the engine's partial order
+when timezone presence differs; this member adds no separate zoned-date class. Classes
+`0x00` and `0x7F` establish no order; equal prefixes in class `0x07` establish no
+order either. Float lexical parsing computes exact round-to-nearest-even before
+forming the existing IEEE key, including subnormals and overflow.
+
+#note[The detached zkVM model still holds a second copy of the earlier SHA-256
+implementation. Its guest compilation and lockfiles are frozen. Native tests
+compare both copies on the existing vectors, but the expanded datatype dispatch
+of the new suite does not retroactively change the frozen model's key profile.
+The previous Poseidon2 draft used truncated SHA term hashes and unsalted leaves;
+this revision replaces both before fixing the implemented member's vectors.]
 
 = Security and privacy considerations
 
