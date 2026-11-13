@@ -4,7 +4,7 @@ use std::{collections::BTreeMap, path::Path, sync::Arc};
 
 use sparq_jsonld::{DocumentLoader, JsonLdError, JsonLdErrorCode, RemoteDocument};
 
-use super::ApiError;
+use super::{inline_context_documents, ApiError};
 
 /// Required URL → filename mappings for an offline VC-API cache.
 pub const CONTEXT_FILES: &[(&str, &str)] = &[
@@ -41,7 +41,7 @@ pub struct OfflineContexts(Arc<BTreeMap<String, String>>);
 
 impl OfflineContexts {
     /// Load all [`CONTEXT_FILES`] from a trusted directory at service startup.
-    /// Original bytes are retained for related-resource digest checks.
+    /// Context bytes are retained exactly as staged.
     pub fn from_directory(path: &Path) -> Result<Self, ApiError> {
         let documents = CONTEXT_FILES
             .iter()
@@ -71,22 +71,25 @@ impl OfflineContexts {
     }
 
     pub(super) fn bytes(&self, url: &str) -> Result<&str, ApiError> {
-        self.0
-            .get(url)
-            .map(String::as_str)
+        self.held_bytes(url)
             .ok_or_else(|| ApiError::new("URL is absent from the offline cache"))
+    }
+
+    pub(super) fn held_bytes(&self, url: &str) -> Option<&str> {
+        self.0.get(url).map(String::as_str)
     }
 }
 
 impl DocumentLoader for OfflineContexts {
     fn load_document(&self, url: &str) -> Result<RemoteDocument, JsonLdError> {
-        self.bytes(url)
-            .map(|text| RemoteDocument::new(text, url))
-            .map_err(|_| {
-                JsonLdError::with_detail(
-                    JsonLdErrorCode::LoadingDocumentFailed,
-                    "URL is absent from the offline cache",
-                )
-            })
+        let document = (|| {
+            let mut value: serde_json::Value = serde_json::from_str(self.bytes(url)?)
+                .map_err(|_| ApiError::new("invalid JSON in offline context cache"))?;
+            inline_context_documents(&mut value)?;
+            Ok::<_, ApiError>(RemoteDocument::new(value.to_string(), url))
+        })();
+        document.map_err(|error| {
+            JsonLdError::with_detail(JsonLdErrorCode::LoadingDocumentFailed, error.to_string())
+        })
     }
 }

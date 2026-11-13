@@ -66,19 +66,18 @@ bound encoding, first-degree hashing and sorting. No new default feature is need
 `issue_quads_bounded_ordered_with::<sha2::Sha256>(&quads, &limits)` returns the
 same labels as a `BTreeMap<String, String>`. Use it in a zkVM guest to avoid
 constructing a randomly seeded return map. On `target_os = "zkvm"`, the standard
-canonicalizer also uses ordered work maps and a lexical dataset adapter. Native
+canonicalizer also uses ordered work maps and sets and a lexical dataset adapter. Native
 builds retain their existing collections and dataset adapter; the existing
 `HashMap`-returning APIs keep their signatures on every target.
 
 The underlying library's default HNDQ limit is 4000 calls. That counter counts
 recursive function entries, not permutation candidates skipped within an entry.
-The bounded APIs additionally compute `calls × d × d!`, where `d` is the largest
-number of related blank-node occurrences for any input blank node, including
-repetitions across quads or term positions. Each call has at most `d` groups
-and each group's permutation loop has at most `d!` iterations. Checked arithmetic
-and an excessive bound return `CanonError::Canonicalization` before that work.
-This deliberately rejects some easy inputs whose first-degree hashes would
-resolve quickly. No weaker comparison or alternate canonicalization is substituted.
+The bounded APIs additionally count every permutation candidate across all
+HNDQ calls, including candidates skipped by path pruning. The budget is shared
+through recursive calls and checked before each candidate is processed.
+Exhaustion returns `CanonError::Canonicalization`. High-degree inputs resolved
+by first-degree hashing consume no permutation budget. The canonical form is
+unchanged.
 These are algorithmic/input bounds, not elapsed-time or process-memory guarantees.
 Tests: `crates/sparq-canon/tests/bounded_canonicalization.rs`.
 

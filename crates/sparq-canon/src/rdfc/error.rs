@@ -13,6 +13,8 @@ pub enum CanonicalizationError {
         "The number of calls to the Hash N-degree Quads algorithm have exceeded the limit of {0}."
     )]
     HndqCallLimitExceeded(usize),
+    #[error("canonical permutation capacity")]
+    PermutationLimitExceeded,
 }
 
 impl From<BlankNodeIdParseError> for CanonicalizationError {
