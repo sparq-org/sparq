@@ -429,3 +429,29 @@ safe = true
 [[map]]
 pattern = "ci/formal-verification.toml"
 safe = true
+
+# The Noir query method library. sparq-zk-query compiles generated programs against
+# it (statement layout pin, native execution and proof tests) and sparq-merkle-suite
+# pins the suite constants it declares, so a change re-runs both.
+[[map]]
+pattern = "zk/noir-query/**"
+crates = ["sparq-zk-query", "sparq-merkle-suite"]
+
+# The conformance corpus the query method's coverage manifest is ratcheted against.
+[[map]]
+pattern = "zk/sparql-evaluator/fixtures/conformance/cases.json"
+crates = ["sparq-zk-query"]
+
+# sparq-zk-query's native tests copy the Noir library roots they compile against
+# (zk/noir-query/core, zk/compose/compose_core, zk/dual-leaf-v2) from the zk root.
+[[map]]
+pattern = "zk"
+crates = ["sparq-zk-query"]
+
+[[map]]
+pattern = "zk/compose/compose_core/**"
+readers = ["sparq-zk-query"]
+
+[[map]]
+pattern = "zk/dual-leaf-v2/**"
+readers = ["sparq-zk-query"]
