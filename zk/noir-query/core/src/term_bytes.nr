@@ -18,6 +18,20 @@ impl<let N: u32> BytePacker<N> {
         words[1] = length as Field;
         Self { words, partial: 0, used: 0, filled: 0, written: 0, length }
     }
+    pub(crate) fn framed_prefix<let L: u32>(kind: u8, bytes: BoundedVec<u8, L>, length: u32) -> Self {
+        std::static_assert(N >= L + 5, "framed byte capacity");
+        check_bytes(bytes);
+        let prefix_length = 5 + bytes.len();
+        assert(prefix_length <= length, "byte prefix length");
+        let mut packed = Self::new(crate::suite_constants::TERM_DOMAIN, length);
+        let words = nonliteral_words(kind, bytes);
+        for i in 0..(L + 35) / 31 { packed.words[i + 2] = words[i]; }
+        packed.used = prefix_length % 31;
+        packed.filled = prefix_length / 31;
+        packed.partial = if packed.used > 0 { packed.words[packed.filled + 2] } else { 0 };
+        packed.written = prefix_length;
+        packed
+    }
     pub(crate) fn push(&mut self, byte: u8) {
         self.append(byte as Field, 1);
     }
@@ -68,7 +82,6 @@ impl<let N: u32> BytePacker<N> {
                 powers[i] = powers[i - 1] * 256;
             }
             let trimmed = value / powers[15 - take];
-            short(trimmed);
             self.append(trimmed, take);
         }
     }
@@ -96,28 +109,54 @@ pub(crate) fn check_bytes<let L: u32>(bytes: BoundedVec<u8, L>) {
     for i in 1..16 {
         powers[i] = powers[i - 1] * 256;
     }
+    let boundary = bytes.len() / 15;
+    let remainder = bytes.len() % 15;
+    let mut partial: Field = 0;
+    let mut padding: Field = 0;
     for chunk in 0..(L + 14) / 15 {
-        let start = chunk * 15;
-        let remaining = if start < bytes.len() {
-            bytes.len() - start
-        } else {
-            0
-        };
-        let take = if remaining < 15 { remaining } else { 15 };
         let mut value: Field = 0;
         for j in 0..15 {
-            value = value * 256
-                + if start + j < L {
-                    bytes.get_unchecked(start + j) as Field
-                } else {
-                    0
-                };
+            let i = chunk * 15 + j;
+            value = value * 256 + if i < L { bytes.get_unchecked(i) as Field } else { 0 };
         }
-        // Packed input and the bounded quotient make this an integer division:
-        // their possible product is below the modulus. Every discarded byte
-        // must therefore be zero, including the wholly unused chunks.
-        short(value / powers[15 - take]);
+        partial = partial + if chunk == boundary { value } else { 0 };
+        padding = padding + if chunk > boundary { value } else { 0 };
     }
+    // Unused full chunks are nonnegative and their sum cannot wrap the field.
+    padding.assert_max_bit_size::<0>();
+    // Only the boundary chunk needs the exact short integer division check.
+    short(partial / powers[15 - remainder]);
+
+}
+
+// The prefix and every source index are static; only the final word width varies.
+pub(crate) fn nonliteral_hash<let L: u32>(kind: u8, bytes: BoundedVec<u8, L>) -> Field {
+    check_bytes(bytes);
+    let length = bytes.len() + 5;
+    let mut words = [0; (L + 35) / 31 + 2];
+    words[0] = crate::suite_constants::TERM_DOMAIN;
+    words[1] = length as Field;
+    let encoded = nonliteral_words(kind, bytes);
+    for i in 0..(L + 35) / 31 { words[i + 2] = encoded[i]; }
+    Poseidon2::hash(words, 2 + (length + 30) / 31)
+}
+
+pub(crate) fn straight_hash<let L: u32>(domain: Field, bytes: BoundedVec<u8, L>) -> Field {
+    check_bytes(bytes);
+    let mut words = [0; (L + 30) / 31 + 2];
+    words[0] = domain; words[1] = bytes.len() as Field;
+    for chunk in 0..(L + 30) / 31 {
+        let start = chunk * 31;
+        let width = if L - start < 31 { L - start } else { 31 };
+        let mut value: Field = 0;
+        for offset in 0..31 {
+            if offset < width { value = value * 256 + bytes.get_unchecked(start + offset) as Field; }
+        }
+        let remaining = if start < bytes.len() { bytes.len() - start } else { 0 };
+        let take = if remaining < width { remaining } else { width };
+        words[chunk + 2] = value / power256(width - take);
+    }
+    Poseidon2::hash(words, 2 + (bytes.len() + 30) / 31)
 }
 
 unconstrained fn split_remainder(value: Field, bytes: u32) -> Field {
@@ -253,4 +292,111 @@ fn encoded_byte_length_is_checked() {
     let mut packed: BytePacker<32> = BytePacker::new(crate::suite_constants::TERM_DOMAIN, 0);
     packed.push(1);
     let _hash = packed.finish();
+}
+
+fn power256(exponent: u32) -> Field {
+    let bits = (exponent as Field).to_le_bits::<5>();
+    let mut result: Field = 1;
+    let mut power: Field = 256;
+    for i in 0..5 {
+        result = result * if bits[i] { power } else { 1 };
+        power = power * power;
+    }
+    result
+}
+// Each word is a fixed linear combination of byte witnesses. Canonical backing
+// zeros make division by its unused-byte scale exact in the integer encoding.
+fn nonliteral_words<let L: u32>(kind: u8, bytes: BoundedVec<u8,L>) -> [Field; (L + 35) / 31] {
+    let mut words = [0; (L + 35) / 31];
+    for chunk in 0..(L + 35) / 31 {
+        let mut value = if chunk == 0 { (kind as Field) * 4294967296 + bytes.len() as Field } else { 0 };
+        let start = if chunk == 0 { 0 } else { chunk * 31 - 5 };
+        let width = if chunk == 0 { if L < 26 { L } else { 26 } }
+            else { if L - start < 31 { L - start } else { 31 } };
+        for j in 0..31 {
+            if j < width { value = value * 256 + bytes.get_unchecked(start + j) as Field; }
+        }
+        let remaining = if start < bytes.len() { bytes.len() - start } else { 0 };
+        let take = if remaining < width { remaining } else { width };
+        words[chunk] = value / power256(width - take);
+    }
+    words
+}
+
+
+#[test]
+fn fixed_words_match_reference_at_framed_boundaries() {
+    for length in [0, 1, 25, 26, 27, 30, 31, 32, 56, 57, 58, 61, 62, 63, 88, 89, 90, 127, 128] {
+        let mut lexical = [0; 128];
+        let mut raw = [0; 160];
+        raw[0] = 3;
+        raw[4] = length as u8;
+        for i in 0..128 {
+            if i < length {
+                lexical[i] = ((i * 17 + length) % 256) as u8;
+                raw[i + 5] = lexical[i];
+            }
+        }
+        let bytes = BoundedVec::from_parts_unchecked(lexical, length);
+        assert(nonliteral_hash(3, bytes) == reference_hash(raw, length + 5), "fixed words differ");
+        raw[8 + length] = 2;
+        raw[9 + length] = 65;
+        raw[10 + length] = 66;
+        let mut framed: BytePacker<160> = BytePacker::framed_prefix(3, bytes, length + 15);
+        framed.framed(BoundedVec::<u8, 2>::from_array([65, 66]));
+        framed.framed(BoundedVec::<u8, 1>::new());
+        assert(framed.finish() == reference_hash(raw, length + 15), "fixed frame suffix differs");
+        assert(straight_hash(crate::suite_constants::TERM_DOMAIN, bytes)
+            == reference_hash(lexical, length), "fixed raw words differ");
+    }
+}
+
+#[test(should_fail_with = "byte prefix length")]
+fn framed_prefix_cannot_discard_lexical_bytes() {
+    let _packed: BytePacker<32> = BytePacker::framed_prefix(1, BoundedVec::<u8, 1>::from_array([65]), 5);
+}
+
+#[test(should_fail_with = "call to assert_max_bit_size")]
+fn fixed_prefix_rejects_backing_padding() {
+    let _packed: BytePacker<32> = BytePacker::framed_prefix(1,
+        BoundedVec::<u8, 2>::from_parts_unchecked([65, 66], 1), 6);
+}
+#[test(should_fail_with = "call to assert_max_bit_size")]
+fn fixed_raw_hash_rejects_backing_padding() {
+    let _hash = straight_hash(crate::suite_constants::TERM_DOMAIN,
+        BoundedVec::<u8, 2>::from_parts_unchecked([65, 66], 1));
+}
+#[test(should_fail_with = "call to assert_max_bit_size")]
+fn empty_metadata_resource_rejects_backing_padding() {
+    let _cell = crate::term::open_term(1,
+        BoundedVec::<u8, 2>::from_parts_unchecked([65, 66], 1),
+        BoundedVec::<u8, 0>::new(), BoundedVec::<u8, 0>::new(), [0; 31], 1);
+}
+#[test(should_fail_with = "nonliteral position")]
+fn empty_datatype_capacity_rejects_literals() {
+    let _cell = crate::term::open_term(3, BoundedVec::<u8, 1>::from_array([65]),
+        BoundedVec::<u8, 0>::new(), BoundedVec::<u8, 0>::new(), [0; 31], 1);
+}
+
+
+pub(crate) fn byte_sum<let L: u32>(bytes: [u8; L]) -> Field {
+    let mut sum: Field = 0;
+    for i in 0..L { sum = sum + bytes[i] as Field; }
+    sum
+}
+
+#[test]
+fn padding_boundary_accepts_every_canonical_length() {
+    for length in 0..65 {
+        let mut bytes = [0; 64];
+        for i in 0..64 { if i < length { bytes[i] = ((i * 13 + 7) % 256) as u8; } }
+        check_bytes(BoundedVec::from_parts_unchecked(bytes, length));
+    }
+}
+#[test(should_fail_with = "call to assert_max_bit_size")]
+fn full_padding_chunks_must_be_zero() {
+    let mut bytes = [0; 64];
+    bytes[0] = 65;
+    bytes[45] = 1;
+    check_bytes(BoundedVec::from_parts_unchecked(bytes, 1));
 }

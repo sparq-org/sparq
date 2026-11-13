@@ -2,3 +2,4 @@
 live tests/live_noir.rs::credential_modes_match_vectors_and_compiled_public_abi
 live tests/live_noir.rs::random_literals_execute_against_rust_and_engine
 live tests/live_noir.rs::solid_app_suite_profile_opens_in_revealed_mode
+live tests/live_noir.rs::opaque_cells_cannot_be_abi_witnesses

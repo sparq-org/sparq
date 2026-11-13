@@ -62,6 +62,72 @@ fn assert_compiler(gate: &support::LiveToolchain) {
 const NOIR_CORE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../zk/noir-query/core");
 const COMPOSE_CORE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../zk/compose/compose_core");
 const NOIR_FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../zk/noir-query/fixtures");
+
+#[test]
+fn opaque_cells_cannot_be_abi_witnesses() {
+    let gate = match support::gate("opaque_cells_cannot_be_abi_witnesses", &["nargo"]) {
+        Some(g) => g,
+        None => return,
+    };
+    assert_compiler(&gate);
+    let scratch = Scratch::new();
+    for (name, source) in [
+        (
+            "cell",
+            "fn main(cell: core::term::TermCell) -> pub Field { cell.enc() }",
+        ),
+        (
+            "checked",
+            "fn main(cell: core::term::KeyCheckedCell) -> pub Field { cell.cell().enc() }",
+        ),
+        (
+            "credential",
+            "fn main(cell: core::suite_metadata::OpenedCredential<1>) -> pub Field { cell.root() }",
+        ),
+    ] {
+        let path = scratch.0.join(name);
+        project(&path, name, source);
+        let out = support::live_tool(&gate, "nargo")
+            .current_dir(&path)
+            .args(["compile", "--force"])
+            .output()
+            .unwrap();
+        let diagnostic = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            !out.status.success(),
+            "opaque {name} was accepted as a witness"
+        );
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("Invalid type found in the entry point"),
+            "{diagnostic}"
+        );
+        assert!(diagnostic.contains("[u8; 0]"), "{diagnostic}");
+    }
+    let path = scratch.0.join("private_cell");
+    project(
+        &path,
+        "private_cell",
+        "fn main() -> pub Field { core::term::padding().enc }",
+    );
+    let out = support::live_tool(&gate, "nargo")
+        .current_dir(&path)
+        .args(["compile", "--force"])
+        .output()
+        .unwrap();
+    let diagnostic = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!out.status.success(), "private cell fields were accessible");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("enc is private"), "{diagnostic}");
+    support::complete(gate);
+}
+
 fn toml(v: &Value) -> String {
     match v {
         Value::Array(a) => format!("[{}]", a.iter().map(toml).collect::<Vec<_>>().join(",")),
