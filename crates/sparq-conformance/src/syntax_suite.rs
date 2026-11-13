@@ -40,7 +40,7 @@ pub(crate) fn run_manifest(
         .iter()
         .filter(|t| t.predicate.as_str() == format!("{MF}entries"))
     {
-        for entry in g.list(&head.object) {
+        for entry in g.checked_list(&head.object)? {
             let node = as_node(&entry).ok_or("manifest entry is not a resource")?;
             if !seen.insert(node.clone()) {
                 continue;
@@ -74,25 +74,29 @@ pub(crate) fn run_manifest(
                 .into_iter()
                 .find_map(|ty| ty.strip_prefix(RDFT).map(str::to_owned))
                 .unwrap_or_default();
-            let outcome = match file("action") {
-                Some(action) => {
-                    let action_base = match action.strip_prefix(root) {
-                        Ok(relative) => format!("{base}{}", relative.display()),
-                        Err(_) => crate::rdf::file_iri(&action),
-                    };
-                    evaluate(
-                        &action,
-                        file("result").as_deref(),
-                        &action_base,
-                        kind.strip_prefix(stem).unwrap_or("unknown"),
-                        parse,
-                        stem == "TestNTriples" || stem == "TestTurtle",
-                    )
+            let outcome = if stem == "TestXML" && !cfg!(feature = "rdfxml") {
+                Outcome::Fail("RDF/XML parser requires the rdfxml feature".into())
+            } else {
+                match file("action") {
+                    Some(action) => {
+                        let action_base = match action.strip_prefix(root) {
+                            Ok(relative) => format!("{base}{}", relative.display()),
+                            Err(_) => crate::rdf::file_iri(&action),
+                        };
+                        evaluate(
+                            &action,
+                            file("result").as_deref(),
+                            &action_base,
+                            kind.strip_prefix(stem).unwrap_or("unknown"),
+                            parse,
+                            matches!(stem, "TestNTriples" | "TestTurtle" | "TestXML"),
+                        )
+                    }
+                    None => Outcome::Fail("missing or nonlocal mf:action".into()),
                 }
-                None => Outcome::Fail("missing or nonlocal mf:action".into()),
             };
             out.push((
-                id.as_str().to_owned(),
+                crate::rdf::published_iri(id.as_str(), root, base),
                 TestResult {
                     suite: label.into(),
                     name,
@@ -279,10 +283,48 @@ mod tests {
     }
 
     #[test]
+    fn rdfxml_uses_shipping_parser_and_isomorphic_eval() {
+        let f = Fixture::new();
+        f.write("input", r#"<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:e="https://example.test/">
+            <rdf:Description rdf:about="s"><e:p rdf:nodeID="a"/></rdf:Description>
+            <rdf:Description rdf:nodeID="a"><e:p rdf:resource="o"/></rdf:Description></rdf:RDF>"#);
+        f.write("expected.nq", "<https://example.test/data/s> <https://example.test/p> _:renamed .\n_:renamed <https://example.test/p> <https://example.test/data/o> .\n");
+        let path = manifest(&f, "TestXML", "");
+        let run = || line_syntax::run_manifest(LineSuite::RdfXml, &path, None).unwrap();
+        let rows = run();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].0, "https://example.test/manifest#ok");
+        assert_eq!(
+            matches!(rows[0].1.outcome, Outcome::Pass),
+            cfg!(feature = "rdfxml")
+        );
+        assert!(
+            matches!(rows[1].1.outcome, Outcome::Fail(_)),
+            "missing action fails"
+        );
+        f.write("expected.nq", "<https://example.test/data/s> <https://example.test/p> _:renamed .\n_:renamed <https://example.test/p> <https://example.test/different> .\n");
+        assert!(
+            matches!(run()[0].1.outcome, Outcome::Fail(_)),
+            "different graph fails"
+        );
+        f.write("input", "<not-closed");
+        let text = std::fs::read_to_string(&path)
+            .unwrap()
+            .replace("TestXMLEval", "TestXMLNegativeSyntax");
+        std::fs::write(&path, text).unwrap();
+        assert_eq!(
+            matches!(run()[0].1.outcome, Outcome::Pass),
+            cfg!(feature = "rdfxml"),
+            "disabled parser cannot pass negative syntax"
+        );
+    }
+
+    #[test]
     fn negative_fixture_errors_are_failures() {
         let f = Fixture::new();
         for suite in [LineSuite::NTriples, LineSuite::NQuads, LineSuite::TriG] {
             let parse: Parse = match suite {
+                LineSuite::RdfXml => unreachable!(),
                 LineSuite::NTriples => {
                     |t, b| line_syntax::parse_sparq_graph(LineSuite::NTriples, t, b)
                 }

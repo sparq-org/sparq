@@ -2,6 +2,8 @@
 
 #[path = "support/earl.rs"]
 mod earl;
+#[path = "support/earl_fixture.rs"]
+mod earl_fixture;
 
 use sparq_conformance::inference::report::Outcome;
 use sparq_conformance::line_syntax::{self, LineSuite};
@@ -10,7 +12,7 @@ use std::path::PathBuf;
 
 #[test]
 fn reports_every_rdf12_lane_even_when_ratchets_fail() {
-    let fixture = earl::Fixture::new();
+    let fixture = earl_fixture::Fixture::new();
     let mut expected = Vec::new();
     for &(dir, lane, _) in sparq_conformance::floors::rdf12::LANES {
         let stem = match dir {
