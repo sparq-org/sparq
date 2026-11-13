@@ -1,9 +1,9 @@
-// Retained pass-two work; not wired into lib.nr at the pass-2a checkpoint.
+// Pass-two date components; casts remain outside this checkpoint.
 // Research grade; not externally audited.
 use crate::expr_core::{DECIMAL, exact, INTEGER, Lane, Numeric, SCALE, StringLane};
 use crate::expr_term::{empty, from_bytes};
 use crate::expr_term_contract::{
-    CheckedLexicalOpening, DT_DATE, DT_DATETIME, DT_STRING, KIND_LITERAL, read,
+    CheckedLexicalOpening, DT_DATE, DT_DATETIME, KIND_LITERAL, read_input,
 };
 use sparq_xpath::{XsdDateTime, XsdDayTimeDuration};
 use std::collections::bounded_vec::BoundedVec;
@@ -45,20 +45,47 @@ fn pair<let L: u32>(a: BoundedVec<u8, L>, i: u32) -> (u32, bool) {
 // Input validity is checked independently of the key's representability. This
 // permits component extraction from fractional seconds finer than milliseconds.
 pub fn read_date<T, let L: u32, let D: u32, let G: u32>(
-    a: T,
-    error: bool,
-    allow_string: bool,
-    target_date: bool,
+    input: (Lane<T>, bool),
 ) -> (Lane<TemporalValue>, bool)
 where
     T: CheckedLexicalOpening<L, D, G>,
 {
-    let a = read(a);
-    let text = a.lexical;
-    let is_date = (a.cell.dt == DT_DATE) | (allow_string & target_date & (a.cell.dt == DT_STRING));
-    let type_ok = (a.cell.dt == DT_DATE)
-        | (a.cell.dt == DT_DATETIME)
-        | (allow_string & (a.cell.dt == DT_STRING) & (a.language.len() == 0));
+    let (a, upstream_error, upstream_capacity) = read_input(input);
+    let mut start: u32 = 0;
+    let mut end = a.lexical.len();
+    let mut leading = true;
+    for i in 0..L {
+        if i < a.lexical.len() {
+            let b = a.lexical.get_unchecked(i);
+            let ws = (b == 32) | (b == 9) | (b == 10) | (b == 13);
+            if leading & ws {
+                start = i + 1;
+            } else {
+                leading = false;
+            }
+        }
+    }
+    let mut trailing = true;
+    for j in 0..L {
+        let i = L - 1 - j;
+        if (i >= start) & (i < a.lexical.len()) {
+            let b = a.lexical.get_unchecked(i);
+            let ws = (b == 32) | (b == 9) | (b == 10) | (b == 13);
+            if trailing & ws {
+                end = i;
+            } else {
+                trailing = false;
+            }
+        }
+    }
+    let mut text: BoundedVec<u8, L> = BoundedVec::new();
+    for i in 0..L {
+        if (i >= start) & (i < end) {
+            text.push(a.lexical.get_unchecked(i));
+        }
+    }
+    let is_date = a.cell.datatype() == DT_DATE;
+    let type_ok = (a.cell.datatype() == DT_DATE) | (a.cell.datatype() == DT_DATETIME);
     let negative = at(text, 0) == 45;
     let start = negative as u32;
     let mut end = L;
@@ -194,8 +221,9 @@ where
     } else {
         valid = valid & (zone == text.len());
     }
-    let error = error | !a.cell.bound | (a.cell.kind != KIND_LITERAL) | !type_ok | !valid;
-    let mut capacity = !error & (negative | (count != 4) | precision);
+    let error =
+        upstream_error | !a.cell.bound() | (a.cell.kind() != KIND_LITERAL) | !type_ok | !valid;
+    let mut capacity = upstream_capacity | (!error & (negative | (count != 4) | precision));
     let active = !error & !capacity;
     let value = sparq_xpath::datetime_from_components_with_tz(
         if active { year as i32 } else { 1970 },
@@ -275,7 +303,8 @@ pub fn compare(
     let (a, ae) = a;
     let (b, be) = b;
     let error = ae | be | (a.value.is_date != b.value.is_date);
-    let capacity = a.capacity | b.capacity | (a.value.has_timezone != b.value.has_timezone);
+    let capacity =
+        a.capacity | b.capacity | (!error & (a.value.has_timezone != b.value.has_timezone));
     let whole = sparq_xpath::datetime_equal(a.value.value, b.value.value);
     let eq = whole & (a.value.fraction == b.value.fraction);
     let less = sparq_xpath::datetime_less_than(a.value.value, b.value.value)
@@ -292,85 +321,4 @@ pub fn compare(
         !less
     };
     (Lane { value: result & !error & !capacity, capacity }, error)
-}
-pub fn cast(a: (Lane<TemporalValue>, bool), date: bool) -> (Lane<TemporalValue>, bool) {
-    let (mut a, e) = a;
-    if date & !a.value.is_date {
-        let d = a.value.value;
-        a.value.value = sparq_xpath::datetime_from_components_with_tz(
-            sparq_xpath::year_from_datetime(d),
-            sparq_xpath::month_from_datetime(d),
-            sparq_xpath::day_from_datetime(d),
-            0,
-            0,
-            0,
-            0,
-            d.tz_offset_minutes,
-        );
-        a.value.fraction = 0;
-    }
-    a.value.is_date = date;
-    (a, e)
-}
-fn put(out: &mut StringLane<64>, byte: u8) {
-    assert(out.len < 64, "date output capacity");
-    out.bytes[out.len] = byte;
-    out.len = out.len + 1;
-}
-fn pair_out(out: &mut StringLane<64>, n: u32) {
-    put(out, (n / 10) as u8 + 48);
-    put(out, (n % 10) as u8 + 48);
-}
-pub fn lexical(a: (Lane<TemporalValue>, bool)) -> (Lane<StringLane<64>>, bool) {
-    let (a, e) = a;
-    let v = a.value;
-    let d = v.value;
-    let mut out = empty();
-    let y = sparq_xpath::year_from_datetime(d) as u32;
-    put(&mut out, (y / 1000) as u8 + 48);
-    put(&mut out, ((y / 100) % 10) as u8 + 48);
-    pair_out(&mut out, y % 100);
-    put(&mut out, 45);
-    pair_out(&mut out, sparq_xpath::month_from_datetime(d) as u32);
-    put(&mut out, 45);
-    pair_out(&mut out, sparq_xpath::day_from_datetime(d) as u32);
-    if !v.is_date {
-        put(&mut out, 84);
-        pair_out(&mut out, sparq_xpath::hours_from_datetime(d) as u32);
-        put(&mut out, 58);
-        pair_out(&mut out, sparq_xpath::minutes_from_datetime(d) as u32);
-        put(&mut out, 58);
-        pair_out(&mut out, sparq_xpath::seconds_from_datetime(d) as u32);
-        if v.fraction != 0 {
-            put(&mut out, 46);
-            let mut fraction = v.fraction as u64;
-            let mut place: u64 = 100000000000000000;
-            let mut last = out.len;
-            for _ in 0..18 {
-                let digit = fraction / place;
-                fraction = fraction % place;
-                place = if place > 1 { place / 10 } else { 1 };
-                put(&mut out, digit as u8 + 48);
-                if digit != 0 {
-                    last = out.len;
-                }
-            }
-            out.len = last;
-            for i in 0..64 {
-                if i >= last {
-                    out.bytes[i] = 0;
-                }
-            }
-        }
-    }
-    if v.has_timezone {
-        if d.tz_offset_minutes == 0 {
-            put(&mut out, 90);
-        } else {
-            for i in 0..6 {
-                put(&mut out, v.zone.bytes[i]);
-            }
-        }
-    }
-    (Lane { value: out, capacity: a.capacity }, e)
 }

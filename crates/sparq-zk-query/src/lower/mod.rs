@@ -2,6 +2,10 @@
 
 pub mod expr;
 #[cfg(test)]
+mod expr_functions_semantics;
+#[cfg(test)]
+mod expr_functions_tests;
+#[cfg(test)]
 mod expr_live_targets;
 pub mod expr_plan;
 #[cfg(test)]

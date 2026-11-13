@@ -31,7 +31,7 @@ use std::collections::bounded_vec::BoundedVec;
 use expressions::expr_core::{Lane, Scalar, lane, exact, SCALE, INTEGER, DECIMAL, truth, logical_and, as_numeric};
 use expressions::expr_compare::{value_compare, numeric_compare, in_list, EQ, GE, LE};
 use expressions::expr_arith::{binary, MUL};
-use expressions::expr_term_contract::{TermCell, CheckedLexicalOpening, LexicalOpening, DT_INTEGER, DT_DECIMAL, DT_DATE, DT_BOOLEAN, DT_STRING};
+use expressions::expr_term_contract::{TermCell, CheckedLexicalOpening, LexicalOpening, DT_INTEGER, DT_DECIMAL, DT_DATE, DT_BOOLEAN, DT_STRING, DT_FLOAT, DT_DOUBLE, DT_LANGSTRING};
 use expressions::expr_to_term::{ComputedTermEncoder, numeric_lexical};
 struct Encoder {}
 fn convert(c:credential_terms::term::TermCell)->TermCell {
@@ -68,6 +68,8 @@ fn checked_key<let L:u32,let D:u32>(c:credential_terms::term::TermCell,l:Bounded
  else if dt==DT_DECIMAL {let _=credential_terms::term::recompute_key_for(c,l,d,g,DT_DECIMAL);}
  else if dt==DT_BOOLEAN {let _=credential_terms::term::recompute_key_for(c,l,d,g,DT_BOOLEAN);}
  else if dt==DT_STRING {let _=credential_terms::term::recompute_key_for(c,l,d,g,DT_STRING);}
+ else if dt==DT_FLOAT {let _=credential_terms::term::recompute_key_for(c,l,d,g,DT_FLOAT);}
+ else if dt==DT_DOUBLE {let _=credential_terms::term::recompute_key_for(c,l,d,g,DT_DOUBLE);}
  else {assert_eq(dt,DT_DATE);let _=credential_terms::term::recompute_key_for(c,l,d,g,DT_DATE);}
 }
 fn bytes<let N:u32>(s:[u8;N])->BoundedVec<u8,32> {let mut b=BoundedVec::new();for c in s {b.push(c);}b}
@@ -115,6 +117,35 @@ fn date(day:u64)->(Lane<Scalar<128>>,bool) {
 }
 fn missing()->(Lane<Scalar<128>>,bool) {
  widened(expressions::expr_open::variable(Opening {cell:credential_terms::term::padding(),lexical:BoundedVec::new(),datatype:BoundedVec::new(),expected_dt:0}))
+}
+fn raw_string<let N:u32>(value:[u8;N])->Opening {
+ let lexical=bytes(value);let datatype=metadata("http://www.w3.org/2001/XMLSchema#string".as_bytes());
+ let mut payload:Field=0;for i in 0..30 {payload=payload*256+if i<N {value[i] as Field}else{0};}
+ let key:Field=(if N>30 {7}else{6}) as Field*0x1000000000000000000000000000000000000000000000000000000000000+payload;
+ let cell=credential_terms::term::open_term(3,lexical,datatype,BoundedVec::<u8,64>::new(),key.to_be_bytes::<31>(),0);
+ Opening {cell,lexical,datatype,expected_dt:DT_STRING}
+}
+fn raw_iri<let N:u32>(value:[u8;N])->IriOpening {
+ let lexical=metadata(value);let cell=credential_terms::term::open_term(1,lexical,BoundedVec::<u8,128>::new(),BoundedVec::<u8,64>::new(),[0;31],0);
+ IriOpening {cell,lexical}
+}
+struct PartEncoder {}
+impl expressions::expr_construct::CheckedTermConstructor<32,128,0> for PartEncoder {
+ fn construct(kind:u8,l:BoundedVec<u8,32>,d:BoundedVec<u8,128>,g:BoundedVec<u8,0>,key:[u8;31])->TermCell {
+  let c=credential_terms::term::open_term(kind,l,d,g,key,0);
+  let _=credential_terms::term::recompute_key_for(c,l,d,g,DT_INTEGER);convert(c)
+ }
+}
+impl expressions::expr_construct::CheckedTermConstructor<32,53,32> for PartEncoder {
+ fn construct(kind:u8,l:BoundedVec<u8,32>,d:BoundedVec<u8,53>,g:BoundedVec<u8,32>,key:[u8;31])->TermCell {
+  let c=credential_terms::term::open_term(kind,l,d,g,key,0);
+  let _=credential_terms::term::recompute_key_for(c,l,d,g,DT_LANGSTRING);convert(c)
+ }
+}
+impl expressions::expr_construct::CheckedTermConstructor<40,0,0> for PartEncoder {
+ fn construct(kind:u8,l:BoundedVec<u8,40>,d:BoundedVec<u8,0>,g:BoundedVec<u8,0>,key:[u8;31])->TermCell {
+  assert_eq(kind,1);convert(credential_terms::term::open_term(kind,l,d,g,key,0))
+ }
 }
 fn bind(result:(Lane<bool>,bool),expected:bool,error:bool) {
  check(result,expected,error);
@@ -226,6 +257,22 @@ fn computed_key_changed() {
  let (computed,_)=expressions::expr_to_term::numeric::<Encoder>((lane(exact(INTEGER,false,5*SCALE)),false));
  assert_eq(computed.value.key(),0x1800000000000000000000000000000000000000000000000000000000000+6*SCALE,"computed key changed");
 }
+#[test] fn term_functions_construct_with_actual_suite() {
+ let p=expressions::expr_term::strdt((lane(raw_string("123".as_bytes())),false),(lane(raw_iri("http://www.w3.org/2001/XMLSchema#integer".as_bytes())),false));
+ let key:Field=0x1800000000000000000000000000000000000000000000000000000000000+123*SCALE;
+ let (v,e)=expressions::expr_construct::term::<PartEncoder,32,128,0>(p,key.to_be_bytes::<31>());assert(!e);assert(!v.capacity);
+ let expected=credential_terms::term::open_term(3,bytes("123".as_bytes()),metadata("http://www.w3.org/2001/XMLSchema#integer".as_bytes()),BoundedVec::<u8,0>::new(),key.to_be_bytes::<31>(),0);assert_eq(v.value.enc(),expected.enc());
+ let p=expressions::expr_term::strlang((lane(raw_string("chat".as_bytes())),false),(lane(raw_string("EN-us".as_bytes())),false));
+ let (v,e)=expressions::expr_construct::term::<PartEncoder,32,53,32>(p,[0;31]);assert(!e);assert(!v.capacity);
+ let expected=credential_terms::term::open_term(3,bytes("chat".as_bytes()),metadata("http://www.w3.org/1999/02/22-rdf-syntax-ns#langString".as_bytes()),bytes("en-us".as_bytes()),[0;31],0);assert_eq(v.value.enc(),expected.enc());
+}
+#[test] fn ieee_key_rounding_and_datatype_with_actual_suite() {
+ let key:Field=0x2000000000000000000000000000000000000000000000000000000000000+0x402fffffffffffff*0x100000000000000000000000000000000000000000000;
+ let input=opened(bytes("-0.25".as_bytes()),metadata("http://www.w3.org/2001/XMLSchema#float".as_bytes()),key,DT_FLOAT);
+ let result=expressions::expr_numeric::numeric(as_numeric(input),expressions::expr_numeric::CEIL);let (n,e)=result;assert(!e);assert_eq(n.value.bits,0x80000000);
+ let p=expressions::expr_term::numeric_datatype(result);let (v,e)=expressions::expr_construct::term::<PartEncoder,40,0,0>(p,[0;31]);assert(!e);
+ let expected=credential_terms::term::open_term(1,metadata("http://www.w3.org/2001/XMLSchema#float".as_bytes()),BoundedVec::<u8,0>::new(),BoundedVec::<u8,0>::new(),[0;31],0);assert_eq(v.value.enc(),expected.enc());
+}
 #[test(should_fail_with="key disagrees with lexical form")]
 fn changed_checked_numeric_key() {
  let lexical=bytes("5".as_bytes());let datatype=metadata("http://www.w3.org/2001/XMLSchema#integer".as_bytes());
@@ -257,6 +304,8 @@ fn changed_opened_bytes() {
         "target_2_actual_openings_and_binding",
         "target_3_actual_openings_and_binding",
         "target_sum_actual_openings_and_binding",
+        "term_functions_construct_with_actual_suite",
+        "ieee_key_rounding_and_datatype_with_actual_suite",
     ] {
         let out = crate::support::live_tool(&gate, "nargo")
             .args([

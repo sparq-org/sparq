@@ -1,7 +1,8 @@
-// Retained pass-two work; not wired into lib.nr at the pass-2a checkpoint.
+// Numeric functions over constrained input lanes.
 // Research grade; not externally audited.
 use crate::expr_core::{
-    check_numeric, DECIMAL, EXACT_LIMIT, FLOAT, floating, Lane, Numeric, SCALE, zero_numeric,
+    check_numeric, DECIMAL, EXACT_LIMIT, FLOAT, floating, INTEGER, Lane, Numeric, SCALE,
+    zero_numeric,
 };
 use sparq_ieee754::{f32, f64};
 pub global ABS: u8 = 0;
@@ -14,7 +15,22 @@ pub fn numeric(a: (Lane<Numeric>, bool), function: u8) -> (Lane<Numeric>, bool) 
     let mut n = if error { zero_numeric() } else { a.value };
     check_numeric(n);
     let mut capacity = a.capacity;
-    if n.ty <= DECIMAL {
+    if n.ty == INTEGER {
+        // This bucket's unscaled integer is below 2^53, safely inside i64.
+        let m = (n.magnitude as u128 / (SCALE as u128)) as i64;
+        let value = if n.negative { -m } else { m };
+        let out = if function == ABS {
+            sparq_xpath::abs_int(value)
+        } else if function == ROUND {
+            sparq_xpath::round_int(value)
+        } else if function == CEIL {
+            sparq_xpath::ceil_int(value)
+        } else {
+            sparq_xpath::floor_int(value)
+        };
+        n.negative = out < 0;
+        n.magnitude = (if out < 0 { -out } else { out }) as u64 as Field * SCALE;
+    } else if n.ty == DECIMAL {
         if function == ABS {
             n.negative = false;
         } else if n.ty == DECIMAL {

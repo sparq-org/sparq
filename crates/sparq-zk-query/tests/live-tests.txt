@@ -13,3 +13,4 @@ live tests/execution.rs::constant_membership_length_is_data_and_inactive_values_
 live src/lower/expr_live_targets.rs::noir_target_queries_match_host_mirror
 live tests/execution.rs::mixed_string_classes_execute_and_refuse_rebound_wrong_traces
 live tests/execution.rs::inactive_expression_rows_skip_values_but_active_capacity_still_refuses
+live src/lower/expr_functions_tests.rs::noir_function_samples_match_host_mirror

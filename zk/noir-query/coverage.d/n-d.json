@@ -92,6 +92,39 @@
       ],
       "guest_proof_evidence": "not_asserted",
       "limits": "Research grade and not externally audited. Expression-level checks with lane A source snapshot; whole-query native proofs are not asserted. Integers through 2^48, IN lists of 32, opened strings of 128 bytes, timezone-free dates in years 0001 through 9999. Aggregate and absence inputs are supplied by lane C. The production opening and encoding adapters remain integration seams."
+    },
+    {
+      "id": "term_functions_second_group",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_functions_tests::term_constructor_examples_and_errors",
+        "rust:expr_functions_tests::noir_function_samples_match_host_mirror"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred."
+    },
+    {
+      "id": "temporal_functions_second_group",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_functions_tests::date_component_recommendation_examples",
+        "rust:expr_functions_tests::noir_function_samples_match_host_mirror"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred."
+    },
+    {
+      "id": "numeric_functions_second_group",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_functions_tests::numeric_exact_functions_and_boundaries",
+        "rust:expr_functions_tests::noir_function_samples_match_host_mirror"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred."
     }
   ],
   "functions": [
@@ -189,7 +222,484 @@
       ],
       "guest_proof_evidence": "not_asserted",
       "limits": "Newly computed values only. Existing cells retain their lexical identity. Absolute exact scaled magnitude below 2^112; decimal precision through 18 fractional digits. Lane A supplies the static encoding implementation."
+    },
+    {
+      "name": "isIRI",
+      "group": "term_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_functions_tests::term_kind_and_unbound",
+        "rust:expr_functions_tests::noir_function_samples_match_host_mirror"
+      ],
+      "rejection_cases": [
+        "noir:expr_functions_tests::is_iri_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred."
+    },
+    {
+      "name": "isBlank",
+      "group": "term_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_functions_tests::term_kind_and_unbound",
+        "rust:expr_functions_tests::noir_function_samples_match_host_mirror"
+      ],
+      "rejection_cases": [
+        "noir:expr_functions_tests::is_blank_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred."
+    },
+    {
+      "name": "isLiteral",
+      "group": "term_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_functions_tests::term_kind_and_unbound",
+        "rust:expr_functions_tests::noir_function_samples_match_host_mirror"
+      ],
+      "rejection_cases": [
+        "noir:expr_functions_tests::is_literal_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred."
+    },
+    {
+      "name": "isNumeric",
+      "group": "term_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_functions_tests::numeric_classification_lexical_facets",
+        "rust:expr_functions_tests::noir_function_samples_match_host_mirror"
+      ],
+      "rejection_cases": [
+        "noir:expr_functions_tests::is_numeric_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred."
+    },
+    {
+      "name": "STR",
+      "group": "term_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_functions_tests::term_lexical_and_metadata",
+        "rust:expr_functions_tests::noir_function_samples_match_host_mirror"
+      ],
+      "rejection_cases": [
+        "noir:expr_functions_tests::str_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred."
+    },
+    {
+      "name": "LANG",
+      "group": "term_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_functions_tests::term_lexical_and_metadata",
+        "rust:expr_functions_tests::noir_function_samples_match_host_mirror"
+      ],
+      "rejection_cases": [
+        "noir:expr_functions_tests::lang_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred."
+    },
+    {
+      "name": "DATATYPE",
+      "group": "term_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_functions_tests::computed_numeric_datatype",
+        "rust:expr_functions_tests::noir_function_samples_match_host_mirror"
+      ],
+      "rejection_cases": [
+        "noir:expr_functions_tests::datatype_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred."
+    },
+    {
+      "name": "LANGMATCHES",
+      "group": "term_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_functions_tests::language_matching_examples_and_nul",
+        "rust:expr_functions_tests::noir_function_samples_match_host_mirror"
+      ],
+      "rejection_cases": [
+        "noir:expr_functions_tests::lang_matches_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred."
+    },
+    {
+      "name": "IRI",
+      "group": "term_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_functions_tests::iri_resolution_examples_and_capacity",
+        "rust:expr_functions_tests::noir_function_samples_match_host_mirror"
+      ],
+      "rejection_cases": [
+        "noir:expr_functions_tests::iri_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred. ASCII references use bounded resolution; non-ASCII string references and bracketed authorities are capacity refused pending the upstream resolver. Existing IRIs retain identity."
+    },
+    {
+      "name": "STRDT",
+      "group": "term_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_functions_tests::term_constructor_examples_and_errors",
+        "rust:expr_functions_tests::noir_function_samples_match_host_mirror"
+      ],
+      "rejection_cases": [
+        "noir:expr_functions_tests::strdt_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred."
+    },
+    {
+      "name": "STRLANG",
+      "group": "term_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_functions_tests::term_constructor_examples_and_errors",
+        "rust:expr_functions_tests::noir_function_samples_match_host_mirror"
+      ],
+      "rejection_cases": [
+        "noir:expr_functions_tests::strlang_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred."
+    },
+    {
+      "name": "YEAR",
+      "group": "temporal_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_functions_tests::date_component_recommendation_examples",
+        "rust:expr_functions_tests::noir_function_samples_match_host_mirror"
+      ],
+      "rejection_cases": [
+        "noir:expr_functions_tests::year_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred."
+    },
+    {
+      "name": "MONTH",
+      "group": "temporal_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_functions_tests::date_component_recommendation_examples",
+        "rust:expr_functions_tests::noir_function_samples_match_host_mirror"
+      ],
+      "rejection_cases": [
+        "noir:expr_functions_tests::month_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred."
+    },
+    {
+      "name": "DAY",
+      "group": "temporal_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_functions_tests::date_component_recommendation_examples",
+        "rust:expr_functions_tests::noir_function_samples_match_host_mirror"
+      ],
+      "rejection_cases": [
+        "noir:expr_functions_tests::day_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred."
+    },
+    {
+      "name": "HOURS",
+      "group": "temporal_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_functions_tests::date_component_recommendation_examples",
+        "rust:expr_functions_tests::noir_function_samples_match_host_mirror"
+      ],
+      "rejection_cases": [
+        "noir:expr_functions_tests::hours_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred."
+    },
+    {
+      "name": "MINUTES",
+      "group": "temporal_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_functions_tests::date_component_recommendation_examples",
+        "rust:expr_functions_tests::noir_function_samples_match_host_mirror"
+      ],
+      "rejection_cases": [
+        "noir:expr_functions_tests::minutes_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred."
+    },
+    {
+      "name": "SECONDS",
+      "group": "temporal_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_functions_tests::date_component_recommendation_examples",
+        "rust:expr_functions_tests::noir_function_samples_match_host_mirror"
+      ],
+      "rejection_cases": [
+        "noir:expr_functions_tests::seconds_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred."
+    },
+    {
+      "name": "TIMEZONE",
+      "group": "temporal_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_functions_tests::date_component_recommendation_examples",
+        "rust:expr_functions_tests::noir_function_samples_match_host_mirror"
+      ],
+      "rejection_cases": [
+        "noir:expr_functions_tests::timezone_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred."
+    },
+    {
+      "name": "TZ",
+      "group": "temporal_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_functions_tests::date_component_recommendation_examples",
+        "rust:expr_functions_tests::noir_function_samples_match_host_mirror"
+      ],
+      "rejection_cases": [
+        "noir:expr_functions_tests::tz_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred."
+    },
+    {
+      "name": "ABS",
+      "group": "numeric_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_functions_tests::numeric_ieee_functions_special_values",
+        "rust:expr_functions_tests::noir_function_samples_match_host_mirror"
+      ],
+      "rejection_cases": [
+        "noir:expr_functions_tests::abs_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred."
+    },
+    {
+      "name": "ROUND",
+      "group": "numeric_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_functions_tests::numeric_ieee_functions_special_values",
+        "rust:expr_functions_tests::noir_function_samples_match_host_mirror"
+      ],
+      "rejection_cases": [
+        "noir:expr_functions_tests::round_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred."
+    },
+    {
+      "name": "CEIL",
+      "group": "numeric_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_functions_tests::numeric_ieee_functions_special_values",
+        "rust:expr_functions_tests::noir_function_samples_match_host_mirror"
+      ],
+      "rejection_cases": [
+        "noir:expr_functions_tests::ceil_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred."
+    },
+    {
+      "name": "FLOOR",
+      "group": "numeric_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_functions_tests::numeric_ieee_functions_special_values",
+        "rust:expr_functions_tests::noir_function_samples_match_host_mirror"
+      ],
+      "rejection_cases": [
+        "noir:expr_functions_tests::floor_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred."
     }
   ],
-  "known_semantic_divergences": []
+  "known_semantic_divergences": [
+    {
+      "id": "langmatches-language-argument-1",
+      "tracking": "#7384",
+      "case": "LANGMATCHES(\"en\"@en,\"en\")",
+      "dataset": "empty",
+      "baseline": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#func-langMatches",
+      "published_2013_expected_mappings": [
+        {}
+      ],
+      "profile_behavior": "Expression error; BIND produces an unbound result.",
+      "reason": "The engine accepts language-tagged arguments where the Recommendation requires simple string literals.",
+      "status": "recommendation_retained",
+      "evidence": "rust:expr_functions_tests::term_functions_against_engine"
+    },
+    {
+      "id": "langmatches-language-argument-2",
+      "tracking": "#7384",
+      "case": "LANGMATCHES(\"en\",\"en\"@en)",
+      "dataset": "empty",
+      "baseline": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#func-langMatches",
+      "published_2013_expected_mappings": [
+        {}
+      ],
+      "profile_behavior": "Expression error; BIND produces an unbound result.",
+      "reason": "The engine accepts language-tagged arguments where the Recommendation requires simple string literals.",
+      "status": "recommendation_retained",
+      "evidence": "rust:expr_functions_tests::term_functions_against_engine"
+    },
+    {
+      "id": "langmatches-language-argument-3",
+      "tracking": "#7384",
+      "case": "LANGMATCHES(\"en\"@en,\"en\"@fr)",
+      "dataset": "empty",
+      "baseline": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#func-langMatches",
+      "published_2013_expected_mappings": [
+        {}
+      ],
+      "profile_behavior": "Expression error; BIND produces an unbound result.",
+      "reason": "The engine accepts language-tagged arguments where the Recommendation requires simple string literals.",
+      "status": "recommendation_retained",
+      "evidence": "rust:expr_functions_tests::term_functions_against_engine"
+    },
+    {
+      "id": "year-zero-year",
+      "tracking": "#7384",
+      "case": "YEAR(\"0000-01-01T00:00:00Z\"^^xsd:dateTime)",
+      "dataset": "empty",
+      "baseline": "https://www.w3.org/TR/2004/REC-xmlschema-2-20041028/#dateTime",
+      "published_2013_expected_mappings": [
+        {}
+      ],
+      "profile_behavior": "Expression error under the XML Schema 1.0 baseline.",
+      "reason": "The engine accepts year zero; the baseline lexical space excludes it.",
+      "status": "recommendation_retained",
+      "evidence": "rust:expr_functions_tests::date_functions_generated_against_engine"
+    },
+    {
+      "id": "year-zero-month",
+      "tracking": "#7384",
+      "case": "MONTH(\"0000-01-01T00:00:00Z\"^^xsd:dateTime)",
+      "dataset": "empty",
+      "baseline": "https://www.w3.org/TR/2004/REC-xmlschema-2-20041028/#dateTime",
+      "published_2013_expected_mappings": [
+        {}
+      ],
+      "profile_behavior": "Expression error under the XML Schema 1.0 baseline.",
+      "reason": "The engine accepts year zero; the baseline lexical space excludes it.",
+      "status": "recommendation_retained",
+      "evidence": "rust:expr_functions_tests::date_functions_generated_against_engine"
+    },
+    {
+      "id": "year-zero-day",
+      "tracking": "#7384",
+      "case": "DAY(\"0000-01-01T00:00:00Z\"^^xsd:dateTime)",
+      "dataset": "empty",
+      "baseline": "https://www.w3.org/TR/2004/REC-xmlschema-2-20041028/#dateTime",
+      "published_2013_expected_mappings": [
+        {}
+      ],
+      "profile_behavior": "Expression error under the XML Schema 1.0 baseline.",
+      "reason": "The engine accepts year zero; the baseline lexical space excludes it.",
+      "status": "recommendation_retained",
+      "evidence": "rust:expr_functions_tests::date_functions_generated_against_engine"
+    },
+    {
+      "id": "year-zero-hours",
+      "tracking": "#7384",
+      "case": "HOURS(\"0000-01-01T00:00:00Z\"^^xsd:dateTime)",
+      "dataset": "empty",
+      "baseline": "https://www.w3.org/TR/2004/REC-xmlschema-2-20041028/#dateTime",
+      "published_2013_expected_mappings": [
+        {}
+      ],
+      "profile_behavior": "Expression error under the XML Schema 1.0 baseline.",
+      "reason": "The engine accepts year zero; the baseline lexical space excludes it.",
+      "status": "recommendation_retained",
+      "evidence": "rust:expr_functions_tests::date_functions_generated_against_engine"
+    },
+    {
+      "id": "year-zero-minutes",
+      "tracking": "#7384",
+      "case": "MINUTES(\"0000-01-01T00:00:00Z\"^^xsd:dateTime)",
+      "dataset": "empty",
+      "baseline": "https://www.w3.org/TR/2004/REC-xmlschema-2-20041028/#dateTime",
+      "published_2013_expected_mappings": [
+        {}
+      ],
+      "profile_behavior": "Expression error under the XML Schema 1.0 baseline.",
+      "reason": "The engine accepts year zero; the baseline lexical space excludes it.",
+      "status": "recommendation_retained",
+      "evidence": "rust:expr_functions_tests::date_functions_generated_against_engine"
+    },
+    {
+      "id": "year-zero-seconds",
+      "tracking": "#7384",
+      "case": "SECONDS(\"0000-01-01T00:00:00Z\"^^xsd:dateTime)",
+      "dataset": "empty",
+      "baseline": "https://www.w3.org/TR/2004/REC-xmlschema-2-20041028/#dateTime",
+      "published_2013_expected_mappings": [
+        {}
+      ],
+      "profile_behavior": "Expression error under the XML Schema 1.0 baseline.",
+      "reason": "The engine accepts year zero; the baseline lexical space excludes it.",
+      "status": "recommendation_retained",
+      "evidence": "rust:expr_functions_tests::date_functions_generated_against_engine"
+    },
+    {
+      "id": "year-zero-timezone",
+      "tracking": "#7384",
+      "case": "TIMEZONE(\"0000-01-01T00:00:00Z\"^^xsd:dateTime)",
+      "dataset": "empty",
+      "baseline": "https://www.w3.org/TR/2004/REC-xmlschema-2-20041028/#dateTime",
+      "published_2013_expected_mappings": [
+        {}
+      ],
+      "profile_behavior": "Expression error under the XML Schema 1.0 baseline.",
+      "reason": "The engine accepts year zero; the baseline lexical space excludes it.",
+      "status": "recommendation_retained",
+      "evidence": "rust:expr_functions_tests::date_functions_generated_against_engine"
+    },
+    {
+      "id": "year-zero-tz",
+      "tracking": "#7384",
+      "case": "TZ(\"0000-01-01T00:00:00Z\"^^xsd:dateTime)",
+      "dataset": "empty",
+      "baseline": "https://www.w3.org/TR/2004/REC-xmlschema-2-20041028/#dateTime",
+      "published_2013_expected_mappings": [
+        {}
+      ],
+      "profile_behavior": "Expression error under the XML Schema 1.0 baseline.",
+      "reason": "The engine accepts year zero; the baseline lexical space excludes it.",
+      "status": "recommendation_retained",
+      "evidence": "rust:expr_functions_tests::date_functions_generated_against_engine"
+    }
+  ]
 }

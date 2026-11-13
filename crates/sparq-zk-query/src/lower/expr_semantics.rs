@@ -67,7 +67,7 @@ fn decimal(s: &str, integer: bool) -> std::result::Result<BigInt, Error> {
     }
     Ok(value)
 }
-fn integer_facets(value: &BigInt, dt: &str) -> bool {
+pub(super) fn integer_facets(value: &BigInt, dt: &str) -> bool {
     let n = value / SCALE;
     match dt {
         "byte" => n >= (-128).into() && n <= 127.into(),
@@ -151,7 +151,7 @@ pub(super) fn typed(value: impl Into<String>, dt: &str) -> Term {
 pub(super) fn bool_term(value: bool) -> Term {
     typed(if value { "true" } else { "false" }, "boolean")
 }
-fn number_term(n: Number) -> Term {
+pub(super) fn number_term(n: Number) -> Term {
     match n {
         Number::Exact(n, ty) => typed(
             exact_text(&n, ty == LaneType::Decimal),
@@ -246,53 +246,11 @@ fn is_numeric(ty: LaneType) -> bool {
         LaneType::Integer | LaneType::Decimal | LaneType::Float | LaneType::Double
     )
 }
-fn date_value(term: &Term) -> std::result::Result<(u32, u32, u32), Error> {
-    let Term::Literal(literal) = term else {
-        return Err(Error::Sparql);
-    };
-    let s = literal.value().as_bytes();
-    if s.len() != 10 {
-        return Err(Error::Capacity);
-    }
-    if s[4] != b'-'
-        || s[7] != b'-'
-        || !s
-            .iter()
-            .enumerate()
-            .all(|(i, b)| i == 4 || i == 7 || b.is_ascii_digit())
-    {
-        return Err(Error::Sparql);
-    }
-    let parse = |a, b| {
-        literal.value()[a..b]
-            .parse::<u32>()
-            .map_err(|_| Error::Sparql)
-    };
-    let (y, m, d) = (parse(0, 4)?, parse(5, 7)?, parse(8, 10)?);
-    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
-    let days = match m {
-        2 => {
-            if leap {
-                29
-            } else {
-                28
-            }
-        }
-        4 | 6 | 9 | 11 => 30,
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        _ => 0,
-    };
-    if y == 0 || d == 0 || d > days {
-        return Err(Error::Sparql);
-    }
-    Ok((y, m, d))
-}
-
 fn compare(a: &Term, b: &Term, op: &ExprOp) -> std::result::Result<bool, Error> {
     let at = constant_type(a);
     let bt = constant_type(b);
-    if at == LaneType::Date && bt == LaneType::Date {
-        return Ok(relation(date_value(a)?, date_value(b)?, op));
+    if matches!(at, LaneType::Date | LaneType::DateTime) && at == bt {
+        return super::expr_functions_semantics::compare_dates(a, b, op);
     }
     if is_numeric(at) && is_numeric(bt) {
         let x = number(a)?;
@@ -470,6 +428,10 @@ pub(super) fn eval(expr: &Expr, vars: &BTreeMap<u32, Term>) -> Result {
                     Ok(number_term(n))
                 }
                 ExprOp::Unsupported(_) => Err(Error::Sparql),
+                _ => super::expr_functions_semantics::function(
+                    op,
+                    &args.iter().map(|a| eval(a, vars)).collect::<Vec<_>>(),
+                ),
             }
         }
     }

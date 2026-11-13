@@ -13,7 +13,7 @@ use spargebra::{
 #[path = "../../../sparq-zk-compose/src/toolchain.rs"]
 pub(super) mod toolchain;
 
-fn parsed(query: &str) -> Expression {
+pub(super) fn parsed(query: &str) -> Expression {
     fn find(p: &GraphPattern) -> Option<Expression> {
         match p {
             GraphPattern::Extend { expression, .. } => Some(expression.clone()),
@@ -29,7 +29,7 @@ fn parsed(query: &str) -> Expression {
     };
     find(&pattern).expect("projection expression")
 }
-fn slots() -> BTreeMap<String, (u32, LaneType)> {
+pub(super) fn slots() -> BTreeMap<String, (u32, LaneType)> {
     BTreeMap::from([
         ("missing".into(), (0, LaneType::Dynamic)),
         ("n".into(), (1, LaneType::Dynamic)),
@@ -37,7 +37,7 @@ fn slots() -> BTreeMap<String, (u32, LaneType)> {
         ("y".into(), (3, LaneType::Dynamic)),
     ])
 }
-fn expression(text: &str) -> Expr {
+pub(super) fn expression(text: &str) -> Expr {
     from_spargebra(
         &parsed(&format!(
             "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ({text} AS ?v) {{}}"
@@ -114,7 +114,7 @@ fn engine(query: &str, data: &str) -> Vec<Vec<Option<Term>>> {
     let graph = sparq_core::Graph::load_str(data, "n-triples").unwrap();
     sparq_engine::query(&graph, query).unwrap().rows
 }
-fn compare_engine(text: &str, exception: Option<&str>) {
+pub(super) fn compare_engine(text: &str, exception: Option<&str>) {
     let query =
         format!("PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ({text} AS ?v) {{}}");
     let ir = from_spargebra(&parsed(&query), &slots()).unwrap();
@@ -274,7 +274,7 @@ fn builtin_edge_entries_in_scope() {
     eprintln!("builtin expression scope: {included:?}");
 }
 
-fn noir_numeric(term: &Term) -> std::result::Result<String, Error> {
+pub(super) fn noir_numeric(term: &Term) -> std::result::Result<String, Error> {
     use mirror::Number;
     use num_traits::Signed;
     Ok(match mirror::number(term)? {
@@ -288,7 +288,7 @@ fn noir_numeric(term: &Term) -> std::result::Result<String, Error> {
         Number::Double(n) => format!("floating(3, {})", n.to_bits()),
     })
 }
-fn noir_operand(term: &Term) -> String {
+pub(super) fn noir_operand(term: &Term) -> String {
     match noir_numeric(term) {
         Ok(n) => format!("(lane({n}), false)"),
         Err(Error::Sparql) => "(lane(zero_numeric()), true)".into(),
