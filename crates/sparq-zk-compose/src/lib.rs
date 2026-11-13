@@ -15,8 +15,9 @@
 //!    re-check (`sparq_zk::verify::recheck`), checks binding-consistency
 //!    edges, and verifies each sub-proof via bb.
 //!
-//! Like `sparq-zk`, NOTHING in the workspace depends on this crate — default
-//! builds and the wasm artifact are byte-identical with or without it.
+//! The separate result host adapter opts into this crate. Core/default builds and
+//! the lean wasm package do not depend on it. Native proving uses the driver;
+//! successful-result preparation and reconstruction also compile for wasm32.
 //!
 //! Model: Opus 4.8 (Fable 5 unavailable — flag for re-review/upgrade).
 
@@ -25,6 +26,7 @@ pub mod build;
 // the browser-shippable captured car-hire ProofManifest (the /showcase/zk-car-hire
 // in-tab verify fallback). Pure serialization — no toolchain; research-grade, NOT
 // externally audited (sq-qhy4).
+#[cfg(not(target_arch = "wasm32"))]
 pub mod capture;
 // sq-314: derivation steps + entailment-regime enforcement.
 pub mod derivation;
@@ -34,6 +36,7 @@ pub mod derivation;
 // NOT externally audited (sq-qhy4); enforces structural legality only.
 #[cfg(feature = "dual-leaf")]
 pub mod dispatch;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod driver;
 // The DualLeafV1 value-lane builders and renderers, reachable only by this
 // explicit name: the ordinary names build and render the V2 lanes.
@@ -81,6 +84,11 @@ pub mod revocation;
 // (sq-qhy4); no manifest/dispatch wiring and no compiled member yet.
 pub mod sameas;
 pub mod toml;
+mod nonce;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod verifier;
+#[cfg(target_arch = "wasm32")]
+#[path = "verifier_wasm.rs"]
 pub mod verifier;
 
 pub use manifest::{
@@ -89,6 +97,7 @@ pub use manifest::{
     ProofManifest, RevocationStatus, SignatureMode, StatusListSnapshot, SubProof,
 };
 // sq-1s2.3 (FL1 follow-up): browser-shippable captured-manifest packaging.
+#[cfg(not(target_arch = "wasm32"))]
 pub use capture::{
     public_inputs_to_hex, CaptureError, CapturedCarHireManifest, CapturedSubProof,
     CAR_HIRE_CAPTURE_NOTE,
@@ -118,6 +127,7 @@ pub use dispatch::{
 // disclosed-solution term binding is deferred to sq-1zf94.
 #[cfg(feature = "extended-fragment")]
 pub use verifier::{dispatch_fragment, verify_fragment_manifest, FragmentDispatchError};
+#[cfg(not(target_arch = "wasm32"))]
 pub use verifier::EntailmentPolicy;
 // Verifier-side commitment-method authentication + the relying party's policy.
 pub use method_auth::{AuthenticatedMethod, MethodAuthError, MethodPolicy};
@@ -160,17 +170,21 @@ pub use holder::{
 // audit #4: verifier-issued nonce + single-use store.
 // sq-aih: FileSeenNonces is the DURABLE (restart-surviving) store;
 // InMemorySeenNonces is NON-DURABLE / test-only.
-pub use verifier::{FileSeenNonces, InMemorySeenNonces, SeenNonces, VerifierNonce};
+#[cfg(not(target_arch = "wasm32"))]
+pub use verifier::FileSeenNonces;
+pub use verifier::{InMemorySeenNonces, SeenNonces, VerifierNonce};
 // audit #12: revocation / freshness policy.
+#[cfg(not(target_arch = "wasm32"))]
 pub use verifier::RevocationPolicy;
 // sq-cwq: external holder trust anchor for the HolderPop binding's PoP.
+#[cfg(not(target_arch = "wasm32"))]
 pub use verifier::HolderRegistry;
 
 // Versioned authenticated-result experiment, off by default.
 #[cfg(feature = "successful-results")]
 pub mod result;
 // beadzkp-13.5: private exact pinned-toolchain version matcher.
-#[cfg(feature = "successful-results")]
+#[cfg(all(feature = "successful-results", not(target_arch = "wasm32")))]
 mod toolchain;
 
 // The LIVE-toolchain gate for the `#[cfg(test)]` tests that live in `src/` (the

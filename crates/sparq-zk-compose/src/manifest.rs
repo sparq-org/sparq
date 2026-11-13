@@ -1171,6 +1171,7 @@ impl CircuitId {
     }
 
     // Diagnostics must remain available even for a directly constructed invalid id.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn label(&self) -> String {
         self.package().unwrap_or_else(|e| e.to_string())
     }

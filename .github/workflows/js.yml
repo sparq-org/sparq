@@ -254,3 +254,22 @@ jobs:
       # feature-set drift between them visible in the log.
       - name: Report wasm size
         run: ls -l wasm/sparq_wasm_bg.wasm wasm-node/sparq_wasm_bg.wasm wasm-dl/sparq_dl_wasm_bg.wasm
+
+  zk-result:
+    name: successful-result Node package
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: js/zk-result/package-lock.json
+      - name: Install pinned package dependencies
+        run: npm ci --prefix js/zk-result --ignore-scripts
+      - name: Exercise the bundled package without network access
+        run: python3 js/zk-result/scripts/offline.py node --test --test-concurrency=1 js/zk-result/test/result.test.js

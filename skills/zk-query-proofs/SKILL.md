@@ -537,3 +537,6 @@ then interleaves real adapter subprocesses. It preserves per-sample failures,
 unsupported combinations, exact inputs, authority/authentication identities and
 raw reports. Paired planner acceptance contracts retain visibly different public
 capacities; exact authority modes and selected support are separate contracts.
+
+The [Node package and host seam](references/successful-results.md#node-package-and-webassembly-host)
+use the same private preparation and independent statement reconstruction.
