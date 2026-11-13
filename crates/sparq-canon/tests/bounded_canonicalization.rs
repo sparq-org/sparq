@@ -201,3 +201,69 @@ fn input_and_output_bounds_apply_without_any_blank_nodes() {
     cap.max_permutation_steps = 0;
     assert!(canonicalize_quads_bounded_with::<Sha256>(&graph, &cap).is_ok());
 }
+
+#[path = "../../../zk/sparql-evaluator/methods/guest-canon/src/profile.rs"]
+mod guest_canon_profile;
+
+#[test]
+fn guest_profile_enforces_quad_capacity_before_rdfc() {
+    let cap = guest_canon_profile::limits();
+    for count in [64, 65] {
+        let graph: Vec<_> = (0..count)
+            .map(|i| {
+                Quad::new(
+                    NamedNode::new(format!("urn:s:{i}")).unwrap(),
+                    NamedNode::new("urn:p").unwrap(),
+                    NamedNode::new("urn:o").unwrap(),
+                    GraphName::DefaultGraph,
+                )
+            })
+            .collect();
+        let canonical = canonicalize_quads_bounded_with::<Sha256>(&graph, &cap);
+        let issued = issue_quads_bounded_ordered_with::<Sha256>(&graph, &cap);
+        if count == 64 {
+            assert!(canonical.is_ok(), "{canonical:?}");
+            assert!(issued.is_ok(), "{issued:?}");
+            assert_eq!(
+                canonical.unwrap(),
+                sparq_canon::canonicalize_quads_with::<Sha256>(&graph).unwrap()
+            );
+            assert!(issued.unwrap().is_empty());
+        } else {
+            for result in [canonical.map(|_| ()), issued.map(|_| ())] {
+                assert!(
+                    matches!(result, Err(error) if error.to_string().contains("input quad capacity"))
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn guest_negative_fixture_rejects_before_rdfc() {
+    let graph =
+        sparq_canon::parse_nquads(include_str!("rdf-canon-testdata/rdfc10/test074-in.nq")).unwrap();
+    let cap = guest_canon_profile::limits();
+    for result in [
+        canonicalize_quads_bounded_with::<Sha256>(&graph, &cap).map(|_| ()),
+        issue_quads_bounded_with::<Sha256>(&graph, &cap).map(|_| ()),
+        issue_quads_bounded_ordered_with::<Sha256>(&graph, &cap).map(|_| ()),
+    ] {
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("input quad capacity"));
+    }
+}
+
+#[test]
+fn guest_profile_admits_the_largest_positive_fixture() {
+    let graph =
+        sparq_canon::parse_nquads(include_str!("rdf-canon-testdata/rdfc10/test060-in.nq")).unwrap();
+    let cap = guest_canon_profile::limits();
+    assert_eq!(
+        canonicalize_quads_bounded_with::<Sha256>(&graph, &cap).unwrap(),
+        include_str!("rdf-canon-testdata/rdfc10/test060-rdfc10.nq")
+    );
+    assert!(issue_quads_bounded_ordered_with::<Sha256>(&graph, &cap).is_ok());
+}

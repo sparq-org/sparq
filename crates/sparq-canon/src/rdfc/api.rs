@@ -145,3 +145,122 @@ fn relabel_blank_node(
         None => Err(CanonicalizationError::CanonicalIdentifierNotExist),
     }
 }
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    fn clique() -> Vec<Quad> {
+        let mut quads = Vec::new();
+        for a in 0..5 {
+            for b in 0..5 {
+                if a != b {
+                    quads.push(Quad::new(
+                        BlankNode::new(format!("n{a}")).unwrap(),
+                        oxrdf02::NamedNode::new("urn:p").unwrap(),
+                        BlankNode::new(format!("n{b}")).unwrap(),
+                        GraphName::DefaultGraph,
+                    ));
+                }
+            }
+        }
+        quads
+    }
+
+    #[test]
+    fn pruned_candidates_consume_the_exact_budget() {
+        let quads = crate::parse_02(include_str!(
+            "../../tests/rdf-canon-testdata/rdfc10/test044-in.nq"
+        ))
+        .unwrap();
+        let options = CanonicalizationOptions {
+            hndq_call_limit: Some(4_000),
+            permutation_limit: Some(2_800),
+        };
+        for result in [
+            canonicalize_quads_with::<Sha256>(&quads, &options).map(|_| ()),
+            issue_quads_with::<Sha256>(&quads, &options).map(|_| ()),
+        ] {
+            assert!(matches!(
+                result,
+                Err(CanonicalizationError::PermutationLimitExceeded)
+            ));
+        }
+        let options = CanonicalizationOptions {
+            hndq_call_limit: Some(4_000),
+            permutation_limit: Some(3_000),
+        };
+        assert_eq!(
+            canonicalize_quads_with::<Sha256>(&quads, &options).unwrap(),
+            include_str!("../../tests/rdf-canon-testdata/rdfc10/test044-rdfc10.nq")
+        );
+    }
+
+    #[test]
+    fn exact_budget_boundary_includes_recursive_calls() {
+        let quads = vec![
+            Quad::new(
+                BlankNode::new("a").unwrap(),
+                oxrdf02::NamedNode::new("urn:p").unwrap(),
+                BlankNode::new("b").unwrap(),
+                GraphName::DefaultGraph,
+            ),
+            Quad::new(
+                BlankNode::new("b").unwrap(),
+                oxrdf02::NamedNode::new("urn:p").unwrap(),
+                BlankNode::new("a").unwrap(),
+                GraphName::DefaultGraph,
+            ),
+        ];
+        // Two roots each visit two nodes, with two singleton groups per node.
+        for budget in [7, 8] {
+            let options = CanonicalizationOptions {
+                hndq_call_limit: Some(usize::MAX),
+                permutation_limit: Some(budget),
+            };
+            for result in [
+                canonicalize_quads_with::<Sha256>(&quads, &options).map(|_| ()),
+                issue_quads_with::<Sha256>(&quads, &options).map(|_| ()),
+            ] {
+                if budget == 7 {
+                    assert!(matches!(
+                        result,
+                        Err(CanonicalizationError::PermutationLimitExceeded)
+                    ));
+                } else {
+                    assert!(result.is_ok());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn exact_budget_rejects_exhaustion_and_preserves_output() {
+        let quads = clique();
+        let options = CanonicalizationOptions {
+            hndq_call_limit: Some(usize::MAX),
+            permutation_limit: Some(8),
+        };
+        for result in [
+            canonicalize_quads_with::<Sha256>(&quads, &options).map(|_| ()),
+            issue_quads_with::<Sha256>(&quads, &options).map(|_| ()),
+        ] {
+            assert!(matches!(
+                result,
+                Err(CanonicalizationError::PermutationLimitExceeded)
+            ));
+        }
+        let options = CanonicalizationOptions {
+            hndq_call_limit: Some(usize::MAX),
+            permutation_limit: Some(20_000),
+        };
+        assert_eq!(
+            canonicalize_quads_with::<Sha256>(&quads, &options).unwrap(),
+            canonicalize_quads(&quads).unwrap()
+        );
+        assert_eq!(
+            issue_quads_with::<Sha256>(&quads, &options).unwrap().len(),
+            5
+        );
+    }
+}

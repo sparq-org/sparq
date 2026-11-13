@@ -48,6 +48,24 @@ class GuestDeterminismTests(unittest.TestCase):
             'python3 zk/sparql-evaluator/scripts/guest_determinism.py --output "$RUNNER_TEMP/sparq-guest-determinism"',
         ])
 
+    def test_canon_host_and_guest_share_the_bounded_profile(self):
+        guest = (gate.ROOT / "zk/sparql-evaluator/methods/guest-canon/src/main.rs").read_text()
+        host = (gate.ROOT / "zk/sparql-evaluator/host/examples/canon_differential.rs").read_text()
+        self.assertIn("mod profile;", guest)
+        self.assertIn("let limits = profile::limits();", guest)
+        self.assertIn('#[path = "../../methods/guest-canon/src/profile.rs"]', host)
+        self.assertIn("let limits = canon_check_profile::limits();", host)
+        self.assertNotIn("CanonicalizationLimits {", guest)
+        self.assertNotIn("CanonicalizationLimits {", host)
+        oversized = []
+        for case in gate.canonical_inputs():
+            quads = [line for line in case["input"].splitlines()
+                     if line.strip() and not line.lstrip().startswith("#")]
+            if len(quads) > 64:
+                oversized.append(case["id"])
+                self.assertTrue(case.get("negative"))
+        self.assertEqual(oversized, ["test074c"])
+
     def test_general_operator_paths_cannot_be_replaced_by_index_shortcuts(self):
         path = gate.ROOT / "zk/sparql-evaluator/fixtures/paper/determinism.json"
         cases = json.loads(path.read_text())["cases"]
