@@ -1,3 +1,5 @@
+#[path = "support/authenticated.rs"]
+mod authenticated;
 #[path = "support/mod.rs"]
 mod fixture_support;
 #[path = "../../sparq-zk-compose/tests/support/mod.rs"]
@@ -270,8 +272,11 @@ fn seeded_engine_interpreter_and_circuit_differential() {
     let seeds = std::env::var("SPARQ_NOIR_QUERY_SEED")
         .map(|s| vec![s.parse().expect("integer seed")])
         .unwrap_or_else(|_| vec![0, 1, 7, 41, 893, 1201]);
+    let mut workspaces = std::collections::BTreeMap::new();
     for seed in seeds {
-        let (rdf, data, _) = fixture_support::generated_dataset(seed);
+        let (rdf, _, _) = fixture_support::generated_dataset(seed);
+        let credentials = vec![authenticated::sign(&rdf, seed)];
+        let data = vec![credentials[0].cells(0).unwrap()];
         for query in fixture_support::DIFFERENTIAL_QUERIES {
             let plan = lower(
                 query,
@@ -284,11 +289,20 @@ fn seeded_engine_interpreter_and_circuit_differential() {
             .unwrap();
             let trace = evaluate(&plan, &data, &FixtureEncoder).unwrap();
             fixture_support::assert_engine(query, &rdf, &trace.result);
-            let package = generate(&plan).unwrap();
-            let workspace = Workspace::new(&package);
+            let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+            let workspace = workspaces
+                .entry(plan.hash())
+                .or_insert_with(|| Workspace::new(&package));
             let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
-            let input =
-                prover_toml(&plan, &data, &FixtureEncoder, &trace, [7; 32], [3; 32]).unwrap();
+            let input = sparq_zk_query::witness::prover_toml_authenticated(
+                &plan,
+                &credentials,
+                &trace,
+                [7; 32],
+                [3; 32],
+                authenticated::issuer_root(),
+            )
+            .unwrap();
             driver
                 .execute(&input, "differential")
                 .unwrap_or_else(|e| panic!("seed={seed}, {query}: {e}"));
@@ -300,9 +314,15 @@ fn seeded_engine_interpreter_and_circuit_differential() {
                     } else {
                         altered.tables[node].rows.remove(row);
                     }
-                    let input =
-                        prover_toml(&plan, &data, &FixtureEncoder, &altered, [7; 32], [3; 32])
-                            .unwrap();
+                    let input = sparq_zk_query::witness::prover_toml_authenticated(
+                        &plan,
+                        &credentials,
+                        &altered,
+                        [7; 32],
+                        [3; 32],
+                        authenticated::issuer_root(),
+                    )
+                    .unwrap();
                     assert!(
                         driver.execute(&input, "altered_row").is_err(),
                         "seed={seed}, {query}, table={node}, row={row}"

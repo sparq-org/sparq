@@ -26,6 +26,7 @@ pub fn sign(source: &str, index: u64) -> Credential {
         issuer_siblings: siblings,
     }
 }
+#[allow(dead_code)]
 pub fn fixture() -> Vec<Credential> {
     vec![sign("<urn:a> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:b> <urn:p> \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n",0)]
 }

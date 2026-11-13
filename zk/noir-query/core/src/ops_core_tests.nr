@@ -262,28 +262,28 @@ fn unused_index_is_zero() { ops_core::check_indices([1], 0); }
 
 fn credential_quad() -> [TermCell; 4] { [iri(1), iri(2), iri(3), unbound()] }
 #[test(should_fail_with = "credential capacity")]
-fn credential_opening_count_is_bounded() { crate::table::open_credential([credential_quad()], 2, 0); }
+fn credential_opening_count_is_bounded() { crate::table::check_credential_cells([credential_quad()], 2, 0); }
 #[test(should_fail_with = "credential padding")]
-fn credential_opening_cannot_hide_quads_in_padding() { crate::table::open_credential([credential_quad()], 0, 0); }
+fn credential_opening_cannot_hide_quads_in_padding() { crate::table::check_credential_cells([credential_quad()], 0, 0); }
 #[test(should_fail_with = "triple bound")]
 fn credential_opening_requires_bound_triple_positions() {
-    let mut quad = credential_quad(); quad[2] = unbound(); crate::table::open_credential([quad], 1, 0);
+    let mut quad = credential_quad(); quad[2] = unbound(); crate::table::check_credential_cells([quad], 1, 0);
 }
 #[test(should_fail_with = "triple positions")]
 fn credential_opening_requires_an_rdf_subject() {
-    let mut quad = credential_quad(); quad[0].kind = 3; crate::table::open_credential([quad], 1, 0);
+    let mut quad = credential_quad(); quad[0].kind = 3; crate::table::check_credential_cells([quad], 1, 0);
 }
 #[test(should_fail_with = "triple positions")]
 fn credential_opening_requires_an_iri_predicate() {
-    let mut quad = credential_quad(); quad[1].kind = 2; quad[1].scope = 1; crate::table::open_credential([quad], 1, 0);
+    let mut quad = credential_quad(); quad[1].kind = 2; quad[1].scope = 1; crate::table::check_credential_cells([quad], 1, 0);
 }
 #[test(should_fail_with = "credential named graph not yet supported")]
 fn credential_opening_refuses_named_graphs() {
-    let mut quad = credential_quad(); quad[3] = iri(4); crate::table::open_credential([quad], 1, 0);
+    let mut quad = credential_quad(); quad[3] = iri(4); crate::table::check_credential_cells([quad], 1, 0);
 }
 #[test(should_fail_with = "credential blank-node scope")]
 fn credential_opening_binds_blank_nodes_to_the_credential() {
-    let mut quad = credential_quad(); quad[0].kind = 2; quad[0].scope = 2; crate::table::open_credential([quad], 1, 0);
+    let mut quad = credential_quad(); quad[0].kind = 2; quad[0].scope = 2; crate::table::check_credential_cells([quad], 1, 0);
 }
 #[test(should_fail_with = "credential request bound")]
 fn dataset_credential_bound_is_positive() {
@@ -485,4 +485,31 @@ fn overflow_cannot_be_hidden_by_a_full_truncated_output() {
 fn slice_public_indices_do_not_wrap() {
     ops_core::slice(two(),0xffffffff,true,0xffffffff,empty::<4,1>());
     ops_core::slice(two(),0,true,0xffffffff,two());
+}
+
+#[test(should_fail_with = "row request bound")]
+fn request_row_bound_is_positive_even_for_an_empty_table() {
+    ops_core::check_bound(empty::<1,1>(),0);
+}
+
+#[test]
+fn expression_effective_boolean_value_uses_the_suite_key_prefix() {
+    let zero: Field = 0x0180000000000000000000000000000000000000000000000000000000000000;
+    let mut numeric=expression_cell(1,0,11);numeric.key=zero;
+    let result=crate::ops_core_expr::evaluate(Table{rows:[[numeric]],len:1},[unbound()],[expr_step(0,0,0,0,0)]);
+    assert(!result[0].value & !result[0].is_error);
+    numeric.key=zero+1;
+    let result=crate::ops_core_expr::evaluate(Table{rows:[[numeric]],len:1},[unbound()],[expr_step(0,0,0,0,0)]);
+    assert(result[0].value & !result[0].is_error);
+    for class in [5,6] {
+        let cell=expression_cell(class,0,11);
+        let result=crate::ops_core_expr::evaluate(Table{rows:[[cell]],len:1},[unbound()],[expr_step(0,0,0,0,0)]);
+        assert(!result[0].value & !result[0].is_error);
+    }
+}
+
+#[test(should_fail_with = "language-tagged effective boolean value not yet supported")]
+fn expression_refuses_pending_language_tagged_ebv() {
+    let mut cell=expression_cell(0,0,11);cell.dt=crate::suite_constants::DT_LANGSTRING;
+    let _result=crate::ops_core_expr::evaluate(Table{rows:[[cell]],len:1},[unbound()],[expr_step(0,0,0,0,0)]);
 }

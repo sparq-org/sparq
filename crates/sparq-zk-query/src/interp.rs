@@ -1,7 +1,7 @@
 //! Exact bounded table evaluation over supplied term cells.
 //!
-//! Credential cells are a stand-in pending the suite lane's `open_credential`.
-//! This module does not authenticate a credential or implement a cryptosuite.
+//! The credential adapter authenticates complete inputs before this reference
+//! evaluator runs; the generated program checks them independently.
 
 use crate::{plan::*, Error};
 use oxrdf::Term;
@@ -328,6 +328,18 @@ impl Value {
             Self::Boolean(v, e) => (v, e),
             Self::Term(c) if !c.bound || c.kind != 3 => (false, true),
             Self::Term(c) => match c.key_class {
+                0 if c.dt
+                    == sparq_merkle_suite::poseidon::field_bytes(
+                        sparq_merkle_suite::poseidon::hash_bytes(
+                            sparq_merkle_suite::poseidon::DATATYPE_DOMAIN,
+                            b"http://www.w3.org/1999/02/22-rdf-syntax-ns#langString",
+                        ),
+                    ) =>
+                {
+                    return Err(Error::Unsupported(
+                        "language-tagged effective boolean value".into(),
+                    ));
+                }
                 1 => {
                     let mut zero = [0; 32];
                     zero[2] = 0x80;

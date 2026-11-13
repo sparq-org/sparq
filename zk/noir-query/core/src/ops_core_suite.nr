@@ -75,7 +75,7 @@ pub fn open_one<let N: u32, let L: u32>(
         for n in 0..N {
             for p in 0..3 {
                 if quads[n][p].bound() {
-                    if quads[n][p].kind() == 3 { checked_literal(quads[n][p], credentials[n][p]); }
+                    if (p == 2) & (quads[n][p].kind() == 3) { checked_literal(quads[n][p], credentials[n][p]); }
                     opened.rows[n][p] = table_cell(quads[n][p]);
                 }
             }
@@ -167,3 +167,34 @@ fn dataset_assembly_copies_every_row_and_flag() {
     let dataset=append_credential(empty_dataset::<2>(),opened,1);
     assert(crate::table::equal_row(dataset.rows[1], [cell,cell,cell]));assert(dataset.active == [false,true]);
 }
+
+fn raw_literal<let T: u32>(lexical:u8, datatype:[u8;T]) -> TermOpening<1> {
+    let mut bytes=[0;128];for i in 0..T {bytes[i]=datatype[i];}
+    TermOpening {bound:true,kind:3,lexical:[lexical],lexical_len:1,datatype:bytes,datatype_len:T,language:[0;64],language_len:0,key:[0;31]}
+}
+fn check_raw_literal(raw:TermOpening<1>) {checked_literal(crate::suite_entry::open_cell(raw,1),raw);}
+#[test(should_fail_with = "class disagrees with datatype")]
+fn integer_key_is_recomputed() {check_raw_literal(raw_literal(49,"http://www.w3.org/2001/XMLSchema#integer".as_bytes()));}
+#[test(should_fail_with = "class disagrees with datatype")]
+fn decimal_key_is_recomputed() {check_raw_literal(raw_literal(49,"http://www.w3.org/2001/XMLSchema#decimal".as_bytes()));}
+#[test(should_fail_with = "class disagrees with datatype")]
+fn date_key_is_recomputed() {
+    let mut raw=raw_literal(49,"http://www.w3.org/2001/XMLSchema#date".as_bytes());
+    raw.key[0]=8;
+    check_raw_literal(raw);
+}
+#[test(should_fail_with = "class disagrees with datatype")]
+fn datetime_key_is_recomputed() {
+    let mut raw=raw_literal(49,"http://www.w3.org/2001/XMLSchema#dateTime".as_bytes());
+    raw.key[0]=3;
+    check_raw_literal(raw);
+}
+#[test(should_fail_with = "class disagrees with datatype")]
+fn boolean_key_is_recomputed() {check_raw_literal(raw_literal(49,"http://www.w3.org/2001/XMLSchema#boolean".as_bytes()));}
+#[test(should_fail_with = "class disagrees with datatype")]
+fn string_key_is_recomputed() {check_raw_literal(raw_literal(97,"http://www.w3.org/2001/XMLSchema#string".as_bytes()));}
+
+#[test(should_fail_with = "credential signature padding")]
+fn inactive_credential_key_y_is_zero() { let mut proof=empty_proof();proof.pk.y=1;let _opened=inactive(proof,0,0); }
+#[test(should_fail_with = "credential signature padding")]
+fn inactive_credential_signature_x_is_zero() { let mut proof=empty_proof();proof.r.x=1;let _opened=inactive(proof,0,0); }

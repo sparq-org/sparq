@@ -80,6 +80,12 @@ pub fn generated_dataset(mut seed: u64) -> (String, Vec<CredentialCells>, Vec<Te
 
 #[allow(dead_code)]
 pub const DIFFERENTIAL_QUERIES: &[&str] = &[
+    "ASK {VALUES ?x {0} FILTER(?x)}",
+    "ASK {VALUES ?x {1} FILTER(?x)}",
+    "ASK {VALUES ?x {false} FILTER(?x)}",
+    "ASK {VALUES ?x {true} FILTER(?x)}",
+    "ASK {VALUES ?x {\"\"} FILTER(?x)}",
+    "ASK {VALUES ?x {\"x\"} FILTER(?x)}",
     "SELECT ?s ?x WHERE {?s <urn:p> ?x}",
     "SELECT ?x WHERE {?s <urn:p> ?x}",
     "SELECT DISTINCT ?x WHERE {?s <urn:p> ?x}",

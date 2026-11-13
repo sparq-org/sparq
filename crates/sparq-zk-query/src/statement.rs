@@ -1,5 +1,5 @@
 //! Shared public layout for generated programs and independent reconstruction.
-//! The supplied-cell opening is the programme's explicit draft stand-in.
+//! The authenticated profile binds its verifier-stored issuer root and slot limits.
 
 use crate::{
     interp::{row_key, Cell, CredentialCells, EncodeTerm, ResultValue, Word},
@@ -101,15 +101,9 @@ impl Layout {
         statement: &Statement,
         issuer_root: Word,
     ) -> Result<Vec<Word>, Error> {
-        if statement.signature_mode != 1 {
-            return Err(Error::Unsupported("hidden suite signature mode".into()));
-        }
         crate::credential::field(issuer_root)?;
-        let mut fixture = statement.clone();
-        fixture.signature_mode = 0;
-        let mut words = self.reconstruct(plan, &fixture, &crate::credential::SuiteEncoder)?;
-        words.pop();
-        words[64] = number(1);
+        let mut words =
+            self.reconstruct_words(plan, statement, &crate::credential::SuiteEncoder, 1)?;
         words.push(issuer_root);
         let mut bounds = plan.credential_quad_bounds();
         bounds.resize(self.credentials, 0);
@@ -134,11 +128,29 @@ impl Layout {
         statement: &Statement,
         encoder: &impl EncodeTerm,
     ) -> Result<Vec<Word>, Error> {
+        let mut words = self.reconstruct_words(plan, statement, encoder, 0)?;
+        words.push(binding(&words)?);
+        Ok(words)
+    }
+    fn reconstruct_words(
+        &self,
+        plan: &Plan,
+        statement: &Statement,
+        encoder: &impl EncodeTerm,
+        signature_mode: u8,
+    ) -> Result<Vec<Word>, Error> {
         if *self != Self::new(plan) {
             return Err(Error::Invalid("public layout".into()));
         }
-        if statement.signature_mode != 0 {
-            return Err(Error::Unsupported("credential suite opening".into()));
+        if statement.signature_mode != signature_mode {
+            return Err(Error::Unsupported(
+                if signature_mode == 0 {
+                    "credential suite opening"
+                } else {
+                    "hidden suite signature mode"
+                }
+                .into(),
+            ));
         }
         let mut words = vec![];
         words.extend(statement.request_digest.map(|b| number(u64::from(b))));
@@ -208,8 +220,6 @@ impl Layout {
             }
             _ => return Err(Error::Invalid("result form".into())),
         }
-        let binding = binding(&words)?;
-        words.push(binding);
         Ok(words)
     }
     /// Check the locally compiled ABI against the declaration schema.

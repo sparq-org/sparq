@@ -74,6 +74,7 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
         )
     };
     let cap = plan.capacity;
+    let lexical = crate::credential::LEXICAL_CAPACITY;
     let layout = crate::statement::Layout::new(plan);
     source.push_str(&if authenticated {
         layout.declarations_authenticated()
@@ -82,7 +83,7 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
     });
     if authenticated {
         for (c, n) in plan.credential_quad_capacities().into_iter().enumerate() {
-            writeln!(source,"    credential_{c}: [[core::suite_entry::TermOpening<32>; 4]; {n}],\n    credential_proof_{c}: core::ops_core_suite::CredentialProof<{n}>,").unwrap();
+            writeln!(source,"    credential_{c}: [[core::suite_entry::TermOpening<{lexical}>; 4]; {n}],\n    credential_proof_{c}: core::ops_core_suite::CredentialProof<{n}>,").unwrap();
         }
         writeln!(
             source,

@@ -107,3 +107,45 @@ pub fn bind_ask_authenticated<let C: u32, let P: u32, let I: u32>(
     for bound in credential_quad_bounds { state = h2(state, bound as Field); }
     assert(state == statement_binding, "authenticated statement binding");
 }
+
+#[test]
+fn suite_dataset_empty_vector_matches_the_host() {
+    check_suite_dataset([0],0,[0;32],[221,90,92,201,14,84,121,10,133,160,143,37,218,1,88,150,180,168,181,120,184,67,40,113,173,128,217,66,12,56,36,177]);
+}
+#[test(should_fail_with = "message padding")]
+fn suite_dataset_message_padding_is_canonical() {
+    check_suite_dataset([1],0,[0;32],[221,90,92,201,14,84,121,10,133,160,143,37,218,1,88,150,180,168,181,120,184,67,40,113,173,128,217,66,12,56,36,177]);
+}
+#[test(should_fail_with = "suite dataset commitment")]
+fn suite_dataset_commitment_is_bound() { check_suite_dataset([0],0,[0;32],[0;32]); }
+#[test]
+fn authenticated_ask_vector_matches_the_host() {
+    bind_ask_authenticated(9,[4],[0;32],[0;32],1,[1,4,2],[crate::table::unbound()],[0],true,
+        0x2b935ec2af78e8ecc1c6e20422008a2f38b105b86cd3d6b1670a70d2aa93606d);
+}
+#[test(should_fail_with = "authenticated statement binding")]
+fn authenticated_ask_binds_the_issuer_root() {
+    bind_ask_authenticated(10,[4],[0;32],[0;32],1,[1,4,2],[crate::table::unbound()],[0],true,
+        0x2b935ec2af78e8ecc1c6e20422008a2f38b105b86cd3d6b1670a70d2aa93606d);
+}
+#[test(should_fail_with = "authenticated statement binding")]
+fn authenticated_ask_binds_each_quad_limit() {
+    bind_ask_authenticated(9,[3],[0;32],[0;32],1,[1,4,2],[crate::table::unbound()],[0],true,
+        0x2b935ec2af78e8ecc1c6e20422008a2f38b105b86cd3d6b1670a70d2aa93606d);
+}
+
+#[test]
+fn authenticated_select_vector_matches_the_host() {
+    bind_select_authenticated(9,[4],[0;32],[0;32],1,[1,4,2],[crate::table::unbound()],[0],crate::table::empty::<2,1>(),
+        0x184c7bfc730c1ca93b627200ff585a102373ceddfb799a10f18ae1e0ace96220);
+}
+#[test(should_fail_with = "authenticated statement binding")]
+fn authenticated_select_binds_the_issuer_root() {
+    bind_select_authenticated(10,[4],[0;32],[0;32],1,[1,4,2],[crate::table::unbound()],[0],crate::table::empty::<2,1>(),
+        0x184c7bfc730c1ca93b627200ff585a102373ceddfb799a10f18ae1e0ace96220);
+}
+#[test(should_fail_with = "authenticated statement binding")]
+fn authenticated_select_binds_each_quad_limit() {
+    bind_select_authenticated(9,[3],[0;32],[0;32],1,[1,4,2],[crate::table::unbound()],[0],crate::table::empty::<2,1>(),
+        0x184c7bfc730c1ca93b627200ff585a102373ceddfb799a10f18ae1e0ace96220);
+}
