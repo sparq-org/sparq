@@ -2537,9 +2537,6 @@ impl Graph {
                 == NUMERICS_MAGIC.len() + dict.len() * std::mem::size_of::<f64>() =>
             {
                 let m = backing::Backing::open_file(f, (NUMERICS_MAGIC.len() + dict.len() * std::mem::size_of::<f64>()) as u64)?;
-                if m.len() != NUMERICS_MAGIC.len() + dict.len() * std::mem::size_of::<f64>() {
-                    return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "numeric cache size changed during open"));
-                }
                 if m[..NUMERICS_MAGIC.len()] == NUMERICS_MAGIC {
                     match m {
                         backing::Backing::Owned(bytes) => NumData::Owned(bytes[NUMERICS_MAGIC.len()..]
@@ -2556,9 +2553,6 @@ impl Graph {
         let temporals = match std::fs::File::open(&tp) {
             Ok(f) if f.metadata()?.len() as usize == dict.len() * 9 => {
                 let m = backing::Backing::open_file(f, (dict.len() * 9) as u64)?;
-                if m.len() != dict.len() * 9 {
-                    return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "temporal cache size changed during open"));
-                }
                 match m {
                     backing::Backing::Owned(bytes) => {
                         let n = bytes.len() / 9;
@@ -15601,7 +15595,9 @@ mod tests {
         .unwrap()
         .save(&dir)
         .unwrap();
-        let mut parent = Graph::open(&dir).unwrap();
+        // Small files are read into owned memory and closed at open; force the mapped
+        // backing so the open files this scenario depends on stay open on Windows.
+        let mut parent = backing::with_threshold(0, || Graph::open(&dir)).unwrap();
         let (_, mut child) = parent.named.pop().expect("one named graph");
         let t = [term_iri(8, "s"), term_iri(8, "p"), term_iri(8, "o")];
         child

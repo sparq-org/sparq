@@ -53,6 +53,32 @@ fn scratch_paths_do_not_reuse_existing_directories() {
 
 #[test]
 #[cfg(not(miri))]
+fn build_selection_and_override() {
+    let dir = Directory::new();
+    let path = dir.0.join("bytes");
+    let selected = threshold();
+    for len in [0, 1, SMALL_FILE_BYTES + 1] {
+        std::fs::write(&path, vec![42; len]).unwrap();
+        let backing = Backing::open(&path).unwrap();
+        assert_eq!(
+            matches!(backing, Backing::Owned(_)),
+            len <= selected,
+            "build selection ignored for file length {len}"
+        );
+        assert_eq!(&*backing, vec![42; len]);
+    }
+    with_threshold(usize::MAX, || {
+        assert!(matches!(Backing::open(&path).unwrap(), Backing::Owned(_)));
+        with_threshold(0, || {
+            assert!(matches!(Backing::open(&path).unwrap(), Backing::Mapped(_)));
+        });
+        assert!(matches!(Backing::open(&path).unwrap(), Backing::Owned(_)));
+    });
+    assert_eq!(threshold(), selected, "override was not restored");
+}
+
+#[test]
+#[cfg(not(miri))]
 fn threshold_boundaries_and_empty() {
     let dir = Directory::new();
     let path = dir.0.join("bytes");

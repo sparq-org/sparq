@@ -55,7 +55,7 @@ impl Backing {
             // Bound both the read and its allocation independently of the stat. A file
             // changed between stat and read is refused, including same-strategy growth.
             let mut bytes = Vec::new();
-            let read_limit = threshold as u64 + 1;
+            let read_limit = (threshold as u64).saturating_add(1);
             file.take(read_limit).read_to_end(&mut bytes)?;
             if bytes.len() as u64 != len {
                 return Err(io::Error::new(
@@ -132,7 +132,15 @@ fn threshold() -> usize {
     if let Some(value) = OVERRIDE.with(|v| v.get()) {
         return value;
     }
-    SMALL_FILE_BYTES
+    // Build-time coverage for the complete crash/fault suite, including integration
+    // tests that link the non-test library. Local test overrides still take priority.
+    if cfg!(sparq_backing = "mapped") {
+        0
+    } else if cfg!(sparq_backing = "owned") {
+        usize::MAX
+    } else {
+        SMALL_FILE_BYTES
+    }
 }
 
 #[cfg(test)]
