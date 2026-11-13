@@ -16,6 +16,19 @@ key-checked cells and the public-value contract. Raw term openings are entry-poi
 witnesses; `TermCell` and `KeyCheckedCell` are internal validated values produced
 by the constructors, not ABI witness types.
 
+For caller-selected backing bounds use
+`suite_entry::BoundedTermOpening<L, D, G>`, `open_bounded_cell(raw, scope)` and
+`open_bounded_quads(raw_quads, scope)`. Runtime lengths remain witnesses and all
+backing bytes after each length must be zero. Absent openings require every raw
+field to be zero. The existing fixed-metadata opening API remains compatible.
+
+`term::open_key_checked(raw, scope, expected_dt)` returns an opaque
+`KeyCheckedCell` directly from a bounded raw literal opening. It shares the initial
+lexical hash and checks the datatype and full recomputed key. Use a fixed pinned
+datatype identifier to omit unrelated parsers. `recompute_key_for` remains
+available for opening an existing cell. No unchecked checked-cell constructor is
+exposed.
+
 Hidden credential mode has public issuer-key coordinates and agreed configuration
 digest halves, and no public output. Revealed mode has public issuer-key coordinates and agreed configuration
 digest halves and outputs the salted signed message. Neither exposes the tree

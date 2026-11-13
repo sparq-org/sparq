@@ -103,7 +103,7 @@ pub fn open_lexical<let L: u32, let D: u32, let G: u32>(
         & (rebuilt.key_class == cell.key_class), "lexical opening differs");
 }
 
-/// Its private payload can only be minted by `recompute_key`.
+/// Its private payload is minted only after lexical key recomputation.
 pub struct KeyCheckedCell { cell: TermCell }
 impl KeyCheckedCell { pub fn cell(self) -> TermCell { self.cell } }
 
@@ -121,6 +121,21 @@ pub fn recompute_key_for<let L: u32, let D: u32, let G: u32>(
     cell: TermCell, lexical: BoundedVec<u8, L>, datatype: BoundedVec<u8, D>, language: BoundedVec<u8, G>, expected_datatype: Field,
 ) -> KeyCheckedCell {
     open_lexical(cell, lexical, datatype, language);
+    check_opened_key(cell, lexical, expected_datatype)
+}
+
+/// Build and check a raw literal with one lexical hash. Pass a fixed datatype
+/// identifier so unrelated value parsers fold away in the generated circuit.
+pub fn open_key_checked<let L: u32, let D: u32, let G: u32>(
+    raw: crate::suite_entry::BoundedTermOpening<L, D, G>, credential: u32, expected_dt: Field,
+) -> KeyCheckedCell {
+    let cell = crate::suite_entry::open_bounded_cell(raw, credential);
+    let lexical = BoundedVec::from_parts_unchecked(raw.lexical, raw.lexical_len);
+    check_opened_key(cell, lexical, expected_dt)
+}
+
+// Only fresh construction or a checked full lexical opening reaches this helper.
+fn check_opened_key<let L: u32>(cell: TermCell, lexical: BoundedVec<u8, L>, expected_datatype: Field) -> KeyCheckedCell {
     assert(cell.kind == KIND_LITERAL, "key requires literal");
     assert(cell.dt == expected_datatype, "datatype specialization differs");
     let (_class, key) = crate::term_key::recompute(lexical, expected_datatype);
