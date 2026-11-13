@@ -5,6 +5,7 @@ pub mod capacity;
 pub mod codegen;
 pub mod credential;
 pub mod driver;
+pub mod envelope_policy;
 pub mod interp;
 pub mod lower;
 pub mod plan;
