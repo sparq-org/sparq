@@ -110,13 +110,16 @@ unknown creation when both explicit bounds are absent.
 characters to an integer, rejecting signs, empty input and overflow. These replace
 the synthetic purpose/index cells, not the status policy. Use the literal
 vocabulary identifiers and term constructors instead of the synthetic IRI and
-number encodings. The envelope's old whole-second offset fixtures must consume
+number encodings. The index opener returns `u64`; narrowing it requires an
+explicit range check in the caller. The envelope's old whole-second offset fixtures must consume
 `Timestamp`'s exact millisecond representation instead.
 
 `term::credential_graph(request_digest, credential_index)` creates a synthetic
 blank graph name under its own domain, binding both request-digest halves and the
 fixed dataset position. It is distinct from issuer blank-node labels and carries
-the credential scope. The caller fixes that position in generated wiring; it is
+the credential scope. `cell.credential()` is `credential_index + 1` for blank
+nodes and zero for other kinds; the envelope adapter uses it as its scope.
+The caller fixes that position in generated wiring; it is
 not another entry-point witness. This replaces the envelope's synthetic graph
 name. The native `metadata::graph_name` returns the same cell.
 

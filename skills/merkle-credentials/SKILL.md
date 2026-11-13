@@ -54,7 +54,7 @@ credential scope.
 
 Import `sparq_noir_query_core` from `zk/noir-query/core`. Its `term::open_term`
 takes a kind tag, bounded lexical/datatype/language bytes, comparison-key bytes
-and a credential index. It computes every cell component. Never accept a
+and an explicit blank-node scope. It computes every cell component. Never accept a
 `TermCell` itself as an entry-point witness: call the constructor on the raw
 opening first. Access components through the cell's methods. `term::padding()`
 is the only canonical unbound cell; the bound default graph is distinct.
@@ -110,12 +110,14 @@ before returning a usable instant. Inclusive-start and fallback policy belong to
 the envelope, which must refuse required checks on unknown creation.
 
 `open_status_index` checks a string literal and parses only unsigned decimal
-characters into a bounded integer; `open_status_purpose` checks the exact string
+characters into `u64`; `open_status_purpose` checks the exact string
 literal value. Obtain both cells from the authenticated table before opening.
 `term::credential_graph(request_digest, index)` derives the synthetic graph name
 under its own domain. Its blank-node scope is the fixed dataset position, as for
 credential-local blank nodes, while its encoding is separate from issuer labels.
 Use the literal vocabulary getters for the common credential predicates.
+The complete opener derives `cell.credential()` as `credential_index + 1` for
+blank nodes and zero for other kinds; use it as the envelope adapter's scope.
 
 The frozen evaluator remains a second SHA copy. Every new caller uses the new
 crate. Required-CI source inclusion checks fixed/generated encodings, keys,

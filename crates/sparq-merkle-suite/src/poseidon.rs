@@ -180,7 +180,13 @@ pub fn root(quads: &[Fr], salt: Fr) -> Result<Fr, Error> {
 
 /// Signed message, binding suite, private salt, exact count, salted root, and
 /// both unsigned halves of the SHA-256 canonical configuration digest.
-pub fn signed_message(salt: Fr, count: u32, root: Fr, configuration: &[u8; 32], metadata: Fr) -> Fr {
+pub fn signed_message(
+    salt: Fr,
+    count: u32,
+    root: Fr,
+    configuration: &[u8; 32],
+    metadata: Fr,
+) -> Fr {
     message_for_suite(suite_id(), salt, count, root, configuration, metadata)
 }
 
@@ -248,7 +254,10 @@ pub fn issue(
     let root = root(&rows.iter().map(|(q, _)| *q).collect::<Vec<_>>(), salt)?;
     let digest: [u8; 32] = Sha256::digest(proof_config.as_bytes()).into();
     let metadata = crate::metadata::from_configuration(&proof_config, &key.public_key())?;
-    let signature = sig::sign_deterministic(key, &signed_message(salt, count, root, &digest, metadata.digest));
+    let signature = sig::sign_deterministic(
+        key,
+        &signed_message(salt, count, root, &digest, metadata.digest),
+    );
     Ok(Credential {
         document: rows.iter().map(|(_, line)| format!("{line}\n")).collect(),
         proof_config,
@@ -289,7 +298,8 @@ pub fn verify(credential: &Credential, key: &sig::PublicKey) -> bool {
             credential.count,
             credential.root,
             &digest,
-         crate::metadata::from_configuration(&proof_config, key)?.digest))
+            crate::metadata::from_configuration(&proof_config, key)?.digest,
+        ))
     };
     check().is_ok_and(|message| sig::verify(key, &message, &credential.signature))
 }
@@ -304,12 +314,22 @@ pub fn field_bytes(field: Fr) -> [u8; 32] {
 }
 
 /// Verify the credential before exposing its proof metadata to an envelope caller.
-pub fn verify_and_open(credential: &Credential, key: &sig::PublicKey) -> Result<crate::metadata::Metadata, Error> {
-    if !verify(credential, key) { return Err(Error("credential verification failed")); }
+pub fn verify_and_open(
+    credential: &Credential,
+    key: &sig::PublicKey,
+) -> Result<crate::metadata::Metadata, Error> {
+    if !verify(credential, key) {
+        return Err(Error("credential verification failed"));
+    }
     crate::metadata::from_configuration(&credential.proof_config, key)
 }
 
 /// Dataset cells with the nonzero scope derived from a fixed credential position.
 pub fn credential_cells(quad: &Quad, index: u32) -> Result<[TermCell; 4], Error> {
-    quad_cells(quad, index.checked_add(1).ok_or(Error("credential scope capacity"))?)
+    quad_cells(
+        quad,
+        index
+            .checked_add(1)
+            .ok_or(Error("credential scope capacity"))?,
+    )
 }

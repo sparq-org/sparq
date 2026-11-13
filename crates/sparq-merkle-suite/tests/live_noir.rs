@@ -41,7 +41,10 @@ fn assert_compiler(gate: &support::LiveToolchain) {
         .unwrap();
     assert!(out.status.success(), "nargo version command failed");
     let stdout = String::from_utf8(out.stdout).unwrap();
-    assert!(stdout.contains("is dirty: false"), "credential suite requires the pinned release compiler");
+    assert!(
+        stdout.contains("is dirty: false"),
+        "credential suite requires the pinned release compiler"
+    );
     let lines: Vec<_> = stdout.lines().take(2).collect();
     assert_eq!(
         lines,
@@ -114,7 +117,9 @@ fn random_literals_execute_against_rust_and_engine() {
     assert_compiler(&gate);
     let scratch = Scratch::new();
     let mut workers = [Vec::new(), Vec::new()];
-    for (i, fixture) in cases::fixtures().into_iter().enumerate() { workers[i % 2].push(fixture); }
+    for (i, fixture) in cases::fixtures().into_iter().enumerate() {
+        workers[i % 2].push(fixture);
+    }
     std::thread::scope(|scope| {
         for fixtures in workers {
             let gate_ref = &gate;
@@ -123,7 +128,10 @@ fn random_literals_execute_against_rust_and_engine() {
                 for ((datatype, bucket), inputs) in fixtures {
                     let path = root.join(format!("{datatype}-{bucket}"));
                     project(&path, "merkle_keys", &cases::program(&datatype, bucket));
-                    for input in inputs { prover(&path, &input); execute(gate_ref, &path); }
+                    for input in inputs {
+                        prover(&path, &input);
+                        execute(gate_ref, &path);
+                    }
                 }
             });
         }
@@ -155,7 +163,11 @@ fn credential_modes_match_vectors_and_compiled_public_abi() {
             (11, [9; 32]),
             (7, std::array::from_fn(|i| i as u8)),
         ] {
-            let (mut input, message) = credential::input_created(salt, config, if salt == 11 { Some("2026-01-01T00:00:00Z") } else { None });
+            let (mut input, message) = if salt == 11 {
+                credential::input_created(salt, config, Some("2026-01-01T00:00:00Z"))
+            } else {
+                credential::input(salt, config)
+            };
             if mode == "revealed" {
                 for k in ["r", "s", "e", "e_k"] {
                     input.as_object_mut().unwrap().remove(k);
@@ -204,13 +216,15 @@ fn credential_modes_match_vectors_and_compiled_public_abi() {
             1,
             p::root(&[q], Fr::from(7u64)).unwrap(),
             &[9; 32],
-         Fr::from(0u64));
+            Fr::from(0u64),
+        );
         let b = p::signed_message(
             Fr::from(8u64),
             1,
             p::root(&[q], Fr::from(8u64)).unwrap(),
             &[9; 32],
-         Fr::from(0u64));
+            Fr::from(0u64),
+        );
         assert_ne!(a, b);
     }
     support::complete(gate);
