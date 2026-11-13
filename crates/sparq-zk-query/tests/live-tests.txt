@@ -7,3 +7,4 @@ live tests/proofs.rs::native_proof_reconstructs_inputs_and_consumes_only_after_a
 live tests/proofs.rs::n0_native_proofs_match_the_engine_and_refuse_altered_answers
 structural tests/execution.rs::generated_driver_refuses_path_packages_before_io
 live tests/proofs.rs::shape_cache_reuses_constants_and_invalidates_library_revisions
+live tests/authentication.rs::suite_program_checks_authentication_membership_keys_and_credential_limits

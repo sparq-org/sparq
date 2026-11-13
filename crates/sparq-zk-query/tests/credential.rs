@@ -183,3 +183,28 @@ fn per_credential_limits_are_checked_before_the_result_and_bind_the_statement() 
             .unwrap()
     );
 }
+
+#[test]
+fn suite_value_keys_preserve_false_ebv_and_refuse_pending_lexical_ebv() {
+    use sparq_zk_query::interp::EncodeTerm;
+    let integer = oxrdf::Literal::new_typed_literal(
+        "0",
+        oxrdf::NamedNode::new_unchecked("http://www.w3.org/2001/XMLSchema#integer"),
+    );
+    assert_eq!(
+        sparq_zk_query::statement::hex(SuiteEncoder.encode(&integer.into()).unwrap().key),
+        "0x0001800000000000000000000000000000000000000000000000000000000000"
+    );
+    for literal in ["0", "false", "\"\""] {
+        let plan = lower(&format!("ASK {{VALUES ?x {{{literal}}} FILTER(?x)}}"), B).unwrap();
+        assert_eq!(
+            evaluate(&plan, &[], &SuiteEncoder).unwrap().result,
+            ResultValue::Ask(false)
+        );
+    }
+    let plan = lower("ASK {VALUES ?x {\"word\"@en} FILTER(?x)}", B).unwrap();
+    assert_eq!(
+        evaluate(&plan, &[], &SuiteEncoder).unwrap_err(),
+        Error::Unsupported("language-tagged effective boolean value".into())
+    );
+}

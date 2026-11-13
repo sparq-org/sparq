@@ -273,6 +273,7 @@ fn collect_comparisons(
             variable: variable.as_str().to_owned(),
             op,
             bound: biased(bound),
+            datatype: super::PredicateDatatype::Integer,
         });
     }
     Ok(())

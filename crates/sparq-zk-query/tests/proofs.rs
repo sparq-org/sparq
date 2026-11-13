@@ -210,6 +210,28 @@ fn native_proof_reconstructs_inputs_and_consumes_only_after_acceptance() {
             || NOW + 3600
         )
         .is_err());
+    // This clock is expired before verification starts and valid afterwards.
+    // It isolates the initial window check from the final window check.
+    assert!(compiler
+        .verify(
+            &request,
+            &presentation,
+            &FixtureEncoder,
+            &audience,
+            &store,
+            || {
+                let verifying = std::fs::read_dir(tmp.path())
+                    .unwrap()
+                    .map(Result::unwrap)
+                    .any(|entry| entry.file_name().to_string_lossy().starts_with("verify_"));
+                if verifying {
+                    NOW
+                } else {
+                    NOW + 3600
+                }
+            }
+        )
+        .is_err());
     let late = std::cell::Cell::new(false);
     assert!(compiler
         .verify(
@@ -719,6 +741,64 @@ fn shape_cache_reuses_constants_and_invalidates_library_revisions() {
     .unwrap();
     let revised = compiler.prepare("ASK {?s <urn:p> ?x}", B).unwrap();
     assert_eq!(original.verification_key, revised.verification_key);
-    assert_eq!(entries(), 2);
+    let original_request = authenticated_request(
+        stored(&original, "ASK {?s <urn:p> ?x}", 7, "urn:verifier", None),
+        B,
+        original.verification_key.clone(),
+    )
+    .unwrap();
+    let path = zk.join("noir-query/core/src/ops_core.nr");
+    let source = std::fs::read_to_string(&path).unwrap();
+    let old = "assert(result == (input.len > 0), \"ASK result\");";
+    let new = "assert(result != (input.len > 0), \"ASK result\");";
+    assert_eq!(source.matches(old).count(), 1);
+    std::fs::write(path, source.replace(old, new)).unwrap();
+    let changed = compiler.prepare("ASK {?s <urn:p> ?x}", B).unwrap();
+    assert_ne!(original.verification_key, changed.verification_key);
+    assert_eq!(entries(), 3);
+    assert_eq!(
+        compiler
+            .prove(
+                &original_request,
+                &[],
+                &[],
+                &FixtureEncoder,
+                [3; 32],
+                || NOW
+            )
+            .unwrap_err(),
+        Error::Invalid("verification key mismatch".into())
+    );
     support::complete(gate);
+}
+
+#[test]
+fn authenticated_issuer_policy_is_part_of_the_canonical_request() {
+    let query = "ASK {}";
+    let plan = sparq_zk_query::lower::lower(query, B).unwrap();
+    let key = vec![1, 2, 3];
+    let prepared = Prepared {
+        descriptor: sparq_zk_query::request::descriptor(&plan, &key).unwrap(),
+        plan,
+        verification_key: key.clone(),
+        artifact: serde_json::Value::Null,
+    };
+    let request = authenticated_request(
+        stored(&prepared, query, 7, "urn:verifier", None),
+        B,
+        key.clone(),
+    )
+    .unwrap();
+    let mut other_root = authenticated::issuer_root();
+    other_root[31] ^= 1;
+    let other = Request::new_authenticated(
+        StoredRequest::new(request_spec(request.stored())).unwrap(),
+        B,
+        key,
+        other_root,
+    )
+    .unwrap();
+    assert_ne!(request.digest(), other.digest());
+    assert!(request.canonical_rdf().contains("issuerRoot"));
+    assert_eq!(request.issuer_root().unwrap(), authenticated::issuer_root());
 }

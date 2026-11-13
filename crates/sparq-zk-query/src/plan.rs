@@ -191,6 +191,8 @@ impl Plan {
         for n in self.credential_quad_capacities() {
             w.u32(n);
         }
+        w.u32(crate::credential::LEXICAL_CAPACITY as u32);
+        w.u32(crate::credential::ISSUER_DEPTH);
         w.u8(match self.form {
             ResultForm::Select => 0,
             ResultForm::Ask => 1,

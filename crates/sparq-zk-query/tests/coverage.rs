@@ -1,3 +1,5 @@
+#[path = "support/authenticated.rs"]
+mod authenticated;
 #[path = "support/mod.rs"]
 mod fixture_support;
 #[path = "../../sparq-zk-compose/tests/support/mod.rs"]
@@ -9,7 +11,7 @@ use sparq_zk_query::{
     capacity::Bounds,
     interp::{evaluate, Cell, ResultValue, Trace},
     lower::lower,
-    witness::prover_toml,
+    witness::prover_toml_authenticated,
 };
 
 fn root() -> std::path::PathBuf {
@@ -206,6 +208,7 @@ fn corpus_cases_execute_with_engine_expected_result_and_altered_witness_controls
     };
     let corpus = corpus();
     let manifest = merged_manifest();
+    let mut workspaces = std::collections::BTreeMap::new();
     for fixture in corpus["cases"].as_array().unwrap() {
         let entry = manifest["cases"]
             .as_array()
@@ -224,25 +227,21 @@ fn corpus_cases_execute_with_engine_expected_result_and_altered_witness_controls
             Err(_) if entry["status"] != "passing" => continue,
             Err(e) => panic!("{}: {e}", fixture["id"]),
         };
-        let rdf = fixture
-            .get("dataset")
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-            .unwrap_or_else(|| {
-                std::fs::read_to_string(
-                    root().join("zk/sparql-evaluator/fixtures/conformance/core.nt"),
-                )
-                .unwrap()
-            });
-        let (data, _) = dataset(&rdf);
-        let trace = evaluate(&plan, &data, &FixtureEncoder)
-            .unwrap_or_else(|e| panic!("{}: {e}", fixture["id"]));
-        assert_expected(&trace, fixture);
-        fixture_support::assert_engine(query, &rdf, &trace.result);
-        let package = sparq_zk_query::codegen::generate_operator_fixture(&plan).unwrap();
-        let workspace = Workspace::new(&package);
+        let (data, trace) = host_fixture(fixture, &plan);
+        let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+        let workspace = workspaces
+            .entry(plan.hash())
+            .or_insert_with(|| Workspace::new(&package));
         let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
-        let input = prover_toml(&plan, &data, &FixtureEncoder, &trace, [7; 32], [3; 32]).unwrap();
+        let input = prover_toml_authenticated(
+            &plan,
+            &data,
+            &trace,
+            [7; 32],
+            [3; 32],
+            authenticated::issuer_root(),
+        )
+        .unwrap();
         driver
             .execute(&input, "corpus")
             .unwrap_or_else(|e| panic!("{}: {e}", fixture["id"]));
@@ -258,8 +257,15 @@ fn corpus_cases_execute_with_engine_expected_result_and_altered_witness_controls
             } else {
                 changed.tables[n].rows[0][0].enc[31] ^= 1;
             }
-            let input =
-                prover_toml(&plan, &data, &FixtureEncoder, &changed, [7; 32], [3; 32]).unwrap();
+            let input = prover_toml_authenticated(
+                &plan,
+                &data,
+                &changed,
+                [7; 32],
+                [3; 32],
+                authenticated::issuer_root(),
+            )
+            .unwrap();
             assert!(
                 driver.execute(&input, "altered_table").is_err(),
                 "{}, node {n}",
@@ -294,4 +300,37 @@ fn corpus_cases_execute_with_engine_expected_result_and_altered_witness_controls
         assert!(driver.execute(&changed, "altered_public").is_err());
     }
     support::complete(gate);
+}
+
+fn host_fixture(
+    fixture: &Value,
+    plan: &sparq_zk_query::plan::Plan,
+) -> (Vec<sparq_zk_query::credential::Credential>, Trace) {
+    let query = fixture["query"].as_str().unwrap();
+    let rdf = fixture
+        .get("dataset")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .unwrap_or_else(|| {
+            std::fs::read_to_string(root().join("zk/sparql-evaluator/fixtures/conformance/core.nt"))
+                .unwrap()
+        });
+    let data = vec![authenticated::sign(&rdf, 0)];
+    let cells = vec![data[0].cells(0).unwrap()];
+    let trace = evaluate(plan, &cells, &FixtureEncoder)
+        .unwrap_or_else(|e| panic!("{}: {e}", fixture["id"]));
+    assert_expected(&trace, fixture);
+    fixture_support::assert_engine(query, &rdf, &trace.result);
+    (data, trace)
+}
+
+#[test]
+fn admitted_corpus_suite_inputs_match_both_host_oracles() {
+    for fixture in corpus()["cases"].as_array().unwrap() {
+        if fixture["expected"]["kind"] == "result" {
+            if let Ok(plan) = lower(fixture["query"].as_str().unwrap(), B) {
+                let _checked = host_fixture(fixture, &plan);
+            }
+        }
+    }
 }

@@ -1092,6 +1092,11 @@ version = "0.12.4"
 criteria = "safe-to-deploy"
 notes = "Detached proof-methods workspace (publish=false research crates: TEE attestation verifier, CBOR/COSE and X.509 parsing, Nitro Secure Module and vsock on the enclave side); no trusted-import audit available upstream."
 
+[[exemptions.html5ever]]
+version = "0.40.1"
+criteria = "safe-to-deploy"
+notes = "Exact-version exemption for the opt-in sparq-jsonld/html feature (#7341): HTML tokenizer and tree builder. Offline screening verified the crates.io archive against Cargo.lock (SHA256 456a1a377e608e555d22ddab27ac0114bc7a7b4199078108e34c2aeae6c9b130), allowed MIT OR Apache-2.0 licensing, the allowed registry source, and the cached index non-yanked flag. No covering audit or exemption was recorded for this version at a331aed. Source audit pending; this exemption is not a completed source audit. Default JSON processing and lean wasm do not enable this feature; runtime and build-time uses still require safe-to-deploy coverage."
+
 [[exemptions.http]]
 version = "1.5.0"
 criteria = "safe-to-deploy"
@@ -1406,6 +1411,11 @@ notes = "Exact-version review backlog zkp-10.8.1, independently accepted by GPT-
 version = "0.1.2"
 criteria = "safe-to-deploy"
 
+[[exemptions.markup5ever]]
+version = "0.40.0"
+criteria = "safe-to-deploy"
+notes = "Exact-version exemption for the opt-in sparq-jsonld/html feature (#7341): HTML parsing interfaces and expanded names. Offline screening verified the crates.io archive against Cargo.lock (SHA256 0ab3dc68ac4a0f5719e560136778c1ee716e296030d75dbd4484e37e39e3a842), allowed MIT OR Apache-2.0 licensing, the allowed registry source, and the cached index non-yanked flag. No covering audit or exemption was recorded for this version at a331aed. Source audit pending; this exemption is not a completed source audit. Default JSON processing and lean wasm do not enable this feature; runtime and build-time uses still require safe-to-deploy coverage."
+
 [[exemptions.matchit]]
 version = "0.8.4"
 criteria = "safe-to-deploy"
@@ -1510,6 +1520,11 @@ criteria = "safe-to-deploy"
 [[exemptions.ndk-sys]]
 version = "0.6.0+11769913"
 criteria = "safe-to-deploy"
+
+[[exemptions.new_debug_unreachable]]
+version = "1.0.6"
+criteria = "safe-to-deploy"
+notes = "Exact-version exemption for the opt-in sparq-jsonld/html feature (#7341): unreachable-path macro used by parsing internals. Offline screening verified the crates.io archive against Cargo.lock (SHA256 650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086), allowed MIT licensing, the allowed registry source, and the cached index non-yanked flag. No covering audit or exemption was recorded for this version at a331aed. Source audit pending; this exemption is not a completed source audit. Default JSON processing and lean wasm do not enable this feature; runtime and build-time uses still require safe-to-deploy coverage."
 
 [[exemptions.nix]]
 version = "0.31.3"
@@ -1706,6 +1721,26 @@ criteria = "safe-to-deploy"
 version = "0.7.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.phf]]
+version = "0.14.0"
+criteria = "safe-to-deploy"
+notes = "Exact-version exemption for the opt-in sparq-jsonld/html feature (#7341): runtime lookup tables for HTML atoms. Offline screening verified the crates.io archive against Cargo.lock (SHA256 010378780309880b08997fae13be7834dba947d36393bd372f2b1556deb2a2f6), allowed MIT licensing, the allowed registry source, and the cached index non-yanked flag. No covering audit or exemption was recorded for this version at a331aed. Source audit pending; this exemption is not a completed source audit. Default JSON processing and lean wasm do not enable this feature; runtime and build-time uses still require safe-to-deploy coverage."
+
+[[exemptions.phf_codegen]]
+version = "0.14.0"
+criteria = "safe-to-deploy"
+notes = "Exact-version exemption for the opt-in sparq-jsonld/html feature (#7341): build-time perfect-hash table code generation. Offline screening verified the crates.io archive against Cargo.lock (SHA256 41b585a510fb76fdebead6897982ef2a03a21d8e6cbcca904999742a4afc6ffe), allowed MIT licensing, the allowed registry source, and the cached index non-yanked flag. No covering audit or exemption was recorded for this version at a331aed. Source audit pending; this exemption is not a completed source audit. Default JSON processing and lean wasm do not enable this feature; runtime and build-time uses still require safe-to-deploy coverage."
+
+[[exemptions.phf_generator]]
+version = "0.14.0"
+criteria = "safe-to-deploy"
+notes = "Exact-version exemption for the opt-in sparq-jsonld/html feature (#7341): build-time perfect-hash table generation. Offline screening verified the crates.io archive against Cargo.lock (SHA256 aeb62e0959d5a1bebc965f4d15d9e2b7cea002b6b0f5ba8cde6cc26738467100), allowed MIT licensing, the allowed registry source, and the cached index non-yanked flag. No covering audit or exemption was recorded for this version at a331aed. Source audit pending; this exemption is not a completed source audit. Default JSON processing and lean wasm do not enable this feature; runtime and build-time uses still require safe-to-deploy coverage."
+
+[[exemptions.phf_shared]]
+version = "0.14.0"
+criteria = "safe-to-deploy"
+notes = "Exact-version exemption for the opt-in sparq-jsonld/html feature (#7341): shared perfect-hash functions. Offline screening verified the crates.io archive against Cargo.lock (SHA256 c6fd9027e2d9319be6349febd1db4e8d02aa544921200c9b777720ac34a3aa89), allowed MIT licensing, the allowed registry source, and the cached index non-yanked flag. No covering audit or exemption was recorded for this version at a331aed. Source audit pending; this exemption is not a completed source audit. Default JSON processing and lean wasm do not enable this feature; runtime and build-time uses still require safe-to-deploy coverage."
+
 [[exemptions.pin-project-lite]]
 version = "0.2.17"
 criteria = "safe-to-deploy"
@@ -1772,6 +1807,11 @@ criteria = "safe-to-deploy"
 [[exemptions.ppv-lite86]]
 version = "0.2.21"
 criteria = "safe-to-deploy"
+
+[[exemptions.precomputed-hash]]
+version = "0.1.1"
+criteria = "safe-to-deploy"
+notes = "Exact-version exemption for the opt-in sparq-jsonld/html feature (#7341): precomputed-hash trait for interned names. Offline screening verified the crates.io archive against Cargo.lock (SHA256 925383efa346730478fb4838dbe9137d2a47675ad789c546d150a6e1dd4ab31c), allowed MIT licensing, the allowed registry source, and the cached index non-yanked flag. No covering audit or exemption was recorded for this version at a331aed. Source audit pending; this exemption is not a completed source audit. Default JSON processing and lean wasm do not enable this feature; runtime and build-time uses still require safe-to-deploy coverage."
 
 [[exemptions.prefix-trie]]
 version = "0.8.4"
@@ -2347,6 +2387,16 @@ notes = "Exact-version review backlog zkp-10.8.1, independently accepted by GPT-
 version = "1.2.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.string_cache]]
+version = "0.11.0"
+criteria = "safe-to-deploy"
+notes = "Exact-version exemption for the opt-in sparq-jsonld/html feature (#7341): runtime string interning for HTML names. Offline screening verified the crates.io archive against Cargo.lock (SHA256 ffa8a5dbe8b3f0bbe29d4c3225daafaeead63afdc1b65fc4c01a1384166038e6), allowed MIT OR Apache-2.0 licensing, the allowed registry source, and the cached index non-yanked flag. No covering audit or exemption was recorded for this version at a331aed. Source audit pending; this exemption is not a completed source audit. Default JSON processing and lean wasm do not enable this feature; runtime and build-time uses still require safe-to-deploy coverage."
+
+[[exemptions.string_cache_codegen]]
+version = "0.11.2"
+criteria = "safe-to-deploy"
+notes = "Exact-version exemption for the opt-in sparq-jsonld/html feature (#7341): build-time string-interning code generation. Offline screening verified the crates.io archive against Cargo.lock (SHA256 928dcdf75e47626b3617a976ec205d9f057584c371c1f23b782129268d0e6edc), allowed MIT OR Apache-2.0 licensing, the allowed registry source, and the cached index non-yanked flag. No covering audit or exemption was recorded for this version at a331aed. Source audit pending; this exemption is not a completed source audit. Default JSON processing and lean wasm do not enable this feature; runtime and build-time uses still require safe-to-deploy coverage."
+
 [[exemptions.strsim]]
 version = "0.11.1"
 criteria = "safe-to-deploy"
@@ -2393,6 +2443,11 @@ criteria = "safe-to-deploy"
 version = "3.27.0"
 criteria = "safe-to-deploy"
 notes = "Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd. Host temporary-file creation/removal depends on path, ownership, collision and OS behavior. The real consumer may process sensitive prover artifacts; retain filesystem and noncryptographic naming RNG distinction. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.tendril]]
+version = "0.5.1"
+criteria = "safe-to-deploy"
+notes = "Exact-version exemption for the opt-in sparq-jsonld/html feature (#7341): runtime text buffers used by the HTML parser. Offline screening verified the crates.io archive against Cargo.lock (SHA256 5fed54709c5b3a53d09bb1c113ea4f5ceafd1e772ddcb0030a82e1d56c087b08), allowed MIT OR Apache-2.0 licensing, the allowed registry source, and the cached index non-yanked flag. No covering audit or exemption was recorded for this version at a331aed. Source audit pending; this exemption is not a completed source audit. Default JSON processing and lean wasm do not enable this feature; runtime and build-time uses still require safe-to-deploy coverage."
 
 [[exemptions.termcolor]]
 version = "1.4.1"
@@ -2700,6 +2755,11 @@ criteria = "safe-to-deploy"
 [[exemptions.web-time]]
 version = "1.1.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.web_atoms]]
+version = "0.3.0"
+criteria = "safe-to-deploy"
+notes = "Exact-version exemption for the opt-in sparq-jsonld/html feature (#7341): HTML atom and entity tables with build-time code generation. Offline screening verified the crates.io archive against Cargo.lock (SHA256 7572660c8890448ba236b7376f27e389c6a7e1c70195622faced601f855c0ada), allowed MIT OR Apache-2.0 licensing, the allowed registry source, and the cached index non-yanked flag. No covering audit or exemption was recorded for this version at a331aed. Source audit pending; this exemption is not a completed source audit. Default JSON processing and lean wasm do not enable this feature; runtime and build-time uses still require safe-to-deploy coverage."
 
 [[exemptions.webpki-root-certs]]
 version = "1.0.8"

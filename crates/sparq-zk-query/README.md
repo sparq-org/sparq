@@ -65,8 +65,9 @@ It is a distinct profile from the detached evaluator's commitment.
 ordered credential slots from public limits. The plan hash includes those buckets;
 the exact limits remain public inputs. Private counts cannot select another key.
 The initial literal profile admits integer, decimal, date, dateTime, boolean and
-string datatypes within the suite's representable ranges. Unsupported datatypes,
-timezoned dates and opened lexical forms beyond the profile's bound are refused.
+string datatypes within the suite's representable ranges. Unsupported datatypes and opened lexical forms beyond the profile's bound are
+refused. Value comparisons outside the suite ranges, including timezoned dates,
+receive a capacity refusal.
 The library's supplied-cell entry point serves operator fixtures only; the proof
 lifecycle always uses suite authentication.
 

@@ -12,7 +12,7 @@ use rustc_hash::FxHashSet;
 use sparq_core::Graph;
 use std::cmp::Ordering;
 
-mod clock;
+use crate::rule_schedule::{clock, saturate};
 
 const NEX: &str = "http://www.w3.org/ns/shacl-node-expr#";
 const SPARQL: &str = "http://www.w3.org/ns/sparql#";
@@ -368,26 +368,9 @@ pub(crate) fn execute(
             layer,
             true,
         )?;
-        let mut settled = false;
-        for _ in 0..MAX_ITERATIONS {
-            iterations += 1;
-            if !iteration(
-                data,
-                shapes,
-                &model,
-                &base,
-                &derived,
-                &mut inferred,
-                layer,
-                false,
-            )? {
-                settled = true;
-                break;
-            }
-        }
-        if !settled {
-            return Err("SHACL 1.2 rule iteration limit exceeded".into());
-        }
+        iterations += saturate(MAX_ITERATIONS, "SHACL 1.2 rule iteration limit exceeded", || {
+            iteration(data, shapes, &model, &base, &derived, &mut inferred, layer, false)
+        })?;
         start = end;
     }
     remove_annotated(&mut inferred, &sh("tempTriple"));

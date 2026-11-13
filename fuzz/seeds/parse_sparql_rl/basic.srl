@@ -1,0 +1,3 @@
+PREFIX : <http://example/>
+DATA { :a :p 1 }
+RULE { ?s :q ?o } WHERE { ?s :p ?o }

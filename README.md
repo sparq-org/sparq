@@ -180,7 +180,7 @@ standard it implements.
   ([guide](skills/rdf-canon/SKILL.md)).
 <!-- ANCHOR_END: features-core -->
 - **Zero-knowledge query proofs** *(research scaffold — NOT yet sound)* — model proving a query
-  result is correct without revealing the data ([guide](skills/zk-query-proofs/SKILL.md)). The v1
+  result is correct without revealing the data ([guide](skills/zk-query-proofs/SKILL.md), [Node package](skills/zk-result-javascript/SKILL.md)). The v1
   verifier provides **no** soundness guarantee to a relying party pending external audit — see the
   [security caveat](SECURITY.md#scope-and-a-critical-caveat-research-scaffolds-with-no-security-guarantee).
   The separate [Merkle credential suite](skills/merkle-credentials/SKILL.md) adds
@@ -188,6 +188,9 @@ standard it implements.
 - **Federated MPC** *(research scaffold — no security guarantee yet)* — model evaluating SPARQL
   across parties with multi-party computation ([guide](skills/mpc/SKILL.md)); honest-majority
   semi-honest, **not** maliciously secure ([SECURITY.md](SECURITY.md)). <!-- privacy-claims-allow: negative caveat ("not maliciously secure"); sq-toze.35 -->
+- **Verifiable joint aggregates** *(research-grade, not externally audited)* — signed
+  commitments and verifiable count/sum releases, threshold verdicts or refusals in a detached crate
+  ([guide](skills/verifiable-aggregate/SKILL.md)).
 <!-- sq-g4h0c: the `interfaces` anchor is the SINGLE SOURCE for the docs guide's
      "Interfaces" line (book/src/getting-started/capabilities.md {{#include}}s it). Repo-
      relative `skills/<x>/SKILL.md` links are kept for the lychee gate and rewritten to

@@ -426,6 +426,41 @@ fn parses_prefixes_comments_reversed_bounds_and_variable_ids() {
 }
 
 #[test]
+fn hidden_integer_filter_blocks_follow_the_shared_join_walk_order() {
+    let sparql = "PREFIX ex: <http://example.org/> SELECT DISTINCT ?s WHERE {
+        { ?s ex:salary ?salary FILTER(50 < ?salary) }
+        { ?s ex:age ?age FILTER(?age != 99) }
+    }";
+    let established = sparq_zk::verify::fragment_filters(sparql).unwrap();
+    let q = DisclosureQuery::parse(sparql).unwrap();
+    let ordered_bounds = |filters: &[sparq_zk::verify::QueryFilter]| {
+        filters
+            .iter()
+            .map(|filter| (filter.variable.clone(), filter.bound))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        ordered_bounds(&established),
+        vec![("salary".into(), 50), ("age".into(), 99)]
+    );
+    assert_eq!(
+        q.filters
+            .iter()
+            .map(|filter| (filter.variable.clone(), filter.bound))
+            .collect::<Vec<_>>(),
+        ordered_bounds(&established)
+    );
+    assert_eq!(
+        q.filters.iter().map(|filter| filter.op).collect::<Vec<_>>(),
+        vec![FilterOp::Gt, FilterOp::Ne]
+    );
+    assert!(q.filters.iter().all(|filter| {
+        !q.projection.contains(&filter.variable)
+            && filter.datatype == sparq_zk_compose::planner::PredicateDatatype::Integer
+    }));
+}
+
+#[test]
 fn rejects_unsupported_query_operators_and_modifiers_via_ast() {
     let queries = [
         "SELECT ?s WHERE { ?s ex:p ?o }",

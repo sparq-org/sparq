@@ -3,7 +3,7 @@
 
 use crate::table::{TermCell, Table, unbound, same_term};
 use crate::ops_core::Boolean;
-use crate::suite_constants::DT_STRING;
+use crate::suite_constants::{DT_STRING, DT_LANGSTRING};
 
 pub struct Step {
     pub op: u8,
@@ -28,6 +28,7 @@ fn ebv(value: Value) -> Boolean {
     if value.is_boolean {
         result = Boolean {value: value.boolean, is_error: value.is_error};
     } else if value.term.bound & (value.term.kind == 3) {
+        assert(value.term.dt != DT_LANGSTRING, "language-tagged effective boolean value not yet supported");
         assert(value.term.key_class != 0x7f, "literal value range");
         assert(value.term.key_class != 2, "floating-point EBV not yet supported");
         if value.term.key_class == 1 {
