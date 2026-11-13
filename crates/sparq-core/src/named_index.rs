@@ -56,6 +56,37 @@ impl NamedIndex {
         }
     }
 
+    // Called before Vec::remove, while the old positions still identify their name terms.
+    // Changing a position does not change its name's hash, so buckets can stay in place.
+    pub fn remove(&mut self, named: &[(Term, Graph)], i: usize) {
+        let name = &named[i].0;
+        let mut entry = self
+            .table
+            .find_entry(self.hashes.hash_one(name), |p| named[p.first].0 == *name)
+            .ok()
+            .expect("named graph is indexed");
+        let positions = entry.get_mut();
+        if positions.first == i {
+            if positions.duplicates.is_empty() {
+                entry.remove();
+            } else {
+                positions.first = positions.duplicates.remove(0);
+            }
+        } else {
+            positions.duplicates.retain(|p| *p != i);
+        }
+        for positions in self.table.iter_mut() {
+            if positions.first > i {
+                positions.first -= 1;
+            }
+            for p in &mut positions.duplicates {
+                if *p > i {
+                    *p -= 1;
+                }
+            }
+        }
+    }
+
     pub fn heap_bytes(&self) -> usize {
         self.table.allocation_size()
             + self

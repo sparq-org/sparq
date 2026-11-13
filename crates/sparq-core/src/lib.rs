@@ -1771,12 +1771,13 @@ impl Graph {
     }
 
     fn remove_named_at(&mut self, i: usize) -> (Term, Graph) {
+        self.named_index.remove(&self.named, i);
         let removed = self.named.remove(i);
-        self.named_changed();
+        *self.graph_prefix_index.get_mut().unwrap_or_else(|e| e.into_inner()) = None;
         removed
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "mmap"))]
     fn pop_named(&mut self) -> Option<(Term, Graph)> {
         let i = self.named.len().checked_sub(1)?;
         Some(self.remove_named_at(i))

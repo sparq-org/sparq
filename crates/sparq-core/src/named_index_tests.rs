@@ -146,6 +146,62 @@ proptest! {
 }
 
 #[test]
+fn removal_preserves_duplicate_order_and_term_identity() {
+    let text = "urn:nidx:shared";
+    let iri: Term = NamedNode::new(text).unwrap().into();
+    let blank: Term = oxrdf::BlankNode::new_unchecked(text).into();
+    let literal: Term = Literal::new_simple_literal(text).into();
+    let mut graph = Graph::new();
+    let mut model: Model = [
+        iri.clone(),
+        blank,
+        iri.clone(),
+        literal,
+        iri.clone(),
+        name(15),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(i, n)| (n, payload(i as u8)))
+    .collect();
+    for (i, (n, _)) in model.iter().enumerate() {
+        graph.add_named(n.clone(), subgraph(i as u8)).unwrap();
+    }
+    assert_state(&graph, &model);
+    // The first exact member wins; selecting it still includes every duplicate in Vec order.
+    let assert_selected = |graph: &Graph, model: &Model| {
+        let selected = graph.fork_scoped(&[iri.clone(), iri.clone()]);
+        let expected = model.iter().filter(|(n, _)| *n == iri).cloned().collect();
+        assert_state(&selected, &expected);
+    };
+    assert_selected(&graph, &model);
+    // Exercise removal of a non-first duplicate, promotion of the first duplicate,
+    // a distinct term with the same text, the tail, and the final member of a name.
+    for i in [2, 0, 0, 5, 0, 0] {
+        let removed = graph.remove_named_at(i);
+        let expected = model.remove(i);
+        assert_eq!(removed.0, expected.0);
+        assert_state(&graph, &model);
+        assert_selected(&graph, &model);
+        let next: Term = NamedNode::new(format!("urn:nidx:append:{}", model.len()))
+            .unwrap()
+            .into();
+        graph.add_named(next.clone(), subgraph(9)).unwrap();
+        model.push((next, payload(9)));
+        assert_state(&graph, &model);
+        assert_selected(&graph, &model);
+    }
+    while !model.is_empty() {
+        let n = model[0].0.clone();
+        graph.remove_named(&n).unwrap().unwrap();
+        model.remove(0);
+        assert_state(&graph, &model);
+    }
+    graph.ensure_named(&iri).unwrap();
+    assert_state(&graph, &vec![(iri, vec![])]);
+}
+
+#[test]
 fn exact_lookup_work_is_bounded() {
     use named_index::COMPARISONS;
     for count in [256, 4096, 16384] {
