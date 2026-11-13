@@ -3,6 +3,9 @@
 mod nonces {
     include!("authrdf_cli/nonces.rs");
 }
+mod signatures {
+    include!("authrdf_cli/signatures.rs");
+}
 
 use ed25519_dalek::{Signer, SigningKey};
 use model::{
@@ -69,6 +72,7 @@ impl Args {
                 "--signature-mode",
                 "--out",
             ],
+            "commit" => &["--request", "--credentials", "--salt-hex"],
             "prove" => &[
                 "--request",
                 "--credentials",
@@ -83,8 +87,9 @@ impl Args {
                 "--guest",
                 "--nonce-store",
                 "--signatures",
+                "--credentials",
             ],
-            _ => return Err(Error("expected issue, request, prove or verify")),
+            _ => return Err(Error("expected issue, request, commit, prove or verify")),
         };
         let mut values = values.peekable();
         let mut options = BTreeMap::new();
@@ -312,19 +317,7 @@ fn request(args: &Args) -> Result<Value> {
     Ok(json!({"request_digest": hex_string(&digest)}))
 }
 
-fn prove(args: &Args) -> Result<Value> {
-    let salt = hex::<32>(args.one("--salt-hex")?)?;
-    let request_path = args.one("--request")?;
-    let paths = args
-        .0
-        .get("--credentials")
-        .ok_or(Error("missing credentials"))?;
-    let guest_path = args.one("--guest")?;
-    let r0vm = Path::new(args.one("--r0vm")?);
-    let out = Path::new(args.one("--out")?);
-    absent(out)?;
-    let request: Request = read_json(request_path)?;
-    validate(&request)?;
+fn load_dataset(paths: &[String], salt: [u8; 32], request: &Request) -> Result<PrivateCredentials> {
     let credentials = paths
         .iter()
         .map(read_json)
@@ -358,6 +351,38 @@ fn prove(args: &Args) -> Result<Value> {
             credential.signature.clear();
         }
     }
+    Ok(dataset)
+}
+
+fn commit(args: &Args) -> Result<Value> {
+    let salt = hex::<32>(args.one("--salt-hex")?)?;
+    let request_path = args.one("--request")?;
+    let paths = args
+        .0
+        .get("--credentials")
+        .ok_or(Error("missing credentials"))?;
+    let request: Request = read_json(request_path)?;
+    validate(&request)?;
+    let dataset = load_dataset(paths, salt, &request)?;
+    let commitment =
+        model::dataset_commitment(&dataset, &request.policy).map_err(|e| Error(e.0))?;
+    Ok(json!({"dataset_commitment": hex_string(&commitment)}))
+}
+
+fn prove(args: &Args) -> Result<Value> {
+    let salt = hex::<32>(args.one("--salt-hex")?)?;
+    let request_path = args.one("--request")?;
+    let paths = args
+        .0
+        .get("--credentials")
+        .ok_or(Error("missing credentials"))?;
+    let guest_path = args.one("--guest")?;
+    let r0vm = Path::new(args.one("--r0vm")?);
+    let out = Path::new(args.one("--out")?);
+    absent(out)?;
+    let request: Request = read_json(request_path)?;
+    validate(&request)?;
+    let dataset = load_dataset(paths, salt, &request)?;
     let witness = Witness { request, dataset };
     // Native evaluation also checks anchors and gives no proof or acceptance shortcut.
     model::evaluate(&witness).map_err(|e| Error(e.0))?;
@@ -383,18 +408,54 @@ fn verify(args: &Args) -> Result<Value> {
     let nonce_path = PathBuf::from(args.one("--nonce-store")?);
     let request: Request = read_json(request_path)?;
     validate(&request)?;
-    let signatures = match (request.policy.signature_mode, args.optional("--signatures")) {
-        (SignatureMode::Revealed, Some(path)) => {
+    let credential_paths = args.0.get("--credentials");
+    let signature_path = args.optional("--signatures");
+    let matching = credential_paths.is_some();
+    let signatures = match (
+        request.policy.signature_mode,
+        signature_path,
+        credential_paths,
+    ) {
+        (SignatureMode::Revealed, Some(path), None) => {
             let strings: Vec<String> = read_json(path)?;
             strings
                 .iter()
                 .map(|s| hex::<64>(s).map(|b| b.to_vec()))
                 .collect::<Result<Vec<_>>>()?
         }
-        (SignatureMode::Hidden, None) => Vec::new(),
-        _ => return Err(Error("signatures are required only in revealed mode")),
+        (SignatureMode::Revealed, None, Some(paths)) => {
+            let credentials = paths
+                .iter()
+                .map(read_json)
+                .collect::<Result<Vec<Credential>>>()?;
+            // Check every declared hex field before matching signatures.
+            credentials
+                .iter()
+                .map(Credential::key)
+                .collect::<Result<Vec<_>>>()?;
+            credentials
+                .iter()
+                .map(|c| c.signed().map(|c| c.signature))
+                .collect::<Result<Vec<_>>>()?
+        }
+        (SignatureMode::Hidden, None, None) => Vec::new(),
+        _ => {
+            return Err(Error(
+                "signatures are required only in revealed mode: choose signatures or credentials",
+            ));
+        }
     };
     let presentation: Presentation = read_json(presentation_path)?;
+    let signatures = if matching {
+        let journal: model::Journal = presentation
+            .receipt
+            .journal
+            .decode()
+            .map_err(|_| Error("journal decoding rejected"))?;
+        signatures::in_journal_order(&journal, &request, signatures)?
+    } else {
+        signatures
+    };
     let guest = guest(guest_path)?;
     let mut nonces = nonces::FileNonces(nonce_path);
     let start = Instant::now();
@@ -430,6 +491,7 @@ fn main() -> std::process::ExitCode {
         .and_then(|args| match command.as_str() {
             "issue" => issue(&args),
             "request" => request(&args),
+            "commit" => commit(&args),
             "prove" => prove(&args),
             "verify" => verify(&args),
             _ => unreachable!(),

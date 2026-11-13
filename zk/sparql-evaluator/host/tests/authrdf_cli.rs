@@ -931,3 +931,329 @@ fn nonce_store_serializes_concurrent_writers_and_fails_closed() {
         assert_eq!(fs::read_to_string(&victim).unwrap(), "preserve");
     }
 }
+
+#[path = "../examples/authrdf_cli/signatures.rs"]
+mod signatures;
+
+fn encoded_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+#[test]
+fn commit_matches_model_and_pins_agreed_authority_in_both_modes() {
+    let f = Fixture::new();
+    let a = f.issue("a", "urn:issuer:a", "urn:key:a", SEED, "urn:birth");
+    let b = f.issue("b", "urn:issuer:b", "urn:key:b", NONCE, "urn:valid");
+    let path = f.request(
+        &[a.clone(), b.clone()],
+        "ASK { ?p <urn:birth> ?d . ?p <urn:valid> ?v }",
+    );
+    let mut request: model::Request = serde_json::from_value(json_file(&path)).unwrap();
+    let signed = vec![signed(&json_file(&a)), signed(&json_file(&b))];
+    let commit = |salt: &str| {
+        success(run(&[
+            "commit",
+            "--request",
+            text(&path),
+            "--credentials",
+            text(&b),
+            text(&a),
+            "--salt-hex",
+            salt,
+        ]))
+    };
+    let mut previous = None;
+    for mode in [model::SignatureMode::Hidden, model::SignatureMode::Revealed] {
+        request.policy.signature_mode = mode;
+        request.authority = DatasetAuthority::HolderDeclared;
+        put(&path, &request);
+        let mut dataset = model::PrivateCredentials {
+            credentials: signed.clone(),
+            salt: [3; 32],
+        };
+        if mode == model::SignatureMode::Revealed {
+            for credential in &mut dataset.credentials {
+                credential.signature.clear();
+            }
+        }
+        let expected = model::dataset_commitment(&dataset, &request.policy).unwrap();
+        let output = commit(SALT);
+        assert_eq!(
+            output,
+            json!({"dataset_commitment": encoded_hex(&expected)})
+        );
+        assert_ne!(output, commit(NONCE), "salt must bind the commitment");
+        if let Some(previous) = previous {
+            assert_ne!(output, previous);
+        }
+        previous = Some(output.clone());
+        let agreed_path = f.path("agreed.json");
+        if agreed_path.exists() {
+            fs::remove_file(&agreed_path).unwrap();
+        }
+        success(run(&[
+            "request",
+            "--query",
+            text(&f.path("query.rq")),
+            "--keys",
+            text(&f.path("keys.json")),
+            "--authority",
+            &format!("verifier-agreed:{}", encoded_hex(&expected)),
+            "--nonce-hex",
+            NONCE,
+            "--signature-mode",
+            mode.as_str(),
+            "--out",
+            text(&agreed_path),
+        ]));
+        let agreed: model::Request = serde_json::from_value(json_file(&agreed_path)).unwrap();
+        let journal = model::evaluate(&model::Witness {
+            request: agreed.clone(),
+            dataset,
+        })
+        .unwrap();
+        assert_eq!(journal.dataset_commitment, expected);
+        assert_eq!(
+            journal.provenance,
+            model::Provenance::VerifierAgreedAuthenticated
+        );
+        assert_eq!(
+            journal.result,
+            sparq_proved_evaluator_model::v3::CanonicalResult::Ask(true)
+        );
+        put(&path, &agreed);
+        assert_eq!(
+            commit(SALT),
+            output,
+            "authority must not alter the dataset commitment"
+        );
+    }
+}
+
+#[test]
+fn commit_rejects_invalid_arguments_and_unauthenticated_credentials() {
+    let f = Fixture::new();
+    let c = f.issue("a", "urn:issuer:a", "urn:key:a", SEED, "urn:birth");
+    let path = f.request(std::slice::from_ref(&c), "ASK {}");
+    failure(
+        run(&[
+            "commit",
+            "--request",
+            "/missing",
+            "--credentials",
+            "/missing",
+            "--salt-hex",
+            "AB",
+        ]),
+        "hex",
+    );
+    failure(
+        run(&["commit", "--request", text(&path), "--salt-hex", SALT]),
+        "missing credentials",
+    );
+    failure(
+        run(&[
+            "commit",
+            "--request",
+            text(&path),
+            "--credentials",
+            text(&c),
+            "--salt-hex",
+            SALT,
+            "--out",
+            text(&f.path("unexpected.json")),
+        ]),
+        "unknown or duplicate option",
+    );
+    for mode in [model::SignatureMode::Hidden, model::SignatureMode::Revealed] {
+        let mut request: model::Request = serde_json::from_value(json_file(&path)).unwrap();
+        request.policy.signature_mode = mode;
+        put(&path, &request);
+        let mut bad = json_file(&c);
+        bad["signature_hex"] = json!("00".repeat(64));
+        put(&f.path("bad.json"), &bad);
+        failure(
+            run(&[
+                "commit",
+                "--request",
+                text(&path),
+                "--credentials",
+                text(&f.path("bad.json")),
+                "--salt-hex",
+                SALT,
+            ]),
+            "signature verification failed",
+        );
+        failure(
+            run(&[
+                "commit",
+                "--request",
+                text(&path),
+                "--credentials",
+                text(&c),
+                "--salt-hex",
+                &"00".repeat(32),
+            ]),
+            "blinding rejected",
+        );
+    }
+    assert!(!f.path("unexpected.json").exists());
+}
+
+#[test]
+fn revealed_signature_worker() {
+    if let Some(path) = std::env::var_os("AUTHRDF_SIGNATURE_TEST_INPUT") {
+        let input = json_file(Path::new(&path));
+        let journal = serde_json::from_value(input["journal"].clone()).unwrap();
+        let request = serde_json::from_value(input["request"].clone()).unwrap();
+        let signatures = serde_json::from_value(input["signatures"].clone()).unwrap();
+        let output = match signatures::in_journal_order(&journal, &request, signatures) {
+            Ok(ordered) => json!({"ordered": ordered}),
+            Err(error) => json!({"error": error.0}),
+        };
+        println!("signature-match={output}");
+    }
+}
+
+#[test]
+fn revealed_credential_signatures_are_matched_in_a_process_and_verified_by_cli() {
+    use risc0_zkvm::{FakeReceipt, InnerReceipt, Receipt, ReceiptClaim};
+    let f = Fixture::new();
+    let a = f.issue("a", "urn:issuer:a", "urn:key:a", SEED, "urn:birth");
+    let b = f.issue("b", "urn:issuer:b", "urn:key:b", NONCE, "urn:valid");
+    let request_path = f.request(&[a.clone(), b.clone()], "ASK {}");
+    let mut request: model::Request = serde_json::from_value(json_file(&request_path)).unwrap();
+    request.policy.signature_mode = model::SignatureMode::Revealed;
+    put(&request_path, &request);
+    let credentials = [signed(&json_file(&a)), signed(&json_file(&b))];
+    let mut dataset = model::PrivateCredentials {
+        credentials: credentials.to_vec(),
+        salt: [3; 32],
+    };
+    for credential in &mut dataset.credentials {
+        credential.signature.clear();
+    }
+    let journal = model::evaluate(&model::Witness {
+        request: request.clone(),
+        dataset,
+    })
+    .unwrap();
+    let expected: Vec<Vec<u8>> = journal
+        .signed_messages
+        .iter()
+        .map(|entry| match entry.verification_method.as_str() {
+            "urn:key:a" => credentials[0].signature.clone(),
+            "urn:key:b" => credentials[1].signature.clone(),
+            _ => panic!("unexpected method"),
+        })
+        .collect();
+    let reversed: Vec<Vec<u8>> = expected.iter().rev().cloned().collect();
+    assert_ne!(reversed, expected);
+    let input_path = f.path("signature-input.json");
+    let worker = |signatures: Vec<Vec<u8>>| {
+        put(
+            &input_path,
+            &json!({"journal": journal, "request": request, "signatures": signatures}),
+        );
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "revealed_signature_worker", "--nocapture"])
+            .env("AUTHRDF_SIGNATURE_TEST_INPUT", &input_path)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        serde_json::from_str::<Value>(
+            stdout
+                .lines()
+                .find_map(|line| line.strip_prefix("signature-match="))
+                .unwrap(),
+        )
+        .unwrap()
+    };
+    assert_eq!(worker(reversed), json!({"ordered": expected}));
+    assert_eq!(
+        worker(vec![vec![0; 64]; 2])["error"],
+        "credential signatures do not match journal"
+    );
+    assert_eq!(
+        worker(vec![expected[0].clone()])["error"],
+        "credential signature count mismatch"
+    );
+    let mut excess = expected.clone();
+    excess.push(vec![0; 64]);
+    assert_eq!(
+        worker(excess)["error"],
+        "credential signature count mismatch"
+    );
+    model::check_revealed_signatures(&journal, &request, &expected).unwrap();
+    let bytes = risc0_zkvm::serde::to_vec(&journal)
+        .unwrap()
+        .iter()
+        .flat_map(|word| word.to_le_bytes())
+        .collect::<Vec<_>>();
+    let pin = embedded_authrdf_pin();
+    let receipt = Receipt::new(
+        InnerReceipt::Fake(FakeReceipt::new(ReceiptClaim::ok(
+            pin.image_id,
+            bytes.clone(),
+        ))),
+        bytes,
+    );
+    let presentation = f.path("fake.json");
+    put(&presentation, &Presentation { receipt });
+    let guest = f.guest();
+    let output = run(&[
+        "verify",
+        "--request",
+        text(&request_path),
+        "--presentation",
+        text(&presentation),
+        "--credentials",
+        text(&b),
+        text(&a),
+        "--guest",
+        text(&guest),
+        "--nonce-store",
+        text(&f.path("nonces.json")),
+    ]);
+    failure(output, "only succinct receipts");
+    let mut bad = json_file(&a);
+    bad["signature_hex"] = json!("00".repeat(64));
+    put(&a, &bad);
+    failure(
+        run(&[
+            "verify",
+            "--request",
+            text(&request_path),
+            "--presentation",
+            text(&presentation),
+            "--credentials",
+            text(&a),
+            text(&b),
+            "--guest",
+            "/missing",
+            "--nonce-store",
+            text(&f.path("nonces.json")),
+        ]),
+        "signatures do not match journal",
+    );
+    failure(
+        run(&[
+            "verify",
+            "--request",
+            text(&request_path),
+            "--presentation",
+            text(&presentation),
+            "--credentials",
+            text(&a),
+            "--signatures",
+            "/missing",
+            "--guest",
+            "/missing",
+            "--nonce-store",
+            text(&f.path("nonces.json")),
+        ]),
+        "choose signatures or credentials",
+    );
+    assert!(!f.path("nonces.json").exists());
+}
