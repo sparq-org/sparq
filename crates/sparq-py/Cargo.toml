@@ -38,7 +38,7 @@ doctest = false
 
 [build-dependencies]
 # build.rs: emit the macOS `-undefined dynamic_lookup` link args for extension modules.
-pyo3-build-config = "0.29"
+pyo3-build-config = "0.30"
 
 [dependencies]
 # `extension-module` tells pyo3 NOT to link libpython (the interpreter provides the
