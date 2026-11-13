@@ -167,7 +167,7 @@ fn arithmetic_capacity_stays_sticky_through_ebv_and_error_handlers() {
 }
 
 #[test]
-fn interpreted_aggregate_arguments_separate_arithmetic_and_comparison_capacity() {
+fn interpreted_aggregate_arguments_keep_snapshot_capacity() {
     for (value, expression) in [
         ("1".to_owned(), "SUM(?n + 9223372036854775807)"),
         (
@@ -190,12 +190,14 @@ fn interpreted_aggregate_arguments_separate_arithmetic_and_comparison_capacity()
         "n-triples",
     )
     .unwrap();
+    let query = "SELECT (MAX(?n<0) AS ?lt) (MIN(?n>0) AS ?gt) (MAX(?n=0) AS ?eq) {?s ?p ?n}";
+    let prepared = sparq_engine::PreparedQuery::parse(query).unwrap();
+    assert!(matches!(
+        sparq_engine::query_prepared_with_budget_detailed(&graph, &prepared, &budget(true)),
+        Err(sparq_engine::QueryFailure::Capacity(sparq_engine::EvaluationCapacity::NumericRepresentation))
+    ));
     assert_eq!(
-        rows(
-            &graph,
-            "SELECT (MAX(?n<0) AS ?lt) (MIN(?n>0) AS ?gt) (MAX(?n=0) AS ?eq) {?s ?p ?n}",
-            true
-        ),
+        rows(&graph, query, false),
         vec![vec![boolean(false), boolean(true), boolean(false)]]
     );
     let graph = Graph::load_str("", "n-triples").unwrap();

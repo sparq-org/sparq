@@ -11,8 +11,8 @@ from run import file_hash
 class OriginalReplayTests(unittest.TestCase):
     def test_all_original_objects_and_both_authorities_are_configured(self):
         manifest = original_plan()
-        self.assertEqual(manifest["case_count"], 319)
-        self.assertEqual(len(manifest["jobs"]), 1914)
+        self.assertEqual(manifest["case_count"], 322)
+        self.assertEqual(len(manifest["jobs"]), 1932)
         self.assertEqual(manifest["classifications"], [])
         self.assertEqual({j["authority"] for j in manifest["jobs"]},
                          {"verifier_agreed", "holder_declared"})
@@ -54,7 +54,7 @@ class OriginalReplayTests(unittest.TestCase):
         for change in (lambda r:r["records"].pop(),
                        lambda r:r["records"].append(r["records"][0]),
                        lambda r:r["totals"]["exact_v3"].update(genuine_proofs=1),
-                       lambda r:r["totals"]["exact_v1"].update(passed_jobs=637),
+                       lambda r:r["totals"]["exact_v1"].update(passed_jobs=643),
                        lambda r:r.update(coverage_gaps=[{"status":"unknown"}])):
             invalid = copy.deepcopy(report)
             change(invalid)

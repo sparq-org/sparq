@@ -34,7 +34,7 @@ fn numeric_capacity_is_rejected_by_the_evaluation_relation() {
         "../../fixtures/conformance/numeric-capacity.json"
     ))
     .unwrap();
-    assert_eq!(corpus["cases"].as_array().unwrap().len(), 21);
+    assert_eq!(corpus["cases"].as_array().unwrap().len(), 24);
     for case in corpus["cases"].as_array().unwrap() {
         let input = witness(case);
         admit(&input.request).unwrap_or_else(|e| panic!("{}: admission {e:?}", case["id"]));
@@ -120,7 +120,7 @@ mod v2_checks {
             "../../fixtures/conformance/numeric-capacity.json"
         ))
         .unwrap();
-        assert_eq!(corpus["cases"].as_array().unwrap().len(), 21);
+        assert_eq!(corpus["cases"].as_array().unwrap().len(), 24);
         for case in corpus["cases"].as_array().unwrap() {
             let input = v2_witness(case);
             admit(&input.request).unwrap_or_else(|e| panic!("{}: admission {e:?}", case["id"]));

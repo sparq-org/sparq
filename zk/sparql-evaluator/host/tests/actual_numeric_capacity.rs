@@ -108,7 +108,7 @@ fn actual_guest_rejects_numeric_capacity_after_a_successful_control() {
             case["id"]
         );
     }
-    assert_eq!(rejected["cases"].as_array().unwrap().len(), 21);
+    assert_eq!(rejected["cases"].as_array().unwrap().len(), 24);
 }
 
 #[test]
@@ -218,5 +218,5 @@ fn actual_v2_guest_rejects_numeric_capacity_after_a_successful_control() {
             case["id"]
         );
     }
-    assert_eq!(rejected["cases"].as_array().unwrap().len(), 21);
+    assert_eq!(rejected["cases"].as_array().unwrap().len(), 24);
 }

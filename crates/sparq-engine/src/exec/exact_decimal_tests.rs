@@ -57,7 +57,7 @@ fn sig_digits_counts() {
 }
 
 #[test]
-fn interpreted_comparisons_keep_exact_values_beyond_the_tower() {
+fn interpreted_comparisons_respect_strict_snapshot_bound() {
     let graph = Graph::load_str("", "n-triples").unwrap();
     let local = LocalVocab::default();
     let bindings = Bindings::unsorted(Vec::new(), Vec::new());
@@ -84,12 +84,18 @@ fn interpreted_comparisons_keep_exact_values_beyond_the_tower() {
             strict_numeric_capacity: strict,
             ..crate::QueryBudget::unlimited()
         };
-        budget::with_budget(&limits, || {
-            for expr in &expressions {
+        for (index, expr) in expressions.iter().enumerate() {
+            budget::with_budget(&limits, || {
                 let result = eval_expr(&graph, &local, &bindings, &[], expr).unwrap();
-                assert!(matches!(result, Value::Bool(true)), "{expr:?}: {result:?}");
-                assert!(budget::check(0).is_ok());
-            }
-        });
+                if strict && index < 3 {
+                    assert!(matches!(budget::failure(), Some(crate::QueryFailure::Capacity(
+                        crate::EvaluationCapacity::NumericRepresentation
+                    ))));
+                } else {
+                    assert!(matches!(result, Value::Bool(true)), "{expr:?}: {result:?}");
+                    assert!(budget::check(0).is_ok());
+                }
+            });
+        }
     }
 }

@@ -1069,7 +1069,12 @@ pub(super) fn lit_kind(v: &Value) -> LitKind<'_> {
             }
             let dt = l.datatype();
             if is_numeric_dt(l) {
-                LitKind::Num(Num::of_literal(l))
+                // Strict mode uses the V1 snapshot operand bound, including ORDER keys.
+                LitKind::Num(if budget::strict_numeric() {
+                    numeric_capacity::operand(l)
+                } else {
+                    Num::of_literal(l)
+                })
             } else if dt == xsd::STRING {
                 LitKind::Str(l.value())
             } else if dt == xsd::BOOLEAN {
@@ -1204,6 +1209,11 @@ fn comparison_numeric(v: &Value) -> Option<Num> {
 }
 
 fn comparison_num_cmp(a: Num, b: Num) -> Option<Ordering> {
+    // Strict snapshot comparisons retain checked scale alignment; widening is
+    // reserved for a future ZK dialect/version, not a lexical fallback here.
+    if budget::strict_numeric() {
+        return num_compare(a, b);
+    }
     if let (Some(x), Some(y)) = (a.to_dec(), b.to_dec()) {
         return x.cmp(y)
             .or_else(|| cmp_decimal_str(&a.lexical(), &b.lexical()));
@@ -1212,21 +1222,23 @@ fn comparison_num_cmp(a: Num, b: Num) -> Option<Ordering> {
 }
 
 fn exact_value_cmp(x: &Value, y: &Value) -> Option<Ordering> {
+    // Strict numeric operands were checked by lit_kind; the V1 snapshot has
+    // no beyond-tower lexical fallback. Lenient comparisons keep that fallback.
+    if budget::strict_numeric() {
+        return None;
+    }
     cmp_decimal_str(&exact_decimal_lexical(x)?, &exact_decimal_lexical(y)?)
 }
 
-/// Only two valid exact operands are exempt from arithmetic representation limits.
-/// Other scalar comparisons retain the existing sticky strict-capacity checks.
+/// Strict numeric capacity is the representation bound of the ZK V1 snapshot:
+/// checked integer/decimal operands and decimal scale alignment. Widening this
+/// bound belongs to a future ZK dialect/version. Lenient comparisons are unchanged.
 fn check_comparison_capacity(x: &Value, y: &Value) {
     if !budget::strict_numeric() {
         return;
     }
-    let exact = |v: &Value| match comparison_numeric(v) {
-        Some(n) => n.to_dec().is_some(),
-        None => beyond_tower_lexical(v).is_some(),
-    };
-    if !(exact(x) && exact(y)) {
-        let _ = (as_numeric(x), as_numeric(y));
+    if let (Some(a), Some(b)) = (as_numeric(x), as_numeric(y)) {
+        let _ = numeric_capacity::comparable(a, b);
     }
 }
 
@@ -1355,7 +1367,8 @@ pub(super) fn beyond_tower_lexical(v: &Value) -> Option<&str> {
 /// tower). `None` for float/double, whose exact value is its `f64`.
 #[cold]
 pub(super) fn exact_decimal_lexical(v: &Value) -> Option<String> {
-    match comparison_numeric(v) {
+    let numeric = if budget::strict_numeric() { as_numeric(v) } else { comparison_numeric(v) };
+    match numeric {
         Some(n) if n.to_dec().is_some() => Some(n.lexical()),
         Some(_) => None,
         None => beyond_tower_lexical(v).map(str::to_string),
@@ -1364,7 +1377,8 @@ pub(super) fn exact_decimal_lexical(v: &Value) -> Option<String> {
 
 pub(super) fn as_num(v: &Value) -> Option<f64> {
     if budget::strict_numeric() && !matches!(v, Value::Bool(_)) {
-        return comparison_numeric(v).map(Num::f64);
+        // The strict V1 snapshot must observe the operand bound before conversion.
+        return as_numeric(v).map(Num::f64);
     }
     match v {
         Value::Num(n) => Some(n.f64()),
@@ -1460,6 +1474,13 @@ impl CompareTerm for Value {
         // intransitive at the 2^53 collapse — witness 1 of sq-wjl8i). The relational
         // `<`/`=` (`cmp_expr`, via `num_compare`) deliberately KEEPS its own semantics; this total
         // order refines only their ties. Beyond-tower exact values use lexicals below.
+        // The strict V1 snapshot uses the original checked total-order consumers.
+        if budget::strict_numeric() {
+            return match (as_numeric(self), as_numeric(other)) {
+                (Some(a), Some(b)) => numeric_capacity::comparable(a, b).then(|| a.cmp_total(b)),
+                _ => None,
+            };
+        }
         match (comparison_numeric(self), comparison_numeric(other)) {
             (Some(a), Some(b)) => {
                 // Two in-tower decimals whose scale alignment overflows i128 would fall
@@ -1528,6 +1549,12 @@ impl CompareTerm for Value {
 /// vs a documented extension). Relational `<` / `=` semantics are UNTOUCHED.
 #[inline]
 pub(super) fn compare_values(x: &Value, y: &Value) -> Option<Ordering> {
+    // Preserve the V1 snapshot's capacity observation before total-order shortcuts.
+    if budget::strict_numeric() {
+        if let (Some(a), Some(b)) = (as_numeric(x), as_numeric(y)) {
+            return numeric_capacity::comparable(a, b).then(|| a.cmp_total(b));
+        }
+    }
     compare_terms(x, y)
 }
 

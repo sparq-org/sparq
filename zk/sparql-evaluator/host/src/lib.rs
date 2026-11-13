@@ -16,21 +16,22 @@ use sparq_proved_evaluator_model::{
 };
 use std::{fmt, path::Path};
 
-/// Versioned complete default/named dataset proving and verification.
+// Module documentation lives inside each module so its links use that scope.
+// Versioned complete default/named dataset proving and verification.
 pub mod v2;
 
-/// Versioned blank-node identity and canonical graph-result proving and verification.
+// Versioned blank-node identity and canonical graph-result proving and verification.
 pub mod v3;
 
-/// Optional `sparq-query-protocol` adapter over the V3 relation.
+// Optional `sparq-query-protocol` adapter over the V3 relation.
 #[cfg(feature = "vcq")]
 pub mod vcq;
 
-/// Issuer-authenticated RDF (V5) proving and verification over a separate guest.
+// Issuer-authenticated RDF (V5) proving and verification over a separate guest.
 #[cfg(feature = "authenticated-rdf")]
 pub mod authenticated_rdf;
 
-/// Optional `sparq-query-protocol` adapter over the V5 authenticated-RDF relation.
+// Optional `sparq-query-protocol` adapter over the V5 authenticated-RDF relation.
 #[cfg(feature = "vcq-authenticated")]
 pub mod vcq_authenticated;
 

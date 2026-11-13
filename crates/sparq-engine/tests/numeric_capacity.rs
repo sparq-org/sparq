@@ -13,6 +13,25 @@ fn query(expression: &str) -> String {
     format!("PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ({expression} AS ?v) {{}}")
 }
 
+// These cases deliberately exceed the snapshot representation bound. Keep the
+// lenient goldens and assert the strict query's actual typed capacity cause.
+fn check_wide_query(
+    graph: &Graph,
+    query: &str,
+    budget: &QueryBudget,
+    check_lenient: impl FnOnce(sparq_engine::QueryResult),
+) {
+    if budget.strict_numeric_capacity {
+        let prepared = sparq_engine::PreparedQuery::parse(query).unwrap();
+        let result = sparq_engine::query_prepared_with_budget_detailed(graph, &prepared, budget);
+        assert!(matches!(result, Err(sparq_engine::QueryFailure::Capacity(
+            sparq_engine::EvaluationCapacity::NumericRepresentation
+        ))), "{query}: {result:?}");
+    } else {
+        check_lenient(sparq_engine::query_with_budget(graph, query, budget).unwrap());
+    }
+}
+
 #[test]
 fn numeric_capacity_survives_expression_error_handling() {
     let graph = Graph::load_str("", "n-triples").unwrap();
@@ -30,6 +49,8 @@ fn numeric_capacity_survives_expression_error_handling() {
         "xsd:decimal(\"100000000000000000000000000000000000000000000\")",
         "SUBSTR(\"abcd\", 1, \"100000000000000000000000000000000000000000000\"^^xsd:integer)",
         "SUBSTR(\"abcd\", \"-100000000000000000000000000000000000000000000\"^^xsd:integer, \"100000000000000000000000000000000000000000002\"^^xsd:integer)",
+        "\"0.0000000000000000000000000000000000000001\"^^xsd:decimal < 1",
+        "SECONDS(\"2024-01-01T00:00:00.1234567890123456789012345678901234567890123Z\"^^xsd:dateTime) = 0.0",
     ];
     for expression in expressions {
         for wrapper in [
@@ -52,8 +73,6 @@ fn numeric_capacity_survives_expression_error_handling() {
         "COALESCE(xsd:integer(\"invalid\"), 7)",
         "xsd:integer(\"0.0000000000000000000000000000000000000001\"^^xsd:decimal)",
         "ROUND(\"0.99999999999999999999999999999999999999\"^^xsd:decimal)",
-        "\"0.0000000000000000000000000000000000000001\"^^xsd:decimal < 1",
-        "SECONDS(\"2024-01-01T00:00:00.1234567890123456789012345678901234567890123Z\"^^xsd:dateTime) = 0.0",
         "1 + 2",
         "0.1 + 0.2",
         "1 / 3",
@@ -123,26 +142,29 @@ fn exact_comparisons_past_i128() {
                     ] {
                         let expr = format!("{left} {op} {right}");
                         let q = format!("SELECT ?v {{?s ?p ?v FILTER({expr})}}");
-                        let result = sparq_engine::query_with_budget(graph, &q, &budget).unwrap();
-                        assert_eq!(result.rows.len(), usize::from(expect), "{q}");
+                        check_wide_query(graph, &q, &budget, |result| {
+                            assert_eq!(result.rows.len(), usize::from(expect), "{q}");
+                        });
                         // VALUES uses local terms; BIND exercises materialised value comparison.
                         let q = format!("SELECT ?b {{VALUES ?v {{{hi}}} BIND(({expr}) AS ?b)}}");
-                        let result = sparq_engine::query_with_budget(graph, &q, &budget).unwrap();
-                        assert_eq!(
-                            result.rows,
-                            vec![vec![Some(oxrdf::Literal::from(expect).into())]],
-                            "{q}"
-                        );
+                        check_wide_query(graph, &q, &budget, |result| {
+                            assert_eq!(
+                                result.rows,
+                                vec![vec![Some(oxrdf::Literal::from(expect).into())]],
+                                "{q}"
+                            );
+                        });
                     }
                 }
                 // Numeric equality crosses datatype, leading-zero and scale spellings.
                 let q = format!("SELECT (\"+0{high}.00\"^^<http://www.w3.org/2001/XMLSchema#decimal> = {hi} AS ?b) {{}}");
-                let result = sparq_engine::query_with_budget(graph, &q, &budget).unwrap();
-                assert_eq!(
-                    result.rows,
-                    vec![vec![Some(oxrdf::Literal::from(true).into())]],
-                    "{q}"
-                );
+                check_wide_query(graph, &q, &budget, |result| {
+                    assert_eq!(
+                        result.rows,
+                        vec![vec![Some(oxrdf::Literal::from(true).into())]],
+                        "{q}"
+                    );
+                });
             }
         }
     }
@@ -167,12 +189,13 @@ fn exact_comparisons_past_i128() {
             ),
         ] {
             let q = query(&format!("{a} < {b}"));
-            let result = sparq_engine::query_with_budget(&graph, &q, &budget).unwrap();
-            assert_eq!(
-                result.rows,
-                vec![vec![Some(oxrdf::Literal::from(true).into())]],
-                "{q}"
-            );
+            check_wide_query(&graph, &q, &budget, |result| {
+                assert_eq!(
+                    result.rows,
+                    vec![vec![Some(oxrdf::Literal::from(true).into())]],
+                    "{q}"
+                );
+            });
         }
         for bad in [
             "\"340282366920938463463374607431768211456000.5\"^^xsd:integer",
@@ -265,21 +288,22 @@ fn small_constant_filters_match_bind_for_uncached_exact_values() {
                                 "SELECT ?v {{?s <http://ex/p> ?v FILTER({expr})}} ORDER BY ?v"
                             );
                             let bind = format!("SELECT ?v {{?s <http://ex/p> ?v BIND(({expr}) AS ?b) FILTER(?b)}} ORDER BY ?v");
-                            let result =
-                                sparq_engine::query_with_budget(graph, &q, &budget).unwrap();
-                            let oracle =
-                                sparq_engine::query_with_budget(graph, &bind, &budget).unwrap();
-                            assert_eq!(oracle.rows, expected, "BIND oracle: {bind}");
-                            assert_eq!(result.rows, expected, "{datatype}: {q}");
+                            check_wide_query(graph, &q, &budget, |result| {
+                                assert_eq!(result.rows, expected, "{datatype}: {q}");
+                            });
+                            check_wide_query(graph, &bind, &budget, |oracle| {
+                                assert_eq!(oracle.rows, expected, "BIND oracle: {bind}");
+                            });
                             // COUNT and streaming have independent cache-only scan shortcuts.
                             let q = format!("SELECT ?v {{?s <http://ex/p> ?v FILTER({expr})}}");
-                            assert_eq!(
-                                sparq_engine::count_with_budget(graph, &q, &budget).unwrap(),
-                                expected.len(),
-                                "COUNT: {q}"
-                            );
+                            let count = sparq_engine::count_with_budget(graph, &q, &budget);
+                            if budget.strict_numeric_capacity {
+                                assert!(count.unwrap_err().contains("numeric-representation"), "COUNT: {q}");
+                            } else {
+                                assert_eq!(count.unwrap(), expected.len(), "COUNT: {q}");
+                            }
                             let mut json = String::new();
-                            sparq_engine::query_json_stream_with_budget(
+                            let streamed = sparq_engine::query_json_stream_with_budget(
                                 graph,
                                 &q,
                                 &budget,
@@ -287,8 +311,12 @@ fn small_constant_filters_match_bind_for_uncached_exact_values() {
                                     json.push_str(&chunk);
                                     std::ops::ControlFlow::Continue(())
                                 },
-                            )
-                            .unwrap();
+                            );
+                            if budget.strict_numeric_capacity {
+                                assert!(streamed.unwrap_err().contains("numeric-representation"), "stream: {q}");
+                                continue;
+                            }
+                            streamed.unwrap();
                             let json: serde_json::Value = serde_json::from_str(&json).unwrap();
                             let mut actual: Vec<_> = json["results"]["bindings"]
                                 .as_array()
@@ -403,10 +431,14 @@ fn uncached_exact_values_after_update_transaction_and_fork_match_bind() {
                     let filter = format!("SELECT ?v {{ ?s <urn:p> ?v FILTER({expr}) }}");
                     let bind =
                         format!("SELECT ?v {{ ?s <urn:p> ?v BIND({expr} AS ?ok) FILTER(?ok) }}");
-                    let actual = sparq_engine::query_with_budget(&graph, &filter, &budget).unwrap();
-                    let exact = sparq_engine::query_with_budget(&graph, &bind, &budget).unwrap();
-                    assert_eq!(actual.rows.len(), 1, "{path}: {expr}");
-                    assert_eq!(actual.rows, exact.rows, "{path}: {expr}");
+                    check_wide_query(&graph, &filter, &budget, |actual| {
+                        let exact = sparq_engine::query(&graph, &bind).unwrap();
+                        assert_eq!(actual.rows.len(), 1, "{path}: {expr}");
+                        assert_eq!(actual.rows, exact.rows, "{path}: {expr}");
+                    });
+                    check_wide_query(&graph, &bind, &budget, |exact| {
+                        assert_eq!(exact.rows.len(), 1, "BIND {path}: {expr}");
+                    });
                 }
             }
             assert!(
@@ -460,20 +492,21 @@ fn order_by_past_i128_is_exact_in_both_sort_paths() {
                         key.to_string()
                     };
                     let q = format!("SELECT ?v {{?s ?p ?v}} ORDER BY {order}");
-                    let result = sparq_engine::query_with_budget(graph, &q, &budget).unwrap();
-                    let actual: Vec<_> = result
-                        .rows
-                        .iter()
-                        .map(|row| match row[0].as_ref().unwrap() {
-                            oxrdf::Term::Literal(l) => l.value(),
-                            other => panic!("expected literal: {other}"),
-                        })
-                        .collect();
-                    let mut expected: Vec<_> = ordered.iter().map(String::as_str).collect();
-                    if desc {
-                        expected.reverse();
-                    }
-                    assert_eq!(actual, expected, "{q}");
+                    check_wide_query(graph, &q, &budget, |result| {
+                        let actual: Vec<_> = result
+                            .rows
+                            .iter()
+                            .map(|row| match row[0].as_ref().unwrap() {
+                                oxrdf::Term::Literal(l) => l.value(),
+                                other => panic!("expected literal: {other}"),
+                            })
+                            .collect();
+                        let mut expected: Vec<_> = ordered.iter().map(String::as_str).collect();
+                        if desc {
+                            expected.reverse();
+                        }
+                        assert_eq!(actual, expected, "{q}");
+                    });
                 }
             }
         }

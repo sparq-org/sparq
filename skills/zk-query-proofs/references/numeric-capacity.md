@@ -5,6 +5,17 @@ enabled by the exact-dataset evaluator. It separates a valid RDF numeric lexical
 from a computation the current engine can represent. This is a bounded numeric
 profile, not arbitrary-precision SPARQL arithmetic.
 
+The detached `SparqSparql11SnapshotV1` evaluator enables the engine's strict
+numeric capacity option. Its snapshot representation bound precedes the wider
+comparisons introduced by [#7317](https://github.com/sparq-org/sparq/pull/7317).
+The named `v1_snapshot_numeric_budget` retains the original checked arithmetic,
+cast, comparison and ordering consumers, including decimal scale alignment and
+computed intermediates. V2/V3 and the authenticated-RDF profile inherit these
+numeric consumers. Widening this numeric range belongs to a future dialect/version
+bump. Wider lexical comparisons remain available with the default, non-strict
+budget; they do not widen the V1 snapshot. See the
+[snapshot boundary and journal comparison checks](../../../zk/sparql-evaluator/README.md#admitted-profile-and-evidence).
+
 Integer arithmetic consumers use `i64`. Decimal arithmetic consumers use a signed
 `i128` mantissa and checked decimal scale/alignment. Decimal division retains the engine's existing
 precision: exact results terminating within eighteen fractional digits when representable,
@@ -17,11 +28,11 @@ semantics, including NaN. This guard does not promise exact real-number arithmet
 for floating types or expand the existing decimal division precision.
 
 Interpreted and compiled arithmetic, casts, MIN/MAX and SUM/AVG share checked
-consumers. Relational comparison of two well-formed integer/decimal values and
-standard ordering can instead compare exact lexicals of any length. The bounded
-numeric fast path stays first; exceeding its mantissa or scale-alignment capacity
-in these comparisons does not set an arithmetic capacity failure. Other scalar
-comparisons retain the checked operand limits and sticky failures. Numeric sargable
+consumers. Strict relational comparisons and ordering check the same operand and
+scale-alignment bounds, including stored values and computed intermediates.
+Exhaustion sets the same sticky capacity failure. Non-strict comparisons retain
+exact lexical comparison beyond these lanes, including mantissas beyond `i128`.
+Numeric sargable
 shortcuts and parallel expression work fall back when this option is active, so worker-local evaluation cannot lose
 the capacity state. This may increase work; no latency neutrality is claimed.
 Reentrant calls restore their parent's state. A custom extension must propagate a
@@ -38,8 +49,9 @@ unary plus preserve term identity. Numeric-source casts, including `xsd:string`,
 currently enter the numeric lane and can reject a large literal even when a more
 specialized conversion could decide the result. Exact
 SECONDS output likewise retains all bounded input fraction digits; a later
-arithmetic consumer fails if the result exceeds the decimal lane. Exact
-integer/decimal comparison remains available for those fractional digits.
+arithmetic consumer fails if the result exceeds the decimal lane. Non-strict
+comparisons retain exact comparison of those fractional digits; strict comparisons
+keep the V1 snapshot's representation and scale-alignment checks when consuming them.
 Default native evaluation retains its existing finite-representation fallback behavior, which
 is a known implementation limitation, not a normative datatype validity rule.
 
@@ -59,7 +71,7 @@ length and with canceling huge start/length would clip to `"abcd"` and `"a"`;
 supporting these requires checked lexical arithmetic, not independently saturating
 each argument. Their expected strings remain in the capacity corpus for follow-up.
 
-The [21-case capacity corpus](../../../zk/sparql-evaluator/fixtures/conformance/numeric-capacity.json)
+The [24-case capacity corpus](../../../zk/sparql-evaluator/fixtures/conformance/numeric-capacity.json)
 contains explicit capacity rejections, not W3C conformance successes. Native
 tests exercise interpreted aggregate arguments and compiled expressions, stored dense/compressed consumers,
 large parallel thresholds and reentrant state. The model also preserves all 167

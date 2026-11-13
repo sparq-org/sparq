@@ -13,7 +13,7 @@ ROOT = HERE.parents[1]
 
 
 class CapacityExpectations(unittest.TestCase):
-    def test_all_43_sources_and_exact_causes_are_bound(self):
+    def test_all_46_sources_and_exact_causes_are_bound(self):
         registry = json.loads((HERE / "capacity-expectations.json").read_text())
         classes = json.loads((HERE / "rejections.json").read_text())
         counts = {}
@@ -49,7 +49,7 @@ class CapacityExpectations(unittest.TestCase):
                             check_outcome(job, outcome | {"error_class":wrong["category"], "rejection":wrong}, output)
                     with self.assertRaisesRegex(ValueError, "exact cause"):
                         check_outcome(job | {"expected_rejection":{"category":"capacity"}}, outcome, output)
-        self.assertEqual(counts, {"numeric_representation":26, "temporal_year":9,
+        self.assertEqual(counts, {"numeric_representation":29, "temporal_year":9,
                                  "budget_rows":1, "temporal year capacity":7})
 
     def test_unknown_or_changed_capacity_fixture_is_not_guessed(self):
