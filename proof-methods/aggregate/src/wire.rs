@@ -226,7 +226,8 @@ pub enum Outcome {
     BelowMinimumGroup {
         range_proof: Bytes,
     },
-    TooFewContributors,
+    // A struct variant makes deny_unknown_fields apply to this refusal as well.
+    TooFewContributors {},
     ThresholdVerdict {
         verdict: bool,
         /// Two hidden limbs per difference, optionally followed by the group-minimum difference.

@@ -732,7 +732,7 @@ pub fn finish(
     s.identity(index, keys)?;
     let digest = contributions_digest(&cs);
     let outcome = if cs.len() < s.parameters.min_contributors as usize {
-        Outcome::TooFewContributors
+        Outcome::TooFewContributors {}
     } else {
         let local = local.ok_or_else(|| error(Some(index), "missing-partial"))?;
         guard(local.index == index, Some(index), "local-index")?;
@@ -827,7 +827,7 @@ pub fn verify_outcome(s: &Session, cs: &[Contribution], output: &SignedOutcome) 
     )?;
     verify_signature(s.party(i)?, &outcome_bytes(output), &output.signature, i)?;
     let enough = cs.len() >= s.parameters.min_contributors as usize;
-    if matches!(output.outcome, Outcome::TooFewContributors) {
+    if matches!(output.outcome, Outcome::TooFewContributors {}) {
         return guard(!enough, Some(i), "enough-contributors");
     }
     guard(enough, Some(i), "too-few-contributors")?;
@@ -896,7 +896,7 @@ pub fn verify_outcome(s: &Session, cs: &[Contribution], output: &SignedOutcome) 
             limb_commitments,
             range_proof,
         } => verify_threshold(s, i, *verdict, limb_commitments, range_proof, (c, d)),
-        Outcome::TooFewContributors => unreachable!(),
+        Outcome::TooFewContributors {} => unreachable!(),
     }
 }
 

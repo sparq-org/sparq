@@ -210,7 +210,7 @@ fn full_sessions_and_boundary() {
     }
     assert!(matches!(
         too_few().output.outcome,
-        Outcome::TooFewContributors
+        Outcome::TooFewContributors {}
     ));
     assert!(matches!(
         refusal().output.outcome,
@@ -221,6 +221,28 @@ fn full_sessions_and_boundary() {
     assert!(out["outcome"].get("rho").is_none());
     assert!(out["outcome"].get("sum").is_none());
     assert!(out["outcome"].get("sigma").is_none());
+}
+
+#[test]
+fn too_few_refusal_rejects_unsigned_json_fields() {
+    let f = too_few();
+    f.verify(&f.output).unwrap();
+    for (field, value) in [
+        ("count", serde_json::json!(0)),
+        ("rho", serde_json::json!("")),
+        ("sum", serde_json::json!("0")),
+        ("sigma", serde_json::json!("")),
+        ("range_proof", serde_json::json!("")),
+        ("verdict", serde_json::json!(true)),
+        ("limb_commitments", serde_json::json!([])),
+    ] {
+        let mut wire = serde_json::to_value(&f.output).unwrap();
+        wire["outcome"][field] = value;
+        assert!(
+            serde_json::from_value::<SignedOutcome>(wire).is_err(),
+            "accepted unsigned refusal field {field}"
+        );
+    }
 }
 
 #[test]
@@ -548,7 +570,7 @@ fn output_verifier_guards() {
     f.resign_output(&mut out);
     reject(f.verify(&out), Some(0), "count-opening");
     let mut out = f.output.clone();
-    out.outcome = Outcome::TooFewContributors;
+    out.outcome = Outcome::TooFewContributors {};
     f.resign_output(&mut out);
     reject(f.verify(&out), Some(0), "enough-contributors");
     let tf = too_few();
@@ -1501,7 +1523,7 @@ fn recipient_rechecks_attestation_even_with_a_valid_finisher_signature() {
             }
             "missing-contributor" => {
                 cs.remove(1);
-                out.outcome = Outcome::TooFewContributors;
+                out.outcome = Outcome::TooFewContributors {};
             }
             _ => unreachable!(),
         }
@@ -1701,7 +1723,8 @@ fn compute_only_and_requester_participation() {
                     64,
                 )
             } else {
-                (vec![count], vec![r], 32)
+                // Match the zero proof's arity so only the value constraint rejects it.
+                (vec![count, count_bound - count], vec![r, -r], 32)
             };
             c.range_proof = prove(
                 &f.session,
@@ -1964,7 +1987,7 @@ fn simulation_checks_inputs_and_too_few_attestations() {
     ));
     let f = simulate_session(p, &parties).unwrap();
     assert!(f.partials.is_empty());
-    assert!(matches!(f.outcome.outcome, Outcome::TooFewContributors));
+    assert!(matches!(f.outcome.outcome, Outcome::TooFewContributors {}));
 }
 
 #[test]

@@ -57,9 +57,17 @@ test('minimum-group refusal exposes no aggregate openings', () => {
   }
 });
 test('too few contributors is publicly verifiable without partials', () => {
-  const { outputs, partials } = session(2, 0);
+  const { session: s, contributions, outputs, partials } = session(2, 0);
   assert.deepEqual(partials, []);
   assert.equal(outputs[0].outcome.kind, 'too-few-contributors');
+  for (const [field, value] of Object.entries({ count: 0, rho: '', sum: '0', sigma: '',
+    range_proof: '', verdict: true, limb_commitments: [] })) {
+    const outcome = structuredClone(outputs[0]);
+    outcome.outcome[field] = value;
+    assert.throws(() => call('verifyOutcome', { session: s, contributions, outcome }),
+      (e) => JSON.parse(String(e)).check === 'json-encoding',
+      `accepted unsigned refusal field ${field}`);
+  }
 });
 test('unattested hospital input is rejected by roster index', () => {
   const f = session(3, 6);

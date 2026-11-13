@@ -67,6 +67,8 @@ unsigned count and unsigned canonical decimal **string** sum; count-only uses
 For a roster below `min_contributors`, skip partial exchange and call `finish`
 with `local:null,messages:[]` after collecting every signed contribution. Missing
 or invalid hospital input is an error, not a successful threshold refusal.
+Outcome JSON rejects unknown fields. In Rust, construct or match the empty refusal
+as `Outcome::TooFewContributors {}`.
 Errors throw JSON text `{code,index,check}`; treat `input-not-attested` as a failed
 session. `below-minimum-group` exposes a proof with no count or sum opening;
 `release` exposes the count and optional sum plus blindings. Only contributor

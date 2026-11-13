@@ -191,7 +191,7 @@ pub(crate) fn outcome_bytes(o: &SignedOutcome) -> Vec<u8> {
             e.0.push(1);
             e.bytes(&range_proof.0);
         }
-        Outcome::TooFewContributors => e.0.push(2),
+        Outcome::TooFewContributors {} => e.0.push(2),
         Outcome::ThresholdVerdict {
             verdict,
             limb_commitments,

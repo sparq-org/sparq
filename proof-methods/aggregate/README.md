@@ -99,7 +99,7 @@ strings; threshold values fit `u128`. Thresholds accept `count` or `sum`, and
 outcome releases only a verdict and proves the group minimum without opening CNT.
 Below the group minimum it returns a count-hiding refusal instead. Count-only
 messages omit sum fields. JSON bytes use unpadded base64url, points are compressed
-Ristretto and scalars are canonical little endian.
+Ristretto and scalars are canonical little endian. Outcome JSON rejects unknown fields.
 
 G is the Ristretto basepoint; H hashes `sparq-verifiable-aggregate/v1/H` with SHA-512.
 Complement range proofs enforce separate count/sum bounds and compute-only zeros.
