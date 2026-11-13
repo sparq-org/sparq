@@ -32,3 +32,10 @@
   crate: "sparq-conformance"
   features: "geo"
   test: true
+
+# Shipping RDF/XML entry point and hermetic manifest accounting; external suites
+# run only with SPARQ_RDF_TESTS_ROOT set by earl-report.sh.
+- name: "sparq-conformance (rdfxml)"
+  crate: "sparq-conformance"
+  features: "rdfxml"
+  test: true

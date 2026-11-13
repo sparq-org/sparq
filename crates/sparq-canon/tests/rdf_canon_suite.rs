@@ -17,6 +17,8 @@
 
 #[path = "../../sparq-conformance/tests/support/earl.rs"]
 mod earl;
+#[path = "../../sparq-conformance/tests/support/earl_fixture.rs"]
+mod earl_fixture;
 
 use oxrdf::Triple;
 use sparq_core::Graph;
@@ -250,7 +252,7 @@ fn unreadable_negative_fixture_is_a_failure() {
 
 #[test]
 fn reports_canon_entries_even_when_ratchet_fails() {
-    let fixture = earl::Fixture::new();
+    let fixture = earl_fixture::Fixture::new();
     fixture.write(
         "manifest.ttl",
         r#"

@@ -11,6 +11,15 @@ pub fn file_iri(path: &Path) -> String {
     format!("file://{}", path.display())
 }
 
+/// Map a manifest-local test IRI to its published directory, preserving explicit IRIs.
+pub(crate) fn published_iri(id: &str, directory: &Path, base: &str) -> String {
+    let local = format!("{}/", file_iri(directory));
+    match id.strip_prefix(&local) {
+        Some(relative) => format!("{base}{relative}"),
+        None => id.to_owned(),
+    }
+}
+
 /// Inverse of [`file_iri`].
 pub fn iri_to_path(iri: &str) -> Option<PathBuf> {
     iri.strip_prefix("file://").map(PathBuf::from)
@@ -132,6 +141,8 @@ impl MiniGraph {
     }
 
     /// Walks an `rdf:first`/`rdf:rest` list starting at `head`.
+    /// Incomplete lists return their readable prefix; report runners should use
+    /// `checked_list` so a broken manifest cannot appear complete.
     pub fn list(&self, head: &Term) -> Vec<Term> {
         const FIRST: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#first";
         const REST: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#rest";
@@ -156,6 +167,35 @@ impl MiniGraph {
         }
         out
     }
+
+    /// Read a complete, unambiguous RDF list or reject the manifest.
+    pub(crate) fn checked_list(&self, head: &Term) -> Result<Vec<Term>, String> {
+        const FIRST: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#first";
+        const REST: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#rest";
+        const NIL: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#nil";
+        let mut out = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut cur = head.clone();
+        loop {
+            if matches!(&cur, Term::NamedNode(n) if n.as_str() == NIL) {
+                return Ok(out);
+            }
+            let node = as_node(&cur).ok_or("RDF list cell is not a resource")?;
+            if !seen.insert(node.clone()) {
+                return Err("cyclic RDF list".into());
+            }
+            let mut first = self.objects(&node, FIRST);
+            let mut rest = self.objects(&node, REST);
+            // Repeated identical triples still describe one RDF graph edge.
+            first.dedup();
+            rest.dedup();
+            if first.len() != 1 || rest.len() != 1 {
+                return Err("RDF list cell must have one rdf:first and one rdf:rest".into());
+            }
+            out.push(first[0].clone());
+            cur = rest[0].clone();
+        }
+    }
 }
 
 /// Converts a term reference usable as a manifest node, or `None` for literals.
@@ -164,5 +204,40 @@ pub fn as_node(t: &Term) -> Option<NamedOrBlankNode> {
         Term::NamedNode(n) => Some(NamedOrBlankNode::NamedNode(n.clone())),
         Term::BlankNode(b) => Some(NamedOrBlankNode::BlankNode(b.clone())),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checked_lists_never_return_a_partial_prefix() {
+        let head = Term::NamedNode(oxrdf::NamedNode::new("https://example.test/#head").unwrap());
+        for (body, valid) in [
+            ("<#head> rdf:first <#a>; rdf:rest rdf:nil .", true),
+            ("<#head> rdf:first <#a>, <#a>; rdf:rest rdf:nil .", true),
+            ("<#head> rdf:first <#a>; rdf:rest <#tail> .", false),
+            ("<#head> rdf:first <#a>; rdf:rest false .", false),
+            ("<#head> rdf:first <#a>; rdf:rest <#head> .", false),
+            ("<#head> rdf:first <#a>, <#b>; rdf:rest rdf:nil .", false),
+            ("<#head> rdf:first <#a>; rdf:rest rdf:nil, <#tail> .", false),
+        ] {
+            let text =
+                format!("@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> . {body}");
+            let graph = MiniGraph {
+                triples: oxttl::TurtleParser::new()
+                    .with_base_iri("https://example.test/")
+                    .unwrap()
+                    .for_slice(text.as_bytes())
+                    .collect::<Result<_, _>>()
+                    .unwrap(),
+            };
+            let result = graph.checked_list(&head);
+            assert_eq!(result.is_ok(), valid, "{body}: {result:?}");
+            if valid {
+                assert_eq!(result.unwrap().len(), 1);
+            }
+        }
     }
 }
