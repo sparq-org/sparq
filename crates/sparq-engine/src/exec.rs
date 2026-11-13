@@ -39,6 +39,10 @@ use sparq_substrate::join as sjoin;
 // / FILTER conformance is bit-identical.
 use sparq_substrate::compare::{compare_terms, CompareTerm, LiteralKind, TermClass};
 use rustc_hash::FxHashSet;
+#[cfg(target_os = "zkvm")]
+use std::collections::BTreeSet as WorkSet;
+#[cfg(not(target_os = "zkvm"))]
+use std::collections::HashSet as WorkSet;
 use spargebra::algebra::{
     AggregateExpression, AggregateFunction, Expression, GraphPattern, OrderExpression, PropertyPathExpression,
 };

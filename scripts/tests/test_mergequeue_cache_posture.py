@@ -76,7 +76,6 @@ NEXTEST_ARCHIVE_ARTIFACT = "nextest-archive"
 UPLOAD_ARTIFACT = "actions/upload-artifact@"
 DOWNLOAD_ARTIFACT = "actions/download-artifact@"
 
-_NEW_LIST_ITEM = re.compile(r"^ {0,6}- ")
 _ARCHIVE_FILE_ARG = re.compile(r"--archive-file\s+(\S+)")
 
 
@@ -86,6 +85,23 @@ _ARCHIVE_FILE_ARG = re.compile(r"--archive-file\s+(\S+)")
 # --------------------------------------------------------------------------- #
 def _lines(path: Path) -> list[str]:
     return path.read_text().split("\n")
+
+
+def _definitions(path: Path, parents=frozenset()) -> set[Path]:
+    """The workflow and its referenced local action definitions."""
+    if path in parents:
+        raise AssertionError(f"cyclic local action reference: {path}")
+    found = {path}
+    for line in _lines(path):
+        match = re.match(r"^\s+(?:- )?uses: (\./\S+)", line)
+        if match:
+            directory = REPO_ROOT / match.group(1)
+            action = next((directory / name for name in ("action.yml", "action.yaml")
+                           if (directory / name).is_file()), None)
+            if action is None:
+                raise AssertionError(f"missing local action: {directory}")
+            found.update(_definitions(action, parents | {path}))
+    return found
 
 
 def _is_comment(line: str) -> bool:
@@ -133,6 +149,9 @@ def runs_on_branch_refs(path: Path) -> bool:
 
 def step_body(lines: list[str], start: int) -> list[str]:
     """The lines of the `steps:` list item whose first line is `lines[start]`."""
+    step_indent = len(lines[start]) - len(lines[start].lstrip())
+    if not lines[start].lstrip().startswith("- "):
+        step_indent -= 2  # A uses: property following a - name: item.
     i = start + 1
     while i < len(lines):
         line = lines[i]
@@ -140,7 +159,7 @@ def step_body(lines: list[str], start: int) -> list[str]:
             i += 1
             continue
         indent = len(line) - len(line.lstrip())
-        if _NEW_LIST_ITEM.match(line) or indent < 8:
+        if indent <= step_indent:
             break
         i += 1
     return lines[start:i]
@@ -170,7 +189,8 @@ def branch_ref_workflows_with_rust_cache() -> list[Path]:
     return sorted(
         p
         for p in WORKFLOWS.glob("*.yml")
-        if RUST_CACHE in p.read_text() and runs_on_branch_refs(p)
+        if runs_on_branch_refs(p) and any(RUST_CACHE in definition.read_text()
+                                         for definition in _definitions(p))
     )
 
 
@@ -181,7 +201,7 @@ class TestParserNonVacuity(unittest.TestCase):
 
     def test_known_lanes_are_discovered(self) -> None:
         names = [p.name for p in branch_ref_workflows_with_rust_cache()]
-        for lane in ("ci-fast.yml", "ci.yml", "python.yml"):
+        for lane in ("ci-fast.yml", "ci.yml", "python.yml", "zk-exact-evaluator.yml"):
             self.assertIn(
                 lane,
                 names,
@@ -204,50 +224,51 @@ class TestParserNonVacuity(unittest.TestCase):
 
     def test_step_walker_finds_every_rust_cache_step(self) -> None:
         for wf in branch_ref_workflows_with_rust_cache():
-            text = wf.read_text()
-            found = steps_using(text.split("\n"), RUST_CACHE)
-            self.assertEqual(
-                len(found),
-                text.count(RUST_CACHE),
-                f"{wf.name}: the step walker saw {len(found)} rust-cache steps but the "
-                f"file names the action {text.count(RUST_CACHE)} times — a step shape the "
-                "walker does not understand would be silently unchecked.",
-            )
+            for path in _definitions(wf):
+                text = path.read_text()
+                found = steps_using(text.split("\n"), RUST_CACHE)
+                self.assertEqual(
+                    len(found),
+                    text.count(RUST_CACHE),
+                    f"{path}: the step walker saw {len(found)} rust-cache steps but the "
+                    f"file names the action {text.count(RUST_CACHE)} times — a step shape the "
+                    "walker does not understand would be silently unchecked.",
+                )
 
 
 class TestCacheSaveDiscipline(unittest.TestCase):
     def test_every_branch_ref_rust_cache_step_saves_on_main_only(self) -> None:
         for wf in branch_ref_workflows_with_rust_cache():
-            lines = _lines(wf)
-            for idx, body in steps_using(lines, RUST_CACHE):
-                where = f"{wf.name}:{idx + 1}"
-                got = with_value(body, SAVE_IF_KEY)
-                self.assertIsNotNone(
-                    got,
-                    f"{where}: rust-cache step in a workflow that runs on branch refs has "
-                    f"no `save-if`. A branch-scoped save is unreachable from main and churns "
-                    f"the shared cache budget — add `save-if: {SAVE_IF_VALUE}` (sq-3sbrr).",
-                )
-                self.assertEqual(
-                    got,
-                    SAVE_IF_VALUE,
-                    f"{where}: `save-if` must be exactly `{SAVE_IF_VALUE}`. A bare `false` "
-                    "also stops main from ever SEEDING a cache; a wider condition lets the "
-                    "dead queue-ref save back in.",
-                )
+            for path in _definitions(wf):
+                for idx, body in steps_using(_lines(path), RUST_CACHE):
+                    where = f"{path}:{idx + 1}"
+                    got = with_value(body, SAVE_IF_KEY)
+                    self.assertIsNotNone(
+                        got,
+                        f"{where}: rust-cache step in a workflow that runs on branch refs has "
+                        f"no `save-if`. A branch-scoped save is unreachable from main and churns "
+                        f"the shared cache budget — add `save-if: {SAVE_IF_VALUE}` (sq-3sbrr).",
+                    )
+                    self.assertEqual(
+                        got,
+                        SAVE_IF_VALUE,
+                        f"{where}: `save-if` must be exactly `{SAVE_IF_VALUE}`. A bare `false` "
+                        "also stops main from ever SEEDING a cache; a wider condition lets the "
+                        "dead queue-ref save back in.",
+                    )
 
     def test_restore_is_never_disabled(self) -> None:
         # `save-if` gates SAVING only — the whole design depends on queue refs and PR
         # heads still RESTORING main's entry. `lookup-only` would break that silently
         # (a cache "hit" that unpacks nothing).
         for wf in branch_ref_workflows_with_rust_cache():
-            lines = _lines(wf)
-            for idx, body in steps_using(lines, RUST_CACHE):
-                self.assertIsNone(
-                    with_value(body, "lookup-only:"),
-                    f"{wf.name}:{idx + 1}: rust-cache `lookup-only` would disable RESTORE; "
-                    "sq-6vshe.15 restricts SAVING only.",
-                )
+            for path in _definitions(wf):
+                for idx, body in steps_using(_lines(path), RUST_CACHE):
+                    self.assertIsNone(
+                        with_value(body, "lookup-only:"),
+                        f"{path}:{idx + 1}: rust-cache `lookup-only` would disable RESTORE; "
+                        "sq-6vshe.15 restricts SAVING only.",
+                    )
 
 
 def _ci_cache_steps_by_job() -> list[tuple[str, int, list[str]]]:

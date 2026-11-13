@@ -1,0 +1,28 @@
+{
+  "cases": [
+    {
+      "id": "distinct-values",
+      "query": "SELECT DISTINCT ?x WHERE { VALUES ?x { 1 1 2 } }"
+    },
+    {
+      "id": "count-distinct-values",
+      "query": "SELECT (COUNT(DISTINCT *) AS ?n) WHERE { VALUES ?x { 1 1 2 } }"
+    },
+    {
+      "id": "concat-distinct-values",
+      "query": "SELECT (GROUP_CONCAT(DISTINCT ?x; separator=\"|\") AS ?text) WHERE { VALUES ?x { \"a\" \"a\" \"b\" } }"
+    },
+    {
+      "id": "cyclic-variable-bgp",
+      "query": "SELECT ?a ?b ?c WHERE { ?a ?p ?b . ?b ?q ?c . ?c ?r ?a }"
+    },
+    {
+      "id": "canonical-blank-table",
+      "query": "SELECT ?x WHERE { ?x <http://ex/nickname> ?name }"
+    },
+    {
+      "id": "regex-replace-captures",
+      "query": "SELECT (REPLACE(\"abba\", \"(a)\", \"$1$1\") AS ?r) WHERE {}"
+    }
+  ]
+}

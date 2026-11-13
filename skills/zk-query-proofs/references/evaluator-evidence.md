@@ -10,7 +10,21 @@ it has no mock or missing-tool success path. It runs native semantic tests,
 every host integration test (including actual guest rejection and genuine proof
 tests), and detached-workspace Clippy. Relevant changes include the vendored SDK.
 
-Each run exports the following as one SHA-pinned Actions upload:
+The parallel `guest execution reproducibility` job (`guest-reproducibility`)
+runs the executor checks in `guest_determinism.py` and uploads their records
+separately. It compares repeated guest counts and journals while varying the
+SDK initialization entropy reply, and rejects other randomness requests. This
+is sampled execution evidence and produces no proofs or receipts.
+
+On pull requests limited to engine, core or substrate inputs, classification
+requires reproducibility alone. Other evaluator inputs also require the proof
+campaign. Both jobs require explicit valid `required` and `proof_required`
+outputs before setup; uncertain classification requires both checks. Push,
+merge-group and manual-dispatch proof selection retain their full input scope.
+Both jobs use the local `zk-exact-setup` composite with separate cache keys;
+the proof job also requests its host Clippy component.
+
+Each proof-campaign run exports the following as one SHA-pinned Actions upload:
 
 - `source.json`: checked-out commit/tree and SHA-256 inventory of tracked files.
 - Host and guest Cargo metadata: locked dependency resolution and enabled features.

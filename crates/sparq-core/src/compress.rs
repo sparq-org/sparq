@@ -104,7 +104,7 @@ fn get_varint_checked(buf: &[u8], pos: &mut usize) -> Option<u64> {
 enum Blocks {
     Owned(Vec<u8>),
     #[cfg(feature = "mmap")]
-    Mapped { map: memmap2::Mmap, off: usize },
+    File { backing: crate::backing::Backing, off: usize },
 }
 
 impl Blocks {
@@ -113,7 +113,7 @@ impl Blocks {
         match self {
             Blocks::Owned(v) => v,
             #[cfg(feature = "mmap")]
-            Blocks::Mapped { map, off } => &map[*off..],
+            Blocks::File { backing, off } => &backing[*off..],
         }
     }
 }
@@ -602,8 +602,13 @@ impl CompressedPerm {
     /// the lazy out-of-core mode.
     #[cfg(feature = "mmap")]
     pub fn from_mmap(map: memmap2::Mmap) -> std::io::Result<Self> {
+        Self::from_backing(crate::backing::Backing::Mapped(map))
+    }
+
+    #[cfg(feature = "mmap")]
+    pub(crate) fn from_backing(backing: crate::backing::Backing) -> std::io::Result<Self> {
         let bad = |m: &str| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("compressed perm: {m}"));
-        let b: &[u8] = &map;
+        let b: &[u8] = &backing;
         if b.len() < 32 {
             return Err(bad("missing FILE_MAGIC header"));
         }
@@ -664,7 +669,7 @@ impl CompressedPerm {
         // the mmap scan path byte-identical regardless of the `block-bloom` feature.
         let perm = CompressedPerm {
             dir,
-            blocks: Blocks::Mapped { map, off: dir_end },
+            blocks: Blocks::File { backing, off: dir_end },
             len,
             #[cfg(feature = "block-bloom")]
             bloom: None,
@@ -744,7 +749,7 @@ impl CompressedPerm {
         let stream = match &self.blocks {
             Blocks::Owned(v) => v.capacity(),
             #[cfg(feature = "mmap")]
-            Blocks::Mapped { .. } => 0,
+            Blocks::File { backing, .. } => backing.heap_bytes(),
         };
         // sq-wihld — the OPT-IN per-block Bloom directory (when built) is resident
         // heap; count it so `heap_bytes` stays honest for the memory-budget paths.
