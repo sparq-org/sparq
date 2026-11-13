@@ -116,3 +116,69 @@ fn changed_temporal_padding() {
 fn changed_boolean_payload() {
     let _ = variable(fixture(DT_BOOLEAN, 5, 1));
 }
+#[test]
+fn ieee_keys_retain_value_and_zero_sign() {
+    let shift: Field = 0x100000000000000000000000000000000000000000000;
+    let (v, e) = variable(fixture(
+        crate::expr_term_contract::DT_DOUBLE,
+        2,
+        0xbff0000000000000 * shift,
+    ));
+    assert(!e);
+    assert(!v.capacity);
+    assert_eq(v.value.number.bits, 0x3ff0000000000000);
+    let mut input = fixture(
+        crate::expr_term_contract::DT_DOUBLE,
+        2,
+        0x8000000000000000 * shift,
+    );
+    input.bytes[0] = 45;
+    input.bytes[1] = 48;
+    input.len = 2;
+    let (v, e) = variable(input);
+    assert(!e);
+    assert_eq(v.value.number.bits, 0x8000000000000000);
+    let (v, e) = variable(fixture(
+        crate::expr_term_contract::DT_FLOAT,
+        2,
+        0xbff0000000000000 * shift,
+    ));
+    assert(!e);
+    assert_eq(v.value.number.bits, 0x3f800000);
+    let (v, e) = variable(fixture(
+        crate::expr_term_contract::DT_FLOAT,
+        2,
+        0xb6a0000000000000 * shift,
+    ));
+    assert(!e);
+    assert_eq(v.value.number.bits, 1);
+    let (v, e) = variable(fixture(crate::expr_term_contract::DT_FLOAT, 127, 0));
+    assert(!e);
+    assert(!v.capacity);
+    assert_eq(v.value.number.bits, 0x7fc00000);
+}
+#[test]
+fn computed_opening_preserves_capacity() {
+    let input = fixture(
+        DT_INTEGER,
+        1,
+        0x800000000000000000000000000000000000000000000000000000000000 + 5 * SCALE,
+    );
+    let (v, e) = crate::expr_open::value((
+        crate::expr_core::Lane { value: input, capacity: true }, false,
+    ));
+    assert(!e);
+    assert(v.capacity);
+    assert_eq(v.value.number.magnitude, 5 * SCALE);
+}
+#[test]
+fn whitespace_key_gap_is_capacity() {
+    let mut input = fixture(DT_INTEGER, 0, 0);
+    input.len = 2;
+    input.bytes[0] = 32;
+    input.bytes[1] = 53;
+    let (v, e) = variable(input);
+    assert(!e);
+    assert(v.capacity);
+    assert(v.value.valid);
+}

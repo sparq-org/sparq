@@ -1,3 +1,4 @@
 # Live expression samples use the shared gate and its completion ledger.
 live src/lower/expr_tests.rs::noir_samples_match_host_mirror
 live src/lower/expr_live_targets.rs::noir_target_queries_match_host_mirror
+live src/lower/expr_functions_tests.rs::noir_function_samples_match_host_mirror

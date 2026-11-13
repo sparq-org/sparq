@@ -74,7 +74,7 @@ pub fn numeric_compare(
 pub fn same_term(a: (Lane<TermCell>, bool), b: (Lane<TermCell>, bool)) -> (Lane<bool>, bool) {
     let (a, ae) = a;
     let (b, be) = b;
-    let error = ae | be | !a.value.bound | !b.value.bound;
+    let error = ae | be | !a.value.bound() | !b.value.bound();
     (Lane { value: identity(a.value, b.value) & !error, capacity: a.capacity | b.capacity }, error)
 }
 
@@ -110,7 +110,7 @@ pub fn value_compare<let L: u32>(
     let (b, be) = b;
     let x = a.value;
     let y = b.value;
-    let mut error = ae | be | !x.term.bound | !y.term.bound;
+    let mut error = ae | be | !x.term.bound() | !y.term.bound();
     let mut capacity = a.capacity | b.capacity;
     let mut value = false;
     if (x.tag == NUMERIC) & (y.tag == NUMERIC) {
@@ -138,7 +138,7 @@ pub fn value_compare<let L: u32>(
         error = error | !x.valid | !y.valid;
         // A missing timezone would require an agreed implicit timezone. Different
         // classes have no order here; this is a method capacity refusal.
-        capacity = capacity | (x.temporal.key_class != y.temporal.key_class);
+        capacity = capacity | (!error & (x.temporal.key_class != y.temporal.key_class));
         x.temporal.key.assert_max_bit_size::<64>();
         y.temporal.key.assert_max_bit_size::<64>();
         value = relation(
@@ -152,7 +152,7 @@ pub fn value_compare<let L: u32>(
         // Specific datatype mappings above take precedence, including NaN and
         // invalid lexical forms. Only the RDF-term fallback uses identity.
         value = identical;
-        error = error | ((x.term.kind == 3) & (y.term.kind == 3) & !identical);
+        error = error | ((x.term.kind() == 3) & (y.term.kind() == 3) & !identical);
     } else {
         error = true;
     }
@@ -176,5 +176,8 @@ pub fn not_in_list<let L: u32, let N: u32>(
 }
 
 fn identity(a: TermCell, b: TermCell) -> bool {
-    (a.enc == b.enc) & ((a.kind != 2) | (a.credential == b.credential))
+    (a.bound() == b.bound())
+        & (a.kind() == b.kind())
+        & (a.enc() == b.enc())
+        & (a.credential() == b.credential())
 }

@@ -150,17 +150,18 @@ where
             "unbound opening bytes",
         );
     }
-    assert(out.cell.kind <= KIND_LITERAL, "term kind");
-    assert((out.cell.kind == KIND_BLANK_NODE) | (out.cell.credential == 0), "credential scope");
+    assert(out.cell.kind() <= KIND_LITERAL, "term kind");
+    assert((out.cell.kind() == KIND_BLANK_NODE) | (out.cell.credential() == 0), "credential scope");
     out
 }
 // Key includes its class byte: one class byte followed by thirty payload bytes.
 pub fn key_payload(cell: TermCell) -> Field {
-    cell.key.assert_max_bit_size::<248>();
-    let bytes = cell.key.to_be_bytes::<31>();
-    assert(bytes[0] == cell.key_class, "key class byte");
-    cell.key
-        - cell.key_class as Field * 0x1000000000000000000000000000000000000000000000000000000000000
+    cell.key().assert_max_bit_size::<248>();
+    let bytes = cell.key().to_be_bytes::<31>();
+    assert(bytes[0] == cell.key_class(), "key class byte");
+    cell.key()
+        - cell.key_class() as Field
+            * 0x1000000000000000000000000000000000000000000000000000000000000
 }
 
 // RDF lexical strings contain Unicode scalar values. Lengths remain explicit,
@@ -204,4 +205,16 @@ fn utf8<let L: u32>(bytes: BoundedVec<u8, L>) {
         }
     }
     assert(remaining == 0, "opening UTF-8");
+}
+
+// Function inputs retain the caller's error and capacity channels alongside the
+// statically checked opening. A computed refusal must survive metadata access.
+pub fn read_input<T, let L: u32, let D: u32, let G: u32>(
+    input: (crate::expr_core::Lane<T>, bool),
+) -> (LexicalOpening<L, D, G>, bool, bool)
+where
+    T: CheckedLexicalOpening<L, D, G>,
+{
+    let (a, e) = input;
+    (read(a.value), e, a.capacity)
 }

@@ -1,21 +1,21 @@
-// Retained pass-two work; not wired into lib.nr at the pass-2a checkpoint.
+// Pass-two term functions; enabled after the separate checkpoint gate.
 // Research grade; not externally audited.
-use crate::expr_core::{check_string, Lane, lane, StringLane, truth};
+use crate::expr_core::{check_string, Lane, StringLane};
 use crate::expr_term_contract::{
     CheckedLexicalOpening, DT_BYTE, DT_DECIMAL, DT_DOUBLE, DT_FLOAT, DT_INT, DT_INTEGER, DT_LONG,
     DT_NEGATIVEINTEGER, DT_NONNEGATIVEINTEGER, DT_NONPOSITIVEINTEGER, DT_POSITIVEINTEGER, DT_SHORT,
     DT_STRING, DT_UNSIGNEDBYTE, DT_UNSIGNEDINT, DT_UNSIGNEDLONG, DT_UNSIGNEDSHORT, KIND_BLANK_NODE,
-    KIND_IRI, KIND_LITERAL, LexicalOpening, read,
+    KIND_IRI, KIND_LITERAL, LexicalOpening, read_input,
 };
 use std::collections::bounded_vec::BoundedVec;
 
 // Constructors return derived term parts. Encoding these computed parts is the
 // term module's separate responsibility; no encoding witness is accepted here.
-pub struct TermParts<let L: u32> {
+pub struct TermParts<let L: u32, let D: u32, let G: u32> {
     pub kind: u8,
     pub lexical: StringLane<L>,
-    pub datatype: StringLane<L>,
-    pub language: StringLane<L>,
+    pub datatype: StringLane<D>,
+    pub language: StringLane<G>,
 }
 pub fn empty<let L: u32>() -> StringLane<L> {
     StringLane { bytes: [0; L], len: 0, lang: 0 }
@@ -25,7 +25,7 @@ pub fn text<let L: u32, let N: u32>(bytes: BoundedVec<u8, N>) -> Lane<StringLane
     let mut value = empty();
     value.len = if bytes.len() <= L { bytes.len() } else { 0 };
     for i in 0..L {
-        if i < bytes.len() {
+        if (bytes.len() <= L) & (i < bytes.len()) {
             value.bytes[i] = bytes.get(i);
         }
     }
@@ -36,70 +36,82 @@ pub fn from_bytes<let L: u32>(bytes: [u8; L], len: u32) -> StringLane<L> {
     check_string(out);
     out
 }
-pub fn parts<let L: u32>(
+pub fn parts<let L: u32, let D: u32, let G: u32>(
     kind: u8,
     lexical: StringLane<L>,
-    datatype: StringLane<L>,
-    language: StringLane<L>,
-) -> TermParts<L> {
+    datatype: StringLane<D>,
+    language: StringLane<G>,
+) -> TermParts<L, D, G> {
     TermParts { kind, lexical, datatype, language }
 }
-pub fn kind_test<T, let L: u32, let D: u32, let G: u32>(
-    a: T,
-    error: bool,
+fn kind_test<T, let L: u32, let D: u32, let G: u32>(
+    input: (Lane<T>, bool),
     kind: u8,
 ) -> (Lane<bool>, bool)
 where
     T: CheckedLexicalOpening<L, D, G>,
 {
-    let a = read(a);
-    truth(a.cell.kind == kind, error | !a.cell.bound)
+    let (a, e, capacity) = read_input(input);
+    let error = e | !a.cell.bound();
+    (Lane { value: (a.cell.kind() == kind) & !error, capacity }, error)
 }
-pub fn is_iri<T, let L: u32, let D: u32, let G: u32>(a: T, e: bool) -> (Lane<bool>, bool)
+pub fn is_iri<T, let L: u32, let D: u32, let G: u32>(input: (Lane<T>, bool)) -> (Lane<bool>, bool)
 where
     T: CheckedLexicalOpening<L, D, G>,
 {
-    kind_test(a, e, KIND_IRI)
+    kind_test(input, KIND_IRI)
 }
-pub fn is_blank<T, let L: u32, let D: u32, let G: u32>(a: T, e: bool) -> (Lane<bool>, bool)
+pub fn is_blank<T, let L: u32, let D: u32, let G: u32>(input: (Lane<T>, bool)) -> (Lane<bool>, bool)
 where
     T: CheckedLexicalOpening<L, D, G>,
 {
-    kind_test(a, e, KIND_BLANK_NODE)
+    kind_test(input, KIND_BLANK_NODE)
 }
-pub fn is_literal<T, let L: u32, let D: u32, let G: u32>(a: T, e: bool) -> (Lane<bool>, bool)
+pub fn is_literal<T, let L: u32, let D: u32, let G: u32>(
+    input: (Lane<T>, bool),
+) -> (Lane<bool>, bool)
 where
     T: CheckedLexicalOpening<L, D, G>,
 {
-    kind_test(a, e, KIND_LITERAL)
+    kind_test(input, KIND_LITERAL)
 }
 pub fn str_value<T, let L: u32, let D: u32, let G: u32>(
-    a: T,
-    e: bool,
+    input: (Lane<T>, bool),
 ) -> (Lane<StringLane<L>>, bool)
 where
     T: CheckedLexicalOpening<L, D, G>,
 {
-    let a = read(a);
-    let error = e | !a.cell.bound | ((a.cell.kind != KIND_IRI) & (a.cell.kind != KIND_LITERAL));
-    (text(a.lexical), error)
+    let (a, e, capacity) = read_input(input);
+    let error =
+        e | !a.cell.bound() | ((a.cell.kind() != KIND_IRI) & (a.cell.kind() != KIND_LITERAL));
+    let mut out = text(a.lexical);
+    out.capacity = out.capacity | capacity;
+    (out, error)
 }
-pub fn lang<T, let L: u32, let D: u32, let G: u32>(a: T, e: bool) -> (Lane<StringLane<G>>, bool)
+pub fn lang<T, let L: u32, let D: u32, let G: u32>(
+    input: (Lane<T>, bool),
+) -> (Lane<StringLane<G>>, bool)
 where
     T: CheckedLexicalOpening<L, D, G>,
 {
-    let a = read(a);
-    (text(a.language), e | !a.cell.bound | (a.cell.kind != KIND_LITERAL))
+    let (a, e, capacity) = read_input(input);
+    let mut out = text(a.language);
+    out.capacity = out.capacity | capacity;
+    (out, e | !a.cell.bound() | (a.cell.kind() != KIND_LITERAL))
 }
-pub fn datatype<T, let L: u32, let D: u32, let G: u32>(a: T, e: bool) -> (Lane<TermParts<D>>, bool)
+pub fn datatype<T, let L: u32, let D: u32, let G: u32>(
+    input: (Lane<T>, bool),
+) -> (Lane<TermParts<D, 0, 0>>, bool)
 where
     T: CheckedLexicalOpening<L, D, G>,
 {
-    let a = read(a);
+    let (a, e, capacity) = read_input(input);
     let out = text(a.datatype);
     (
-        lane(parts(KIND_IRI, out.value, empty(), empty())),
-        e | !a.cell.bound | (a.cell.kind != KIND_LITERAL),
+        Lane {
+            value: parts(KIND_IRI, out.value, empty(), empty()),
+            capacity: capacity | out.capacity,
+        }, e | !a.cell.bound() | (a.cell.kind() != KIND_LITERAL),
     )
 }
 fn whitespace(b: u8) -> bool {
@@ -129,8 +141,8 @@ fn equals<let L: u32, let N: u32>(
 }
 // Lexical validity is separate from numeric capacity: isNumeric of a valid huge
 // integer or a high-precision decimal is true. Facet arithmetic saturates at u64.
-pub fn numeric_valid<let L: u32, let D: u32, let G: u32>(a: LexicalOpening<L, D, G>) -> bool {
-    let dt = a.cell.dt;
+fn numeric_valid<let L: u32, let D: u32, let G: u32>(a: LexicalOpening<L, D, G>) -> bool {
+    let dt = a.cell.datatype();
     let integer = (dt == DT_INTEGER)
         | (dt == DT_NONPOSITIVEINTEGER)
         | (dt == DT_NEGATIVEINTEGER)
@@ -205,7 +217,10 @@ pub fn numeric_valid<let L: u32, let D: u32, let G: u32>(a: LexicalOpening<L, D,
             } else if ((b == 43) | (b == 45))
                 & exp
                 & (i > i0)
-                & ((at(a.lexical, i - 1) == 69) | (at(a.lexical, i - 1) == 101)) {} else {
+                & (
+                    (at(a.lexical, if i > 0 { i - 1 } else { 0 }) == 69)
+                        | (at(a.lexical, if i > 0 { i - 1 } else { 0 }) == 101)
+                ) {} else {
                 valid = false;
             }
         }
@@ -267,15 +282,15 @@ pub fn numeric_valid<let L: u32, let D: u32, let G: u32>(a: LexicalOpening<L, D,
     }
     (integer | binary | (dt == DT_DECIMAL)) & valid
 }
-pub fn is_numeric<T, let L: u32, let D: u32, let G: u32>(a: T, e: bool) -> (Lane<bool>, bool)
+pub fn is_numeric<T, let L: u32, let D: u32, let G: u32>(
+    input: (Lane<T>, bool),
+) -> (Lane<bool>, bool)
 where
     T: CheckedLexicalOpening<L, D, G>,
 {
-    let a = read(a);
-    truth(
-        (a.cell.kind == KIND_LITERAL) & numeric_valid(a),
-        e | !a.cell.bound,
-    )
+    let (a, e, capacity) = read_input(input);
+    let error = e | !a.cell.bound();
+    (Lane { value: (a.cell.kind() == KIND_LITERAL) & numeric_valid(a) & !error, capacity }, error)
 }
 pub fn lang_matches<let L: u32, let M: u32>(
     a: (Lane<StringLane<L>>, bool),
@@ -323,21 +338,20 @@ pub fn lang_matches<let L: u32, let M: u32>(
     (Lane { value: result & !error, capacity: a.capacity | b.capacity }, error)
 }
 fn plain<let L: u32, let D: u32, let G: u32>(a: LexicalOpening<L, D, G>) -> bool {
-    (a.cell.kind == KIND_LITERAL) & (a.cell.dt == DT_STRING) & (a.language.len() == 0)
+    (a.cell.kind() == KIND_LITERAL) & (a.cell.datatype() == DT_STRING) & (a.language.len() == 0)
 }
 pub fn strdt<T, U, let L: u32, let D: u32, let G: u32, let N: u32, let E: u32, let H: u32>(
-    a: T,
-    b: U,
-    error: bool,
-) -> (Lane<TermParts<L>>, bool)
+    a: (Lane<T>, bool),
+    b: (Lane<U>, bool),
+) -> (Lane<TermParts<L, N, 0>>, bool)
 where
     T: CheckedLexicalOpening<L, D, G>,
     U: CheckedLexicalOpening<N, E, H>,
 {
-    let a = read(a);
-    let b = read(b);
-    let dt = text::<L, N>(b.lexical);
-    let err = error | !a.cell.bound | !b.cell.bound | !plain(a) | (b.cell.kind != KIND_IRI);
+    let (a, ae, ac) = read_input(a);
+    let (b, be, bc) = read_input(b);
+    let dt = text::<N, N>(b.lexical);
+    let err = ae | be | !a.cell.bound() | !b.cell.bound() | !plain(a) | (b.cell.kind() != KIND_IRI);
     (
         Lane {
             value: parts(
@@ -346,50 +360,32 @@ where
                 dt.value,
                 empty(),
             ),
-            capacity: dt.capacity,
+            capacity: ac | bc | dt.capacity,
         }, err,
     )
 }
 pub fn strlang<T, U, let L: u32, let D: u32, let G: u32, let N: u32, let E: u32, let H: u32>(
-    a: T,
-    b: U,
-    error: bool,
-) -> (Lane<TermParts<L>>, bool)
+    a: (Lane<T>, bool),
+    b: (Lane<U>, bool),
+) -> (Lane<TermParts<L, 53, N>>, bool)
 where
     T: CheckedLexicalOpening<L, D, G>,
     U: CheckedLexicalOpening<N, E, H>,
 {
-    let a = read(a);
-    let b = read(b);
-    let mut language = text::<L, N>(b.lexical);
-    let mut valid = b.lexical.len() > 0;
-    let mut first = true;
-    let mut segment = true;
+    let (a, ae, ac) = read_input(a);
+    let (b, be, bc) = read_input(b);
+    let mut language = text::<N, N>(b.lexical);
+    let valid = crate::expr_language::valid(b.lexical);
     for i in 0..N {
-        if i < b.lexical.len() {
-            let c = b.lexical.get(i);
-            let alpha = ((c >= 65) & (c <= 90)) | ((c >= 97) & (c <= 122));
-            if c == 45 {
-                valid = valid & segment;
-                segment = false;
-                first = false;
-            } else {
-                valid = valid & (alpha | (!first & digit(c)));
-                segment = true;
-            }
-        }
-    }
-    valid = valid & segment;
-    for i in 0..L {
         let c = language.value.bytes[i];
         if (i < language.value.len) & (c >= 65) & (c <= 90) {
             language.value.bytes[i] = c + 32;
         }
     }
-    let dt = text::<L, 53>(BoundedVec::from_array(
+    let dt = text::<53, 53>(BoundedVec::from_array(
         "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString".as_bytes(),
     ));
-    let err = error | !a.cell.bound | !b.cell.bound | !plain(a) | !plain(b) | !valid;
+    let err = ae | be | !a.cell.bound() | !b.cell.bound() | !plain(a) | !plain(b) | !valid;
     (
         Lane {
             value: parts(
@@ -398,7 +394,7 @@ where
                 dt.value,
                 language.value,
             ),
-            capacity: dt.capacity | language.capacity,
+            capacity: ac | bc | dt.capacity | language.capacity,
         }, err,
     )
 }
@@ -495,6 +491,52 @@ fn reference<let L: u32>(a: StringLane<L>) -> (bool, u32, u32, u32, u32, bool) {
     }
     (valid, scheme, path, stop, hash, authority)
 }
+// ASCII reference grammar. Bracketed hosts and non-ASCII references use an
+// explicit capacity channel until the upstream URI resolver provides validation.
+fn reference_shape<let L: u32>(a: StringLane<L>) -> (bool, bool) {
+    let (basic, scheme, path, stop, hash, authority) = reference(a);
+    let mut valid = basic;
+    let mut capacity = false;
+    let mut hashes: u32 = 0;
+    let host_begin = scheme + 2;
+    let mut at_count: u32 = 0;
+    let mut host = host_begin;
+    let mut brackets = false;
+    for i in 0..L {
+        if i < a.len {
+            let c = a.bytes[i];
+            capacity = capacity | (c >= 128);
+            if c == 35 {
+                hashes = hashes + 1;
+            }
+            if authority & (i >= host_begin) & (i < path) {
+                if c == 64 {
+                    at_count = at_count + 1;
+                    host = i + 1;
+                }
+                brackets = brackets | (c == 91) | (c == 93);
+            } else {
+                valid = valid & (c != 91) & (c != 93);
+            }
+        }
+    }
+    valid = valid & (hashes <= 1) & (at_count <= 1);
+    capacity = capacity | brackets;
+    let mut port = false;
+    for i in 0..L {
+        if authority & (i >= host) & (i < path) & !brackets {
+            let c = a.bytes[i];
+            if c == 58 {
+                valid = valid & !port;
+                port = true;
+            } else if port {
+                valid = valid & digit(c);
+            }
+        }
+    }
+    let _unused = (stop, hash);
+    (valid, capacity)
+}
 fn normalized_path<let L: u32>(p: StringLane<L>) -> Lane<StringLane<L>> {
     let mut out = empty();
     let mut cap = false;
@@ -548,18 +590,19 @@ fn normalized_path<let L: u32>(p: StringLane<L>) -> Lane<StringLane<L>> {
 // `base` is the public query base parameter. RFC reference resolution is bounded
 // by L, including dot-segment removal; no host-supplied resolved value is used.
 pub fn iri<T, let L: u32, let D: u32, let G: u32>(
-    a: T,
+    input: (Lane<T>, bool),
     base: StringLane<L>,
-    error: bool,
-) -> (Lane<TermParts<L>>, bool)
+) -> (Lane<TermParts<L, 0, 0>>, bool)
 where
     T: CheckedLexicalOpening<L, D, G>,
 {
-    let a = read(a);
+    let (a, error, input_capacity) = read_input(input);
     check_string(base);
     let source = text::<L, L>(a.lexical).value;
     let (valid, scheme, path, end, hash, auth) = reference(source);
     let (base_valid, base_scheme, base_path, base_end, base_hash, _) = reference(base);
+    let (source_shape, source_capacity) = reference_shape(source);
+    let (base_shape, base_capacity) = reference_shape(base);
     let mut out = empty();
     let mut p = empty();
     let mut cap = false;
@@ -604,10 +647,60 @@ where
     copy_range(&mut out, p.value, 0, p.value.len, &mut cap);
     copy_range(&mut out, query, query_start, query_end, &mut cap);
     copy_range(&mut out, source, hash, source.len, &mut cap);
+    let identity = a.cell.kind() == KIND_IRI;
     let err = error
-        | !a.cell.bound
-        | !((a.cell.kind == KIND_IRI) | plain(a))
-        | !valid
-        | ((scheme == 0) & (!base_valid | (base_scheme == 0)));
-    (Lane { value: parts(KIND_IRI, out, empty(), empty()), capacity: cap }, err)
+        | !a.cell.bound()
+        | (
+            !identity
+                & (
+                    !plain(a)
+                        | !valid
+                        | !source_shape
+                        | ((scheme == 0) & (!base_valid | !base_shape | (base_scheme == 0)))
+                )
+        );
+    (
+        Lane {
+            value: parts(
+                KIND_IRI,
+                if identity { source } else { out },
+                empty(),
+                empty(),
+            ),
+            capacity: input_capacity
+                | (!identity & !err & (cap | source_capacity | ((scheme == 0) & base_capacity))),
+        }, err,
+    )
+}
+
+// Computed numeric results already carry their primitive datatype. This avoids
+// requiring floating lexical serialization to implement DATATYPE(arithmetic).
+pub fn numeric_datatype(
+    input: (Lane<crate::expr_core::Numeric>, bool),
+) -> (Lane<TermParts<40, 0, 0>>, bool) {
+    let (a, e) = input;
+    let n = if e {
+        crate::expr_core::zero_numeric()
+    } else {
+        a.value
+    };
+    crate::expr_core::check_numeric(n);
+    let lexical = if n.ty == crate::expr_core::INTEGER {
+        text::<40, 40>(BoundedVec::from_array("http://www.w3.org/2001/XMLSchema#integer".as_bytes()))
+            .value
+    } else if n.ty == crate::expr_core::DECIMAL {
+        text::<40, 40>(BoundedVec::from_array("http://www.w3.org/2001/XMLSchema#decimal".as_bytes()))
+            .value
+    } else if n.ty == crate::expr_core::FLOAT {
+        text::<40, 38>(
+            BoundedVec::from_array("http://www.w3.org/2001/XMLSchema#float".as_bytes()),
+        )
+            .value
+    } else {
+        text::<40, 39>(
+            BoundedVec::from_array("http://www.w3.org/2001/XMLSchema#double".as_bytes()),
+        )
+            .value
+    };
+    (Lane { value: parts(KIND_IRI, lexical, empty(), empty()), capacity: a.capacity }, e)
 }
