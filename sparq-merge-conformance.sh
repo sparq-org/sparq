@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Merges sparq #7341, #7348 and #7350 (squash), each pinned to its reviewed head.
-# For each PR it first resolves the review threads that already have a reply (the bot
-# findings, each answered on the PR), and marks #7350 ready. Already-merged PRs are skipped.
+# Merges sparq #7341 and #7348 (squash), each pinned to its reviewed head, after resolving
+# the review threads that already have a reply (the bot findings, each answered on the PR).
+# Then marks #7350 ready without merging it: its zk exact-evaluator lane only runs on a
+# non-draft head and must pass before #7350 merges. Already-done steps are skipped.
 set -euo pipefail
 repo=sparq-org/sparq
 
@@ -27,6 +28,7 @@ merge 7341 340632b3b884ca3b8e25a10d642ae5e0c951b2d2 "fix(jsonld): process HTML a
   "Processes HTML script elements and remote documents in sparq-jsonld, and reports Graph ingest separately from the API suites. Addresses #7326."
 merge 7348 1a519205ac429dae5ea224f79c21d55faf077279 "feat(shacl): support SHACL 1.2 node-expression forms" \
   "Evaluates the SHACL 1.2 node-expression forms in both feature states, sharing one evaluator with SHACL-AF rules. Addresses #7326."
-merge 7350 e28bf24da80708a00e4ef6a5ec6a186ff6e26211 "feat(vc): verify presentations, related resources and proof chains for the W3C suites" \
-  "Verifies presentations, related-resource digests and previousProof chains in the VC-API endpoint, and meters RDFC permutations per candidate. Addresses #7349."
+# #7350: ready only. Its merge comes in a later line, once zk-exact-evaluator is green.
+resolve_answered_threads 7350
+if [ "$(gh api "repos/$repo/pulls/7350" --jq .draft)" = true ]; then gh pr ready 7350 -R "$repo"; fi
 echo "All done."
