@@ -75,10 +75,7 @@ pub fn same_term(a: (Lane<TermCell>, bool), b: (Lane<TermCell>, bool)) -> (Lane<
     let (a, ae) = a;
     let (b, be) = b;
     let error = ae | be | !a.value.bound | !b.value.bound;
-    (
-        Lane { value: (a.value.enc == b.value.enc) & !error, capacity: a.capacity | b.capacity },
-        error,
-    )
+    (Lane { value: identity(a.value, b.value) & !error, capacity: a.capacity | b.capacity }, error)
 }
 
 // Explicit byte lengths preserve U+0000. The upstream str<N> comparison infers
@@ -151,11 +148,11 @@ pub fn value_compare<let L: u32>(
             op,
         );
     } else if op == EQ {
-        let identical = x.term.enc == y.term.enc;
+        let identical = identity(x.term, y.term);
         // Specific datatype mappings above take precedence, including NaN and
         // invalid lexical forms. Only the RDF-term fallback uses identity.
         value = identical;
-        error = error | ((x.term.kind == 2) & (y.term.kind == 2) & !identical);
+        error = error | ((x.term.kind == 3) & (y.term.kind == 3) & !identical);
     } else {
         error = true;
     }
@@ -176,4 +173,8 @@ pub fn not_in_list<let L: u32, let N: u32>(
     args: [(Lane<Scalar<L>>, bool); N],
 ) -> (Lane<bool>, bool) {
     logical_not(in_list(lhs, args))
+}
+
+fn identity(a: TermCell, b: TermCell) -> bool {
+    (a.enc == b.enc) & ((a.kind != 2) | (a.credential == b.credential))
 }

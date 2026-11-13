@@ -1,4 +1,4 @@
-//! Pass-one expression IR. The plan layer supplies variable slots and static types.
+//! Expression IR. The plan layer supplies variable slots and static types.
 //! Values and numeric bounds belong to public inputs; gadget structure is compiled.
 use std::collections::BTreeMap;
 use std::fmt;
@@ -78,10 +78,22 @@ impl ExprOp {
 /// Neutral tree for integration with the canonical query plan.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Expr {
-    Variable { slot: u32, ty: LaneType },
+    Variable {
+        slot: u32,
+        ty: LaneType,
+    },
     Constant(Term),
-    Bound { slot: u32 },
-    Call { op: ExprOp, args: Vec<Expr> },
+    /// A constrained boolean from the correlated-subquery lane.
+    BooleanInput {
+        slot: u32,
+    },
+    Bound {
+        slot: u32,
+    },
+    Call {
+        op: ExprOp,
+        args: Vec<Expr>,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -113,10 +125,12 @@ pub struct PublicConstant {
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum Gadget {
     Variable(u32),
+    BooleanInput(u32),
     PublicInput(u32),
     Bound(u32),
     Ebv,
     AsNumeric,
+    /// Retain an existing cell; serialize only a newly computed typed value.
     ToTerm,
     Call(ExprOp),
 }
@@ -177,6 +191,27 @@ pub fn promote(a: LaneType, b: LaneType, division: bool) -> LaneType {
     }
 }
 
+/// Lower BIND for computed boolean, integer and decimal results.
+pub fn lower_bind(expr: &Expr) -> Result<TypedDag, Refusal> {
+    let mut dag = lower(expr)?;
+    if !matches!(
+        dag.nodes[dag.root].ty,
+        LaneType::Boolean | LaneType::Integer | LaneType::Decimal
+    ) {
+        return Err(refuse(
+            "BIND",
+            "computed result type is outside this term-construction bucket",
+        ));
+    }
+    dag.nodes.push(Node {
+        gadget: Gadget::ToTerm,
+        inputs: vec![dag.root],
+        ty: LaneType::Term,
+    });
+    dag.root = dag.nodes.len() - 1;
+    Ok(dag)
+}
+
 pub fn lower(expr: &Expr) -> Result<TypedDag, Refusal> {
     let mut builder = Builder {
         nodes: Vec::new(),
@@ -212,6 +247,9 @@ impl Builder {
     fn expr(&mut self, expr: &Expr) -> Result<usize, Refusal> {
         match expr {
             Expr::Variable { slot, ty } => Ok(self.node(Gadget::Variable(*slot), vec![], *ty)),
+            Expr::BooleanInput { slot } => {
+                Ok(self.node(Gadget::BooleanInput(*slot), vec![], LaneType::Boolean))
+            }
             Expr::Bound { slot } => Ok(self.node(Gadget::Bound(*slot), vec![], LaneType::Boolean)),
             Expr::Constant(value) => {
                 let ty = constant_type(value);
@@ -304,6 +342,16 @@ pub fn from_spargebra(
     expr: &Expression,
     slots: &BTreeMap<String, (u32, LaneType)>,
 ) -> Result<Expr, Refusal> {
+    from_spargebra_with_boolean_inputs(expr, slots, &[])
+}
+
+/// Match correlated EXISTS subplans to constrained boolean input slots from lane C.
+/// The caller owns correlation and completeness; this layer only combines their values.
+pub fn from_spargebra_with_boolean_inputs(
+    expr: &Expression,
+    slots: &BTreeMap<String, (u32, LaneType)>,
+    booleans: &[(spargebra::algebra::GraphPattern, u32)],
+) -> Result<Expr, Refusal> {
     let slot = |name: &str| {
         slots
             .get(name)
@@ -315,7 +363,7 @@ pub fn from_spargebra(
             op,
             args: args
                 .into_iter()
-                .map(|a| from_spargebra(a, slots))
+                .map(|a| from_spargebra_with_boolean_inputs(a, slots, booleans))
                 .collect::<Result<_, _>>()?,
         })
     };
@@ -359,6 +407,10 @@ pub fn from_spargebra(
             let _ = args;
             Err(refuse(&name, "outside the first expression group"))
         }
-        E::Exists(_) => Err(refuse("EXISTS", "outside the first expression group")),
+        E::Exists(pattern) => booleans
+            .iter()
+            .find(|(p, _)| p == pattern.as_ref())
+            .map(|(_, slot)| Expr::BooleanInput { slot: *slot })
+            .ok_or_else(|| refuse("EXISTS", "no constrained boolean input for this subplan")),
     }
 }

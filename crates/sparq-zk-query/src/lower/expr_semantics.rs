@@ -246,9 +246,54 @@ fn is_numeric(ty: LaneType) -> bool {
         LaneType::Integer | LaneType::Decimal | LaneType::Float | LaneType::Double
     )
 }
+fn date_value(term: &Term) -> std::result::Result<(u32, u32, u32), Error> {
+    let Term::Literal(literal) = term else {
+        return Err(Error::Sparql);
+    };
+    let s = literal.value().as_bytes();
+    if s.len() != 10 {
+        return Err(Error::Capacity);
+    }
+    if s[4] != b'-'
+        || s[7] != b'-'
+        || !s
+            .iter()
+            .enumerate()
+            .all(|(i, b)| i == 4 || i == 7 || b.is_ascii_digit())
+    {
+        return Err(Error::Sparql);
+    }
+    let parse = |a, b| {
+        literal.value()[a..b]
+            .parse::<u32>()
+            .map_err(|_| Error::Sparql)
+    };
+    let (y, m, d) = (parse(0, 4)?, parse(5, 7)?, parse(8, 10)?);
+    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    let days = match m {
+        2 => {
+            if leap {
+                29
+            } else {
+                28
+            }
+        }
+        4 | 6 | 9 | 11 => 30,
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        _ => 0,
+    };
+    if y == 0 || d == 0 || d > days {
+        return Err(Error::Sparql);
+    }
+    Ok((y, m, d))
+}
+
 fn compare(a: &Term, b: &Term, op: &ExprOp) -> std::result::Result<bool, Error> {
     let at = constant_type(a);
     let bt = constant_type(b);
+    if at == LaneType::Date && bt == LaneType::Date {
+        return Ok(relation(date_value(a)?, date_value(b)?, op));
+    }
     if is_numeric(at) && is_numeric(bt) {
         let x = number(a)?;
         let y = number(b)?;
@@ -359,6 +404,15 @@ fn logical(
 }
 pub(super) fn eval(expr: &Expr, vars: &BTreeMap<u32, Term>) -> Result {
     match expr {
+        Expr::BooleanInput { slot } => {
+            let Some(Term::Literal(value)) = vars.get(slot) else {
+                return Err(Error::Sparql);
+            };
+            if value.datatype().as_str() != format!("{XSD}boolean") {
+                return Err(Error::Sparql);
+            }
+            boolean(value).map(bool_term)
+        }
         Expr::Constant(t) => Ok(t.clone()),
         Expr::Variable { slot, .. } => vars.get(slot).cloned().ok_or(Error::Sparql),
         Expr::Bound { slot } => Ok(bool_term(vars.contains_key(slot))),
