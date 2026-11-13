@@ -7,7 +7,13 @@ rust-version.workspace = true
 description = "Research bounded SPARQL query compiler for Noir"
 publish = false
 
+[features]
+default = []
+ordered-json = ["serde_json/preserve_order"]
+
 [dependencies]
+sparq-merkle-suite = { path = "../sparq-merkle-suite" }
+oxttl = { workspace = true }
 sparq-zk-compose = { path = "../sparq-zk-compose" }
 sparq-zk = { path = "../sparq-zk" }
 blake3 = "1"
@@ -22,7 +28,6 @@ spargebra = { workspace = true }
 sparq-query-protocol = { path = "../sparq-query-protocol" }
 
 [dev-dependencies]
-serde_json = { version = "1", features = ["preserve_order"] }
 oxttl = { workspace = true }
 sparq-core = { path = "../sparq-core" }
 sparq-engine = { path = "../sparq-engine" }

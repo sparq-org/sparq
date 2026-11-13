@@ -1,4 +1,4 @@
-//! Stored request profile for the draft supplied-cell integration.
+//! Verifier-stored query and issuer policy for the research suite profile.
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use oxrdf::{Literal, NamedNode};
@@ -17,7 +17,8 @@ use crate::{
 
 pub const METHOD: &str = "urn:sparq:vcq:method:noir-query:v1";
 pub const DIALECT: &str = "urn:sparq:sparql11";
-pub const PROFILE: &str = "urn:sparq:vcq:noir-query:supplied-cells:v1";
+pub const PROFILE: &str = "urn:sparq:vcq:noir-query:poseidon2-cells:v1";
+pub const SUITE: &str = "urn:sparq:cryptosuite:schnorr-poseidon2-merkle-2026";
 const BACKEND: &str = "urn:sparq:noir:beta.21:bb:5.0.0-nightly.20260324";
 const VCQ: &str = "https://w3id.org/sparq/vcq#";
 
@@ -29,12 +30,17 @@ pub struct Request {
     key: Vec<u8>,
     digest: [u8; 32],
     canonical_rdf: String,
+    issuer_root: Option<[u8; 32]>,
+    credential_quad_bounds: Vec<u32>,
 }
 
 pub fn descriptor(plan: &Plan, key: &[u8]) -> Result<MethodDescriptor, Error> {
     let mut parameters = plan.hash().to_vec();
     let b = plan.bounds();
-    for n in [b.credentials, b.quads_per_credential, b.rows_per_table] {
+    for n in [b.credentials, b.quads_per_credential, b.rows_per_table]
+        .into_iter()
+        .chain(plan.credential_quad_bounds())
+    {
         parameters.extend(n.to_be_bytes());
     }
     MethodDescriptor::new(
@@ -52,10 +58,44 @@ pub fn descriptor(plan: &Plan, key: &[u8]) -> Result<MethodDescriptor, Error> {
 
 impl Request {
     pub fn new(stored: StoredRequest, bounds: Bounds, key: Vec<u8>) -> Result<Self, Error> {
+        Self::new_inner(stored, bounds, key, None, None)
+    }
+    /// Store the verifier's authoritative issuer-set root, never a presentation value.
+    pub fn new_authenticated(
+        stored: StoredRequest,
+        bounds: Bounds,
+        key: Vec<u8>,
+        issuer_root: [u8; 32],
+    ) -> Result<Self, Error> {
+        crate::credential::field(issuer_root)?;
+        Self::new_inner(stored, bounds, key, Some(issuer_root), None)
+    }
+    /// Store distinct public quad limits for the ordered credential slots.
+    pub fn new_authenticated_with_quad_bounds(
+        stored: StoredRequest,
+        bounds: Bounds,
+        key: Vec<u8>,
+        issuer_root: [u8; 32],
+        quad_bounds: &[u32],
+    ) -> Result<Self, Error> {
+        crate::credential::field(issuer_root)?;
+        Self::new_inner(stored, bounds, key, Some(issuer_root), Some(quad_bounds))
+    }
+    fn new_inner(
+        stored: StoredRequest,
+        bounds: Bounds,
+        key: Vec<u8>,
+        issuer_root: Option<[u8; 32]>,
+        quad_bounds: Option<&[u32]>,
+    ) -> Result<Self, Error> {
         if key.is_empty() {
             return Err(Error::Invalid("verification key".into()));
         }
-        let plan = lower(stored.query(), bounds)?;
+        let mut plan = lower(stored.query(), bounds)?;
+        if let Some(quad_bounds) = quad_bounds {
+            plan = plan.with_credential_quad_bounds(quad_bounds)?;
+        }
+        let credential_quad_bounds = plan.credential_quad_bounds();
         let requirements = stored.requirements();
         if stored.base_iri().is_some() {
             return Err(Error::Excluded("external base IRI".into()));
@@ -63,7 +103,18 @@ impl Request {
         if requirements.mode() != EvaluationMode::ExactBounded {
             return Err(Error::Unsupported("evaluation mode".into()));
         }
-        if requirements.source_evidence() != SourceEvidence::None {
+        if issuer_root.is_some() {
+            if requirements.source_evidence() != SourceEvidence::IssuerAuthenticated
+                || !requirements
+                    .accepted_suites()
+                    .iter()
+                    .any(|s| s.as_str() == SUITE)
+            {
+                return Err(Error::Unsupported(
+                    "authenticated credential suite policy".into(),
+                ));
+            }
+        } else if requirements.source_evidence() != SourceEvidence::None {
             return Err(Error::Unsupported("credential suite opening".into()));
         }
         if requirements.status() != StatusPolicy::NotRequested {
@@ -100,7 +151,7 @@ impl Request {
         if requirements.methods() != [descriptor(&plan, &key)?] {
             return Err(Error::Invalid("method descriptor".into()));
         }
-        let canonical_rdf = canonical_request(&stored, bounds, &plan, &key)?;
+        let canonical_rdf = canonical_request(&stored, bounds, &plan, &key, issuer_root)?;
         let digest = Sha256::digest(canonical_rdf.as_bytes()).into();
         Ok(Self {
             stored,
@@ -108,7 +159,13 @@ impl Request {
             key,
             digest,
             canonical_rdf,
+            issuer_root,
+            credential_quad_bounds,
         })
+    }
+    pub fn issuer_root(&self) -> Result<[u8; 32], Error> {
+        self.issuer_root
+            .ok_or_else(|| Error::Unsupported("authenticated issuer policy required".into()))
     }
     pub fn stored(&self) -> &StoredRequest {
         &self.stored
@@ -127,7 +184,8 @@ impl Request {
         &self.canonical_rdf
     }
     pub(crate) fn plan(&self) -> Result<Plan, Error> {
-        lower(self.stored.query(), self.bounds)
+        lower(self.stored.query(), self.bounds)?
+            .with_credential_quad_bounds(&self.credential_quad_bounds)
     }
 }
 
@@ -136,6 +194,7 @@ fn canonical_request(
     b: Bounds,
     plan: &Plan,
     key: &[u8],
+    issuer_root: Option<[u8; 32]>,
 ) -> Result<String, Error> {
     let mut rdf = String::new();
     let mut triple = |subject: &str, predicate: &str, object: String| {
@@ -170,9 +229,13 @@ fn canonical_request(
     let mut parameters = serde_json::json!({
         "bounds": {"credentials":b.credentials, "quadsPerCredential":b.quads_per_credential,"rowsPerTable":b.rows_per_table},
         "planHash": URL_SAFE_NO_PAD.encode(plan.hash()), "profile":PROFILE,
+        "credentialQuadBounds":plan.credential_quad_bounds(),
         "storedRequestEncoding":sparq_query_protocol::LOCAL_ENCODING_PROFILE,
         "storedRequest":URL_SAFE_NO_PAD.encode(sparq_query_protocol::encode_stored_request(stored)),
     });
+    if let Some(root) = issuer_root {
+        parameters["issuerRoot"] = serde_json::json!(URL_SAFE_NO_PAD.encode(root));
+    }
     // This parameter schema contains only strings and bounded integers. Sort
     // both objects explicitly for its canonical RDF JSON lexical form.
     parameters["bounds"].as_object_mut().unwrap().sort_keys();

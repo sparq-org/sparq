@@ -239,7 +239,7 @@ fn corpus_cases_execute_with_engine_expected_result_and_altered_witness_controls
             .unwrap_or_else(|e| panic!("{}: {e}", fixture["id"]));
         assert_expected(&trace, fixture);
         fixture_support::assert_engine(query, &rdf, &trace.result);
-        let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+        let package = sparq_zk_query::codegen::generate_operator_fixture(&plan).unwrap();
         let workspace = Workspace::new(&package);
         let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
         let input = prover_toml(&plan, &data, &FixtureEncoder, &trace, [7; 32], [3; 32]).unwrap();

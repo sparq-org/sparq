@@ -107,6 +107,7 @@ pub enum ResultForm {
 pub struct Plan {
     pub(crate) bounds: Bounds,
     pub(crate) capacity: Capacity,
+    pub(crate) credential_quad_bounds: Vec<u32>,
     pub(crate) nodes: Vec<Node>,
     pub(crate) parameters: Vec<Parameter>,
     pub(crate) variable_names: Vec<String>,
@@ -115,6 +116,42 @@ pub struct Plan {
 }
 
 impl Plan {
+    /// Refine public per-credential bounds without using private cardinalities.
+    pub fn with_credential_quad_bounds(mut self, bounds: &[u32]) -> Result<Self, crate::Error> {
+        if bounds.len() != self.bounds.credentials as usize
+            || bounds
+                .iter()
+                .any(|&n| n == 0 || n > self.bounds.quads_per_credential)
+        {
+            return Err(crate::Error::Capacity("per-credential quad bounds".into()));
+        }
+        self.credential_quad_bounds = bounds.to_vec();
+        Ok(self)
+    }
+    pub fn credential_quad_bounds(&self) -> Vec<u32> {
+        if self.credential_quad_bounds.is_empty() {
+            vec![self.bounds.quads_per_credential; self.bounds.credentials as usize]
+        } else {
+            self.credential_quad_bounds.clone()
+        }
+    }
+    pub fn credential_quad_capacities(&self) -> Vec<u32> {
+        let mut capacities: Vec<_> = self
+            .credential_quad_bounds()
+            .into_iter()
+            .map(|n| {
+                crate::capacity::Bounds {
+                    quads_per_credential: n,
+                    ..self.bounds
+                }
+                .capacity()
+                .expect("validated bounds")
+                .quads_per_credential
+            })
+            .collect();
+        capacities.resize(self.capacity.credentials as usize, 4);
+        capacities
+    }
     pub fn bounds(&self) -> Bounds {
         self.bounds
     }
@@ -143,12 +180,15 @@ impl Plan {
     /// Length-prefixed, tagged, little-endian shape encoding. No serializer defaults.
     /// Parameter kinds and occurrence positions are encoded; their values are not.
     pub fn canonical_bytes(&self) -> Vec<u8> {
-        let mut w = Encoding(b"sparq.noir-query.plan\0\x01".to_vec());
+        let mut w = Encoding(b"sparq.noir-query.plan\0\x02".to_vec());
         for n in [
             self.capacity.credentials,
             self.capacity.quads_per_credential,
             self.capacity.rows_per_table,
         ] {
+            w.u32(n);
+        }
+        for n in self.credential_quad_capacities() {
             w.u32(n);
         }
         w.u8(match self.form {

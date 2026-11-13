@@ -31,7 +31,7 @@ pub fn check_dataset<let C: u32, let N: u32>(
         let encoded: [u8; 32] = message.to_be_bytes();
         for i in 0..32 { bytes[48 + c * 32 + i] = if c < credential_count { encoded[i] } else { 0 }; }
     }
-    let digest = sha256::sha256_var(bytes, 48 + credential_count * 32);
+    let digest = hash_sha256::sha256_var(bytes, 48 + credential_count * 32);
     assert(digest == input_commitment, "dataset commitment");
 }
 
@@ -67,4 +67,43 @@ pub fn bind_ask<let P: u32, let I: u32>(
 ) {
     let state = h2(prefix(request_digest, input_commitment, signature_mode, bounds, parameters, indices), result as Field);
     assert(state == statement_binding, "statement binding");
+}
+
+global SUITE_DATASET_DOMAIN: [u8; 16] = [78,81,47,83,85,73,84,69,47,86,49,0,0,0,0,0];
+
+pub fn check_suite_dataset<let C: u32>(messages: [Field; C], count: u32, salt: [u8; 32], commitment: [u8; 32]) {
+    assert(count <= C, "credential count");
+    let mut bytes: [u8; 48 + C * 32] = [0; 48 + C * 32];
+    for i in 0..16 { bytes[i] = SUITE_DATASET_DOMAIN[i]; }
+    for i in 0..32 { bytes[16 + i] = salt[i]; }
+    for c in 0..C {
+        assert((c < count) | (messages[c] == 0), "message padding");
+        let encoded: [u8; 32] = messages[c].to_be_bytes();
+        for i in 0..32 { bytes[48 + c * 32 + i] = encoded[i]; }
+    }
+    assert(hash_sha256::sha256_var(bytes, 48 + count * 32) == commitment, "suite dataset commitment");
+}
+
+pub fn bind_select_authenticated<let C: u32, let P: u32, let I: u32, let R: u32, let V: u32>(
+    issuer_root: Field, credential_quad_bounds: [u32; C], request_digest: [u8; 32], input_commitment: [u8; 32], signature_mode: u8,
+    bounds: [u32; 3], parameters: [TermCell; P], indices: [u32; I],
+    result: Table<R, V>, statement_binding: Field,
+) {
+    let mut state = prefix(request_digest, input_commitment, signature_mode, bounds, parameters, indices);
+    for row in result.rows { for cell in row { state = absorb_cell(state, cell); } }
+    state = h2(state, result.len as Field);
+    let mut state = h2(state, issuer_root);
+    for bound in credential_quad_bounds { state = h2(state, bound as Field); }
+    assert(state == statement_binding, "authenticated statement binding");
+}
+
+pub fn bind_ask_authenticated<let C: u32, let P: u32, let I: u32>(
+    issuer_root: Field, credential_quad_bounds: [u32; C], request_digest: [u8; 32], input_commitment: [u8; 32], signature_mode: u8,
+    bounds: [u32; 3], parameters: [TermCell; P], indices: [u32; I],
+    result: bool, statement_binding: Field,
+) {
+    let state = h2(prefix(request_digest, input_commitment, signature_mode, bounds, parameters, indices), result as Field);
+    let mut state = h2(state, issuer_root);
+    for bound in credential_quad_bounds { state = h2(state, bound as Field); }
+    assert(state == statement_binding, "authenticated statement binding");
 }

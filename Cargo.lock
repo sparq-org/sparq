@@ -6206,6 +6206,7 @@ dependencies = [
  "sparq-canon",
  "sparq-core",
  "sparq-engine",
+ "sparq-merkle-suite",
  "sparq-query-protocol",
  "sparq-spargebra",
  "sparq-zk",

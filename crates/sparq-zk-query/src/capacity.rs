@@ -33,7 +33,7 @@ impl Bounds {
             credentials: bucket(self.credentials, &[1, 2, 4], "credentials")?,
             quads_per_credential: bucket(
                 self.quads_per_credential,
-                &[4, 16, 64, 256],
+                &[4, 8, 16, 64],
                 "quads per credential",
             )?,
             rows_per_table: bucket(self.rows_per_table, &[2, 4, 8, 16, 32], "rows per table")?,

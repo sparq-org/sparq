@@ -36,8 +36,13 @@ independent verifier reconstruction, and checks the locally compiled ABI before
 key creation. The generated main has no public return value. Intermediate tables,
 complete credential cells and the presentation salt are private. The statement
 binding absorbs every public word in ABI order through the shared Poseidon sponge.
-The credential opening and supplied-cell commitment remain the programme's
-explicit draft stand-in until the suite's authenticated messages are integrated.
+The production opening delegates lexical binding, key recomputation, complete
+credential roots and hidden signatures to the shared suite library. Its private
+issuer membership path uses the existing compose relation and host helpers.
+The verifier-stored issuer root and ordered per-credential quad limits follow the
+result in the public layout. The dataset commitment hashes the ordered signed
+suite messages under a private presentation salt. Operator fixtures retain a
+separate supplied-cell relation without an authentication claim.
 
 The request wrapper materializes a query request as RDF and hashes its RDFC
 canonical N-Quads. Its method parameters include the plan hash, exact public bounds,
@@ -47,8 +52,10 @@ as RDF canonicalization. The exact native key is a request property. The holder
 refuses a mismatch before evaluating private cells. The verifier uses its stored
 query, key and parameter values, independently encodes the released RDF terms,
 checks dataset agreement and freshness, and consumes the original shared protocol
-challenge last. Unsupported suite, status and holder policies are named refusals
-in the draft profile. Lane E supplies the public adapter and envelope.
+challenge last. The authenticated constructor requires the supported suite and issuer-authenticated
+source policy. Unsupported status and holder policies are named refusals.
+Lane E supplies the public adapter and envelope. The structural request constructor
+cannot satisfy the authenticated proof path without a stored issuer root.
 
 The cache is indexed by plan shape and invalidated by a fingerprint of the trusted
 library sources and pinned dependency declarations. It compiles from private source
@@ -69,15 +76,23 @@ lifecycle, filename validation and pinned-version matcher. Verification keys are
 derived from local generated source. The composed manifest is superseded by the
 query method.
 
-The pinned Node compiler measurement did not complete on the unmodified generated
-program and library sources: nested hash-library modules were not resolved. Node
-key creation from the native ACIR, with the explicit Wasm backend and prefetched
-dependencies, produced the native key. This does not establish combined Node
-compilation identity. Following the design's fallback, Node delivery uses
-precompiled published shapes and native compilation for new shapes. The delivery
-package is outside this lane.
+The native and WebAssembly compiler experiment agrees on bytecode and independently
+created verification keys for the initial operator programs. The dependency alias
+for SHA differs from its nested module basename so the unmodified WebAssembly
+resolver loads the same tagged source as the native compiler. Domain, datatype
+and suite identifiers are literals checked against Rust computations. Authenticated
+programs are subject to the same comparison before a delivery choice is fixed.
+The delivery package is outside this lane.
 
 The admitted table ceiling follows complete native compilation measurements for
 the core operators. A larger join probe did not complete on the lane machine,
 including a serial retry, so requests above the validated ceiling receive a named
 capacity refusal. No result is truncated to fit that ceiling.
+
+Credential slots can have distinct quad buckets selected from verifier-declared
+limits. The shape hash includes each compiled bucket in slot order, while exact
+limits are public parameters bound into the request and statement. Generated
+programs declare each credential at its own type and call library assembly gadgets;
+the generator emits no padding, filtering or authentication constraints inline.
+The credential bucket includes the Solid acceptance paths. A larger quad bucket
+without practical proof evidence is not offered.

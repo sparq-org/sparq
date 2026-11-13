@@ -99,6 +99,13 @@ pub fn evaluate(
             .map(|c| c.quads.len())
             .collect::<Vec<_>>(),
     )?;
+    if credentials
+        .iter()
+        .zip(plan.credential_quad_bounds())
+        .any(|(c, b)| c.quads.len() > b as usize)
+    {
+        return Err(Error::Capacity("per-credential quad count".into()));
+    }
     let params: Vec<Option<Cell>> = plan
         .parameters
         .iter()
@@ -324,9 +331,15 @@ impl Value {
                 1 => {
                     let mut zero = [0; 32];
                     zero[2] = 0x80;
+                    let mut full_zero = zero;
+                    full_zero[1] = 1;
+                    (c.key != full_zero, false)
+                }
+                5 | 6 => {
+                    let mut zero = [0; 32];
+                    zero[1] = c.key_class;
                     (c.key != zero, false)
                 }
-                5 | 6 => (c.key != [0; 32], false),
                 7 => (true, false),
                 2 => {
                     return Err(Error::Unsupported(
@@ -338,6 +351,15 @@ impl Value {
             },
         })
     }
+}
+
+fn plain_string(c: Cell) -> bool {
+    c.lang == [0; 32]
+        || c.dt
+            == sparq_merkle_suite::poseidon::field_bytes(sparq_merkle_suite::poseidon::hash_bytes(
+                sparq_merkle_suite::poseidon::DATATYPE_DOMAIN,
+                b"http://www.w3.org/2001/XMLSchema#string",
+            ))
 }
 
 fn compare(op: Compare, a: Value, b: Value) -> Result<Value, Error> {
@@ -371,18 +393,18 @@ fn compare(op: Compare, a: Value, b: Value) -> Result<Value, Error> {
         return Err(Error::Unsupported("floating-point comparison".into()));
     }
     if a.kind == 3 && b.kind == 3 {
-        if matches!(a.key_class, 3 | 4) && matches!(b.key_class, 3 | 4) && a.dt != b.dt {
+        if matches!(a.key_class, 3 | 4 | 8) && matches!(b.key_class, 3 | 4 | 8) && a.dt != b.dt {
             return Err(Error::Unsupported("mixed temporal datatypes".into()));
         }
         if op != Compare::Equal
             && matches!(a.key_class, 6 | 7)
             && matches!(b.key_class, 6 | 7)
-            && (a.lang != [0; 32] || b.lang != [0; 32])
+            && ((!plain_string(a)) || (!plain_string(b)))
         {
             return Err(Error::Unsupported("language-tagged string ordering".into()));
         }
-        if matches!(a.key_class, 3 | 4)
-            && matches!(b.key_class, 3 | 4)
+        if matches!(a.key_class, 3 | 4 | 8)
+            && matches!(b.key_class, 3 | 4 | 8)
             && a.key_class != b.key_class
         {
             return Err(Error::Unsupported("mixed timezone comparison".into()));
@@ -402,7 +424,7 @@ fn compare(op: Compare, a: Value, b: Value) -> Result<Value, Error> {
     if a.kind == 3
         && b.kind == 3
         && a.key_class == b.key_class
-        && matches!(a.key_class, 1 | 3 | 4 | 5 | 6)
+        && matches!(a.key_class, 1 | 3 | 4 | 8 | 5 | 6)
     {
         return Ok(Value::Boolean(
             match op {

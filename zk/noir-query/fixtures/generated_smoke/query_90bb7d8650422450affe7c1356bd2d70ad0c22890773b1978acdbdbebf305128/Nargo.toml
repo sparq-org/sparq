@@ -1,0 +1,8 @@
+[package]
+name = "query_90bb7d8650422450affe7c1356bd2d70ad0c22890773b1978acdbdbebf305128"
+type = "bin"
+authors = ["sparq"]
+compiler_version = ">=1.0.0"
+
+[dependencies]
+core = { path = "../zk/noir-query/core" }

@@ -3,6 +3,7 @@
 
 use crate::table::{TermCell, Table, unbound, same_term};
 use crate::ops_core::Boolean;
+use crate::suite_constants::DT_STRING;
 
 pub struct Step {
     pub op: u8,
@@ -30,9 +31,9 @@ fn ebv(value: Value) -> Boolean {
         assert(value.term.key_class != 0x7f, "literal value range");
         assert(value.term.key_class != 2, "floating-point EBV not yet supported");
         if value.term.key_class == 1 {
-            result = Boolean {value: value.term.key != 0x800000000000000000000000000000000000000000000000000000000000, is_error: false};
+            result = Boolean {value: value.term.key != 0x0180000000000000000000000000000000000000000000000000000000000000, is_error: false};
         } else if (value.term.key_class == 5) | (value.term.key_class == 6) {
-            result = Boolean {value: value.term.key != 0, is_error: false};
+            result = Boolean {value: (value.term.key != value.term.key_class as Field * 0x1000000000000000000000000000000000000000000000000000000000000), is_error: false};
         } else if value.term.key_class == 7 {
             result = Boolean {value: true, is_error: false};
         }
@@ -53,19 +54,19 @@ fn compare(op: u8, a: Value, b: Value) -> Value {
             assert((a.term.key_class != 0x7f) & (b.term.key_class != 0x7f), "literal comparison range");
             if (a.term.kind == 3) & (b.term.kind == 3) {
                 assert((a.term.key_class != 2) & (b.term.key_class != 2), "floating-point comparison not yet supported");
-                let temporal_a = (a.term.key_class == 3) | (a.term.key_class == 4);
-                let temporal_b = (b.term.key_class == 3) | (b.term.key_class == 4);
+                let temporal_a = (a.term.key_class == 3) | (a.term.key_class == 4) | (a.term.key_class == 8);
+                let temporal_b = (b.term.key_class == 3) | (b.term.key_class == 4) | (b.term.key_class == 8);
                 assert(!(temporal_a & temporal_b) | (a.term.dt == b.term.dt), "mixed temporal datatypes not yet supported");
                 assert(!(temporal_a & temporal_b) | (a.term.key_class == b.term.key_class), "mixed timezone comparison not yet supported");
                 assert((op != 0) | ((a.term.key_class != 0) & (b.term.key_class != 0)), "literal equality without a supported value key");
                 let strings = ((a.term.key_class == 6) | (a.term.key_class == 7))
                     & ((b.term.key_class == 6) | (b.term.key_class == 7));
-                assert((op == 0) | !strings | ((a.term.lang == 0) & (b.term.lang == 0)), "language-tagged string ordering not yet supported");
+                assert((op == 0) | !strings | (((a.term.lang == 0) | (a.term.dt == DT_STRING)) & ((b.term.lang == 0) | (b.term.dt == DT_STRING))), "language-tagged string ordering not yet supported");
                 assert(((op == 0) & strings) | ((a.term.key_class != 7) & (b.term.key_class != 7)), "string comparison capacity");
             }
             let class = a.term.key_class;
             let keyed = (a.term.kind == 3) & (b.term.kind == 3) & (class == b.term.key_class)
-                & ((class == 1) | (class == 3) | (class == 4) | (class == 5) | (class == 6));
+                & ((class == 1) | (class == 3) | (class == 4) | (class == 5) | (class == 6) | (class == 8));
             let strings = (a.term.kind == 3) & (b.term.kind == 3)
                 & ((a.term.key_class == 6) | (a.term.key_class == 7))
                 & ((b.term.key_class == 6) | (b.term.key_class == 7));
