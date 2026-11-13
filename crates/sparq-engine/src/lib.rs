@@ -889,6 +889,10 @@ pub(crate) fn view_scope(active: &Option<Graph>) -> Option<exec::view::Guard> {
 pub struct PreparedQuery {
     query: Query,
     versions: Vec<String>,
+    // Bag-equivalent rewrites can skip checked operands. Keep the input plan
+    // when it changed so semantic capacity limits still observe those operands.
+    #[cfg(feature = "algebra-rewrite")]
+    unrewritten: Option<Box<Query>>,
 }
 
 impl PreparedQuery {
@@ -902,11 +906,20 @@ impl PreparedQuery {
     /// conversion deliberately does NOT rewrite: it takes an already-built
     /// algebra verbatim (the opt-out / test-baseline path). When the feature is
     /// OFF the algebra is stored verbatim and the build is byte-identical.
+    /// Numeric or temporal capacity limits use the original algebra, retained
+    /// when rewriting changed it, so rewrites cannot hide checked operands.
     pub fn parse(sparql: &str) -> Result<PreparedQuery, String> {
         let (query, version) = parse_versioned_query(SparqlParser::new(), sparql).map_err(|e| e.to_string())?;
+        #[cfg_attr(not(feature = "algebra-rewrite"), allow(unused_mut))]
+        let mut prepared = Self::from_query_with_versions(query, version)?;
         #[cfg(feature = "algebra-rewrite")]
-        let query = rewrite::rewrite_query(query);
-        Self::from_query_with_versions(query, version)
+        {
+            let rewritten = rewrite::rewrite_query(prepared.query.clone());
+            if rewritten != prepared.query {
+                prepared.unrewritten = Some(Box::new(std::mem::replace(&mut prepared.query, rewritten)));
+            }
+        }
+        Ok(prepared)
     }
 
     /// Retains parser metadata when callers rewrite an algebra's dataset.
@@ -915,7 +928,12 @@ impl PreparedQuery {
     /// # Errors
     /// Rejects unsupported labels or announcements requiring different EBV rules.
     pub fn from_query_with_versions(query: Query, versions: Vec<String>) -> Result<Self, String> {
-        let prepared = Self { query, versions };
+        let prepared = Self {
+            query,
+            versions,
+            #[cfg(feature = "algebra-rewrite")]
+            unrewritten: None,
+        };
         prepared.resolve_ebv_semantics(None)?;
         Ok(prepared)
     }
@@ -955,12 +973,41 @@ impl PreparedQuery {
         &self.query
     }
 
+    // Capacity exhaustion is a whole-query failure, even when the ordinary
+    // expression result would be false/unbound. Bag equivalence alone does not
+    // preserve those failures, so choose the original plan for these limits.
+    fn query_for_budget(&self, _budget: &QueryBudget) -> &Query {
+        #[cfg(feature = "algebra-rewrite")]
+        if _budget.strict_numeric_capacity || _budget.temporal_year_range.is_some() {
+            return self.source_query();
+        }
+        &self.query
+    }
+
+    // Serialization for subsequent execution must retain checked operands too.
+    // The inspected optimized algebra remains available through query().
+    #[cfg(feature = "algebra-rewrite")]
+    fn source_query(&self) -> &Query {
+        self.unrewritten.as_deref().unwrap_or(&self.query)
+    }
+
+    #[cfg(all(feature = "templates", not(feature = "algebra-rewrite")))]
+    fn source_query(&self) -> &Query {
+        &self.query
+    }
+
     /// Replaces algebra while retaining all validated VERSION announcements.
     ///
     /// Use after structural rewrites of this query. Unlike `From<Query>`,
     /// this preserves the source query's EBV contract without re-parsing text.
+    /// The replacement is evaluated as supplied, including under capacity limits.
     pub fn with_query(&self, query: Query) -> Self {
-        Self { query, versions: self.versions.clone() }
+        Self {
+            query,
+            versions: self.versions.clone(),
+            #[cfg(feature = "algebra-rewrite")]
+            unrewritten: None,
+        }
     }
 
     /// True for the graph-valued query forms (CONSTRUCT / DESCRIBE), which produce a set
@@ -1003,7 +1050,12 @@ impl PreparedQuery {
     /// constructors ([`params::value`]).
     #[cfg(feature = "params")]
     pub fn bind(&self, name: &str, value: oxrdf::Term) -> Result<PreparedQuery, String> {
-        let mut bound = params::bind_query(&self.query, name, value).map_err(|e| e.to_string())?;
+        let mut bound = params::bind_query(&self.query, name, value.clone()).map_err(|e| e.to_string())?;
+        #[cfg(feature = "algebra-rewrite")]
+        if let Some(query) = &self.unrewritten {
+            bound.unrewritten = Some(Box::new(params::bind_query(query, name, value)
+                .map_err(|e| e.to_string())?.into_query()));
+        }
         bound.versions = self.versions.clone();
         Ok(bound)
     }
@@ -1012,7 +1064,12 @@ impl PreparedQuery {
 impl From<Query> for PreparedQuery {
     /// Wraps already-parsed (or programmatically built / rewritten) algebra.
     fn from(query: Query) -> PreparedQuery {
-        PreparedQuery { query, versions: Vec::new() }
+        PreparedQuery {
+            query,
+            versions: Vec::new(),
+            #[cfg(feature = "algebra-rewrite")]
+            unrewritten: None,
+        }
     }
 }
 
@@ -1146,7 +1203,7 @@ pub fn query_prepared_with_budget_detailed(
     budget: &QueryBudget,
 ) -> Result<QueryResult, QueryFailure> {
     let semantics = prepared.resolve_ebv_semantics(budget.ebv_semantics).map_err(QueryFailure::Evaluation)?;
-    let q = &prepared.query;
+    let q = prepared.query_for_budget(budget);
     let active = active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
@@ -1186,7 +1243,7 @@ pub fn ask_prepared(graph: &Graph, prepared: &PreparedQuery) -> Result<bool, Str
 /// [`ask_prepared`] under a cooperative [`QueryBudget`] (deadline / max result rows).
 pub fn ask_prepared_with_budget(graph: &Graph, prepared: &PreparedQuery, budget: &QueryBudget) -> Result<bool, String> {
     let semantics = prepared.resolve_ebv_semantics(budget.ebv_semantics)?;
-    let q = &prepared.query;
+    let q = prepared.query_for_budget(budget);
     let active = active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
@@ -1224,7 +1281,7 @@ pub fn query_json_prepared_with_budget(
     budget: &QueryBudget,
 ) -> Result<String, String> {
     let semantics = prepared.resolve_ebv_semantics(budget.ebv_semantics)?;
-    let q = &prepared.query;
+    let q = prepared.query_for_budget(budget);
     let active = active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
@@ -1251,7 +1308,7 @@ const JSON_CHUNK_BYTES: usize = 64 * 1024;
 pub fn query_json_chunks_with_budget(graph: &Graph, sparql: &str, budget: &QueryBudget) -> Result<Vec<String>, String> {
     let prepared = PreparedQuery::parse(sparql)?;
     let semantics = prepared.resolve_ebv_semantics(budget.ebv_semantics)?;
-    let q = &prepared.query;
+    let q = prepared.query_for_budget(budget);
     let active = active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
@@ -1308,7 +1365,7 @@ pub fn query_json_stream_prepared_with_budget(
     mut sink: impl FnMut(String) -> std::ops::ControlFlow<()>,
 ) -> Result<(), String> {
     let semantics = prepared.resolve_ebv_semantics(budget.ebv_semantics)?;
-    let q = &prepared.query;
+    let q = prepared.query_for_budget(budget);
     let active = active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
@@ -1348,7 +1405,7 @@ pub fn count_prepared(graph: &Graph, prepared: &PreparedQuery) -> Result<usize, 
 /// [`count_prepared`] under a cooperative [`QueryBudget`].
 pub fn count_prepared_with_budget(graph: &Graph, prepared: &PreparedQuery, budget: &QueryBudget) -> Result<usize, String> {
     let semantics = prepared.resolve_ebv_semantics(budget.ebv_semantics)?;
-    let q = &prepared.query;
+    let q = prepared.query_for_budget(budget);
     let active = active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);

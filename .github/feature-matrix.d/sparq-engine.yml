@@ -282,9 +282,10 @@
 # verdict on #1735): the regression witness for a previously-caught unsoundness must sit
 # in a gate, not a one-time local run. No new dep (`algebra-rewrite = []`), feature-OFF
 # path byte-identical (cfg-split PreparedQuery::parse).
+# Exercise retained capacity plans through binding, caching and template rendering too.
 - name: "sparq-engine (algebra-rewrite)"
   crate: "sparq-engine"
-  features: "algebra-rewrite"
+  features: "algebra-rewrite,params,result-cache,templates"
   test: true
 
 # sq-iywur: opt-in DPccp dynamic-programming join-order enumerator. The whole
