@@ -5,7 +5,7 @@ use envelope_core::envelope::{
     credential_dataset, holder_message, iri, Membership, merkle_root, Point, property,
     RequestPolicy, Signature, Snapshot, snapshot_digest, stand_in_index, stand_in_key_cell,
     stand_in_number, stand_in_open_credential, stand_in_purpose, stand_in_request_digest,
-    stand_in_vocabulary, StatusEvidence, TermCell, trusted_key_leaf,
+    stand_in_vocabulary, status_leaf, StatusEvidence, TermCell, trusted_key_leaf,
 };
 use envelope_core::table::{check_table, equal_cell, same_term, Table, unbound};
 
@@ -87,7 +87,10 @@ fn status() -> Credential<16> {
     c
 }
 fn path() -> Membership<2> {
-    Membership { index: 1, siblings: [1, h2(0, 1)] }
+    Membership {
+        index: 1,
+        siblings: [status_leaf(true), h2(status_leaf(false), status_leaf(true))],
+    }
 }
 fn acceptance() -> Membership<1> {
     Membership { index: 0, siblings: [999] }
@@ -97,7 +100,7 @@ fn snapshot() -> Snapshot {
         list: iri(800),
         purpose: stand_in_purpose(false),
         bit_len: 4,
-        root: merkle_root(0, path()),
+        root: merkle_root(status_leaf(false), path()),
     }
 }
 fn no_status() -> [StatusEvidence<2, 1>; 16] {
@@ -116,8 +119,28 @@ fn evidence() -> [StatusEvidence<2, 1>; 16] {
     e[2].present = true;
     e
 }
+fn deeper_evidence() -> [StatusEvidence<3, 1>; 16] {
+    let one = status_leaf(true);
+    let member = Membership {
+        index: 1,
+        siblings: [path().siblings[0], path().siblings[1], h2(h2(one, one), h2(one, one))],
+    };
+    let mut deeper = snapshot();
+    deeper.root = merkle_root(status_leaf(false), member);
+    let mut e = [
+        StatusEvidence {
+            present: false,
+            snapshot: deeper,
+            accepted: acceptance(),
+            bit: false,
+            path: member,
+        }; 16
+    ];
+    e[2].present = true;
+    e
+}
 fn policy_root() -> Field {
-    merkle_root(snapshot_digest(snapshot()), acceptance())
+    merkle_root(snapshot_digest::<2>(snapshot()), acceptance())
 }
 fn issuer_path() -> Membership<1> {
     Membership { index: 0, siblings: [777] }
@@ -260,7 +283,7 @@ fn suspension_active_accepted() {
     c.quads[5][2] = stand_in_purpose(true);
     let mut e = evidence();
     e[2].snapshot.purpose = stand_in_purpose(true);
-    let root = merkle_root(snapshot_digest(e[2].snapshot), acceptance());
+    let root = merkle_root(snapshot_digest::<2>(e[2].snapshot), acceptance());
     check_status(c, root, false, e);
 }
 #[test(should_fail_with = "status entry absent")]
@@ -285,6 +308,44 @@ fn status_other_snapshot_refused() {
     e[2].snapshot.root = e[2].snapshot.root + 1;
     check_status(status(), policy_root(), false, e);
 }
+#[test]
+fn snapshot_digest_binds_depth_even_with_identical_root() {
+    let s = snapshot();
+    assert(snapshot_digest::<2>(s) != snapshot_digest::<3>(s));
+}
+#[test]
+fn same_status_bits_at_another_depth_have_another_digest() {
+    // Both trees contain [set, clear, clear, set]; the deeper tree pads with set bits.
+    let deeper = deeper_evidence()[2].snapshot;
+    assert(snapshot_digest::<2>(snapshot()) != snapshot_digest::<3>(deeper));
+    let root = merkle_root(snapshot_digest::<3>(deeper), acceptance());
+    check_status(status(), root, false, deeper_evidence());
+}
+#[test(should_fail_with = "snapshot policy")]
+fn status_same_bits_at_another_depth_refused() {
+    check_status(status(), policy_root(), false, deeper_evidence());
+}
+#[test(should_fail_with = "snapshot policy")]
+fn status_policy_with_another_depth_for_the_same_root_refused() {
+    let root = merkle_root(snapshot_digest::<3>(snapshot()), acceptance());
+    check_status(status(), root, false, evidence());
+}
+#[test(should_fail_with = "status path")]
+fn status_untagged_leaves_refused() {
+    let mut e = evidence();
+    let member = Membership { index: 1, siblings: [1, h2(0, 1)] };
+    e[2].path = member;
+    e[2].snapshot.root = merkle_root(0, member);
+    let root = merkle_root(snapshot_digest::<2>(e[2].snapshot), acceptance());
+    check_status(status(), root, false, e);
+}
+#[test(should_fail_with = "status path")]
+fn status_leaf_using_another_envelope_tag_refused() {
+    let mut e = evidence();
+    e[2].snapshot.root = merkle_root(holder_message([0, 0]), path());
+    let root = merkle_root(snapshot_digest::<2>(e[2].snapshot), acceptance());
+    check_status(status(), root, false, e);
+}
 #[test(should_fail_with = "snapshot identity")]
 fn status_other_list_refused() {
     let mut e = evidence();
@@ -307,8 +368,8 @@ fn status_other_index_refused() {
 fn status_set_bit_refused() {
     let mut e = evidence();
     e[2].bit = true;
-    e[2].snapshot.root = merkle_root(1, path());
-    let root = merkle_root(snapshot_digest(e[2].snapshot), acceptance());
+    e[2].snapshot.root = merkle_root(status_leaf(true), path());
+    let root = merkle_root(snapshot_digest::<2>(e[2].snapshot), acceptance());
     check_status(status(), root, false, e);
 }
 #[test(should_fail_with = "status path")]
@@ -321,7 +382,7 @@ fn status_other_path_refused() {
 fn status_outside_snapshot_length_refused() {
     let mut e = evidence();
     e[2].snapshot.bit_len = 1;
-    let root = merkle_root(snapshot_digest(e[2].snapshot), acceptance());
+    let root = merkle_root(snapshot_digest::<2>(e[2].snapshot), acceptance());
     check_status(status(), root, false, e);
 }
 #[test(should_fail_with = "snapshot capacity")]

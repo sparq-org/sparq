@@ -713,8 +713,9 @@ a substitute for the verifier's stored request.
 - `statusPolicy`: optional object; absent means status is not checked. When present it has
   a non-empty `acceptedSnapshot` collection of snapshot digests and `allowMissingStatus`
   (boolean, absent means false). Each accepted digest binds the list identifier, purpose,
-  bit length and a Merkle root of its decompressed bits. The verifier authenticates the
-  source status-list credential and decides freshness before admitting its digest. Each
+  bit length, tree depth and a Merkle root of its decompressed bits. The verifier
+  authenticates the source status-list credential and decides freshness before admitting its
+  digest. Each
   status entry on each credential MUST have its indicated bit clear in such a snapshot.
   Missing evidence for an entry is a refusal. Absence of all `credentialStatus` triples is
   permitted only when `allowMissingStatus` is true. This exception states absence, not a
@@ -769,6 +770,13 @@ canonically encoded as big-endian field bytes; this is an explicit exception to 
 SHA-256 rule for these profile commitments only. Request, plan and result digests keep their
 specified algorithms. The method must identify the internal profile and exact byte encoding
 in its parameters before wire use.
+
+The snapshot digest is `P(SNAPSHOT, list.enc, purpose.enc, bitLength, D, root)`, where
+`D` is the compiled status-tree depth. A status leaf is `P(STATUS_LEAF, bit, 0)`, with
+`bit` restricted to zero or one; internal nodes remain `P(left, right)`. `P` is the
+length-bound Poseidon2 hash. The distinct status-leaf tag and arity separate leaves from
+other envelope hash inputs, including internal nodes. The draft tags are
+`SNAPSHOT = 0x5643515f45534e50` and `STATUS_LEAF = 0x5643515f45534c46`.
 
 #strong[Source snapshots, retrieved 2026-11-13:]
 #link("https://raw.githubusercontent.com/w3c/vc-data-model/main/index.html")[VC Data Model,

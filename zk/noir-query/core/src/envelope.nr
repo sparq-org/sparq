@@ -22,6 +22,7 @@ pub struct Membership<let D: u32> {
 // Lane E domain separators for distinct draft profile commitments.
 global KEY_SET_LEAF: Field = 0x5643515f454b4559;
 global SNAPSHOT: Field = 0x5643515f45534e50;
+global STATUS_LEAF: Field = 0x5643515f45534c46;
 global HOLDER_REQUEST: Field = 0x5643515f45484f4c;
 global GRAPH_NAME: Field = 0x5643515f45475241;
 
@@ -323,14 +324,22 @@ pub struct Snapshot {
     pub bit_len: u32,
     pub root: Field,
 }
-pub fn snapshot_digest(snapshot: Snapshot) -> Field {
-    h5(
-        SNAPSHOT,
-        snapshot.list.enc,
-        snapshot.purpose.enc,
-        snapshot.bit_len as Field,
-        snapshot.root,
+pub fn snapshot_digest<let D: u32>(snapshot: Snapshot) -> Field {
+    commit_fold(
+        [
+            SNAPSHOT,
+            snapshot.list.enc,
+            snapshot.purpose.enc,
+            snapshot.bit_len as Field,
+            D as Field,
+            snapshot.root,
+        ],
+        6,
     )
+}
+// Dedicated tag and arity distinguish status leaves from two-input Merkle nodes.
+pub fn status_leaf(bit: bool) -> Field {
+    h3(STATUS_LEAF, bit as Field, 0)
 }
 pub struct StatusEvidence<let D: u32, let A: u32> {
     pub present: bool,
@@ -341,7 +350,7 @@ pub struct StatusEvidence<let D: u32, let A: u32> {
 }
 // Each credential-root status row must be covered, including rows unused by the query.
 // Snapshot construction uses W3C left-to-right bit order. The verifier authenticates
-// and curates snapshots; the leaf at the credential's W3C index is its status bit.
+// and curates snapshots; the leaf at the credential's W3C index hashes its tagged bit.
 pub fn check_status<let N: u32, let D: u32, let A: u32>(
     c: Credential<N>,
     accepted_root: Field,
@@ -389,12 +398,12 @@ pub fn check_status<let N: u32, let D: u32, let A: u32>(
             assert(index < e.snapshot.bit_len as u64, "status index length");
             assert((e.snapshot.bit_len as Field).lt(tree_capacity + 1), "snapshot capacity");
             assert(
-                merkle_root(snapshot_digest(e.snapshot), e.accepted) == accepted_root,
+                merkle_root(snapshot_digest::<D>(e.snapshot), e.accepted) == accepted_root,
                 "snapshot policy",
             );
             assert(e.path.index == index as Field, "status index binding");
             assert(!e.bit, "status bit set");
-            assert(merkle_root(e.bit as Field, e.path) == e.snapshot.root, "status path");
+            assert(merkle_root(status_leaf(e.bit), e.path) == e.snapshot.root, "status path");
         }
     }
     assert((count > 0) | allow_missing, "status entry absent");

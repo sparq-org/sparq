@@ -293,8 +293,11 @@ cross-credential set merge and query evaluation to the operator integration.
 Suite opening, RDF term and key encodings, temporal-key recomputation, and stored-request
 normalization are marked stand-ins. The holder relation verifies a Schnorr signature over the
 entire supplied request digest; the local request-binding fixture includes query, domain,
-challenge and all policy values. Status binds list identifier, purpose, length and root in an
-accepted snapshot digest and proves the credential's actual index clear. Validity endpoints
+challenge and all policy values. Status binds list identifier, purpose, length, compiled tree
+depth and root in an accepted snapshot digest and proves the credential's actual index clear. Status leaves hash
+the status-leaf domain tag, the boolean bit and a zero field; two-input internal nodes keep
+their distinct arity. The snapshot digest hashes its domain tag followed by list, purpose,
+bit length, depth and root, in that order. Validity endpoints
 are inclusive, with an absent individual bound contributing no comparison and reversed
 bounds refused. When both bounds are absent, the creation instant from suite metadata is
 the inclusive start; unavailable creation metadata refuses a validity request.
