@@ -741,7 +741,7 @@ async fn sq5(lws: bool) {
     viewer
         .send(Message::Sync(SyncMessage::SyncStep2(unchanged)))
         .await;
-    let mut presence = Awareness::new(Doc::with_client_id(33));
+    let presence = Awareness::new(Doc::with_client_id(33));
     presence.set_local_state(json!({"name": "viewer"})).unwrap();
     viewer
         .send(Message::Awareness(presence.update().unwrap()))
@@ -1202,9 +1202,9 @@ async fn awareness_bound(mode: bool) {
     )
     .await;
     let mut client = h.client(OWNER, 800).await;
-    let mut first = Awareness::new(Doc::with_client_id(801));
+    let first = Awareness::new(Doc::with_client_id(801));
     first.set_local_state(json!({"name":"first"})).unwrap();
-    let mut second = Awareness::new(Doc::with_client_id(802));
+    let second = Awareness::new(Doc::with_client_id(802));
     second.set_local_state(json!({"name":"second"})).unwrap();
     let mut update = first.update().unwrap();
     update.clients.extend(second.update().unwrap().clients);
@@ -1302,7 +1302,7 @@ async fn awareness_forwarding(mode: bool) {
     let mut origin = h.client(WRITER, 1301).await;
     let mut forwarder = h.client(READER, 1302).await;
     let id = yrs::ClientID::new(1301);
-    let mut awareness = Awareness::new(Doc::with_client_id(1301));
+    let awareness = Awareness::new(Doc::with_client_id(1301));
     awareness
         .set_local_state(json!({"name": "origin"}))
         .unwrap();
@@ -1357,7 +1357,7 @@ async fn awareness_forwarding(mode: bool) {
     forwarded.clients.get_mut(&id).unwrap().json = Arc::from("null");
     observer.send(Message::Awareness(forwarded)).await;
     let mut next = h.client(READER, 1303).await;
-    let mut awareness = Awareness::new(Doc::with_client_id(1303));
+    let awareness = Awareness::new(Doc::with_client_id(1303));
     awareness.set_local_state(json!({"name": "next"})).unwrap();
     next.send(Message::Awareness(awareness.update().unwrap()))
         .await;
@@ -1433,7 +1433,7 @@ async fn presence_churn(mode: bool) {
     let mut observer = h.client(OWNER, 900).await;
     for (id, clock) in [(901, 1), (901, 2), (902, 1)] {
         let mut viewer = h.client(READER, id).await;
-        let mut awareness = Awareness::new(Doc::with_client_id(id));
+        let awareness = Awareness::new(Doc::with_client_id(id));
         for revision in 0..clock {
             awareness
                 .set_local_state(json!({"name":"present", "revision":revision}))
@@ -2960,7 +2960,7 @@ async fn clock_tombstone(mode: bool) {
     .await;
     let mut origin = h.client(WRITER, 8600).await;
     let mut forwarder = h.client(READER, 8601).await;
-    let mut awareness = Awareness::new(Doc::with_client_id(8600));
+    let awareness = Awareness::new(Doc::with_client_id(8600));
     awareness
         .set_local_state(json!({"name": "present"}))
         .unwrap();
@@ -2970,7 +2970,7 @@ async fn clock_tombstone(mode: bool) {
     // Other clients can enter and leave while the original client remains active.
     for id in [8603, 8604] {
         let mut transient = h.client(READER, id).await;
-        let mut presence = Awareness::new(Doc::with_client_id(id));
+        let presence = Awareness::new(Doc::with_client_id(id));
         presence
             .set_local_state(json!({"name": "transient"}))
             .unwrap();
@@ -3121,7 +3121,7 @@ async fn live_reload_allows_peer_messages(mode: bool) {
     // This edit and presence exchange complete while the reload's listing is paused.
     owner.edit("-live").await;
     observer.until_text("first-live").await;
-    let mut awareness = Awareness::new(Doc::with_client_id(9500));
+    let awareness = Awareness::new(Doc::with_client_id(9500));
     awareness.set_local_state(json!({"name": "live"})).unwrap();
     owner
         .send(Message::Awareness(awareness.update().unwrap()))

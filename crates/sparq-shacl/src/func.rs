@@ -6,6 +6,7 @@ use super::{EvalScope, NodeExpr};
 use crate::model::{sh, ShapesModel};
 use crate::view::{dedup, GraphView};
 use oxrdf::{Literal, NamedNode, Term};
+use sparq_substrate::numeric::{ArithOp, Dec, Num};
 
 /// `http://www.w3.org/ns/shacl-node-expr#` — the SHACL 1.2 node-expression
 /// vocabulary the W3C suite uses for the built-in operators.
@@ -496,7 +497,7 @@ impl Func {
                 out
             }
             Op::Count(arg) => vec![int_literal(eval(arg)?.len() as i128)],
-            Op::Sum(arg) => vec![sum_literal(&eval(arg)?)],
+            Op::Sum(arg) => sum_literal(&eval(arg)?).into_iter().collect(),
             Op::MinMax { arg, max } => min_max(&eval(arg)?, *max).into_iter().collect(),
             Op::Distinct(arg) => dedup(eval(arg)?),
             Op::Exists(arg) => vec![bool_literal(!eval(arg)?.is_empty())],
@@ -578,7 +579,7 @@ impl Func {
                     keyed.push((n, k));
                 }
                 keyed.sort_by(|(_, a), (_, b)| {
-                    let order = cmp_key(a.as_slice(), b.as_slice());
+                    let order = cmp_key(a.as_ref(), b.as_ref());
                     if *desc {
                         order.reverse()
                     } else {
@@ -778,68 +779,16 @@ fn parse_bool(v: &str) -> Option<bool> {
     }
 }
 
-/// Numeric value of a literal as `f64`, if it is an XSD numeric type.
-fn numeric(t: &Term) -> Option<f64> {
-    match t {
-        Term::Literal(l) if is_numeric(l.datatype().as_str()) => l.value().trim().parse().ok(),
-        _ => None,
-    }
-}
-
-fn is_numeric(dt: &str) -> bool {
-    let Some(local) = dt.strip_prefix(XSD) else {
-        return false;
-    };
-    matches!(
-        local,
-        "integer"
-            | "decimal"
-            | "double"
-            | "float"
-            | "long"
-            | "int"
-            | "short"
-            | "byte"
-            | "nonNegativeInteger"
-            | "positiveInteger"
-            | "nonPositiveInteger"
-            | "negativeInteger"
-            | "unsignedLong"
-            | "unsignedInt"
-            | "unsignedShort"
-            | "unsignedByte"
-    )
-}
-
-/// True iff a numeric literal is integer-valued (no fractional part) — so a sum of
-/// integers stays `xsd:integer` rather than `xsd:decimal`.
-fn is_integer_typed(t: &Term) -> bool {
-    matches!(t, Term::Literal(l) if matches!(
-        l.datatype().as_str().strip_prefix(XSD),
-        Some("integer" | "long" | "int" | "short" | "byte"
-            | "nonNegativeInteger" | "positiveInteger" | "nonPositiveInteger"
-            | "negativeInteger" | "unsignedLong" | "unsignedInt"
-            | "unsignedShort" | "unsignedByte")
-    ))
+/// Whether a term is a well-formed XSD numeric, independent of arithmetic capacity.
+fn is_numeric(t: &Term) -> bool {
+    matches!(t, Term::Literal(l) if l.language().is_none()
+        && sparq_core::numeric_literal_valid(l.value(), l.datatype().as_str()))
 }
 
 fn int_literal(n: i128) -> Term {
     Term::Literal(Literal::new_typed_literal(
         n.to_string(),
         NamedNode::new_unchecked(format!("{XSD}integer")),
-    ))
-}
-
-fn decimal_literal(v: f64) -> Term {
-    // Render without an exponent and ALWAYS with a fractional part, so the lexical
-    // form is a canonical xsd:decimal: a whole-valued decimal must read `42.0`, not
-    // `42` (the W3C node-expr `sum-totalRevenue` sums decimals to a whole number
-    // and expects `42.0`^^xsd:decimal). (sq-mue75)
-    let s = format!("{v}");
-    let s = if s.contains('.') { s } else { format!("{s}.0") };
-    Term::Literal(Literal::new_typed_literal(
-        s,
-        NamedNode::new_unchecked(format!("{XSD}decimal")),
     ))
 }
 
@@ -850,53 +799,49 @@ fn bool_literal(b: bool) -> Term {
     ))
 }
 
-/// Sum of the numeric members; `xsd:integer` if every member is integer-typed,
-/// else `xsd:decimal`. Non-numeric members are ignored (empty ⇒ 0).
-fn sum_literal(vals: &[Term]) -> Term {
-    let mut total = 0.0_f64;
+/// Sum numeric members with exact decimal addition and XPath floating promotion.
+/// Non-numeric members are ignored (empty ⇒ integer zero). A valid operand beyond
+/// the arithmetic tower produces no result, like an engine arithmetic type error.
+fn sum_literal(vals: &[Term]) -> Option<Term> {
+    let mut total = Num::Dec(Dec { mant: 0, scale: 0 });
     let mut all_int = true;
-    for v in vals {
-        if let Some(n) = numeric(v) {
-            total += n;
-            all_int &= is_integer_typed(v);
+    for v in vals.iter().filter(|v| is_numeric(v)) {
+        let Term::Literal(l) = v else { unreachable!() };
+        all_int &= sparq_core::is_integer_datatype(l.datatype().as_str());
+        total = total.binop(Num::of_literal(l)?, ArithOp::Add)?;
+    }
+    if all_int {
+        if let Some(d) = total.to_dec() {
+            return Some(int_literal(d.mant));
         }
     }
-    if all_int && total.fract() == 0.0 {
-        int_literal(total as i128)
-    } else {
-        decimal_literal(total)
-    }
+    Some(Term::Literal(Literal::new_typed_literal(
+        total.canonical_lexical(),
+        total.datatype(),
+    )))
 }
 
-/// MIN/MAX use the same term ordering as ORDER BY.
+/// MIN/MAX use the same term ordering as ORDER BY, retaining the first tie.
 fn min_max(vals: &[Term], max: bool) -> Option<Term> {
-    if max {
-        vals.iter().max_by(|a, b| cmp_term(a, b))
-    } else {
-        vals.iter().min_by(|a, b| cmp_term(a, b))
-    }
-    .cloned()
+    vals.iter()
+        .reduce(|best, value| {
+            let order = super::order::compare(value, best);
+            if (max && order.is_gt()) || (!max && order.is_lt()) {
+                value
+            } else {
+                best
+            }
+        })
+        .cloned()
 }
 
-/// Comparison of two sort keys (each a node set) for `orderBy`: compares the least
-/// value of each. An empty key sorts before any value (ascending).
-fn cmp_key(a: &[Term], b: &[Term]) -> std::cmp::Ordering {
+/// Compare the first sort-key values, with an unbound key first ascending.
+fn cmp_key(a: Option<&Term>, b: Option<&Term>) -> std::cmp::Ordering {
     use std::cmp::Ordering;
-    let la = least(a);
-    let lb = least(b);
-    match (la, lb) {
+    match (a, b) {
         (None, None) => Ordering::Equal,
         (None, Some(_)) => Ordering::Less,
         (Some(_), None) => Ordering::Greater,
-        (Some(x), Some(y)) => cmp_term(x, y),
+        (Some(x), Some(y)) => super::order::compare(x, y),
     }
-}
-
-/// The least term of a set under [`cmp_term`] (for the orderBy sort key).
-fn least(set: &[Term]) -> Option<&Term> {
-    set.iter().min_by(|a, b| cmp_term(a, b))
-}
-
-fn cmp_term(a: &Term, b: &Term) -> std::cmp::Ordering {
-    super::order::compare(a, b)
 }

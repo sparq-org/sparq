@@ -410,6 +410,72 @@ fn numeric_order_refines_float_ties_and_keeps_large_lexicals_exact() {
 }
 
 #[test]
+fn sum_preserves_exact_digits_and_distinguishes_capacity_from_failure() {
+    assert_eq!(
+        eval("[shnex:sum (9007199254740992 1)]").unwrap(),
+        ints(&[9007199254740993])
+    );
+    assert_eq!(
+        eval("[shnex:sum (340282366920938463463374607431768211456000 1)]").unwrap(),
+        vec![]
+    );
+    assert!(eval("[shnex:sum [shnex:instancesOf 42]]").is_err());
+}
+
+#[test]
+fn numeric_extrema_and_sort_refine_values_beyond_the_float_range() {
+    let low = format!("1{}", "0".repeat(400));
+    let high = format!("1{}1", "0".repeat(399));
+    let integer = |value: &str| -> Term {
+        Literal::new_typed_literal(
+            value,
+            NamedNode::new("http://www.w3.org/2001/XMLSchema#integer").unwrap(),
+        )
+        .into()
+    };
+    let double = |value: &str| -> Term {
+        Literal::new_typed_literal(
+            value,
+            NamedNode::new("http://www.w3.org/2001/XMLSchema#double").unwrap(),
+        )
+        .into()
+    };
+    let values =
+        format!(r#"{high} "INF"^^xsd:double {low} "-INF"^^xsd:double "NaN"^^xsd:double -{low}"#);
+    let expected = vec![
+        double("NaN"),
+        double("-INF"),
+        integer(&format!("-{low}")),
+        integer(&low),
+        integer(&high),
+        double("INF"),
+    ];
+    assert_eq!(
+        eval(&format!(
+            "[shnex:nodes ({values}); shnex:orderBy [shnex:var \"focusNode\"]]"
+        ))
+        .unwrap(),
+        expected
+    );
+    assert_eq!(
+        eval(&format!("[shnex:min ({high} {low})]")).unwrap(),
+        vec![integer(&low)]
+    );
+    assert_eq!(
+        eval(&format!("[shnex:max ({low} {high})]")).unwrap(),
+        vec![integer(&high)]
+    );
+    assert_eq!(
+        eval(&format!("[shnex:min ({low} \"INF\"^^xsd:double)]")).unwrap(),
+        vec![integer(&low)]
+    );
+    assert_eq!(
+        eval(&format!("[shnex:max (-{low} \"-INF\"^^xsd:double)]")).unwrap(),
+        vec![integer(&format!("-{low}"))]
+    );
+}
+
+#[test]
 fn temporal_order_uses_exact_values_and_a_total_timezone_order() {
     let actual = eval(r#"[shnex:nodes ("2000-01-01T00:30:00"^^xsd:dateTime "2000-01-01T00:00:00Z"^^xsd:dateTime "2000-01-01T01:00:00+01:00"^^xsd:dateTime); shnex:orderBy [shnex:var "focusNode"]]"#).unwrap();
     assert!(matches!(actual.last(), Some(Term::Literal(l)) if l.value()=="2000-01-01T00:30:00"));
