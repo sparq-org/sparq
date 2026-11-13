@@ -253,3 +253,22 @@ fn mixed_string_equality_preserves_false_and_error_as_the_engine_does() {
         fixture_support::assert_engine(&query, "", &result);
     }
 }
+
+#[test]
+fn malformed_numeric_and_boolean_ebv_is_false_without_a_sparql_error() {
+    for datatype in [
+        "integer",
+        "decimal",
+        "boolean",
+        "double",
+        "float",
+        "unsignedByte",
+    ] {
+        let query =
+            format!("ASK {{FILTER(!\"bad\"^^<http://www.w3.org/2001/XMLSchema#{datatype}>)}}");
+        let plan = lower(&query, BOUNDS).unwrap();
+        let result = evaluate(&plan, &[], &FixtureEncoder).unwrap().result;
+        assert_eq!(result, ResultValue::Ask(true));
+        fixture_support::assert_engine(&query, "", &result);
+    }
+}

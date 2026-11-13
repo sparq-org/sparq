@@ -41,6 +41,21 @@ fn empty<let L:u32>() -> BoundedTermOpening<L,0,0> {
         datatype:[],datatype_len:0,language:[],language_len:0,key:[0;31]}
 }
 
+fn predicate<let L:u32>(raw:ResourceOpening<L>) -> TermCell {
+    let mut cell=crate::term::padding();
+    if raw.bound {
+        assert(raw.kind == 1, "profile predicate kind");
+        cell=crate::suite_entry::open_bounded_cell(BoundedTermOpening {
+            bound:true,kind:1,lexical:raw.lexical,lexical_len:raw.lexical_len,
+            datatype:[],datatype_len:0,language:[],language_len:0,key:[0;31]},0);
+    } else {
+        cell=crate::suite_entry::open_bounded_cell(BoundedTermOpening {
+            bound:false,kind:raw.kind,lexical:raw.lexical,lexical_len:raw.lexical_len,
+            datatype:[],datatype_len:0,language:[],language_len:0,key:[0;31]},0);
+    }
+    cell
+}
+
 fn literal<let TAG:u32,let CHECK:u32,let L:u32,let D:u32>(raw:ObjectOpening<L>, datatype:[u8;D]) -> TermCell {
     std::static_assert((TAG >= 1) & (TAG <= 6), "profile datatype specialization");
     let expected=if TAG == 1 { DT_INTEGER } else if TAG == 2 { DT_DECIMAL }
@@ -65,6 +80,24 @@ fn scalar<let L:u32>(raw:ObjectOpening<L>) -> ObjectOpening<32> {
     ObjectOpening {bound:raw.bound,kind:raw.kind,lexical,lexical_len:raw.lexical_len,datatype:raw.datatype,key:raw.key}
 }
 
+// Root authentication shares a scalar term hash across the admitted datatypes.
+// Value consumers still enter their fixed datatype checked constructor.
+fn identity_scalar(raw:ObjectOpening<32>) -> TermCell {
+    assert((raw.datatype >= 1) & (raw.datatype <= 5), "profile scalar datatype");
+    let (suffix,length)=if raw.datatype == 1 { ([105,110,116,101,103,101,114,0],7) }
+        else if raw.datatype == 2 { ([100,101,99,105,109,97,108,0],7) }
+        else if raw.datatype == 3 { ([100,97,116,101,0,0,0,0],4) }
+        else if raw.datatype == 4 { ([100,97,116,101,84,105,109,101],8) }
+        else { ([98,111,111,108,101,97,110,0],7) };
+    let prefix="http://www.w3.org/2001/XMLSchema#".as_bytes();
+    let mut datatype:[u8;41]=[0;41];
+    for i in 0..33 { datatype[i]=prefix[i]; }
+    for i in 0..8 { datatype[33+i]=suffix[i]; }
+    crate::suite_entry::open_bounded_cell(BoundedTermOpening {
+        bound:true,kind:3,lexical:raw.lexical,lexical_len:raw.lexical_len,
+        datatype,datatype_len:33+length,language:[],language_len:0,key:raw.key},0)
+}
+
 pub fn open_object<let L:u32>(raw:ObjectOpening<L>, scope:u32) -> TermCell {
     object::<1,L>(raw,scope)
 }
@@ -72,7 +105,9 @@ pub fn open_object<let L:u32>(raw:ObjectOpening<L>, scope:u32) -> TermCell {
 fn object<let CHECK:u32,let L:u32>(raw:ObjectOpening<L>, scope:u32) -> TermCell {
     std::static_assert(CHECK <= 1, "profile key consumption mode");
     let mut value=crate::term::padding();
-    if raw.bound & (raw.kind == 3) {
+    if (CHECK == 0) & raw.bound & (raw.kind == 3) & (raw.datatype != 6) {
+        value=identity_scalar(scalar(raw));
+    } else if raw.bound & (raw.kind == 3) {
         if raw.datatype == 1 {
             value=literal::<1,CHECK,32,40>(scalar(raw),"http://www.w3.org/2001/XMLSchema#integer".as_bytes());
         } else if raw.datatype == 2 {
@@ -115,11 +150,13 @@ fn construct_quads<let CHECK:u32,let N:u32,let R:u32,let V:u32>(raw:[QuadOpening
     let mut resources=[[empty();4];N];
     for i in 0..N {
         resources[i][0]=resource(raw[i].subject);
-        resources[i][1]=resource(raw[i].predicate);
         resources[i][3].bound=i < count;
     }
     let mut quads=open_bounded_quads(resources,index+1);
-    for i in 0..N { quads[i][2]=object::<CHECK,V>(raw[i].object,index+1); }
+    for i in 0..N {
+        quads[i][1]=predicate(raw[i].predicate);
+        quads[i][2]=object::<CHECK,V>(raw[i].object,index+1);
+    }
     quads
 }
 
@@ -140,7 +177,10 @@ fn matches<let L:u32,let D:u32>(raw:ObjectOpening<L>,dt:[u8;D]) {
     let actual=open_object(raw,9);
     assert(crate::term::same_term(expected,actual));
     assert((expected.key()==actual.key()) & (expected.datatype()==actual.datatype()));
-    assert(crate::term::same_term(actual,object::<0,L>(raw,9)));
+    let identity=object::<0,L>(raw,9);
+    assert(crate::term::same_term(actual,identity));
+    assert((actual.key()==identity.key()) & (actual.datatype()==identity.datatype())
+        & (actual.language()==identity.language()));
 }
 
 #[test]
@@ -218,3 +258,17 @@ fn profile_quad_positions_and_scope_are_constructed_once() {
 fn profile_checks_the_credential_scope_range() {let _cells=open_quads([quad()],1,0xffffffff);}
 #[test(should_fail_with="profile quad count")]
 fn profile_checks_its_public_quad_capacity() {let _cells=open_quads([quad()],2,0);}
+#[test(should_fail_with="profile scalar datatype")]
+fn profile_identity_scalar_tag_has_an_upper_bound() {
+    let raw=fixture::<64,4>("true".as_bytes(),7,[5,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]);
+    let _cell=object::<0,64>(raw,1);
+}
+#[test(should_fail_with="profile scalar datatype")]
+fn profile_identity_scalar_tag_is_present_for_literals() {
+    let raw=fixture::<64,4>("true".as_bytes(),0,[5,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]);
+    let _cell=object::<0,64>(raw,1);
+}
+#[test(should_fail_with="profile predicate kind")]
+fn profile_predicates_require_the_iri_kind() {
+    let _cell=predicate(resource_fixture::<32,5>("urn:p".as_bytes(),2));
+}

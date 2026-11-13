@@ -840,7 +840,10 @@ fn authenticated_request_admits_and_binds_typed_envelope_properties() {
     )
     .unwrap();
     assert_eq!(request.envelope_inputs().unwrap(), policy);
-    assert_eq!(request.plan().unwrap().canonical_bytes(), prepared.plan.canonical_bytes());
+    assert_eq!(
+        request.plan().unwrap().canonical_bytes(),
+        prepared.plan.canonical_bytes()
+    );
     let mut altered = policy.clone();
     altered.earliest_created += 1;
     let other =
@@ -852,5 +855,39 @@ fn authenticated_request_admits_and_binds_typed_envelope_properties() {
     assert_eq!(
         Request::new_authenticated_with_policy(stored, B, key, altered, None).unwrap_err(),
         Error::Invalid("request and envelope policy".into())
+    );
+}
+
+#[test]
+fn request_admission_refuses_a_present_empty_holder_issuer_list() {
+    let plan = sparq_zk_query::lower::lower("ASK {}", B).unwrap();
+    let key = b"request-admission-fixture".to_vec();
+    let prepared = Prepared {
+        descriptor: sparq_zk_query::request::descriptor(&plan, &key).unwrap(),
+        plan,
+        verification_key: key.clone(),
+        artifact: serde_json::Value::Null,
+    };
+    let mut spec = request_spec(&stored(&prepared, "ASK {}", 1, "urn:receiver", None));
+    let mut requirements = requirements_spec(&spec.requirements);
+    requirements.source_evidence = Some(SourceEvidence::IssuerAuthenticated);
+    requirements.holder = Some(HolderPolicy::Required);
+    requirements.accepted_suites = vec![id(sparq_zk_query::request::SUITE)];
+    spec.requirements = QueryRequirements::new(requirements).unwrap();
+    let stored = StoredRequest::new(spec).unwrap();
+    let mut policy = sparq_zk_query::statement::EnvelopeInputs::issuer_only([7; 32]);
+    policy.holder_required = true;
+    assert!(Request::new_authenticated_with_policy(
+        stored.clone(),
+        B,
+        key.clone(),
+        policy.clone(),
+        None
+    )
+    .is_ok());
+    policy.holder_issuers_present = true;
+    assert_eq!(
+        Request::new_authenticated_with_policy(stored, B, key, policy, None).unwrap_err(),
+        Error::Invalid("empty holder issuer list".into())
     );
 }

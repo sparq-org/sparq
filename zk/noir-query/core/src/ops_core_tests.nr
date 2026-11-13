@@ -382,6 +382,7 @@ fn expression_comparison_refuses_the_pending_float_lane() { expression_compare_c
 fn expression_comparison_refuses_mixed_timezone_classes() { expression_compare_case(expression_cell(3,0,1),expression_cell(4,2,2),1); }
 #[test(should_fail_with = "literal equality without a supported value key")]
 fn expression_comparison_refuses_pending_literal_equality() { expression_compare_case(expression_cell(0,0,1),expression_cell(0,0,1),0); }
+
 #[test(should_fail_with = "string comparison capacity")]
 fn expression_comparison_refuses_prefix_only_ordering() { expression_compare_case(expression_cell(7,1,1),expression_cell(7,2,2),1); }
 #[test]
@@ -652,4 +653,16 @@ fn expression_active_rows_keep_their_value_capacity() {
 fn expression_empty_input_still_checks_its_instruction_structure() {
     let _result=crate::ops_core_expr::evaluate(empty::<2,1>(),[unbound()],
         [expr_step(7,0,0,0,0),expr_step(9,0,0,0,0)]);
+}
+
+
+#[test]
+fn expression_invalid_numeric_and_boolean_ebv_is_false_without_error() {
+    for dt in [crate::suite_constants::DT_INTEGER,crate::suite_constants::DT_DECIMAL,
+        crate::suite_constants::DT_BOOLEAN,crate::suite_constants::DT_DOUBLE,crate::suite_constants::DT_FLOAT] {
+        let mut invalid=expression_cell(0,0,11);invalid.dt=dt;
+        let result=crate::ops_core_expr::evaluate(Table {rows:[[invalid]],len:1},[unbound()],
+            [expr_step(0,0,0,0,0),expr_step(5,0,0,0,0)])[0];
+        assert(result.value & !result.is_error);
+    }
 }

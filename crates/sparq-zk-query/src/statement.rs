@@ -42,8 +42,10 @@ pub struct EnvelopeInputs {
     pub snapshot_root: Word,
     pub snapshot_depth: u32,
     pub validity_required: bool,
+    /// Unix epoch milliseconds when validity is requested.
     pub now: u64,
     pub freshness_required: bool,
+    /// Earliest acceptable creation instant in Unix epoch milliseconds.
     pub earliest_created: u64,
 }
 impl EnvelopeInputs {
@@ -70,6 +72,9 @@ impl EnvelopeInputs {
         field(self.issuer_root)?;
         field(self.snapshot_root)?;
         let n = self.holder_issuer_count as usize;
+        if self.holder_required && self.holder_issuers_present && n == 0 {
+            return Err(Error::Invalid("empty holder issuer list".into()));
+        }
         if n > self.holder_issuers.len()
             || (!self.holder_required && self.holder_issuers_present)
             || (!self.holder_issuers_present && n != 0)

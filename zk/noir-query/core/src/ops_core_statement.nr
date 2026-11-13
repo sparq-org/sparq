@@ -94,6 +94,7 @@ pub fn envelope_words(
     assert(holder_issuer_count <= 4, "holder issuer capacity");
     assert(holder_required | !holder_issuers_present, "inactive holder policy");
     assert(holder_issuers_present | (holder_issuer_count == 0), "holder issuer presence");
+    assert(!holder_required | !holder_issuers_present | (holder_issuer_count > 0), "empty holder issuer list");
     for i in 0..4 {
         if i < holder_issuer_count {
             assert(holder_issuers[i] != 0, "zero holder issuer");
@@ -215,8 +216,11 @@ fn authenticated_select_binds_each_quad_limit() {
 }
 
 #[test]
-fn explicit_empty_holder_scope_differs_from_all_trusted_issuers() {
+fn absent_holder_scope_selects_all_trusted_issuers() {
     let all=envelope_words(9,4,true,false,0,[0;4],false,false,0,0,false,0,false,0);
-    let none=envelope_words(9,4,true,true,0,[0;4],false,false,0,0,false,0,false,0);
-    assert(all[3] == 0);assert(none[3] == 1);
+    assert(all[2] == 1);assert(all[3] == 0);
+}
+#[test(should_fail_with="empty holder issuer list")]
+fn explicit_empty_holder_scope_is_refused() {
+    let _none=envelope_words(9,4,true,true,0,[0;4],false,false,0,0,false,0,false,0);
 }

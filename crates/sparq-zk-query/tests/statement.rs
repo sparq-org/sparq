@@ -197,14 +197,16 @@ fn envelope_policy_has_canonical_optional_values_and_binds_wide_times() {
 }
 
 #[test]
-fn explicit_empty_holder_scope_is_distinct_from_an_absent_scope() {
+fn explicit_empty_holder_scope_is_refused_while_an_absent_scope_selects_all() {
     let mut all = sparq_zk_query::statement::EnvelopeInputs::issuer_only([7; 32]);
     all.holder_required = true;
     let mut none = all.clone();
     none.holder_issuers_present = true;
     assert!(all.words().is_ok());
-    assert!(none.words().is_ok());
-    assert_ne!(all.words().unwrap(), none.words().unwrap());
+    assert_eq!(
+        none.words().unwrap_err(),
+        sparq_zk_query::Error::Invalid("empty holder issuer list".into())
+    );
 }
 
 #[test]

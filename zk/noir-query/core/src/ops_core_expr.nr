@@ -3,7 +3,10 @@
 
 use crate::table::{TermCell, Table, unbound};
 use crate::ops_core::Boolean;
-use crate::suite_constants::{DT_STRING, DT_LANGSTRING};
+use crate::suite_constants::{DT_STRING, DT_LANGSTRING, DT_INTEGER, DT_DECIMAL, DT_DOUBLE,
+    DT_FLOAT, DT_BOOLEAN, DT_NONPOSITIVEINTEGER, DT_NEGATIVEINTEGER,
+    DT_LONG, DT_INT, DT_SHORT, DT_BYTE, DT_NONNEGATIVEINTEGER, DT_UNSIGNEDLONG,
+    DT_UNSIGNEDINT, DT_UNSIGNEDSHORT, DT_UNSIGNEDBYTE, DT_POSITIVEINTEGER};
 use crate::expr_core::{Lane, Scalar, Numeric, StringLane, TemporalLane, truth,
     zero_numeric, TERM, BOOLEAN, NUMERIC, STRING, DATE, DATETIME, DECIMAL};
 use crate::{expr_core, expr_compare};
@@ -28,6 +31,13 @@ fn term(value: TermCell) -> Value {
     Value { term: value, boolean: truth(false, true), is_boolean: false }
 }
 
+fn numeric_or_boolean(dt:Field) -> bool {
+    (dt == DT_INTEGER) | (dt == DT_DECIMAL) | (dt == DT_DOUBLE) | (dt == DT_FLOAT)
+        | (dt == DT_BOOLEAN) | (dt == DT_NONPOSITIVEINTEGER) | (dt == DT_NEGATIVEINTEGER)
+        | (dt == DT_LONG) | (dt == DT_INT) | (dt == DT_SHORT) | (dt == DT_BYTE)
+        | (dt == DT_NONNEGATIVEINTEGER) | (dt == DT_UNSIGNEDLONG) | (dt == DT_UNSIGNEDINT)
+        | (dt == DT_UNSIGNEDSHORT) | (dt == DT_UNSIGNEDBYTE) | (dt == DT_POSITIVEINTEGER)
+}
 fn is_string(cell:TermCell) -> bool {
     cell.bound & (cell.kind == 3) & ((cell.key_class == 6) | (cell.key_class == 7) | (cell.dt == DT_LANGSTRING))
 }
@@ -49,6 +59,8 @@ fn scalar(cell: TermCell, equality: bool, effective_boolean: bool, class_only:bo
         },
     };
     let mut capacity = false;
+    let invalid_ebv = cell.bound & (cell.kind == 3) & (cell.key_class == 0)
+        & numeric_or_boolean(cell.dt);
     if cell.bound & (cell.kind == 3) {
         if effective_boolean {
             assert(cell.key_class != 0x7f, "literal value range");
@@ -58,7 +70,10 @@ fn scalar(cell: TermCell, equality: bool, effective_boolean: bool, class_only:bo
 
         }
         let prefix: Field = cell.key_class as Field * 0x1000000000000000000000000000000000000000000000000000000000000;
-        if cell.key_class == 1 {
+        if invalid_ebv & effective_boolean {
+            value.tag = if cell.dt == DT_BOOLEAN { BOOLEAN } else { NUMERIC };
+            value.valid = false;
+        } else if cell.key_class == 1 {
             let zero: Field = 0x1800000000000000000000000000000000000000000000000000000000000;
             let negative = cell.key.lt(zero);
             let magnitude = if negative { zero - cell.key } else { cell.key - zero };
