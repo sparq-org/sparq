@@ -149,27 +149,25 @@ fn t1_mixed_column_both_populations_probe() {
 /// yet the exact values differ, so a naive pure-f64 path would confident-FAIL (1.0 < 1.0 =
 /// false) and drop the row, while the exact comparison keeps it.
 ///
-/// **Why the vectorized seam does NOT engage here (and why that is correct).** Every value
-/// capable of producing a genuine f64 tie needs > 15 significant decimal digits (this
-/// witness has 17). Two independent, result-equivalent guards steer exactly that class
+/// **Why the vectorized seam does NOT engage here (and why that is correct).** The
+/// decimal witness carries > 15 significant digits. Two
+/// result-equivalent guards steer unsafe decimal precision or magnitude
 /// away from the f64 fast path *before* the vectorized `columnar_filter` seam is reached:
-/// the pre-existing constant-side `decimal_needs_exact_comparison` guard (`lit_num` in `extract_sargable`),
-/// and — added on main (`sq-lr2ii`, `Graph::has_decimal_needing_exact_comparison`) — a graph-side
-/// guard that declines the sargable path whenever the graph HOLDS an f64-inexact decimal.
+/// the constant-side `decimal_needs_exact_comparison` guard (`lit_num` in `extract_sargable`)
+/// and the graph-side `Graph::has_decimal_needing_exact_comparison` guard, which declines
+/// the sargable path whenever the graph holds a decimal requiring exact comparison.
 /// This graph does hold one (the witness), so `extract_sargable` returns `None`, the seam
 /// records a decline (`chunks_built == 0`), and the exact **scalar** path evaluates the
 /// FILTER. The tie is therefore delivered to the tri-mask ONLY at the kernel unit level
 /// (`tie_exactness_2_to_53_classified_as_tie` in `chunk_select.rs`, which pins the
 /// `x == c` tie classification directly); no end-to-end query can both engage the seam and
-/// carry a genuine tie, because the very property that makes a value a tie also trips these
-/// > 15-digit guards.
+/// carry this precision collision, because the decimal guard declines it.
 ///
 /// Asserts: (1) the witness f64 equals 1.0 (tie precondition — if this regresses the
 /// witness becomes a confident lane and the test logic is invalid); (2) the witness row
 /// survives FILTER(?fval < 1) and the result is **byte-identical** to the scalar reference
-/// (result-equivalence across the guard); (3) `chunks_built == 0` — the `sq-lr2ii` /
-/// `decimal_needs_exact_comparison` high-precision-decimal guard declines the sargable/vectorized path for this
-/// graph, so the exact scalar path handles it.
+/// (result-equivalence across the guard); (3) `chunks_built == 0` — the precision/magnitude
+/// guard declines the sargable/vectorized path for this graph, so the exact scalar path handles it.
 #[test]
 fn t2_tie_exactness_decimal_witness() {
     let mut nt = String::new();
@@ -241,17 +239,17 @@ fn t2_tie_exactness_decimal_witness() {
          (exact < 1, but f64 rounds to 1.0 — tri-mask must delegate, not confident-fail)"
     );
 
-    // Guard interaction (reconciled after merging main). The witness is a genuine tie, but a
-    // genuine tie needs > 15 significant digits, and a graph holding an f64-inexact decimal
-    // trips the `sq-lr2ii` graph-side guard (`Graph::has_decimal_needing_exact_comparison`, added on
-    // main) — plus the pre-existing constant-side `decimal_needs_exact_comparison` guard — so
+    // Guard interaction. This precision witness has > 15 significant digits.
+    // A graph holding that decimal
+    // trips the graph-side `Graph::has_decimal_needing_exact_comparison` guard. The
+    // constant-side guard uses `decimal_needs_exact_comparison`, so
     // `extract_sargable` returns `None` and the vectorized seam DECLINES before it runs. The
     // exact scalar path handles the FILTER instead; the byte-identity + witness-survival
     // assertions above prove that is result-correct. The tie CLASSIFICATION kernel is pinned
     // directly by `tie_exactness_2_to_53_classified_as_tie` in `chunk_select.rs`.
     assert_eq!(
         snap.chunks_built, 0,
-        "T2: the `sq-lr2ii`/`decimal_needs_exact_comparison` high-precision-decimal guard must DECLINE the \
+        "T2: the decimal precision/magnitude guard must DECLINE the \
          sargable/vectorized path for a graph holding an f64-inexact decimal \
          (chunks_built={}); the exact scalar path handles it (result byte-identical above)",
         snap.chunks_built

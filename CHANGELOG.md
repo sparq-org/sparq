@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **sparq-core:** `decimal_needs_exact_comparison` provides the shared precision
+  and magnitude guard for stored decimals and numeric FILTER constants.
+
 - **sparq-lws-core (LWS):** `SOLID_SERVER_LWS_MOUNT_BASE_PATH` opts the native
   listener into mounting at the path in `SOLID_SERVER_BASE_URL`; the default
   remains storage-relative routing behind a prefix-stripping proxy. The bare
@@ -23,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refused for LWS because it does not assure exclusive index ownership.
 
 ### Fixed
+
+- **sparq-core / sparq-engine:** numeric FILTER pushdown agrees with BIND for
+  nonzero decimals whose floating images are zero or subnormal (#7322). Cold
+  graph scans reuse cached numeric images instead of reparsing decimal lexicals.
 
 - **sparq-lws-core:** metadata writes, resource deletes, containment removals and
   append/fold publication use fenced HTTP updates. Resource deletion detaches its
@@ -45,6 +52,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The builtin LWS.net ratchet checks exact expected failure names and requires their removal when they pass.
 
 ### Changed
+
+- **sparq-core:** `Graph::has_high_precision_decimal` is renamed to
+  `Graph::has_decimal_needing_exact_comparison` to reflect the magnitude guard.
+  The former name remains available as a deprecated forwarding alias.
 
 - **sparq-lws-core:** insert-only LDP PATCH without Read stores inserts beside a
   Turtle, N-Triples or N-Quads document and returns `204` with no Location or ETag

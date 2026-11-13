@@ -939,10 +939,11 @@ fn numeric_of(term: &Term) -> f64 {
 }
 
 /// Whether a cached decimal term needs the exact comparison path.
-fn is_decimal_needing_exact_comparison(dict: &Dict, id: Id) -> bool {
+fn is_decimal_needing_exact_comparison(dict: &Dict, id: Id, image: f64) -> bool {
     matches!(dict.term_parts(id),
         dict::TermParts::Lit { value, datatype, lang: None }
-            if datatype == xsd::DECIMAL.as_str() && decimal_needs_exact_comparison(value))
+            if datatype == xsd::DECIMAL.as_str()
+                && decimal_needs_exact_comparison_with_image(value, || image))
 }
 
 /// Whether a plain decimal lexical must bypass comparison through its cached `f64`.
@@ -958,6 +959,13 @@ fn is_decimal_needing_exact_comparison(dict: &Dict, id: Id) -> bool {
 /// Invalid plain decimal lexicals also return `true`. This does not validate a
 /// datatype or change numeric-cache acceptance; callers validate those separately.
 pub fn decimal_needs_exact_comparison(value: &str) -> bool {
+    decimal_needs_exact_comparison_with_image(value, || value.parse::<f64>().unwrap_or(f64::NAN))
+}
+
+// One lexical decision for cached terms and constants. The image is lazy so
+// unsafe precision, invalid lexicals and lexical zero never need a float parse.
+// Cached terms supply their existing image without parsing the lexical again.
+fn decimal_needs_exact_comparison_with_image(value: &str, image: impl FnOnce() -> f64) -> bool {
     let body = value.strip_prefix(['+', '-']).unwrap_or(value);
     let (int, frac) = body.split_once('.').unwrap_or((body, ""));
     if (int.is_empty() && frac.is_empty())
@@ -972,8 +980,8 @@ pub fn decimal_needs_exact_comparison(value: &str) -> bool {
     } else {
         int.len() + frac.len()
     };
-    digits > f64::DIGITS as usize
-        || (digits != 0 && value.parse::<f64>().map_or(true, |v| !v.is_normal()))
+    // Test lexical nonzero: a nonzero decimal can have a zero cached image.
+    digits > f64::DIGITS as usize || (digits != 0 && !image().is_normal())
 }
 
 /// True for `xsd:integer` and its derived integer subtypes (NOT decimal/double/float) —
@@ -3445,12 +3453,13 @@ impl Graph {
     }
 
     /// Whether any cached `xsd:decimal` needs exact comparison rather than the
-    /// sargable FILTER's `f64` path. Uses [`decimal_needs_exact_comparison`] for
-    /// both precision and magnitude, matching the engine's constant-side guard.
+    /// sargable FILTER's `f64` path. Shares the precision and magnitude decision
+    /// of [`decimal_needs_exact_comparison`] with the engine's constant-side guard.
     /// Integers are covered by that constant-side guard; float/double values
     /// already have their promoted binary representation.
     ///
-    /// Memoised: the first call scans numeric terms and later calls load one atomic.
+    /// Memoised: the first call scans numeric terms using their cached images,
+    /// without reparsing decimal values, and later calls load one atomic.
     /// Appending dictionary terms invalidates the memo. One unsafe decimal declines
     /// numeric pushdown for the whole graph; ordinary stores keep the fast path.
     pub fn has_decimal_needing_exact_comparison(&self) -> bool {
@@ -3459,12 +3468,21 @@ impl Graph {
             2 => true,
             1 => false,
             _ => {
-                let found = (1..=self.dict.len() as Id)
-                    .any(|id| self.numerics.lookup(id).is_some() && is_decimal_needing_exact_comparison(&self.dict, id));
+                let found = (1..=self.dict.len() as Id).any(|id| {
+                    self.numerics.lookup(id).is_some_and(|image| {
+                        is_decimal_needing_exact_comparison(&self.dict, id, image)
+                    })
+                });
                 self.decimal_needs_exact_comparison.store(if found { 2 } else { 1 }, Relaxed);
                 found
             }
         }
+    }
+
+    /// Deprecated alias for [`Self::has_decimal_needing_exact_comparison`].
+    #[deprecated(note = "renamed to has_decimal_needing_exact_comparison")]
+    pub fn has_high_precision_decimal(&self) -> bool {
+        self.has_decimal_needing_exact_comparison()
     }
 
     /// `true` if the graph holds any `xsd:float` literal. The engine's f64 sargable-FILTER
@@ -14472,6 +14490,94 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn decimal_comparison_gate_uses_cached_image() {
+        let tiny = format!("0.{}1", "0".repeat(324));
+        for (lexical, image, expected) in [("1.5", 0.0, true), (tiny.as_str(), 1.0, false)] {
+            let mut graph = Graph::load_str(
+                &format!("<urn:s> <urn:v> \"{lexical}\"^^<http://www.w3.org/2001/XMLSchema#decimal> ."),
+                "ntriples",
+            )
+            .unwrap();
+            let term = Term::Literal(Literal::new_typed_literal(lexical, xsd::DECIMAL));
+            let id = graph.id_of(&term).unwrap();
+            // Controlled images pin the source of both normal and zero decisions.
+            // Reparsing either lexical would give the opposite answer. Real cache
+            // construction always supplies the correctly rounded image.
+            graph.numerics = NumData::Sparse([(id, image)].into_iter().collect());
+            assert_eq!(
+                graph.has_decimal_needing_exact_comparison(),
+                expected,
+                "{lexical}"
+            );
+        }
+    }
+
+    #[test]
+    fn decimal_comparison_cached_and_parsed_images_agree() {
+        let mut cases = vec![
+            ("1.5".to_string(), false),
+            ("007.50".to_string(), false),
+            (".5".to_string(), false),
+            ("5.".to_string(), false),
+            ("0.0".to_string(), false),
+            ("1.000000000000000001".to_string(), true),
+            (format!("0.{}1", "0".repeat(324)), true),
+            (format!("0.{}1", "0".repeat(309)), true),
+            (format!("0.{}0", "0".repeat(400)), false),
+        ];
+        for (digits, expected) in [
+            ("222507385850720", true),
+            ("222507385850721", false),
+            ("222507385850722", false),
+        ] {
+            cases.push((format!("0.{}{digits}", "0".repeat(307)), expected));
+        }
+        for (lexical, expected) in cases {
+            for sign in ["", "+", "-"] {
+                let lexical = format!("{sign}{lexical}");
+                let image = numeric_cache_value(&lexical, xsd::DECIMAL.as_str()).unwrap();
+                assert_eq!(
+                    decimal_needs_exact_comparison_with_image(&lexical, || image),
+                    expected,
+                    "cached {lexical}"
+                );
+                assert_eq!(
+                    decimal_needs_exact_comparison(&lexical),
+                    expected,
+                    "parsed {lexical}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn deprecated_decimal_comparison_alias_forwards_memo() {
+        let mut graph = Graph::load_str("<urn:s> <urn:v> 1.5 .", "turtle").unwrap();
+        assert!(!graph.has_high_precision_decimal());
+        assert_eq!(
+            graph.has_high_precision_decimal(),
+            graph.has_decimal_needing_exact_comparison()
+        );
+        let tiny = format!("0.{}1", "0".repeat(324));
+        graph
+            .apply_delta(
+                &[[
+                    Term::NamedNode(NamedNode::new_unchecked("urn:tiny")),
+                    Term::NamedNode(NamedNode::new_unchecked("urn:v")),
+                    Term::Literal(Literal::new_typed_literal(tiny, xsd::DECIMAL)),
+                ]],
+                &[],
+            )
+            .unwrap();
+        assert!(graph.has_high_precision_decimal());
+        assert_eq!(
+            graph.has_high_precision_decimal(),
+            graph.has_decimal_needing_exact_comparison()
+        );
     }
 
     /// sq-lr2ii — `has_decimal_needing_exact_comparison` is the engine's sargable-safety gate:

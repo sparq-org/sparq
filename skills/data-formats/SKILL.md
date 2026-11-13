@@ -40,8 +40,9 @@ number; a missing cache value is not a datatype-validity result.
 decimals with more than `f64::DIGITS` significant digits or a nonzero value whose
 cached image is zero/subnormal (below `f64::MIN_POSITIVE`). Zero remains safe.
 `Graph::has_decimal_needing_exact_comparison()` memoizes that decision over cached
-decimal terms; dictionary growth invalidates it. This replaces
-`has_high_precision_decimal()`. The engine uses the same predicate for FILTER
+decimal terms using their existing numeric images; dictionary growth invalidates it.
+`has_high_precision_decimal()` remains as a deprecated forwarding alias.
+The engine uses the same predicate for FILTER
 constants and declines numeric pushdown when either side needs exact comparison.
 Numeric cache values and the `numerics-v3.bin` format are unchanged; reopening an
 existing store computes the new guard in memory.

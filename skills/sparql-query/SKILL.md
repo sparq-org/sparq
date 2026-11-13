@@ -775,8 +775,10 @@ SPARQL Update `USING` identity behavior.
   `f64::DIGITS` significant digits or a nonzero decimal whose image is zero/subnormal
   (below `f64::MIN_POSITIVE`). Zero remains safe. Constants use that predicate directly;
   `Graph::has_decimal_needing_exact_comparison()` memoizes it over cached decimal terms
-  and invalidates it on dictionary growth. An unsafe operand takes the exact evaluator,
-  matching BIND for `=`/`<`/`>`/`<=`/`>=`. The graph decision is conservative: one unsafe
+  using existing numeric images and invalidates it on dictionary growth. The former
+  `has_high_precision_decimal()` name remains as a deprecated forwarding alias.
+  An unsafe operand takes the exact evaluator, matching BIND for `=`/`<`/`>`/`<=`/`>=`.
+  The graph decision is conservative: one unsafe
   decimal disables numeric pushdown across that graph; ordinary stores retain it.
 - **`SELECT *`** never exposes blank-node "variables" (`_:x` in a pattern is an existential var).
 - **Non-deterministic builtins** (`sq-98w7z.1`) — `NOW()` is **query-constant** per SPARQL 1.1

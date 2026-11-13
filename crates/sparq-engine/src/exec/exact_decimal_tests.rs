@@ -68,6 +68,28 @@ fn decimal_underflow_constant_agrees_with_bind() {
 }
 
 #[test]
+fn decimal_gate_remains_correct_after_fork_and_update() {
+    let parent = decimal_graph("0.0");
+    assert!(!parent.has_decimal_needing_exact_comparison());
+    let fork = parent.fork();
+    assert!(!fork.has_decimal_needing_exact_comparison());
+    let tiny = format!("0.{}1", "0".repeat(324));
+    let updated = crate::update(
+        &fork,
+        &format!("INSERT DATA {{ <urn:tiny> <urn:v> \"{tiny}\"^^<http://www.w3.org/2001/XMLSchema#decimal> }}"),
+    ).unwrap();
+    assert!(updated.has_decimal_needing_exact_comparison());
+    assert!(!parent.has_decimal_needing_exact_comparison());
+    assert!(!fork.has_decimal_needing_exact_comparison());
+    let query = "SELECT ?v WHERE { ?s <urn:v> ?v FILTER(?v > 0) }";
+    assert_eq!(
+        crate::query(&updated, query).unwrap().rows,
+        vec![vec![Some(decimal_term(&tiny))]]
+    );
+    assert_eq!(crate::count(&updated, query).unwrap(), 1);
+}
+
+#[test]
 fn decimal_subnormal_collision_agrees_with_bind() {
     let low = format!("0.{}10", "0".repeat(322));
     let high = format!("0.{}11", "0".repeat(322));
