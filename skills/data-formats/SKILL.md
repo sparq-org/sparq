@@ -67,9 +67,12 @@ bytes or change the existing trusted-storage assumption.
 ## Named graph access
 
 `Graph::named` is private. Read `graph.named()` (an ordered slice) or
-`graph.named_graph(&name)`. Use `add_named`, `extend_named`, `set_named`,
+`graph.named_graph(&name)`. Exact lookups use an in-memory side index;
+`graph.named_graph_index(&name)` returns the first matching Vec position for
+`apply_delta_to_named`. Positions can change after removal and are not durable slot IDs.
+Duplicate names retain their original order and resolve to the first member. Use `add_named`, `extend_named`, `set_named`,
 `remove_named`, `retain_named`, and `take_named` for in-memory members; these
-return `Result` and keep the graph-name prefix index current. Store-backed
+return `Result` and keep both exact-name and prefix indexes current. Store-backed
 members cannot be replaced, extracted, or shifted through those methods. A directory-backed
 root refuses `add_named`, `set_named`, and nonempty `extend_named` batches of in-memory
 graphs: use a dataset `fork()` for views, or logged insertion through `ensure_named`.

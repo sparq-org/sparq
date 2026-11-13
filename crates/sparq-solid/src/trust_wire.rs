@@ -233,8 +233,8 @@ fn abac_rule_n3_for(_store: &PodStore) -> &'static str {
 /// touching the ODRL path.
 fn install_auth_grants(graph: &mut Graph, grants: &[Triple]) -> Result<(), String> {
     let g_name = Term::NamedNode(NamedNode::new_unchecked(AUTH_GRAPH));
-    let mut terms: Vec<[Term; 3]> = match graph.named().iter().find(|(n, _)| *n == g_name) {
-        Some((_, sub)) => crate::loader::graph_triples(sub),
+    let mut terms: Vec<[Term; 3]> = match graph.named_graph(&g_name) {
+        Some(sub) => crate::loader::graph_triples(sub),
         None => Vec::new(),
     };
     for t in grants {
@@ -273,8 +273,8 @@ fn install_conditional_grant(graph: &mut Graph, target: &NamedNode, cg: &Conditi
         return Ok(()); // not an auth:read|write|append|control grant → nothing to install
     };
     let g_name = Term::NamedNode(NamedNode::new_unchecked(AUTH_GRAPH));
-    let mut terms: Vec<[Term; 3]> = match graph.named().iter().find(|(n, _)| *n == g_name) {
-        Some((_, sub)) => crate::loader::graph_triples(sub),
+    let mut terms: Vec<[Term; 3]> = match graph.named_graph(&g_name) {
+        Some(sub) => crate::loader::graph_triples(sub),
         None => Vec::new(),
     };
 

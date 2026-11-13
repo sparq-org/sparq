@@ -766,7 +766,7 @@ fn apply_slot_delta(
     match slot {
         None => graph.apply_delta(inserts, deletes),
         Some(name) => {
-            if let Some(i) = graph.named().iter().position(|(n, _)| n == name) {
+            if let Some(i) = graph.named_graph_index(name) {
                 return graph.apply_delta_to_named(i, inserts, deletes);
             }
             if inserts.is_empty() {
@@ -1318,10 +1318,8 @@ fn resolve_effect_ops(graph: &Graph, effects: &[UpdateEffect]) -> Vec<TxnOp> {
                 let seed = match slot {
                     None => decode_triples(graph),
                     Some(name) => graph
-                        .named()
-                        .iter()
-                        .find(|(n, _)| n == name)
-                        .map(|(_, sub)| decode_triples(sub))
+                        .named_graph(name)
+                        .map(decode_triples)
                         .unwrap_or_default(),
                 };
                 running.push((slot.clone(), seed));

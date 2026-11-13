@@ -1012,17 +1012,12 @@ impl SolidMcpServer {
     fn find_doc(&self, url: &str) -> Option<&Graph> {
         let name = NamedNode::new(url).ok()?;
         let term = Term::NamedNode(name);
-        self.store
-            .graph()
-            .named()
-            .iter()
-            .find(|(n, _)| *n == term)
-            .map(|(_, g)| g)
+        self.store.graph().named_graph(&term)
     }
 
     /// The index of the named-graph slot for `term`, if present.
     fn slot_index(&self, term: &Term) -> Option<usize> {
-        self.store.graph().named().iter().position(|(n, _)| n == term)
+        self.store.graph().named_graph_index(term)
     }
 
     /// `resource_get`: serve one document from the shared dataset (draft §6.4), with
@@ -1478,9 +1473,8 @@ impl SolidMcpServer {
                 return true;
             }
             let (acl, acr) = (format!("{iri}.acl"), format!("{iri}.acr"));
-            self.store.graph().named().iter().any(|(n, _)| {
-                matches!(n, Term::NamedNode(nn) if nn.as_str() == acl || nn.as_str() == acr)
-            })
+            self.store.graph().named_graph(&Term::NamedNode(NamedNode::new_unchecked(acl))).is_some()
+                || self.store.graph().named_graph(&Term::NamedNode(NamedNode::new_unchecked(acr))).is_some()
         };
         if known(url) {
             return url.to_string();

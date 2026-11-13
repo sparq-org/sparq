@@ -725,7 +725,7 @@ fn detached_child_survives_sibling_create_and_drop() {
         let tmp = tempdir().unwrap();
         let path = tmp.path().join("store");
         let mut root = store(&path, 2);
-        let (n, mut child) = root.named.pop().unwrap();
+        let (n, mut child) = root.pop_named().unwrap();
         if create {
             root.ensure_named(&name("new")).unwrap();
         } else {
@@ -744,12 +744,12 @@ fn stale_child_drop_changes_only_the_attached_set() {
     let tmp = tempdir().unwrap();
     let path = tmp.path().join("store");
     let mut root = store(&path, 4);
-    let (_, stale) = root.named.remove(1);
+    let (_, stale) = root.remove_named_at(1);
     root.drop_named_durable(&name("g0")).unwrap();
     root.apply_delta(&[triple()], &[]).unwrap();
     root.compact().unwrap();
     // The rewrite assigns g3 to slot 1, which the detached handle previously held.
-    root.named.push((name("old"), stale));
+    root.push_named(name("old"), stale);
     assert!(root.drop_named_durable(&name("old")).unwrap());
     let i = root.ensure_named(&name("g3")).unwrap();
     root.apply_delta_to_named(i, &[triple()], &[]).unwrap();
@@ -766,10 +766,10 @@ fn stale_child_refuses_manifest_republication() {
     let tmp = tempdir().unwrap();
     let path = tmp.path().join("store");
     let mut root = store(&path, 2);
-    let (n, stale) = root.named.pop().unwrap();
+    let (n, stale) = root.pop_named().unwrap();
     root.apply_delta(&[triple()], &[]).unwrap();
     root.compact().unwrap();
-    root.named.push((n, stale));
+    root.push_named(n, stale);
     assert!(root.ensure_named(&name("new")).is_err());
     assert_eq!(
         read_named_manifest(&path).unwrap().unwrap().entries.len(),
@@ -786,7 +786,7 @@ fn duplicate_check_includes_the_dropped_child() {
         Graph::open_dir(&path.join("named/1"), root.lock.clone(), true, Role::Child).unwrap();
     alias.tree = root.tree.clone();
     alias.generation = root.generation;
-    root.named.push((name("g1"), alias));
+    root.push_named(name("g1"), alias);
     assert!(root.drop_named_durable(&name("g1")).is_err());
     assert!(path.join("named/1").is_dir());
     assert_eq!(
@@ -938,7 +938,7 @@ fn last_child_drop_records_the_container() {
     let tmp = tempdir().unwrap();
     let path = tmp.path().join("store");
     let mut root = store(&path, 2);
-    let (_, mut detached) = root.named.pop().unwrap();
+    let (_, mut detached) = root.pop_named().unwrap();
     // Exercise cleanup of a previously undeclared child under the emptying container.
     write_named_manifest(&path, &[(0, name("g0"))], 2).unwrap();
     root.drop_named_durable(&name("g0")).unwrap();
