@@ -23,8 +23,15 @@ mod merge;
 pub(crate) type TripleTerms = [Term; 3];
 pub(crate) type TripleSet = FxHashSet<TripleTerms>;
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static TRIPLE_DECODES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// The triples of one graph as ground term-triples (decoded from its dictionary).
 pub(crate) fn decode_triples(g: &Graph) -> TripleSet {
+    #[cfg(test)]
+    TRIPLE_DECODES.with(|count| count.set(count.get() + 1));
     let pat: IdPattern = [None, None, None];
     let scan = g.store().scan(&pat);
     scan.rows
