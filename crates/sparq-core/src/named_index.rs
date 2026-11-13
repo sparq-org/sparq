@@ -1,8 +1,12 @@
 //! Exact-name side index. Positions refer only to the in-memory Vec, never durable slot ids.
 use crate::{Graph, Term};
 use hashbrown::HashTable;
-#[cfg(not(test))]
+// Native builds seed per process. The zkVM guest must execute reproducibly and may not request
+// randomness after start-up, so it uses a fixed hasher; tests use one for reproducible probes.
+#[cfg(not(any(test, target_os = "zkvm")))]
 use std::collections::hash_map::RandomState as NameHashes;
+#[cfg(all(target_os = "zkvm", not(test)))]
+type NameHashes = rustc_hash::FxBuildHasher;
 #[cfg(test)]
 type NameHashes = std::hash::BuildHasherDefault<std::collections::hash_map::DefaultHasher>;
 use std::hash::BuildHasher;
