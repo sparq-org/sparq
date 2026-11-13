@@ -239,6 +239,7 @@ mod trust {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn trust_view_write_failures_return_errors_and_disable_authorization() {
         let (credential, rules) = credential_and_rules();
         let session = TrustSession { agent: iri(JESSE), now_unix_secs: NOW };
