@@ -11,16 +11,23 @@ HERE = Path(__file__).resolve().parent
 
 FIELD = {'kind': 'field'}
 BOOL = {'kind': 'boolean'}
-DIGEST = {'kind': 'array', 'length': 2,
-          'type': {'kind': 'integer', 'sign': 'unsigned', 'width': 128}}
+U32 = {'kind': 'integer', 'sign': 'unsigned', 'width': 32}
+U64 = {'kind': 'integer', 'sign': 'unsigned', 'width': 64}
+DIGEST = {'kind': 'array', 'length': 32,
+          'type': {'kind': 'integer', 'sign': 'unsigned', 'width': 8}}
+POLICY_INPUTS = [
+    ('issuer_root', FIELD), ('issuer_depth', U32),
+    ('holder_required', BOOL), ('holder_issuers_present', BOOL),
+    ('holder_issuer_count', U32),
+    ('holder_issuers', {'kind': 'array', 'length': 4, 'type': FIELD}),
+    ('status_required', BOOL), ('allow_missing_status', BOOL),
+    ('snapshot_root', FIELD), ('snapshot_depth', U32),
+    ('validity_required', BOOL), ('now', U64),
+    ('freshness_required', BOOL), ('earliest_created', U64),
+]
 PUBLIC_INPUTS = {
-    'issuer': [('trusted_root', FIELD)],
-    'holder': [('request_digest', DIGEST)],
-    'status': [('accepted_root', FIELD), ('allow_missing', BOOL)],
-    'freshness': [('required', BOOL), ('earliest_created', {'kind': 'integer', 'sign': 'unsigned', 'width': 64})],
-    'validity': [('now', {'kind': 'integer', 'sign': 'unsigned', 'width': 64})],
-    'dataset': [('request_digest', DIGEST)],
-    'request': [('request_digest', DIGEST)],
+    name: ([('request_digest', DIGEST)] if name == 'holder' else []) + POLICY_INPUTS
+    for name in ('issuer', 'holder', 'status', 'validity', 'freshness', 'dataset', 'request')
 }
 
 

@@ -1,7 +1,7 @@
 //! Draft credential statement gadgets. Research grade; not externally audited.
 //! No production descriptor or answers-data-model presentation is defined here.
 use crate::suite_constants::{DT_DATETIME, DT_INTEGER, DT_STRING, SUITE_ID};
-use compose::hashes::{commit_fold, h2, h3, h4, h5};
+use compose::hashes::{commit_fold, h2, h3, h5};
 use std::collections::bounded_vec::BoundedVec;
 pub use compose::issuer::Point;
 use crate::table::{append, canonicalize, check_cell, empty, equal_cell, same_term, Table, unbound};
@@ -321,7 +321,8 @@ pub fn trusted_key_leaf(issuer: TermCell, method: TermCell, pk: Point) -> Field 
 }
 pub fn check_issuer<let N: u32, let K: u32>(
     c: Credential<N>,
-    trusted_root: Field,
+    issuer_root: Field,
+    issuer_depth: u32,
     sig: Signature,
     membership: Membership<K>,
 ) -> TermCell {
@@ -335,27 +336,34 @@ pub fn check_issuer<let N: u32, let K: u32>(
         "issuer identity kind",
     );
     assert(
-        merkle_root(
+        set_merkle_root(
             trusted_key_leaf(issuer, c.verification_method, c.issuer_key),
             membership,
+            issuer_depth,
         )
-            == trusted_root,
+            == issuer_root,
         "issuer authorization set",
     );
     verify_signature(c.issuer_key, sig, c.signed_message);
     issuer
 }
-pub fn holder_message(request_digest: [u128; 2]) -> Field {
-    h3(
-        HOLDER_REQUEST,
-        request_digest[0] as Field,
-        request_digest[1] as Field,
-    )
+fn digest_halves(digest: [u8; 32]) -> [Field; 2] {
+    let mut high: Field = 0;
+    let mut low: Field = 0;
+    for i in 0..16 {
+        high = high * 256 + digest[i] as Field;
+        low = low * 256 + digest[i + 16] as Field;
+    }
+    [high, low]
+}
+pub fn holder_message(request_digest: [u8; 32]) -> Field {
+    let limbs = digest_halves(request_digest);
+    h3(HOLDER_REQUEST, limbs[0], limbs[1])
 }
 // Scalar multiplication dominates the holder check.
 pub fn check_holder<let N: u32>(
     c: Credential<N>,
-    request_digest: [u128; 2],
+    request_digest: [u8; 32],
     pk: Point,
     sig: Signature,
 ) {
@@ -414,7 +422,8 @@ pub struct StatusEvidence<let D: u32, let A: u32> {
 // and curates snapshots; the leaf at the credential's W3C index hashes its tagged bit.
 pub fn check_status<let N: u32, let D: u32, let A: u32>(
     c: Credential<N>,
-    accepted_root: Field,
+    snapshot_root: Field,
+    snapshot_depth: u32,
     allow_missing: bool,
     evidence: [StatusEvidence<D, A>; N],
 ) {
@@ -459,7 +468,8 @@ pub fn check_status<let N: u32, let D: u32, let A: u32>(
             assert(index < e.snapshot.bit_len as u64, "status index length");
             assert((e.snapshot.bit_len as Field).lt(tree_capacity + 1), "snapshot capacity");
             assert(
-                merkle_root(snapshot_digest::<D>(e.snapshot), e.accepted) == accepted_root,
+                set_merkle_root(snapshot_digest::<D>(e.snapshot), e.accepted, snapshot_depth)
+                    == snapshot_root,
                 "snapshot policy",
             );
             assert(e.path.index == index as Field, "status index binding");
@@ -492,82 +502,120 @@ pub fn check_validity<let N: u32>(c: Credential<N>, now: u64) {
     assert(start <= now, "before validFrom");
     assert(now <= end, "after validUntil");
 }
-// STAND-IN (lane B): replaced in step 2. Derive this from the stored request.
-pub struct RequestPolicy {
-    pub trusted_root: Field,
+/// Public policy values, reconstructed by the verifier from its stored request.
+/// Field order matches the authenticated layout's agreed policy group.
+pub struct PublicPolicy {
+    pub issuer_root: Field,
+    pub issuer_depth: u32,
     pub holder_required: bool,
     pub holder_issuers_present: bool,
-    pub holder_issuers: [TermCell; 4],
     pub holder_issuer_count: u32,
+    pub holder_issuers: [Field; 4],
     pub status_required: bool,
     pub allow_missing_status: bool,
-    pub accepted_snapshots: Field,
+    pub snapshot_root: Field,
+    pub snapshot_depth: u32,
     pub validity_required: bool,
     pub now: u64,
     pub freshness_required: bool,
     pub earliest_created: u64,
 }
-// STAND-IN (lane B): replaced in step 2. Local fixture, NOT RDFC/SHA-256.
-// Query, domain, challenge and every policy field enter; both digest limbs are kept.
-pub fn stand_in_request_digest(
-    query: Field,
-    domain: Field,
-    challenge: Field,
-    policy: RequestPolicy,
-) -> [u128; 2] {
-    let digest = commit_fold(
-        [
-            0x5643515f45524551,
-            query,
-            domain,
-            challenge,
-            policy.trusted_root,
-            policy.holder_required as Field,
-            policy.holder_issuers_present as Field,
-            policy.holder_issuer_count as Field,
-            policy.holder_issuers[0].enc,
-            policy.holder_issuers[1].enc,
-            policy.holder_issuers[2].enc,
-            policy.holder_issuers[3].enc,
-            policy.status_required as Field,
-            policy.allow_missing_status as Field,
-            policy.accepted_snapshots,
-            policy.validity_required as Field,
-            policy.now as Field,
-            policy.freshness_required as Field,
-            policy.earliest_created as Field,
-        ],
-        19,
+/// Disabled conditions have one canonical public encoding. The verifier emits
+/// these words; this check derives neither the policy nor the request digest.
+pub fn check_policy<let K: u32, let A: u32>(policy: PublicPolicy) {
+    assert(policy.issuer_root != 0, "issuer root absent");
+    assert(policy.issuer_depth <= K, "issuer depth capacity");
+    assert(policy.snapshot_depth <= A, "snapshot depth capacity");
+    assert(
+        policy.holder_required
+            | (
+                !policy.holder_issuers_present
+                    & (policy.holder_issuer_count == 0)
+                    & (policy.holder_issuers == [0; 4])
+            ),
+        "disabled holder policy",
     );
-    let bits: [bool; 254] = digest.to_le_bits();
-    let mut low: u128 = 0;
-    let mut high: u128 = 0;
-    for i in 0..128 {
-        low = low + (bits[i] as u128) * (1_u128 << (i as u128));
-    }
-    for i in 0..126 {
-        high = high + (bits[128 + i] as u128) * (1_u128 << (i as u128));
-    }
-    [high, low]
+    assert(
+        policy.status_required
+            | (
+                !policy.allow_missing_status
+                    & (policy.snapshot_root == 0)
+                    & (policy.snapshot_depth == 0)
+            ),
+        "disabled status policy",
+    );
+    assert(!policy.status_required | (policy.snapshot_root != 0), "snapshot root absent");
+    assert(policy.validity_required | (policy.now == 0), "disabled validity policy");
+    assert(policy.freshness_required | (policy.earliest_created == 0), "disabled freshness policy");
+    check_holder_policy(policy);
 }
+fn check_holder_policy(policy: PublicPolicy) {
+    assert(policy.holder_issuer_count <= 4, "holder issuer capacity");
+    assert(
+        policy.holder_issuers_present | (policy.holder_issuer_count == 0),
+        "holder issuer presence",
+    );
+    for i in 0..4 {
+        let item = policy.holder_issuers[i];
+        if i < policy.holder_issuer_count {
+            assert(item != 0, "holder issuer encoding");
+            if i > 0 {
+                assert(
+                    crate::term::field_lt(policy.holder_issuers[i - 1], item),
+                    "holder issuer order",
+                );
+            }
+        } else {
+            assert(item == 0, "holder issuer padding");
+        }
+    }
+}
+
+/// A compiled maximum path opens a member at the public set-tree depth only.
+/// Unused siblings and high index bits are canonical zero. Hashing dominates.
+pub fn set_merkle_root<let M: u32>(leaf: Field, member: Membership<M>, depth: u32) -> Field {
+    assert(depth <= M, "set depth capacity");
+    let bits: [bool; M] = member.index.to_le_bits();
+    let mut node = leaf;
+    for i in 0..M {
+        if i < depth {
+            node = h2(
+                if bits[i] { member.siblings[i] } else { node },
+                if bits[i] { node } else { member.siblings[i] },
+            );
+        } else {
+            assert(!bits[i] & (member.siblings[i] == 0), "set path padding");
+        }
+    }
+    node
+}
+
 pub fn check_envelope<let N: u32, let K: u32, let D: u32, let A: u32>(
     c: Credential<N>,
-    digest: [u128; 2],
-    policy: RequestPolicy,
+    digest: [u8; 32],
+    policy: PublicPolicy,
     issuer_sig: Signature,
     issuer_path: Membership<K>,
     holder_pk: Point,
     holder_sig: Signature,
     status: [StatusEvidence<D, A>; N],
 ) -> TermCell {
-    let issuer = check_issuer(c, policy.trusted_root, issuer_sig, issuer_path);
+    check_policy::<K, A>(policy);
+    let issuer = check_issuer(
+        c,
+        policy.issuer_root,
+        policy.issuer_depth,
+        issuer_sig,
+        issuer_path,
+    );
     if holder_applies(issuer, policy) {
         check_holder(c, digest, holder_pk, holder_sig);
     }
     if policy.status_required {
         check_status(
             c,
-            policy.accepted_snapshots,
+            policy.snapshot_root,
+            policy.snapshot_depth,
             policy.allow_missing_status,
             status,
         );
@@ -584,12 +632,12 @@ pub fn check_envelope<let N: u32, let K: u32, let D: u32, let A: u32>(
 pub fn credential_dataset<let N: u32, let O: u32>(
     c: Credential<N>,
     issuer: TermCell,
-    digest: [u128; 2],
+    presentation_scope: Field,
 ) -> Table<O, 4> {
     stand_in_open_credential(c);
     let (_, claimed_issuer) = required_property(c, c.root, vocabulary().issuer);
     assert(equal_cell(issuer, claimed_issuer), "dataset issuer binding");
-    let graph = stand_in_graph_name(digest, c.credential_index);
+    let graph = stand_in_graph_name(presentation_scope, c.credential_index);
     let mut out = empty::<O, 4>();
     for i in 0..N {
         let q = c.quads[i];
@@ -605,16 +653,11 @@ pub fn credential_dataset<let N: u32, let O: u32>(
 }
 
 // STAND-IN (lane A): replaced in step 2. Use the suite's scoped blank-node encoding.
-pub fn stand_in_graph_name(digest: [u128; 2], index: u32) -> TermCell {
+pub fn stand_in_graph_name(presentation_scope: Field, index: u32) -> TermCell {
     TermCell {
         bound: true,
         kind: 2,
-        enc: h4(
-            GRAPH_NAME,
-            digest[0] as Field,
-            digest[1] as Field,
-            index as Field,
-        ),
+        enc: h3(GRAPH_NAME, presentation_scope, index as Field),
         key_class: 0,
         key: 0,
         dt: 0,
@@ -636,27 +679,12 @@ pub fn check_freshness<let N: u32>(c: Credential<N>, required: bool, earliest: u
     }
 }
 
-pub fn holder_applies(issuer: TermCell, policy: RequestPolicy) -> bool {
-    assert(policy.holder_issuer_count <= 4, "holder issuer capacity");
-    assert(
-        policy.holder_issuers_present | (policy.holder_issuer_count == 0),
-        "holder issuer presence",
-    );
+pub fn holder_applies(issuer: TermCell, policy: PublicPolicy) -> bool {
+    check_holder_policy(policy);
     let mut listed = false;
     for i in 0..4 {
-        let item = policy.holder_issuers[i];
-        if i < policy.holder_issuer_count {
-            assert(item.bound & equal_cell(item, iri(item.enc)), "holder issuer IRI");
-            if i > 0 {
-                assert(
-                    crate::term::field_lt(policy.holder_issuers[i - 1].enc, item.enc),
-                    "holder issuer order",
-                );
-            }
-            listed = listed | same_term(issuer, item);
-        } else {
-            assert(equal_cell(item, unbound()), "holder issuer padding");
-        }
+        listed =
+            listed | ((i < policy.holder_issuer_count) & (issuer.enc == policy.holder_issuers[i]));
     }
     policy.holder_required & (!policy.holder_issuers_present | listed)
 }
@@ -669,8 +697,8 @@ pub struct HolderEvidence {
 /// Metadata binding still uses the explicitly marked Multikey opener above.
 pub fn check_holders<let C: u32, let N: u32>(
     credentials: [Credential<N>; C],
-    policy: RequestPolicy,
-    digest: [u128; 2],
+    policy: PublicPolicy,
+    digest: [u8; 32],
     slots: [u32; C],
     evidence: [HolderEvidence; C],
 ) {
@@ -700,27 +728,27 @@ pub fn check_holders<let C: u32, let N: u32>(
     }
 }
 
-/// STAND-IN (lane B): replaced in step 2. RDFC is host-side, not callable here.
-/// This entry constrains policy and digest together before checking credentials.
-pub fn check_requested_envelope<let C: u32, let N: u32, let K: u32, let D: u32, let A: u32>(
+/// Check every credential against public policy words. The public request digest
+/// comes from the verifier; it is used here only for holder signatures.
+pub fn check_public_envelope<let C: u32, let N: u32, let K: u32, let D: u32, let A: u32>(
     credentials: [Credential<N>; C],
-    context: [Field; 3],
-    digest: [u128; 2],
-    policy: RequestPolicy,
+    digest: [u8; 32],
+    policy: PublicPolicy,
     signatures: [Signature; C],
     issuers: [Membership<K>; C],
     holders: [HolderEvidence; C],
     slots: [u32; C],
     status: [[StatusEvidence<D, A>; N]; C],
 ) -> [TermCell; C] {
-    assert(
-        digest == stand_in_request_digest(context[0], context[1], context[2], policy),
-        "request binding",
-    );
+    std::static_assert(C > 0, "credential capacity");
+    check_policy::<K, A>(policy);
     let mut verified = [unbound(); C];
     for i in 0..C {
         let mut individual = policy;
         individual.holder_required = false;
+        individual.holder_issuers_present = false;
+        individual.holder_issuer_count = 0;
+        individual.holder_issuers = [0; 4];
         verified[i] = check_envelope(
             credentials[i],
             digest,
@@ -734,61 +762,6 @@ pub fn check_requested_envelope<let C: u32, let N: u32, let K: u32, let D: u32, 
     }
     check_holders(credentials, policy, digest, slots, holders);
     verified
-}
-
-/// Sort unsigned canonical field bytes, collapse duplicates, pad with zero to
-/// the least power of two, and reduce with h2. Empty sets and zero members refuse.
-/// Sorting and hashes dominate; capacity never changes the minimal tree root.
-pub fn canonical_set_root<let N: u32>(members: [Field; N], count: u32) -> (Field, u32, u32) {
-    std::static_assert((N > 0) & ((N & (N - 1)) == 0), "set capacity power of two");
-    assert((count > 0) & (count <= N), "set count");
-    let mut sorted = members;
-    for i in 0..N {
-        if i < count {
-            assert(sorted[i] != 0, "zero set member");
-        } else {
-            assert(sorted[i] == 0, "set input padding");
-        }
-    }
-    for _ in 0..N {
-        for i in 0..N - 1 {
-            if (i + 1 < count) & crate::term::field_lt(sorted[i + 1], sorted[i]) {
-                let value = sorted[i];
-                sorted[i] = sorted[i + 1];
-                sorted[i + 1] = value;
-            }
-        }
-    }
-    let mut row = [0; N];
-    let mut unique: u32 = 0;
-    for i in 0..N {
-        if (i < count) & ((i == 0) | (sorted[i] != sorted[if i > 0 { i - 1 } else { 0 }])) {
-            row[unique] = sorted[i];
-            unique = unique + 1;
-        }
-    }
-    let mut root = row[0];
-    let mut width = N;
-    let mut covered: u32 = 1;
-    let mut depth: u32 = 0;
-    let mut selected_depth: u32 = 0;
-    for _ in 0..N {
-        if width > 1 {
-            for i in 0..N / 2 {
-                if i < width / 2 {
-                    row[i] = h2(row[2 * i], row[2 * i + 1]);
-                }
-            }
-            width = width / 2;
-            covered = covered * 2;
-            depth = depth + 1;
-            if (unique > covered / 2) & (unique <= covered) {
-                root = row[0];
-                selected_depth = depth;
-            }
-        }
-    }
-    (root, selected_depth, unique)
 }
 
 /// Complete RDF set merge: collapse shared default triples while preserving

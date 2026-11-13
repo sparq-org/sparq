@@ -163,11 +163,11 @@ Verifiers"); a later version of the data model should reuse it.
 
 = Draft: Noir query credential statement method <sec-impl-noir-draft>
 
-#strong[Draft — integration part A. Not an available proof method.]
+#strong[Draft — public policy integration. Not an available proof method.]
 The proposed identifier is `urn:sparq:vcq:method:noir-query:v1`. The statement amendment is
 @sec-impl-envelope-draft. The envelope is registered in the real core package alongside the suite and compiler
 operators. Its fixtures include hand-built cells and a complete suite-message opening.
-Authenticated metadata and stored-policy integration remain explicitly marked stand-ins. It does not
+Authenticated metadata remains explicitly marked; stored-policy wiring awaits compiler integration. It does not
 produce an answers-data-model presentation. This method is research grade, not externally
 audited; its description states a proposed contract, not established assurance.
 
@@ -201,26 +201,55 @@ components is required in addition to any issuer claims about the world.
 == Statement, layout and disclosures
 
 The target public statement binds the complete request digest, dataset commitment, chosen
-signature mode and canonical released result. The proposed admission statement is the UTF-8
-method identifier framed by a big-endian byte length, then the request digest and dataset
-commitment as exact digest bytes, an agreed-input boolean byte, a signature-mode byte, the
-result digest, and a big-endian count followed by length-framed revealed signed messages (an
-empty collection in hidden mode). Framing words are four-byte unsigned integers. Boolean bytes
-are zero or one; mode tags are zero for hidden and one for revealed. The result digest is
-SHA-256 of JCS result JSON for SELECT/ASK or RDFC canonical UTF-8 for CONSTRUCT. Query-order
-choices follow the canonical term order below. Exact digest bytes become two big-endian unsigned
-limbs in the circuit without modular reduction. The final descriptor must fix the same layout
-and test vectors on both sides before admission. This is a proposed admission frame. The current
-compiler primitive uses its separate supplied-cell profile: request digest bytes, input
-commitment bytes, signature-mode byte, credential/quad/row bounds, term parameters, index
-parameters, released result and a statement binding, in that order, as defined in
-`statement::Layout` and `ops_core_statement`. Part A does not change that layout or claim that
-its generated circuits already run the credential envelope. Public parameters derived from that
-same request include the trusted-key-set digest, accepted-snapshot-set digest, requirement
-flags, validity time, inclusive `earliestCreated` freshness bound, holder issuer scope, query
-constants, slice indices and capacities. A plan hash identifies the query structure, capacities
-and encoding version. The verifier reconstructs these values from its stored request; publishing
-a digest is not itself enforcing the requirements it describes.
+signature mode and canonical released result. The current authenticated compiler layout is
+request digest bytes, input commitment bytes, signature-mode byte, credential/quad/row bounds,
+term parameters, index parameters, released result, issuer root, ordered credential quad bounds
+and statement binding, as defined in `statement::Layout` and `ops_core_statement`.
+
+The agreed envelope extension replaces that single issuer-root slot with the following group,
+after the result and before `credential_quad_bounds`, with exactly this declaration order:
+
+```noir
+issuer_root: Field
+issuer_depth: u32
+holder_required: bool
+holder_issuers_present: bool
+holder_issuer_count: u32
+holder_issuers: [Field; 4]
+status_required: bool
+allow_missing_status: bool
+snapshot_root: Field
+snapshot_depth: u32
+validity_required: bool
+now: u64
+freshness_required: bool
+earliest_created: u64
+```
+
+The holder issuer list holds unique suite IRI encodings in unsigned big-endian field order, with
+zero padding. Its capacity is four entries; a request above that capacity is refused before
+deduplication. The group flattens to seventeen canonical big-endian field words. Rust's
+`envelope_policy` module derives these words and both minimal set depths from typed
+stored-policy input. Disabled flags have zero subordinate words, which the circuit asserts. An
+absent holder list has zero count and issuer words. Roots are computed by the verifier, never by
+a generated circuit. Compilation may provide larger path capacity, but the circuit hashes only
+levels below the public depth, bounds that depth, and checks unused siblings and index bits are
+zero.
+
+There is no request or policy derivation inside the circuit. The existing Rust request module
+computes the RDFC stored-request digest; it enters as thirty-two public bytes. The holder
+message hashes its two exact unsigned big-endian halves under the holder domain. The verifier
+reconstructs every policy word independently from that same stored request and verifies against
+that entire public sequence, rather than accepting policy words from a presentation. A proof
+with evidence for policy B cannot verify under public policy A. Query constants, capacities and
+the result remain bound by the shared statement. A plan hash identifies the generated structure
+and encoding version.
+
+This partial stage supplies the policy helper and envelope gadgets. The existing compiler's
+key-only issuer membership and fixed depth must be changed together with its public
+declarations, reconstruction and statement binding by the compiler lane before the extension is
+admitted. This stage does not edit those call sites or claim that generated circuits already run
+the complete envelope. The method registry remains unchanged until admission.
 
 Hidden mode keeps credential messages, issuer selections, holder keys and signatures, status
 indices and paths, selected snapshots, individual bound-presence flags and all intermediate
@@ -304,36 +333,37 @@ representation. Its IRI constructor and vocabulary use the suite encoding. The c
 opening recomputes the salted signed message before table conversion. Created instant, Multikey,
 status purpose/index and scoped graph-name metadata still await their authenticated openers.
 Hand-built fixtures continue to use marked metadata transports; they are not admitted credential
-witnesses. Stored-request policy normalization remains a marked local fixture: RDFC
-canonicalization and its SHA-256 digest exist on the host and are not callable from Noir. The
-holder relation verifies a Schnorr signature over the entire supplied request digest; the local
-request-binding fixture includes query, domain, challenge and all policy values, including
-freshness and the holder issuer collection. The batch entry checks this binding before running
-issuer, status, validity and freshness on every credential and holder binding on the required
-issuers. Holder evidence is deduplicated by the full key coordinates; each required key has
-exactly one request signature. The combined fixture covers four credentials and their
-default/named dataset merge, with controls changing each condition on the final credential.
-Status binds list identifier, purpose, length, compiled tree depth and root in an accepted
-snapshot digest and proves the credential's actual index clear. Status leaves hash the
+witnesses. The request-digest and policy-derivation stand-ins have been removed. Rust derives
+the digest and policy words from the stored request; the circuit receives them as public inputs
+and performs no request normalization. The batch entry applies the public policy to every
+credential. Holder evidence is deduplicated by full key coordinates and each required key has
+one signature over the public request digest. The combined fixture covers four credentials and
+their default/named dataset merge, with controls changing every condition on its final
+credential. Status binds list identifier, purpose, length, compiled tree depth and root in an
+accepted snapshot digest and proves the credential's actual index clear. Status leaves hash the
 status-leaf domain tag, the boolean bit and a zero field; two-input internal nodes keep their
 distinct arity. The snapshot digest hashes its domain tag followed by list, purpose, bit length,
-depth and root, in that order. Validity endpoints are inclusive, with an absent individual bound
-contributing no comparison and reversed bounds refused. When both bounds are absent, the
-creation instant from suite metadata is the inclusive start; unavailable creation metadata
-refuses a validity request. Freshness compares the authenticated creation instant with inclusive
-`earliestCreated`; unknown creation refuses only a required check, and absence imposes no
-freshness condition. This does not replace the validity fallback above. The verifier computes
-the bound. The temporal fixture uses exact whole-second offset keys; finer or wider times need
-the suite's checked temporal opening, not a cast or rounding operation.
+depth and root, in that order. The status-bit tree depth remains inside the snapshot digest and
+is distinct from the public snapshot-set membership depth. Validity endpoints are inclusive,
+with an absent individual bound contributing no comparison and reversed bounds refused. When
+both bounds are absent, the creation instant from suite metadata is the inclusive start;
+unavailable creation metadata refuses a validity request. Freshness compares the authenticated
+creation instant with inclusive `earliestCreated`; unknown creation refuses only a required
+check, and absence imposes no freshness condition. This does not replace the validity fallback
+above. The verifier computes the bound. The temporal fixture uses exact whole-second offset
+keys; finer or wider times need the suite's checked temporal opening, not a cast or rounding
+operation.
 
 The accepted-snapshot and trust roots follow the amendment exactly: sort unique canonical
 unsigned field values as thirty-two big-endian bytes, refuse zero members and empty enabled
 sets, pad with zero leaves to the least power of two and reduce adjacent pairs with the
-two-input Poseidon2 hash. A singleton has depth zero. The native helper returns root, depth and
-unique count; capacity does not extend the tree. The default-graph `verifiedIssuer` assertion
-names the same presentation-local graph blank node used by `GRAPH`; its issuer object is an IRI
-with exact trust-member and credential spelling. No IRI normalization is performed, and
-credentials containing the reserved predicate are refused.
+two-input Poseidon2 hash. A singleton has depth zero. The Rust helper returns roots, minimal
+depths and sorted unique members; a separate Noir native test helper supplies fixed
+cross-language vectors. The native helper lives only in the test package, so envelope entry
+points cannot call it. Capacity does not extend the tree. The default-graph `verifiedIssuer`
+assertion names the same presentation-local graph blank node used by `GRAPH`; its issuer object
+is an IRI with exact trust-member and credential spelling. No IRI normalization is performed,
+and credentials containing the reserved predicate are refused.
 
 Vocabulary was checked against the VC Data Model, Bitstring Status List and VC Confidence Method
 editor sources on 2026-11-13, using the exact source URLs recorded in the amendment.

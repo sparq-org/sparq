@@ -710,6 +710,23 @@ dataset and therefore part of the request digest, along with the exact query, do
 trust set and accepted method. No value is taken from the presentation as a substitute for the
 verifier's stored request.
 
+There is no request or policy derivation inside the circuit. Rust computes the request digest
+from the stored request and supplies it as a public input, used for holder-signature messages
+and binding the proof to that request. The verifier independently derives every envelope policy
+value from the same stored request and supplies each as its own public input. It MUST NOT use
+policy values supplied by a presentation. The circuit checks those public values against the
+credential evidence. A proof satisfying another policy therefore does not verify against this
+request's public words.
+
+The public policy includes the trust-set root and minimal depth, holder requirement and issuer
+scope, status requirement, missing-status option, snapshot-set root and minimal depth, validity
+requirement and instant, and freshness requirement and earliest creation instant. When a
+requirement flag is false its value words MUST be zero: no holder scope, count or issuer words
+for disabled holder binding; no missing-status option, snapshot root or depth for disabled
+status; no validity instant for disabled validity; and no creation bound for disabled freshness.
+An absent holder issuer list has zero count and issuer words even when holder binding is
+enabled. The circuit MUST assert these encodings as well as applicable credential conditions.
+
 - `holderBinding`: optional object; absent means no holder requirement. Its optional
   `issuer` RDF list contains issuer IRIs spelled exactly as in `trustedIssuers`.
   The `holderBinding` scoped JSON-LD context preserves that list, including an empty list.
@@ -722,7 +739,8 @@ verifier's stored request.
   no holder requirement. This establishes use of the key the issuer named; a claim about a
   person additionally depends on the issuer's subject binding. The collection is interpreted
   as a set; the method sorts its unique suite IRI encodings as canonical unsigned
-  big-endian field bytes before assigning padded policy slots.
+  big-endian field bytes before assigning padded policy slots. The issuer-list capacity is
+  four entries; a request with more entries MUST be refused before deduplication.
 - `earliestCreated`: optional `xsd:dateTime` with an explicit timezone. When present,
   every credential's authenticated suite creation instant MUST be at or after this bound,
   including equality. Unknown creation MUST be refused. This is freshness, separate from
@@ -815,11 +833,17 @@ such that `2^d >= n`, including depth zero for a singleton. Put members in sorte
 first `n` leaves; fill every remaining leaf up to `2^d` with the zero field value. Reduce
 adjacent pairs left to right with `P(left, right)` until one root remains. Larger compilation
 capacity adds no levels to this tree. There is no separate leaf rehash after the member digest
-and no extra root wrapper. A compiled membership path has exactly `d` siblings, from the leaf
-upward, with directions from the member's zero-based index. The stored request fixes the root
-and this depth. Thus different enumerations or duplicate listings of the same set give the same
-root for every verifier. This set-tree depth is distinct from the status-bit-tree depth `D`
-inside a snapshot digest.
+and no extra root wrapper. A computed zero root MUST be refused; zero is reserved for a publicly
+disabled policy. The verifier computes both set roots and their minimal depths in Rust from the
+stored request. Roots and depths enter the circuit as public inputs.
+
+A membership path has the compiled maximum number of siblings, from the leaf upward. Only the
+first `d` levels enter the root hash, using directions from the member's zero-based index. Every
+sibling and index bit above that public depth MUST be zero. The public depth MUST NOT exceed the
+compiled maximum. The circuit refuses a leaf opened one level too shallow or too deep for the
+accepted root. Root construction and sorting never run in a generated circuit. Thus different
+enumerations or duplicate listings of the same set give the same root for every verifier. This
+set-tree depth is distinct from the status-bit-tree depth `D` inside a snapshot digest.
 
 #strong[Source snapshots, retrieved 2026-11-13:]
 #link("https://raw.githubusercontent.com/w3c/vc-data-model/main/index.html")[VC Data Model,

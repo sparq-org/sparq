@@ -191,6 +191,16 @@ its plan and result encoding from the stored request and RDF answer and consumes
 the original challenge last. Toolchain pins and verifier target are independent
 of the cache location.
 
+The query crate's `envelope_policy::{PolicyInput, derive, public_words}` helper
+prepares the agreed public policy extension from typed stored-policy input.
+`TrustMember` binds issuer, verification method, suite and key; `HolderBinding`
+selects all issuers or an explicit list, with a capacity of four before deduplication.
+`AcceptedSnapshots` takes verifier-curated digests. The helper sorts canonical set
+members, computes minimal roots/depths and emits zero words for disabled conditions.
+The digest remains a separate host-computed public input. This helper is not yet
+wired into the compiler's layout or admission; authenticated metadata integration
+remains pending and the method is not externally audited.
+
 ## Prerequisites
 
 - **Noir toolchain on `PATH`** (the only way to prove/verify): `nargo` **1.0.0-beta.21** and Barretenberg `bb` **5.0.0-nightly.20260324** (bb target `noir-recursive`). Other versions may change the bb public-input byte layout the verifier reconstructs against. If `nargo`/`bb` are absent, the structural pre-filter and all host-side helpers still work, but `verify_manifest` / `CircuitProver` cannot.

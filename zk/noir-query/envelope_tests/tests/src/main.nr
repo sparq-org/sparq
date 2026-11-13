@@ -1,15 +1,26 @@
+mod native;
 use compose_core::hashes::{commit_fold, h2};
 use compose_core::issuer::{BJJ_GX, BJJ_GY, scalar_mul};
 use envelope_core::envelope::{
     check_envelope, check_holder, check_issuer, check_status, check_validity, Credential,
-    credential_dataset, holder_message, iri, Membership, merkle_root, Point, property,
-    RequestPolicy, Signature, Snapshot, snapshot_digest, stand_in_index, stand_in_key_cell,
-    stand_in_number, stand_in_open_credential, stand_in_purpose, stand_in_request_digest,
-    status_leaf, StatusEvidence, TermCell, trusted_key_leaf, vocabulary,
+    credential_dataset, holder_message, iri, Membership, merkle_root, Point, property, PublicPolicy,
+    Signature, Snapshot, snapshot_digest, stand_in_index, stand_in_key_cell, stand_in_number,
+    stand_in_open_credential, stand_in_purpose, status_leaf, StatusEvidence, TermCell,
+    trusted_key_leaf, vocabulary,
 };
 use envelope_core::table::{check_table, equal_cell, same_term, Table, unbound};
 
 fn main() {}
+fn request_digest(high: u128, low: u128) -> [u8; 32] {
+    let hi: [u8; 16] = (high as Field).to_be_bytes();
+    let lo: [u8; 16] = (low as Field).to_be_bytes();
+    let mut bytes = [0; 32];
+    for i in 0..16 {
+        bytes[i] = hi[i];
+        bytes[16 + i] = lo[i];
+    }
+    bytes
+}
 
 global L: Field = 2736030358979909402780800718157159386076813972158567259200215660948447373041;
 fn key(secret: Field) -> Point {
@@ -151,16 +162,18 @@ fn issuer_root(c: Credential<16>) -> Field {
         issuer_path(),
     )
 }
-fn policy(c: Credential<16>) -> RequestPolicy {
-    RequestPolicy {
-        trusted_root: issuer_root(c),
+fn policy(c: Credential<16>) -> PublicPolicy {
+    PublicPolicy {
+        issuer_root: issuer_root(c),
+        issuer_depth: 1,
         holder_required: true,
         holder_issuers_present: false,
-        holder_issuers: [unbound(); 4],
+        holder_issuers: [0; 4],
         holder_issuer_count: 0,
         status_required: true,
         allow_missing_status: false,
-        accepted_snapshots: policy_root(),
+        snapshot_root: policy_root(),
+        snapshot_depth: 1,
         validity_required: true,
         now: 150,
         freshness_required: false,
@@ -173,7 +186,7 @@ fn issuer_accepted_and_identity_returned() {
     let c = base();
     assert(
         equal_cell(
-            check_issuer(c, issuer_root(c), sign(1, 42), issuer_path()),
+            check_issuer(c, issuer_root(c), 1, sign(1, 42), issuer_path()),
             iri(900),
         ),
     );
@@ -183,87 +196,93 @@ fn issuer_missing_refused() {
     let mut c = base();
     c.len = 1;
     c.quads[1] = [unbound(); 4];
-    let _ = check_issuer(c, 1, no_sig(), issuer_path());
+    let _ = check_issuer(c, 1, 1, no_sig(), issuer_path());
 }
 #[test(should_fail_with = "signature evidence absent")]
 fn issuer_evidence_omitted_refused() {
     let c = base();
-    let _ = check_issuer(c, issuer_root(c), no_sig(), issuer_path());
+    let _ = check_issuer(c, issuer_root(c), 1, no_sig(), issuer_path());
 }
 #[test(should_fail_with = "issuer authorization set")]
 fn another_key_set_refused() {
-    let _ = check_issuer(base(), issuer_root(base()) + 1, sign(1, 42), issuer_path());
+    let _ = check_issuer(
+        base(),
+        issuer_root(base()) + 1,
+        1,
+        sign(1, 42),
+        issuer_path(),
+    );
 }
 #[test(should_fail_with = "issuer authorization set")]
 fn another_issuer_label_refused() {
     let mut c = base();
     let root = issuer_root(c);
     c.quads[1][2] = iri(902);
-    let _ = check_issuer(c, root, sign(1, 42), issuer_path());
+    let _ = check_issuer(c, root, 1, sign(1, 42), issuer_path());
 }
 #[test(should_fail_with = "issuer authorization set")]
 fn another_verification_method_refused() {
     let mut c = base();
     let root = issuer_root(c);
     c.verification_method = iri(903);
-    let _ = check_issuer(c, root, sign(1, 42), issuer_path());
+    let _ = check_issuer(c, root, 1, sign(1, 42), issuer_path());
 }
 #[test(should_fail_with = "challenge reduction not bound to its preimage")]
 fn another_issuer_message_refused() {
     let mut c = base();
     c.signed_message = 43;
-    let _ = check_issuer(c, issuer_root(c), sign(1, 42), issuer_path());
+    let _ = check_issuer(c, issuer_root(c), 1, sign(1, 42), issuer_path());
 }
 #[test(should_fail_with = "issuer authorization set")]
 fn different_issuer_key_refused() {
     let mut c = base();
     let root = issuer_root(c);
     c.issuer_key = key(2);
-    let _ = check_issuer(c, root, sign(2, 42), issuer_path());
+    let _ = check_issuer(c, root, 1, sign(2, 42), issuer_path());
 }
 
 #[test]
 fn holder_request_signature_accepted() {
     check_holder(
         holder(),
-        [10, 20],
+        request_digest(10, 20),
         key(1),
-        sign(1, holder_message([10, 20])),
+        sign(1, holder_message(request_digest(10, 20))),
     );
 }
 #[test(should_fail_with = "required property absent")]
 fn holder_key_absent_refused() {
-    check_holder(base(), [10, 20], key(1), no_sig());
+    check_holder(base(), request_digest(10, 20), key(1), no_sig());
 }
 #[test(should_fail_with = "signature evidence absent")]
 fn holder_signature_omitted_refused() {
-    check_holder(holder(), [10, 20], key(1), no_sig());
+    check_holder(holder(), request_digest(10, 20), key(1), no_sig());
 }
 #[test(should_fail_with = "holder key binding")]
 fn holder_other_key_refused() {
     check_holder(
         holder(),
-        [10, 20],
+        request_digest(10, 20),
         key(2),
-        sign(2, holder_message([10, 20])),
+        sign(2, holder_message(request_digest(10, 20))),
     );
 }
 #[test(should_fail_with = "challenge reduction not bound to its preimage")]
 fn holder_other_request_refused() {
     check_holder(
         holder(),
-        [10, 21],
+        request_digest(10, 21),
         key(1),
-        sign(1, holder_message([10, 20])),
+        sign(1, holder_message(request_digest(10, 20))),
     );
 }
 #[test(should_fail_with = "challenge reduction not bound to its preimage")]
 fn holder_other_high_digest_limb_refused() {
     check_holder(
         holder(),
-        [11, 20],
+        request_digest(11, 20),
         key(1),
-        sign(1, holder_message([10, 20])),
+        sign(1, holder_message(request_digest(10, 20))),
     );
 }
 #[test(should_fail_with = "property cardinality")]
@@ -271,12 +290,12 @@ fn holder_ambiguous_key_refused() {
     let mut c = holder();
     c.quads[6] = q(3, vocabulary().public_key, stand_in_key_cell(key(2)));
     c.len = 7;
-    check_holder(c, [10, 20], key(1), no_sig());
+    check_holder(c, request_digest(10, 20), key(1), no_sig());
 }
 
 #[test]
 fn status_active_accepted() {
-    check_status(status(), policy_root(), false, evidence());
+    check_status(status(), policy_root(), 1, false, evidence());
 }
 #[test]
 fn suspension_active_accepted() {
@@ -285,29 +304,29 @@ fn suspension_active_accepted() {
     let mut e = evidence();
     e[2].snapshot.purpose = stand_in_purpose(true);
     let root = merkle_root(snapshot_digest::<2>(e[2].snapshot), acceptance());
-    check_status(c, root, false, e);
+    check_status(c, root, 1, false, e);
 }
 #[test(should_fail_with = "status entry absent")]
 fn status_absent_required_refused() {
-    check_status(base(), policy_root(), false, no_status());
+    check_status(base(), policy_root(), 1, false, no_status());
 }
 #[test]
 fn status_absence_explicitly_permitted() {
-    check_status(base(), policy_root(), true, no_status());
+    check_status(base(), policy_root(), 1, true, no_status());
 }
 #[test(should_fail_with = "status evidence coverage")]
 fn status_evidence_omitted_refused() {
-    check_status(status(), policy_root(), false, no_status());
+    check_status(status(), policy_root(), 1, false, no_status());
 }
 #[test(should_fail_with = "snapshot policy")]
 fn status_other_policy_refused() {
-    check_status(status(), policy_root() + 1, false, evidence());
+    check_status(status(), policy_root() + 1, 1, false, evidence());
 }
 #[test(should_fail_with = "snapshot policy")]
 fn status_other_snapshot_refused() {
     let mut e = evidence();
     e[2].snapshot.root = e[2].snapshot.root + 1;
-    check_status(status(), policy_root(), false, e);
+    check_status(status(), policy_root(), 1, false, e);
 }
 #[test]
 fn snapshot_digest_binds_depth_even_with_identical_root() {
@@ -320,16 +339,16 @@ fn same_status_bits_at_another_depth_have_another_digest() {
     let deeper = deeper_evidence()[2].snapshot;
     assert(snapshot_digest::<2>(snapshot()) != snapshot_digest::<3>(deeper));
     let root = merkle_root(snapshot_digest::<3>(deeper), acceptance());
-    check_status(status(), root, false, deeper_evidence());
+    check_status(status(), root, 1, false, deeper_evidence());
 }
 #[test(should_fail_with = "snapshot policy")]
 fn status_same_bits_at_another_depth_refused() {
-    check_status(status(), policy_root(), false, deeper_evidence());
+    check_status(status(), policy_root(), 1, false, deeper_evidence());
 }
 #[test(should_fail_with = "snapshot policy")]
 fn status_policy_with_another_depth_for_the_same_root_refused() {
     let root = merkle_root(snapshot_digest::<3>(snapshot()), acceptance());
-    check_status(status(), root, false, evidence());
+    check_status(status(), root, 1, false, evidence());
 }
 #[test(should_fail_with = "status path")]
 fn status_untagged_leaves_refused() {
@@ -338,32 +357,32 @@ fn status_untagged_leaves_refused() {
     e[2].path = member;
     e[2].snapshot.root = merkle_root(0, member);
     let root = merkle_root(snapshot_digest::<2>(e[2].snapshot), acceptance());
-    check_status(status(), root, false, e);
+    check_status(status(), root, 1, false, e);
 }
 #[test(should_fail_with = "status path")]
 fn status_leaf_using_another_envelope_tag_refused() {
     let mut e = evidence();
-    e[2].snapshot.root = merkle_root(holder_message([0, 0]), path());
+    e[2].snapshot.root = merkle_root(holder_message(request_digest(0, 0)), path());
     let root = merkle_root(snapshot_digest::<2>(e[2].snapshot), acceptance());
-    check_status(status(), root, false, e);
+    check_status(status(), root, 1, false, e);
 }
 #[test(should_fail_with = "snapshot identity")]
 fn status_other_list_refused() {
     let mut e = evidence();
     e[2].snapshot.list = iri(801);
-    check_status(status(), policy_root(), false, e);
+    check_status(status(), policy_root(), 1, false, e);
 }
 #[test(should_fail_with = "snapshot identity")]
 fn status_other_purpose_refused() {
     let mut e = evidence();
     e[2].snapshot.purpose = stand_in_purpose(true);
-    check_status(status(), policy_root(), false, e);
+    check_status(status(), policy_root(), 1, false, e);
 }
 #[test(should_fail_with = "status index binding")]
 fn status_other_index_refused() {
     let mut e = evidence();
     e[2].path.index = 0;
-    check_status(status(), policy_root(), false, e);
+    check_status(status(), policy_root(), 1, false, e);
 }
 #[test(should_fail_with = "status bit set")]
 fn status_set_bit_refused() {
@@ -371,26 +390,26 @@ fn status_set_bit_refused() {
     e[2].bit = true;
     e[2].snapshot.root = merkle_root(status_leaf(true), path());
     let root = merkle_root(snapshot_digest::<2>(e[2].snapshot), acceptance());
-    check_status(status(), root, false, e);
+    check_status(status(), root, 1, false, e);
 }
 #[test(should_fail_with = "status path")]
 fn status_other_path_refused() {
     let mut e = evidence();
     e[2].path.siblings[0] = 2;
-    check_status(status(), policy_root(), false, e);
+    check_status(status(), policy_root(), 1, false, e);
 }
 #[test(should_fail_with = "status index length")]
 fn status_outside_snapshot_length_refused() {
     let mut e = evidence();
     e[2].snapshot.bit_len = 1;
     let root = merkle_root(snapshot_digest::<2>(e[2].snapshot), acceptance());
-    check_status(status(), root, false, e);
+    check_status(status(), root, 1, false, e);
 }
 #[test(should_fail_with = "snapshot capacity")]
 fn status_snapshot_overflow_refused() {
     let mut e = evidence();
     e[2].snapshot.bit_len = 5;
-    check_status(status(), policy_root(), false, e);
+    check_status(status(), policy_root(), 1, false, e);
 }
 #[test(should_fail_with = "status size")]
 fn status_multibit_refused() {
@@ -401,7 +420,7 @@ fn status_multibit_refused() {
         stand_in_number(2, vocabulary().integer_dt),
     );
     c.len = 8;
-    check_status(c, policy_root(), false, evidence());
+    check_status(c, policy_root(), 1, false, evidence());
 }
 #[test]
 fn status_explicit_single_bit_accepted() {
@@ -412,24 +431,24 @@ fn status_explicit_single_bit_accepted() {
         stand_in_number(1, vocabulary().integer_dt),
     );
     c.len = 8;
-    check_status(c, policy_root(), false, evidence());
+    check_status(c, policy_root(), 1, false, evidence());
 }
 #[test(should_fail_with = "status purpose")]
 fn unsupported_status_purpose_refused() {
     let mut c = status();
     c.quads[5][2] = iri(700);
-    check_status(c, policy_root(), false, evidence());
+    check_status(c, policy_root(), 1, false, evidence());
 }
 #[test(should_fail_with = "required property absent")]
 fn incomplete_status_entry_refused() {
     let mut c = status();
     c.quads[6] = [unbound(); 4];
     c.len = 6;
-    check_status(c, policy_root(), true, evidence());
+    check_status(c, policy_root(), 1, true, evidence());
 }
 #[test(should_fail_with = "status evidence coverage")]
 fn missing_status_option_does_not_omit_present_entries() {
-    check_status(status(), policy_root(), true, no_status());
+    check_status(status(), policy_root(), 1, true, no_status());
 }
 #[test(should_fail_with = "status evidence coverage")]
 fn absence_claim_checks_last_quad() {
@@ -440,19 +459,19 @@ fn absence_claim_checks_last_quad() {
     c.quads[15] = c.quads[2];
     c.quads[2] = q(40, 600, iri(21));
     c.len = 16;
-    check_status(c, policy_root(), true, no_status());
+    check_status(c, policy_root(), 1, true, no_status());
 }
 #[test(should_fail_with = "credential padding")]
 fn shortening_credential_cannot_claim_status_absent() {
     let mut c = status();
     c.len = 2;
-    check_status(c, policy_root(), true, no_status());
+    check_status(c, policy_root(), 1, true, no_status());
 }
 #[test(should_fail_with = "status evidence coverage")]
 fn status_extra_evidence_refused() {
     let mut e = evidence();
     e[15].present = true;
-    check_status(status(), policy_root(), false, e);
+    check_status(status(), policy_root(), 1, false, e);
 }
 #[test]
 fn all_status_entries_checked() {
@@ -466,14 +485,14 @@ fn all_status_entries_checked() {
     c.len = 12;
     let mut e = evidence();
     e[7].present = true;
-    check_status(c, policy_root(), false, e);
+    check_status(c, policy_root(), 1, false, e);
 }
 #[test(should_fail_with = "status evidence coverage")]
 fn second_status_entry_cannot_be_omitted() {
     let mut c = status();
     c.quads[7] = q(1, vocabulary().credential_status, iri(5));
     c.len = 8;
-    check_status(c, policy_root(), false, evidence());
+    check_status(c, policy_root(), 1, false, evidence());
 }
 
 #[test]
@@ -561,42 +580,12 @@ fn shortening_credential_cannot_claim_no_valid_until() {
     check_validity(c, 201);
 }
 
-#[test]
-fn request_digest_covers_every_policy_field() {
-    let p = policy(base());
-    let expected = stand_in_request_digest(10, 20, 30, p);
-    assert(expected != stand_in_request_digest(11, 20, 30, p));
-    assert(expected != stand_in_request_digest(10, 21, 30, p));
-    assert(expected != stand_in_request_digest(10, 20, 31, p));
-    let mut changed = p;
-    changed.trusted_root = changed.trusted_root + 1;
-    assert(expected != stand_in_request_digest(10, 20, 30, changed));
-    changed = p;
-    changed.holder_required = false;
-    assert(expected != stand_in_request_digest(10, 20, 30, changed));
-    changed = p;
-    changed.status_required = false;
-    assert(expected != stand_in_request_digest(10, 20, 30, changed));
-    changed = p;
-    changed.allow_missing_status = true;
-    assert(expected != stand_in_request_digest(10, 20, 30, changed));
-    changed = p;
-    changed.accepted_snapshots = changed.accepted_snapshots + 1;
-    assert(expected != stand_in_request_digest(10, 20, 30, changed));
-    changed = p;
-    changed.validity_required = false;
-    assert(expected != stand_in_request_digest(10, 20, 30, changed));
-    changed = p;
-    changed.now = 151;
-    assert(expected != stand_in_request_digest(10, 20, 30, changed));
-}
 #[test(should_fail_with = "challenge reduction not bound to its preimage")]
 fn holder_signature_for_other_domain_refused() {
-    let p = policy(holder());
-    let digest = stand_in_request_digest(10, 20, 30, p);
+    let digest = request_digest(10, 20);
     check_holder(
         holder(),
-        stand_in_request_digest(10, 21, 30, p),
+        request_digest(10, 21),
         key(1),
         sign(1, holder_message(digest)),
     );
@@ -606,12 +595,19 @@ fn disabled_optional_checks_are_explicit() {
     let c = base();
     let mut p = policy(c);
     p.holder_required = false;
+    p.holder_issuers_present = false;
+    p.holder_issuer_count = 0;
+    p.holder_issuers = [0; 4];
     p.status_required = false;
+    p.snapshot_root = 0;
+    p.snapshot_depth = 0;
+    p.allow_missing_status = false;
     p.validity_required = false;
+    p.now = 0;
     assert(equal_cell(
         check_envelope(
             c,
-            [10, 20],
+            request_digest(10, 20),
             p,
             sign(1, 42),
             issuer_path(),
@@ -627,7 +623,7 @@ fn envelope_required_holder_cannot_be_omitted() {
     let c = base();
     let _ = check_envelope(
         c,
-        [10, 20],
+        request_digest(10, 20),
         policy(c),
         sign(1, 42),
         issuer_path(),
@@ -641,12 +637,12 @@ fn envelope_required_status_cannot_be_omitted() {
     let c = holder();
     let _ = check_envelope(
         c,
-        [10, 20],
+        request_digest(10, 20),
         policy(c),
         sign(1, 42),
         issuer_path(),
         key(1),
-        sign(1, holder_message([10, 20])),
+        sign(1, holder_message(request_digest(10, 20))),
         no_status(),
     );
 }
@@ -655,11 +651,17 @@ fn envelope_required_validity_cannot_be_omitted() {
     let c = validity();
     let mut p = policy(c);
     p.holder_required = false;
+    p.holder_issuers_present = false;
+    p.holder_issuer_count = 0;
+    p.holder_issuers = [0; 4];
     p.status_required = false;
+    p.snapshot_root = 0;
+    p.snapshot_depth = 0;
+    p.allow_missing_status = false;
     p.now = 201;
     let _ = check_envelope(
         c,
-        [10, 20],
+        request_digest(10, 20),
         p,
         sign(1, 42),
         issuer_path(),
@@ -743,17 +745,19 @@ fn two_issuer_fact_pins_and_swapped_pins() {
     let ai = check_issuer(
         a,
         root,
+        1,
         sign(1, 42),
         Membership { index: 0, siblings: [leaf_b] },
     );
     let bi = check_issuer(
         b,
         root,
+        1,
         sign(2, 42),
         Membership { index: 1, siblings: [leaf_a] },
     );
-    let ad = credential_dataset::<16, 7>(a, ai, [10, 20]);
-    let bd = credential_dataset::<16, 7>(b, bi, [10, 20]);
+    let ad = credential_dataset::<16, 7>(a, ai, 20);
+    let bd = credential_dataset::<16, 7>(b, bi, 20);
     check_table(ad);
     check_table(bd);
     assert(ad.len == 7);
@@ -763,11 +767,11 @@ fn two_issuer_fact_pins_and_swapped_pins() {
 }
 #[test(should_fail_with = "dataset issuer binding")]
 fn dataset_swapped_issuer_refused() {
-    let _ = credential_dataset::<16, 5>(base(), iri(902), [10, 20]);
+    let _ = credential_dataset::<16, 5>(base(), iri(902), 20);
 }
 #[test(should_fail_with = "operator capacity")]
 fn dataset_capacity_refused() {
-    let _ = credential_dataset::<16, 4>(base(), iri(900), [10, 20]);
+    let _ = credential_dataset::<16, 4>(base(), iri(900), 20);
 }
 
 #[test]
@@ -784,7 +788,7 @@ fn envelope_all_requirements_accepted() {
     let mut e = no_status();
     e[6].present = true;
     let p = policy(c);
-    let digest = stand_in_request_digest(10, 20, 30, p);
+    let digest = request_digest(10, 20);
     assert(equal_cell(
         check_envelope(
             c,
@@ -822,7 +826,7 @@ fn unrelated_subject_bounds_do_not_set_credential_period() {
 fn status_non_decimal_index_cell_refused() {
     let mut c = status();
     c.quads[6][2] = stand_in_number(1, vocabulary().integer_dt);
-    check_status(c, policy_root(), false, evidence());
+    check_status(c, policy_root(), 1, false, evidence());
 }
 #[test(should_fail_with = "typed number opening")]
 fn validity_wrong_datatype_refused() {
@@ -834,13 +838,13 @@ fn validity_wrong_datatype_refused() {
 fn holder_unsupported_method_refused() {
     let mut c = holder();
     c.quads[4][2] = iri(500);
-    check_holder(c, [10, 20], key(1), no_sig());
+    check_holder(c, request_digest(10, 20), key(1), no_sig());
 }
 #[test(should_fail_with = "status entry type")]
 fn status_unsupported_entry_refused() {
     let mut c = status();
     c.quads[3][2] = iri(500);
-    check_status(c, policy_root(), false, evidence());
+    check_status(c, policy_root(), 1, false, evidence());
 }
 
 #[test(should_fail_with = "duplicate credential quad")]
@@ -855,9 +859,12 @@ fn required_holder_signature_cannot_be_omitted_in_envelope() {
     let c = holder();
     let mut p = policy(c);
     p.status_required = false;
+    p.snapshot_root = 0;
+    p.snapshot_depth = 0;
+    p.allow_missing_status = false;
     let _ = check_envelope(
         c,
-        [10, 20],
+        request_digest(10, 20),
         p,
         sign(1, 42),
         issuer_path(),
@@ -867,9 +874,9 @@ fn required_holder_signature_cannot_be_omitted_in_envelope() {
     );
 }
 #[test]
-fn dataset_graph_names_are_request_local() {
-    let a = credential_dataset::<16, 5>(base(), iri(900), [10, 20]);
-    let b = credential_dataset::<16, 5>(base(), iri(900), [10, 21]);
+fn dataset_graph_names_are_presentation_local() {
+    let a = credential_dataset::<16, 5>(base(), iri(900), 20);
+    let b = credential_dataset::<16, 5>(base(), iri(900), 21);
     let mut a_graph = unbound();
     let mut b_graph = unbound();
     for i in 0..5 {
@@ -934,12 +941,18 @@ fn envelope_freshness_runs_with_explicit_validity_bounds() {
     let c = validity();
     let mut p = policy(c);
     p.holder_required = false;
+    p.holder_issuers_present = false;
+    p.holder_issuer_count = 0;
+    p.holder_issuers = [0; 4];
     p.status_required = false;
+    p.snapshot_root = 0;
+    p.snapshot_depth = 0;
+    p.allow_missing_status = false;
     p.freshness_required = true;
     p.earliest_created = 1;
     let _ = check_envelope(
         c,
-        [10, 20],
+        request_digest(10, 20),
         p,
         sign(1, 42),
         issuer_path(),
@@ -948,12 +961,15 @@ fn envelope_freshness_runs_with_explicit_validity_bounds() {
         no_status(),
     );
 }
-fn scoped_policy(issuer: TermCell) -> RequestPolicy {
+fn scoped_policy(issuer: TermCell) -> PublicPolicy {
     let mut p = policy(base());
     p.holder_issuers_present = true;
     p.holder_issuer_count = 1;
-    p.holder_issuers[0] = issuer;
+    p.holder_issuers[0] = issuer.enc;
     p.status_required = false;
+    p.snapshot_root = 0;
+    p.snapshot_depth = 0;
+    p.allow_missing_status = false;
     p
 }
 #[test]
@@ -962,7 +978,7 @@ fn unlisted_issuer_without_holder_key_accepted() {
     let p = scoped_policy(iri(902));
     let _ = check_envelope(
         c,
-        [10, 20],
+        request_digest(10, 20),
         p,
         sign(1, 42),
         issuer_path(),
@@ -977,7 +993,7 @@ fn listed_issuer_without_holder_key_refused() {
     let p = scoped_policy(iri(900));
     let _ = check_envelope(
         c,
-        [10, 20],
+        request_digest(10, 20),
         p,
         sign(1, 42),
         issuer_path(),
@@ -986,7 +1002,7 @@ fn listed_issuer_without_holder_key_refused() {
         no_status(),
     );
 }
-fn holder_evidence(secret: Field, digest: [u128; 2]) -> envelope_core::envelope::HolderEvidence {
+fn holder_evidence(secret: Field, digest: [u8; 32]) -> envelope_core::envelope::HolderEvidence {
     envelope_core::envelope::HolderEvidence {
         pk: key(secret),
         sig: sign(secret, holder_message(digest)),
@@ -1000,9 +1016,9 @@ fn two_credentials_share_one_holder_signature() {
     envelope_core::envelope::check_holders(
         [holder(), holder()],
         policy(holder()),
-        [10, 20],
+        request_digest(10, 20),
         [0, 0],
-        [holder_evidence(1, [10, 20]), empty_holder_evidence()],
+        [holder_evidence(1, request_digest(10, 20)), empty_holder_evidence()],
     );
 }
 #[test]
@@ -1012,9 +1028,9 @@ fn two_distinct_holder_keys_use_two_signatures() {
     envelope_core::envelope::check_holders(
         [holder(), b],
         policy(holder()),
-        [10, 20],
+        request_digest(10, 20),
         [0, 1],
-        [holder_evidence(1, [10, 20]), holder_evidence(2, [10, 20])],
+        [holder_evidence(1, request_digest(10, 20)), holder_evidence(2, request_digest(10, 20))],
     );
 }
 #[test(should_fail_with = "holder evidence coverage")]
@@ -1026,9 +1042,9 @@ fn two_distinct_holder_keys_with_one_signature_refused() {
     envelope_core::envelope::check_holders(
         [holder(), b],
         policy(holder()),
-        [10, 20],
+        request_digest(10, 20),
         [0, 1],
-        [holder_evidence(1, [10, 20]), absent],
+        [holder_evidence(1, request_digest(10, 20)), absent],
     );
 }
 #[test(should_fail_with = "duplicate holder key")]
@@ -1036,9 +1052,9 @@ fn repeated_signature_for_the_same_holder_key_refused() {
     envelope_core::envelope::check_holders(
         [holder(), holder()],
         policy(holder()),
-        [10, 20],
+        request_digest(10, 20),
         [0, 1],
-        [holder_evidence(1, [10, 20]), holder_evidence(1, [10, 20])],
+        [holder_evidence(1, request_digest(10, 20)), holder_evidence(1, request_digest(10, 20))],
     );
 }
 #[test(should_fail_with = "holder key binding")]
@@ -1048,104 +1064,71 @@ fn distinct_holder_keys_cannot_share_a_slot() {
     envelope_core::envelope::check_holders(
         [holder(), b],
         policy(holder()),
-        [10, 20],
+        request_digest(10, 20),
         [0, 0],
-        [holder_evidence(1, [10, 20]), empty_holder_evidence()],
+        [holder_evidence(1, request_digest(10, 20)), empty_holder_evidence()],
     );
 }
 #[test]
 fn explicit_empty_holder_issuer_list_requires_no_keys() {
     let mut p = scoped_policy(iri(900));
     p.holder_issuer_count = 0;
-    p.holder_issuers = [unbound(); 4];
-    envelope_core::envelope::check_holders([base()], p, [10, 20], [0], [empty_holder_evidence()]);
+    p.holder_issuers = [0; 4];
+    envelope_core::envelope::check_holders(
+        [base()],
+        p,
+        request_digest(10, 20),
+        [0],
+        [empty_holder_evidence()],
+    );
 }
 #[test(should_fail_with = "holder issuer padding")]
 fn holder_issuer_list_requires_zero_padding() {
     let mut p = scoped_policy(iri(900));
-    p.holder_issuers[1] = iri(902);
+    p.holder_issuers[1] = 902;
     let _ = envelope_core::envelope::holder_applies(iri(900), p);
-}
-#[test]
-fn request_digest_covers_freshness_and_issuer_scope() {
-    let p = policy(base());
-    let d = stand_in_request_digest(10, 20, 30, p);
-    let mut other = p;
-    other.freshness_required = true;
-    assert(d != stand_in_request_digest(10, 20, 30, other));
-    other = p;
-    other.earliest_created = 100;
-    assert(d != stand_in_request_digest(10, 20, 30, other));
-    other = scoped_policy(iri(900));
-    other.status_required = true;
-    assert(d != stand_in_request_digest(10, 20, 30, other));
-    let scoped = stand_in_request_digest(10, 20, 30, other);
-    other.holder_issuers[0] = iri(902);
-    assert(scoped != stand_in_request_digest(10, 20, 30, other));
-}
-#[test(should_fail_with = "request binding")]
-fn envelope_digest_for_policy_a_refuses_policy_b() {
-    let c = base();
-    let mut a = policy(c);
-    a.holder_required = false;
-    a.status_required = false;
-    let digest = stand_in_request_digest(10, 20, 30, a);
-    let mut b = a;
-    b.allow_missing_status = true;
-    // No holder or status check is enabled: refusal must come from request binding.
-    let _ = envelope_core::envelope::check_requested_envelope(
-        [c],
-        [10, 20, 30],
-        digest,
-        b,
-        [sign(1, 42)],
-        [issuer_path()],
-        [empty_holder_evidence()],
-        [0],
-        [no_status()],
-    );
 }
 #[test]
 fn canonical_roots_ignore_member_order_and_duplicates() {
     let a = trusted_key_leaf(iri(900), iri(901), key(1));
     let b = trusted_key_leaf(iri(902), iri(903), key(2));
-    let (r, d, n) = envelope_core::envelope::canonical_set_root([a, b, a, 0], 3);
-    let (s, e, m) = envelope_core::envelope::canonical_set_root([b, a], 2);
+    let (r, d, n) = native::canonical_set_root([a, b, a, 0], 3);
+    let (s, e, m) = native::canonical_set_root([b, a], 2);
     assert((r == s) & (d == e) & (n == m) & (d == 1) & (n == 2));
     let x = snapshot_digest::<2>(snapshot());
     let mut other = snapshot();
     other.root = other.root + 1;
     let y = snapshot_digest::<2>(other);
-    let (r, _, _) = envelope_core::envelope::canonical_set_root([x, y], 2);
-    let (s, _, _) = envelope_core::envelope::canonical_set_root([y, x], 2);
+    let (r, _, _) = native::canonical_set_root([x, y], 2);
+    let (s, _, _) = native::canonical_set_root([y, x], 2);
     assert(r == s);
 }
 #[test]
 fn canonical_root_has_minimal_depth_zero_padding_and_unsigned_order() {
-    let (root, d, n) = envelope_core::envelope::canonical_set_root([-1, 2, 1, 0], 3);
+    let (root, d, n) = native::canonical_set_root([-1, 2, 1, 0], 3);
     assert((d == 2) & (n == 3) & (root == h2(h2(1, 2), h2(-1, 0))));
-    let (root, d, n) = envelope_core::envelope::canonical_set_root([2, 2, 0, 0], 2);
+    let (root, d, n) = native::canonical_set_root([2, 2, 0, 0], 2);
     assert((d == 0) & (n == 1) & (root == 2));
 }
 #[test(should_fail_with = "zero set member")]
 fn canonical_set_zero_member_refused() {
-    let _ = envelope_core::envelope::canonical_set_root([0, 1], 2);
+    let _ = native::canonical_set_root([0, 1], 2);
 }
 #[test(should_fail_with = "set count")]
 fn canonical_set_empty_refused() {
-    let _ = envelope_core::envelope::canonical_set_root([0, 0], 0);
+    let _ = native::canonical_set_root([0, 0], 0);
 }
 #[test(should_fail_with = "set input padding")]
 fn canonical_set_nonzero_padding_refused() {
-    let _ = envelope_core::envelope::canonical_set_root([1, 2], 1);
+    let _ = native::canonical_set_root([1, 2], 1);
 }
 #[test]
 fn same_triple_has_one_default_copy_and_each_named_copy() {
     let a = base();
     let mut b = base();
     b.credential_index = 1;
-    let ad = credential_dataset::<16, 5>(a, iri(900), [10, 20]);
-    let bd = credential_dataset::<16, 5>(b, iri(900), [10, 20]);
+    let ad = credential_dataset::<16, 5>(a, iri(900), 20);
+    let bd = credential_dataset::<16, 5>(b, iri(900), 20);
     let merged = envelope_core::envelope::merge_datasets::<2, 5, 10>([ad, bd]);
     check_table(merged);
     let mut defaults: u32 = 0;
@@ -1184,12 +1167,11 @@ fn four_credentials_enforce_all_conditions_and_merge() {
     let mut p = policy(credentials[0]);
     p.freshness_required = true;
     p.earliest_created = 100;
-    let digest = stand_in_request_digest(10, 20, 30, p);
+    let digest = request_digest(10, 20);
     let mut e = no_status();
     e[6].present = true;
-    let verified = envelope_core::envelope::check_requested_envelope(
+    let verified = envelope_core::envelope::check_public_envelope(
         credentials,
-        [10, 20, 30],
         digest,
         p,
         [sign(1, 42); 4],
@@ -1205,7 +1187,7 @@ fn four_credentials_enforce_all_conditions_and_merge() {
     );
     let mut datasets = [envelope_core::table::empty::<27, 4>(); 4];
     for i in 0..4 {
-        datasets[i] = credential_dataset(credentials[i], verified[i], digest);
+        datasets[i] = credential_dataset(credentials[i], verified[i], 20);
     }
     let merged = envelope_core::envelope::merge_datasets::<4, 27, 69>(datasets);
     check_table(merged);
@@ -1221,12 +1203,11 @@ fn run_four(last: Credential<16>) {
     let mut p = policy(credentials[0]);
     p.freshness_required = true;
     p.earliest_created = 100;
-    let digest = stand_in_request_digest(10, 20, 30, p);
+    let digest = request_digest(10, 20);
     let mut e = no_status();
     e[6].present = true;
-    let _ = envelope_core::envelope::check_requested_envelope(
+    let _ = envelope_core::envelope::check_public_envelope(
         credentials,
-        [10, 20, 30],
         digest,
         p,
         [sign(1, 42); 4],
@@ -1344,6 +1325,7 @@ fn suite_cells_and_complete_signed_message_reach_the_envelope() {
     let verified = check_issuer(
         metadata,
         leaf,
+        0,
         sign(1, metadata.signed_message),
         Membership { index: 0, siblings: [] },
     );
@@ -1356,21 +1338,238 @@ fn suite_cells_and_complete_signed_message_reach_the_envelope() {
     );
 }
 
-#[test(should_fail_with = "holder issuer IRI")]
-fn holder_policy_scope_metadata_cannot_change_membership() {
-    let mut p = scoped_policy(iri(900));
-    p.holder_issuers[0].scope = 1;
-    let _ = envelope_core::envelope::holder_applies(iri(900), p);
-}
 #[test(should_fail_with = "holder evidence coverage")]
 fn unused_holder_signature_refused() {
     let mut p = scoped_policy(iri(902));
     p.validity_required = false;
+    p.now = 0;
     envelope_core::envelope::check_holders(
         [base()],
         p,
-        [10, 20],
+        request_digest(10, 20),
         [0],
-        [holder_evidence(1, [10, 20])],
+        [holder_evidence(1, request_digest(10, 20))],
     );
+}
+
+fn inactive_policy() -> PublicPolicy {
+    let mut p = policy(base());
+    p.holder_required = false;
+    p.status_required = false;
+    p.snapshot_root = 0;
+    p.snapshot_depth = 0;
+    p.validity_required = false;
+    p.now = 0;
+    p
+}
+#[test]
+fn inactive_public_policy_has_zero_values() {
+    envelope_core::envelope::check_policy::<3, 3>(inactive_policy());
+}
+#[test(should_fail_with = "disabled freshness policy")]
+fn inactive_freshness_with_nonzero_bound_refused() {
+    let mut p = inactive_policy();
+    p.earliest_created = 1;
+    envelope_core::envelope::check_policy::<3, 3>(p);
+}
+#[test(should_fail_with = "disabled validity policy")]
+fn inactive_validity_with_nonzero_time_refused() {
+    let mut p = inactive_policy();
+    p.now = 1;
+    envelope_core::envelope::check_policy::<3, 3>(p);
+}
+#[test(should_fail_with = "disabled status policy")]
+fn inactive_status_with_nonzero_root_refused() {
+    let mut p = inactive_policy();
+    p.snapshot_root = 1;
+    envelope_core::envelope::check_policy::<3, 3>(p);
+}
+#[test(should_fail_with = "disabled status policy")]
+fn inactive_status_with_nonzero_depth_refused() {
+    let mut p = inactive_policy();
+    p.snapshot_depth = 1;
+    envelope_core::envelope::check_policy::<3, 3>(p);
+}
+#[test(should_fail_with = "disabled status policy")]
+fn inactive_status_with_missing_option_refused() {
+    let mut p = inactive_policy();
+    p.allow_missing_status = true;
+    envelope_core::envelope::check_policy::<3, 3>(p);
+}
+#[test(should_fail_with = "disabled holder policy")]
+fn inactive_holder_with_present_scope_refused() {
+    let mut p = inactive_policy();
+    p.holder_issuers_present = true;
+    envelope_core::envelope::check_policy::<3, 3>(p);
+}
+#[test(should_fail_with = "disabled holder policy")]
+fn inactive_holder_with_nonzero_count_refused() {
+    let mut p = inactive_policy();
+    p.holder_issuer_count = 1;
+    p.holder_issuers[0] = 900;
+    envelope_core::envelope::check_policy::<3, 3>(p);
+}
+#[test(should_fail_with = "disabled holder policy")]
+fn inactive_holder_with_nonzero_word_refused() {
+    let mut p = inactive_policy();
+    p.holder_issuers[3] = 900;
+    envelope_core::envelope::check_policy::<3, 3>(p);
+}
+#[test(should_fail_with = "holder issuer presence")]
+fn absent_holder_scope_requires_zero_count() {
+    let mut p = policy(holder());
+    p.holder_issuer_count = 1;
+    p.holder_issuers[0] = 900;
+    envelope_core::envelope::check_policy::<3, 3>(p);
+}
+#[test(should_fail_with = "holder issuer order")]
+fn duplicate_holder_issuer_words_refused() {
+    let mut p = scoped_policy(iri(900));
+    p.holder_issuer_count = 2;
+    p.holder_issuers[1] = 900;
+    envelope_core::envelope::check_policy::<3, 3>(p);
+}
+#[test]
+fn set_member_at_public_depth_below_compiled_maximum_accepted() {
+    let path = Membership { index: 0, siblings: [777, 0, 0] };
+    assert(envelope_core::envelope::set_merkle_root(42, path, 1) == h2(42, 777));
+    assert(
+        envelope_core::envelope::set_merkle_root(42, Membership { index: 0, siblings: [0; 3] }, 0)
+            == 42,
+    );
+    let _ = check_issuer(base(), issuer_root(base()), 1, sign(1, 42), path);
+}
+#[test(should_fail_with = "issuer authorization set")]
+fn issuer_member_one_level_too_shallow_refused() {
+    let _ = check_issuer(
+        base(),
+        issuer_root(base()),
+        0,
+        sign(1, 42),
+        Membership { index: 0, siblings: [0; 3] },
+    );
+}
+#[test(should_fail_with = "issuer authorization set")]
+fn issuer_member_one_level_too_deep_refused() {
+    let _ = check_issuer(
+        base(),
+        issuer_root(base()),
+        2,
+        sign(1, 42),
+        Membership { index: 0, siblings: [777, 0, 0] },
+    );
+}
+#[test(should_fail_with = "set path padding")]
+fn unused_set_sibling_refused() {
+    let _ = envelope_core::envelope::set_merkle_root(
+        42,
+        Membership { index: 0, siblings: [777, 5, 0] },
+        1,
+    );
+}
+#[test(should_fail_with = "set path padding")]
+fn index_above_public_depth_refused() {
+    let _ = envelope_core::envelope::set_merkle_root(
+        42,
+        Membership { index: 2, siblings: [777, 0, 0] },
+        1,
+    );
+}
+#[test(should_fail_with = "set depth capacity")]
+fn public_set_depth_above_compiled_maximum_refused() {
+    let _ =
+        envelope_core::envelope::set_merkle_root(42, Membership { index: 0, siblings: [0; 3] }, 4);
+}
+#[test]
+fn snapshot_member_at_public_depth_below_compiled_maximum_accepted() {
+    let short = evidence();
+    let mut e = [
+        StatusEvidence {
+            present: false,
+            snapshot: snapshot(),
+            accepted: Membership { index: 0, siblings: [999, 0] },
+            bit: false,
+            path: path(),
+        }; 16
+    ];
+    e[2].present = short[2].present;
+    check_status(status(), policy_root(), 1, false, e);
+}
+#[test(should_fail_with = "snapshot policy")]
+fn snapshot_member_one_level_too_shallow_refused() {
+    let mut e = evidence();
+    e[2].accepted.siblings = [0];
+    check_status(status(), policy_root(), 0, false, e);
+}
+#[test(should_fail_with = "snapshot policy")]
+fn snapshot_member_one_level_too_deep_refused() {
+    let mut e = [
+        StatusEvidence {
+            present: false,
+            snapshot: snapshot(),
+            accepted: Membership { index: 0, siblings: [999, 0] },
+            bit: false,
+            path: path(),
+        }; 16
+    ];
+    e[2].present = true;
+    check_status(status(), policy_root(), 2, false, e);
+}
+#[test(should_fail_with = "status entry absent")]
+fn public_policy_a_refuses_evidence_satisfying_only_policy_b() {
+    let mut a = inactive_policy();
+    a.status_required = true;
+    a.snapshot_root = policy_root();
+    a.snapshot_depth = 1;
+    let _ = envelope_core::envelope::check_public_envelope(
+        [base()],
+        request_digest(10, 20),
+        a,
+        [sign(1, 42)],
+        [issuer_path()],
+        [empty_holder_evidence()],
+        [0],
+        [no_status()],
+    );
+}
+#[test]
+fn public_policy_b_accepts_its_evidence() {
+    let _ = envelope_core::envelope::check_public_envelope(
+        [base()],
+        request_digest(10, 20),
+        inactive_policy(),
+        [sign(1, 42)],
+        [issuer_path()],
+        [empty_holder_evidence()],
+        [0],
+        [no_status()],
+    );
+}
+
+#[test]
+fn native_policy_root_vectors() {
+    let (pair, d, n) = native::canonical_set_root([1, 2], 2);
+    let (reverse, rd, rn) = native::canonical_set_root([2, 1], 2);
+    let (duplicates, dd, dn) = native::canonical_set_root([2, 1, 2, 0], 3);
+    let (singleton, sd, sn) = native::canonical_set_root([2, 0, 0, 0], 1);
+    let (padded, pd, pn) = native::canonical_set_root([3, 1, 2, 0], 3);
+    let (larger, ld, ln) = native::canonical_set_root([2, 1, 0, 0, 0, 0, 0, 0], 2);
+    let (unsigned, ud, un) = native::canonical_set_root([-1, 2, 1, 0], 3);
+    assert((pair == reverse) & (pair == duplicates) & (pair == larger));
+    assert(
+        (d == 1) & (rd == 1) & (dd == 1) & (ld == 1) & (n == 2) & (rn == 2) & (dn == 2) & (ln == 2),
+    );
+    assert(
+        (singleton == 2) & (sd == 0) & (sn == 1) & (pd == 2) & (pn == 3) & (ud == 2) & (un == 3),
+    );
+    let trust = trusted_key_leaf(
+        envelope_core::envelope::iri_bytes("urn:test:issuer".as_bytes()),
+        envelope_core::envelope::iri_bytes("urn:test:key".as_bytes()),
+        key(1),
+    );
+    assert(pair == 0x038682aa1cb5ae4e0a3f13da432a95c77c5c111f6f030faf9cad641ce1ed7383);
+    assert(padded == 0x23e40150eaf2a79630776edb762a0525705f0206f8e3da4cbbe2fba8ae3d7b87);
+    assert(unsigned == 0x13d34888a5f10181210c333c7cec7169f39265a0f2664be7b5bdaa417a3ca537);
+    assert(trust == 0x0634ae948a9551ef686ae6afd30505a0ab76509e71b977393210dc7e764dd62c);
+    println([pair, singleton, padded, unsigned, trust]);
 }
