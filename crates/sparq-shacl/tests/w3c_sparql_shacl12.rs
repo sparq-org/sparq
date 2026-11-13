@@ -7,45 +7,20 @@
 //! revision of the `sh:sparql` suite, which was previously ungated (the gap
 //! sq-6glcr closes; see `research/shacl12-conformance-gap.md`).
 //!
-//! ## `sht:Failure` entries (expected rejection)
-//!
-//! Seven `pre-binding/` entries have `mf:result sht:Failure` rather than an
-//! `sh:ValidationReport`: they declare a SPARQL constraint the processor MUST
-//! reject (an unsupported `MINUS` / `VALUES` / `SERVICE`, a sub-`SELECT` that
-//! drops the pre-bound `$this`, or a `BIND` that re-binds a pre-bound variable).
-//! A conformant processor signals a *failure* (not a normal report).
-//!
-//! (sq-0mjfd) The crate now has that failure channel:
-//! [`sparq_shacl::validate_strict`] returns `Err(ShaclFailure)` for exactly these
-//! constraints (the build-time pre-binding check in `PreparedSparql::build` /
-//! the component-validator path). The harness runs strict validation for an
-//! `sht:Failure` entry and PASSES when it rejects (an `Err`), FAILS when it does
-//! not. The 7 entries are therefore genuine PASSes — previously they were a
-//! distinct non-passing `ExpectedFailure` outcome counted in the gap.
-//!
-//! ## SKIP vs FAIL — and why this gate does NOT assert all-pass
-//!
-//! An entry is **SKIP** when its constraint surface is out of scope here
-//! (a `component/` entry needing the custom-component declaration machinery the
-//! sibling `w3c_sparql_component.rs` handles, or any non-`sht:Validate`/`Failure`
-//! entry). Every other `sht:Validate` entry is compared strictly; an entry whose
-//! 1.2 behaviour this crate does not yet implement produces the wrong report and
-//! is an honest **FAIL** (the gap map), so this harness deliberately does not
-//! assert `fail == 0`.
-//!
-//! ## Ratchet (two-sided)
-//!
-//! The gate is a ratchet: pass must not drop ([`BASELINE_PASS`]) and the FAIL
-//! count must not grow ([`BASELINE_GAP`], now 0 — every in-scope SHACL-1.2 SPARQL
-//! entry passes here). Together they catch a regression in either direction.
-//! Floors calibrated by running the harness at the pinned suite commit
-//! in-worktree.
+//! Expected `sht:Failure` entries use strict validation. Other entries compare
+//! reports, including messages, paths, values, source shapes and components.
+//! The pass floor and failure ceiling are measured at the pin in both feature
+//! states; unsupported forms remain visible as skips or failures.
 //!
 //! The report-comparison policy mirrors `w3c_core.rs`: `sh:conforms` must match,
 //! and the result multisets correspond 1:1 where each expected result's stated
 //! `sh:focusNode` / `sh:resultPath` / `sh:value` / `sh:resultSeverity` /
 //! `sh:sourceConstraintComponent` / `sh:sourceShape` / `sh:resultMessage` agree
 //! (blank nodes match any blank node).
+
+mod support;
+
+use support::Outcome;
 
 use oxrdf::Term;
 use sparq_core::Graph;
@@ -59,45 +34,8 @@ const MF: &str = "http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#";
 const SHT: &str = "http://www.w3.org/ns/shacl-test#";
 const SH: &str = "http://www.w3.org/ns/shacl#";
 
-/// Pass-floor: the SHACL-1.2 SPARQL `sht:Validate` entries this crate validates
-/// correctly at the pinned suite commit (`fetch-shacl-tests.sh` PIN). A
-/// regression below this fails the build; raising it is a deliberate bump.
-///
-/// (sq-6glcr) Calibrated by running the harness in-worktree.
-///
-/// (sq-rnkdh) Raised 10 → 14: the SHACL-1.2 SPARQL-based node
-/// expressions added here — the SPARQL-valued target `sh:targetNode [ sh:select ]`
-/// (`targets/targetNode-select-001`), the SPARQL-valued value nodes
-/// `sh:values [ sh:select / sh:sparqlExpr ]` (`property/property-select-001`,
-/// `property/property-sparqlExpr-001`), and constraint-level `sh:severity`
-/// (`node/sparql-001`) — now PASS.
-///
-/// (sq-mue75) Raised 14 → 17: the three remaining `pre-binding/`
-/// entries — pre-binding-002 (pre-binding into both UNION branches),
-/// pre-binding-005 (into a sibling Join block) and pre-binding-007 (through a
-/// sub-SELECT projection) — now PASS via the extended `push_values_down`
-/// propagation. (The 6 `sh:sparql`-result entries are also now verified for
-/// `sh:sourceConstraint`.)
-///
-/// (sq-0mjfd) Raised 17 → 24: the 7 `mf:result sht:Failure` entries
-/// (`pre-binding/{unsupported-sparql-001..006, pre-binding-006}`) now PASS via the
-/// real rejection channel ([`sparq_shacl::validate_strict`] returns `Err` for an
-/// unsound SHACL-SPARQL pre-binding). They were previously a distinct,
-/// non-passing `ExpectedFailure` outcome in the gap.
-const BASELINE_PASS: usize = 24;
-
-/// Gap-ceiling: the count of entries this crate does NOT yet get right — the
-/// strict-comparison FAILs. A *new* gap (a previously-correct entry breaking)
-/// pushes this above the ceiling and fails the build; closing a gap drops it.
-///
-/// (sq-rnkdh) Lowered 14 → 10: the 4 SPARQL-node-expression entries
-/// moved FAIL → PASS.
-///
-/// (sq-mue75) Lowered 10 → 7: the 3 `pre-binding/` FAILs moved
-/// FAIL → PASS, leaving only the 7 `sht:Failure` rejection entries.
-///
-/// (sq-0mjfd) Lowered 7 → 0: the 7 `sht:Failure` entries now PASS via
-/// the real rejection channel, so this SHACL-1.2 SPARQL suite is fully green here.
+/// Measured at 04ecbb4 (2026-11-12), in both feature states.
+const BASELINE_PASS: usize = 98;
 const BASELINE_GAP: usize = 0;
 
 fn suite_root() -> PathBuf {
@@ -143,10 +81,7 @@ fn w3c_shacl12_sparql_suite() {
     println!("TOTAL pass {pass} fail {fail} skip {skip}");
 
     // Two-sided ratchet: pass must not drop, the gap (fail) must not grow. The
-    // ceiling is now 0 (every in-scope SHACL-1.2 SPARQL entry passes here), so the
-    // gap assertion is an exact equality — `fail == BASELINE_GAP` is the same
-    // two-sided guard as `fail <= BASELINE_GAP` when the ceiling is the minimum
-    // value (clippy::absurd_extreme_comparisons flags the `<=` form at 0).
+    // zero ceiling is equivalently asserted as equality.
     assert!(
         pass >= BASELINE_PASS,
         "SHACL 1.2 SPARQL pass count regressed: {pass} < floor {BASELINE_PASS} (fail {fail}, skip {skip})"
@@ -173,6 +108,7 @@ struct Scoreboard {
 
 impl Scoreboard {
     fn record(&mut self, group: &str, id: &str, outcome: Outcome) {
+        support::earl(id, &outcome);
         let e = self.by_group.entry(group.to_string()).or_default();
         match outcome {
             Outcome::Pass => e.pass += 1,
@@ -188,11 +124,6 @@ impl Scoreboard {
     }
 }
 
-enum Outcome {
-    Pass,
-    Fail(String),
-    Skip(String),
-}
 
 fn file_iri(path: &FsPath) -> String {
     format!("file://{}", path.display())
@@ -304,13 +235,11 @@ fn run_entry(file: &FsPath, g: &Graph, view: &GraphView, entry: &Term) -> Result
     // genuine FAIL when it does NOT (the validator should have rejected but did
     // not). The 7 such shacl12 entries were previously counted as ExpectedFailure
     // (the rejection channel was unbuilt).
-    if matches!(&exp_node, Term::NamedNode(n) if n.as_str() == format!("{SHT}Failure")) {
-        return Ok(match sparq_shacl::validate_strict(data_g, shapes_g) {
-            Err(_) => Outcome::Pass,
-            Ok(_) => Outcome::Fail(
-                "expected sht:Failure (validator must reject) but strict validation produced a report"
-                    .to_string(),
-            ),
+    if let Some(rejected) = support::expected_failure(&exp_node, data_g, shapes_g) {
+        return Ok(if rejected {
+            Outcome::Pass
+        } else {
+            Outcome::Fail(support::NOT_REJECTED.into())
         });
     }
 

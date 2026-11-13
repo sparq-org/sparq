@@ -396,7 +396,35 @@ pub struct SharedSet {
     text: std::sync::OnceLock<String>,
 }
 
-pub(crate) type SetMembers = std::sync::Arc<[(String, String)]>;
+pub(crate) type SetMembers = std::sync::Arc<SetGroup>;
+
+#[derive(Debug)]
+pub(crate) struct SetGroup {
+    members: Vec<(String, String)>,
+    lexical: std::collections::HashSet<String>,
+}
+
+impl SetGroup {
+    pub(crate) fn new(
+        members: Vec<(String, String)>,
+        lexical: std::collections::HashSet<String>,
+    ) -> Self {
+        Self { members, lexical }
+    }
+}
+
+impl std::ops::Deref for SetGroup {
+    type Target = [(String, String)];
+    fn deref(&self) -> &Self::Target {
+        &self.members
+    }
+}
+
+#[cfg(test)]
+std::thread_local! {
+    pub(crate) static SET_TEXT_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(crate) static SET_GROUP_PROBES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 impl SharedSet {
     pub(crate) fn new(parts: Vec<SetMembers>) -> Self {
@@ -406,8 +434,71 @@ impl SharedSet {
         }
     }
 
+    fn contains(&self, value: &str) -> bool {
+        self.parts.iter().any(|group| {
+            #[cfg(test)]
+            SET_GROUP_PROBES.with(|count| count.set(count.get() + 1));
+            group.lexical.contains(value)
+        })
+    }
+
+    fn any_member(&self, mut predicate: impl FnMut(&str) -> bool) -> bool {
+        self.parts
+            .iter()
+            .any(|group| group.iter().any(|(_, value)| predicate(value)))
+    }
+
+    fn bytes(&self) -> impl Iterator<Item = u8> + '_ {
+        let mut seen = std::collections::BTreeSet::new();
+        let mut nonempty = false;
+        self.parts
+            .iter()
+            .flat_map(|group| group.iter())
+            .filter_map(move |(key, value)| {
+                if !seen.insert(key.as_str()) {
+                    return None;
+                }
+                let separator = if nonempty { "|" } else { "" };
+                nonempty |= !value.is_empty();
+                Some([separator, value.as_str()])
+            })
+            .flatten()
+            .flat_map(str::bytes)
+    }
+
+    fn fmt_quoted(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use fmt::Write as _;
+        let mut seen = std::collections::BTreeSet::new();
+        let mut first = true;
+        f.write_char('"')?;
+        for group in &self.parts {
+            for (key, value) in group.iter() {
+                if !seen.insert(key.as_str()) {
+                    continue;
+                }
+                if !first {
+                    f.write_char('|')?;
+                }
+                first &= value.is_empty();
+                for ch in value.chars() {
+                    // str's Debug leaves apostrophes literal, unlike char's Debug.
+                    if ch == '\'' {
+                        f.write_char(ch)?;
+                    } else {
+                        for escaped in ch.escape_debug() {
+                            f.write_char(escaped)?;
+                        }
+                    }
+                }
+            }
+        }
+        f.write_char('"')
+    }
+
     fn as_str(&self) -> &str {
         self.text.get_or_init(|| {
+            #[cfg(test)]
+            SET_TEXT_BUILDS.with(|count| count.set(count.get() + 1));
             let mut seen = std::collections::BTreeSet::new();
             let mut out = String::new();
             for members in &self.parts {
@@ -449,6 +540,58 @@ pub enum Value {
 }
 
 impl Value {
+    #[inline]
+    fn borrowed_text(&self) -> Option<&str> {
+        match self {
+            Self::Iri(s) | Self::Str(s) | Self::DateTime(s) => Some(s),
+            Self::SharedIri(s) | Self::SharedStr(s) | Self::SharedDateTime(s) => Some(s),
+            Self::Num(_) => Some(""),
+            Self::SharedSet(_) => None,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn text_eq(&self, other: &Self) -> bool {
+        match (self.borrowed_text(), other.borrowed_text()) {
+            (Some(a), Some(b)) => a == b,
+            _ => self.shared_text_eq(other),
+        }
+    }
+
+    // Keep shared-group traversal out of the common scalar comparison body.
+    #[inline(never)]
+    fn shared_text_eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::SharedSet(a), Self::SharedSet(b)) => {
+                std::sync::Arc::ptr_eq(a, b) || a.bytes().eq(b.bytes())
+            }
+            (Self::SharedSet(a), b) => a.bytes().eq(b.as_str().bytes()),
+            (a, Self::SharedSet(b)) => a.as_str().bytes().eq(b.bytes()),
+            _ => self.as_str() == other.as_str(),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn set_contains(&self, value: &str) -> bool {
+        match self {
+            Self::SharedSet(set) => set.contains(value),
+            _ => self.any_set_member(|member| member == value),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn any_set_member(&self, predicate: impl FnMut(&str) -> bool) -> bool {
+        match self {
+            Self::SharedSet(set) => set.any_member(predicate),
+            _ => self
+                .as_str()
+                .split(['|', ' ', ','])
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .any(predicate),
+        }
+    }
+
     pub(crate) fn is_datetime(&self) -> bool {
         matches!(self, Self::DateTime(_) | Self::SharedDateTime(_))
     }
@@ -470,12 +613,12 @@ impl PartialEq for Value {
             (
                 Self::Str(_) | Self::SharedStr(_) | Self::SharedSet(_),
                 Self::Str(_) | Self::SharedStr(_) | Self::SharedSet(_),
-            ) => self.as_str() == other.as_str(),
+            ) => self.text_eq(other),
             (Self::Iri(_) | Self::SharedIri(_), Self::Iri(_) | Self::SharedIri(_))
             | (
                 Self::DateTime(_) | Self::SharedDateTime(_),
                 Self::DateTime(_) | Self::SharedDateTime(_),
-            ) => self.as_str() == other.as_str(),
+            ) => self.text_eq(other),
             (Self::Num(a), Self::Num(b)) => a == b,
             _ => false,
         }
@@ -490,7 +633,7 @@ impl fmt::Display for Value {
             Value::SharedIri(s) => write!(f, "<{s}>"),
             Value::Str(s) | Value::DateTime(s) => write!(f, "{s:?}"),
             Value::SharedStr(s) | Value::SharedDateTime(s) => write!(f, "{s:?}"),
-            Value::SharedSet(set) => write!(f, "{:?}", set.as_str()),
+            Value::SharedSet(set) => set.fmt_quoted(f),
             Value::Num(n) => write!(f, "{n}"),
         }
     }
@@ -521,17 +664,26 @@ mod shared_set_tests {
     fn text_is_deferred_ordered_and_memoized() {
         fn send_sync<T: Send + Sync>() {}
         send_sync::<Value>();
+        let first = vec![("iri:a".into(), "a".into()), ("iri:b".into(), "b".into())];
         let first: SetMembers =
-            vec![("iri:a".into(), "a".into()), ("iri:b".into(), "b".into())].into();
-        let second: SetMembers = vec![
+            std::sync::Arc::new(SetGroup::new(first, ["a".into(), "b".into()].into()));
+        let second = vec![
             ("iri:b".into(), "b".into()),
             ("literal:b".into(), "b".into()),
             ("iri:c".into(), "c".into()),
-        ]
-        .into();
+        ];
+        let second: SetMembers =
+            std::sync::Arc::new(SetGroup::new(second, ["b".into(), "c".into()].into()));
         let set = std::sync::Arc::new(SharedSet::new(vec![first, second]));
         assert!(set.text.get().is_none());
+        assert_eq!(format!("{}", Value::SharedSet(set.clone())), "\"a|b|b|c\"");
+        assert!(
+            set.text.get().is_none(),
+            "diagnostics must not build joined text"
+        );
         let value = Value::SharedSet(std::sync::Arc::clone(&set));
+        assert_eq!(value, Value::Str("a|b|b|c".into()));
+        assert!(set.text.get().is_none(), "comparisons must not build joined text");
         assert_eq!(value.as_str(), "a|b|b|c");
         let allocation = value.as_str().as_ptr();
         assert_eq!(set.text.get().unwrap().as_ptr(), allocation);

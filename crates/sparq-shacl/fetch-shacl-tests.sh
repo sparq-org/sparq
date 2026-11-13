@@ -4,9 +4,12 @@
 # skips itself when the suite is absent, so this is opt-in.
 set -euo pipefail
 
-# Pinned 2026-06-09 (main). Bump deliberately; the scoreboard baseline in
+# Pinned 2026-11-12 (main). Bump deliberately; the scoreboard baseline in
 # tests/w3c_core.rs is calibrated against this revision.
-PIN=b6e73695d6196f33d7ce3ba47094a10fbc298e65
+PIN=04ecbb4a5b930f4fa9df6c399ac5c98ccec672c9
+# SHACL_TESTS_PIN overrides the pin for one run (earl-report.sh uses it to report
+# against the current suite). The runners' ratchets hold only at PIN.
+PIN="${SHACL_TESTS_PIN:-$PIN}"
 
 dir="$(cd "$(dirname "$0")" && pwd)/tests/shacl"
 repo="$dir/data-shapes"

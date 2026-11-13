@@ -72,7 +72,9 @@
 //! on-disk snapshot is taken with [`EmbeddedSparqClient::save`] — itself an actor job, so a snapshot
 //! is consistent by construction (it cannot interleave with a write). Directory-backed writes
 //! capture effects on a disposable fork and commit them to the authoritative graph through one
-//! fsync'd transaction frame before materialization. An indeterminate commit stops the actor;
+//! journal group. Already-queued jobs share one sync; their replies, including reads,
+//! are withheld until it succeeds. Save and compaction jobs form queue barriers.
+//! An indeterminate commit stops the actor;
 //! callers must restart to recover before serving any further operations.
 
 use std::panic::AssertUnwindSafe;
@@ -97,15 +99,86 @@ const ACTOR_THREAD_NAME: &str = "sparq-embedded-graph";
 /// Reopen the graph before serving any further operations.
 const ACTOR_STOPPED: &str = "fatal: embedded graph actor stopped; restart to recover";
 
-/// One unit of work for the [`GraphActor`]: a closure run ON the actor thread with EXCLUSIVE
-/// `&mut Graph` access. The job is type-erased (it carries and completes its OWN reply channel
-/// internally), so the channel stays monomorphic across every differently-typed engine call.
-type Job = Box<dyn FnOnce(&mut ActorGraph) + Send + 'static>;
+type ReplyFn = Box<dyn FnOnce(Option<SparqError>) + Send + 'static>;
+
+trait DeferredCall: Send {
+    fn run(&mut self, graph: &mut ActorGraph);
+    fn reply(self: Box<Self>, error: Option<SparqError>);
+}
+
+struct Call<F, T> {
+    operation: Option<F>,
+    result: Option<Result<T, SparqError>>,
+    sender: oneshot::Sender<Result<T, SparqError>>,
+}
+
+impl<F, T> DeferredCall for Call<F, T>
+where
+    F: FnOnce(&mut ActorGraph) -> Result<T, SparqError> + Send + 'static,
+    T: Send + 'static,
+{
+    fn run(&mut self, graph: &mut ActorGraph) {
+        self.result = Some(self.operation.take().expect("job runs once")(graph));
+    }
+
+    fn reply(self: Box<Self>, error: Option<SparqError>) {
+        let Self { result, sender, .. } = *self;
+        let _ = sender.send(match error {
+            Some(error) => Err(error),
+            None => result.expect("job finishes before replying"),
+        });
+    }
+}
+
+enum Run {
+    Call(Box<dyn DeferredCall>),
+    Closure(Box<dyn FnOnce(&mut ActorGraph) -> ReplyFn + Send + 'static>),
+}
+
+impl Run {
+    fn closure(f: impl FnOnce(&mut ActorGraph) -> ReplyFn + Send + 'static) -> Self {
+        Self::Closure(Box::new(f))
+    }
+
+    fn execute(self, graph: &mut ActorGraph) -> Reply {
+        match self {
+            Self::Call(mut call) => {
+                call.run(graph);
+                Reply::Call(call)
+            }
+            Self::Closure(f) => Reply::Closure(f(graph)),
+        }
+    }
+}
+
+/// Reuse the job's allocation for its result until the group's durability barrier.
+enum Reply {
+    Call(Box<dyn DeferredCall>),
+    Closure(ReplyFn),
+}
+
+impl Reply {
+    fn send(self, error: Option<SparqError>) {
+        match self {
+            Self::Call(call) => call.reply(error),
+            Self::Closure(f) => f(error),
+        }
+    }
+}
+
+struct Job {
+    run: Run,
+    barrier: bool,
+}
+
+/// Bound work between acknowledgments without waiting for more arrivals.
+const MAX_GROUP_JOBS: usize = 16;
 
 /// The authoritative graph and the actor's fail-closed commit state.
 struct ActorGraph {
     graph: Graph,
     stopped: bool,
+    stop_reason: Option<String>,
     #[cfg(test)]
     apply_failure: Option<sparq_engine::ApplyError>,
 }
@@ -171,13 +244,31 @@ impl GraphActor {
         F: FnOnce(&mut ActorGraph) -> Result<T, SparqError> + Send + 'static,
         T: Send + 'static,
     {
+        self.call_inner(f, false).await
+    }
+
+    async fn call_barrier<T, F>(&self, f: F) -> Result<T, SparqError>
+    where
+        F: FnOnce(&mut ActorGraph) -> Result<T, SparqError> + Send + 'static,
+        T: Send + 'static,
+    {
+        self.call_inner(f, true).await
+    }
+
+    async fn call_inner<T, F>(&self, f: F, barrier: bool) -> Result<T, SparqError>
+    where
+        F: FnOnce(&mut ActorGraph) -> Result<T, SparqError> + Send + 'static,
+        T: Send + 'static,
+    {
         let (reply_tx, reply_rx) = oneshot::channel();
-        let job: Job = Box::new(move |graph| {
-            // A dropped receiver means the caller's future was cancelled. The op still ran to
-            // completion on the actor thread (same as a dropped `spawn_blocking` handle), so the
-            // graph state is well-defined; only the unobserved result is discarded.
-            let _ = reply_tx.send(f(graph));
-        });
+        let job = Job {
+            run: Run::Call(Box::new(Call {
+                operation: Some(f),
+                result: None,
+                sender: reply_tx,
+            })),
+            barrier,
+        };
         self.tx
             .send(job)
             .map_err(|_| SparqError::Backend(ACTOR_STOPPED.into()))?;
@@ -189,7 +280,13 @@ impl GraphActor {
 
 impl Drop for GraphActor {
     fn drop(&mut self) {
-        let _ = self.tx.send(Box::new(|graph| graph.stopped = true));
+        let _ = self.tx.send(Job {
+            run: Run::closure(|graph| {
+                graph.stopped = true;
+                Box::new(|_| {})
+            }),
+            barrier: true,
+        });
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -238,15 +335,73 @@ fn actor_loop(graph: Graph, mut rx: mpsc::UnboundedReceiver<Job>) {
     let mut graph = ActorGraph {
         graph,
         stopped: false,
+        stop_reason: None,
         #[cfg(test)]
         apply_failure: None,
     };
-    // `blocking_recv` is correct here precisely because this thread is NOT a tokio worker — it has
-    // no runtime context, so parking it blocks nothing but itself.
-    while let Some(job) = rx.blocking_recv() {
-        // `AssertUnwindSafe`: on a caught panic we never touch `graph` again (the loop breaks), so a
-        // logically-torn index can never be observed — which is exactly the unwind-safety obligation.
-        if std::panic::catch_unwind(AssertUnwindSafe(|| job(&mut graph))).is_err() || graph.stopped {
+    let mut pending = None;
+    while let Some(first) = pending.take().or_else(|| rx.blocking_recv()) {
+        let barrier = first.barrier;
+        let mut jobs = Vec::new();
+        if !barrier {
+            while jobs.len() + 1 < MAX_GROUP_JOBS {
+                match rx.try_recv() {
+                    Ok(job) if job.barrier => {
+                        pending = Some(job);
+                        break;
+                    }
+                    Ok(job) => jobs.push(job),
+                    Err(_) => break,
+                }
+            }
+        }
+        // A lone job uses the immediate journal writer: an implicit group of one.
+        let grouped = !barrier && !jobs.is_empty();
+        let mut first_reply = None;
+        let mut replies = Vec::new();
+        // A panic discards every withheld result and stops the actor. Never commit
+        // or serve the potentially partial in-memory state after unwinding.
+        let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            if grouped {
+                graph
+                    .begin_group()
+                    .map_err(|e| engine_err("begin_group", e))?;
+            }
+            for job in std::iter::once(first).chain(jobs) {
+                let reply = job.run.execute(&mut graph);
+                if first_reply.is_none() {
+                    first_reply = Some(reply);
+                } else {
+                    replies.push(reply);
+                }
+                if graph.stopped && !barrier {
+                    return Err(SparqError::Backend(
+                        graph
+                            .stop_reason
+                            .take()
+                            .unwrap_or_else(|| ACTOR_STOPPED.into()),
+                    ));
+                }
+            }
+            if grouped {
+                graph
+                    .commit_group()
+                    .map_err(|e| engine_err("commit_group", e))?;
+            }
+            Ok::<_, SparqError>(())
+        }));
+        let error = match result {
+            Ok(Ok(())) => None,
+            Ok(Err(error)) => Some(error.to_string()),
+            Err(_) => Some(ACTOR_STOPPED.to_owned()),
+        };
+        if error.is_some() {
+            graph.poison_txn();
+        }
+        for reply in first_reply.into_iter().chain(replies) {
+            reply.send(error.as_ref().map(|e| SparqError::Backend(e.clone())));
+        }
+        if error.is_some() || graph.stopped {
             break;
         }
     }
@@ -320,7 +475,7 @@ impl EmbeddedSparqClient {
     /// This maintenance job does not increment [`Self::engine_round_trips`].
     pub async fn compact(&self) -> Result<(), SparqError> {
         self.actor
-            .call(|graph| {
+            .call_barrier(|graph| {
                 refuse_frozen(graph)?;
                 graph.compact().map_err(|e| engine_err("compact", e))
             })
@@ -424,7 +579,7 @@ impl EmbeddedSparqClient {
     pub async fn save(&self, dir: &Path) -> Result<(), SparqError> {
         let dir = dir.to_path_buf();
         self.actor
-            .call(move |graph| {
+            .call_barrier(move |graph| {
                 refuse_frozen(graph)?;
                 // Resolve through any newly created components, retaining only directories
                 // used by a successful snapshot to a separate destination.
@@ -512,10 +667,9 @@ fn commit(graph: &mut ActorGraph, sparql: &str, op: &str) -> Result<(), SparqErr
     result.map_err(|error| {
         if error.applied {
             graph.stopped = true;
-            engine_err(
-                op,
-                format!("indeterminate commit: {}; restart to recover", error.message),
-            )
+            let reason = format!("indeterminate commit: {}; restart to recover", error.message);
+            graph.stop_reason = Some(reason.clone());
+            engine_err(op, reason)
         } else {
             engine_err(op, error.message)
         }
@@ -576,6 +730,12 @@ fn meta_from_result(result: &sparq_engine::QueryResult) -> Result<ResourceMeta, 
         blob_key,
         etag,
         last_modified,
+        append_seq: var_col(result, "appendSeq")
+            .and_then(|col| term_value(row.get(col).and_then(|c| c.as_ref())))
+            .map(|s| s.parse())
+            .transpose()
+            .map_err(|_| SparqError::Backend("invalid append sequence".into()))?
+            .unwrap_or(0),
     })
 }
 
@@ -586,12 +746,13 @@ impl EmbeddedSparqClient {
         // all-or-nothing, so a re-write never leaves a half-deleted record (the safe public default
         // for a direct library consumer, per the sparq-engine docs).
         let modified = meta.last_modified.and_then(timestamp::to_xsd_datetime);
-        let u = sparql::update_put_meta(
+        let u = sparql::update_put_meta_with_append_seq(
             iri,
             &meta.content_type,
             &meta.blob_key,
             &meta.etag,
             modified.as_deref(),
+            meta.append_seq,
         )?;
         self.dispatch(move |graph| {
             commit(graph, &u, "put_meta")
@@ -617,16 +778,7 @@ impl EmbeddedSparqClient {
             .then(|| sparql::select_meta(child))
             .transpose()?;
         let nonce = next_nonce();
-        let modified = meta.last_modified.and_then(timestamp::to_xsd_datetime);
-        let create_u = sparql::update_create_child(
-            container,
-            child,
-            &meta.content_type,
-            &meta.blob_key,
-            &meta.etag,
-            modified.as_deref(),
-            &nonce,
-        )?;
+        let create_u = sparql::update_create_child_meta(container, child, &meta, &nonce, None)?;
         self.dispatch(move |graph| {
             // Container must exist (else 404). Checked inside the same job as the insert, so no
             // concurrent delete can race between this check and the insert.
@@ -706,12 +858,13 @@ impl SparqClient for EmbeddedSparqClient {
         // operation can interleave: the returned record is exactly the one this update replaced.
         let q = sparql::select_meta(iri)?;
         let modified = meta.last_modified.and_then(timestamp::to_xsd_datetime);
-        let u = sparql::update_put_meta(
+        let u = sparql::update_put_meta_with_append_seq(
             iri,
             &meta.content_type,
             &meta.blob_key,
             &meta.etag,
             modified.as_deref(),
+            meta.append_seq,
         )?;
         self.dispatch(move |graph| {
             let result =
@@ -809,6 +962,72 @@ impl SparqClient for EmbeddedSparqClient {
         true
     }
 
+    async fn fold_appends(
+        &self,
+        iri: &str,
+        expected: &ResourceMeta,
+        blob_key: &str,
+    ) -> Result<bool, SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri)])?;
+        let q = sparql::select_meta(iri)?;
+        let modified = expected.last_modified.and_then(timestamp::to_xsd_datetime);
+        let update = sparql::update_put_meta_with_append_seq(
+            iri,
+            &expected.content_type,
+            blob_key,
+            &expected.etag,
+            modified.as_deref(),
+            0,
+        )?;
+        let expected = expected.clone();
+        self.dispatch(move |graph| {
+            let result = sparq_engine::query(graph, &q).map_err(|e| engine_err("fold/read", e))?;
+            match meta_from_result(&result) {
+                Ok(current) if current == expected => {}
+                Ok(_) | Err(SparqError::NotFound) => return Ok(false),
+                Err(e) => return Err(e),
+            }
+            commit(graph, &update, "fold_appends")?;
+            Ok(true)
+        })
+        .await
+    }
+
+    async fn publish_append(&self, iri: &str, key: &str, blob_key: &str) -> Result<(), SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri)])?;
+        let q = sparql::select_meta(iri)?;
+        let directory_q = sparql::select_meta(&super::append_dir(key))?;
+        let iri = iri.to_string();
+        let key = key.to_string();
+        let blob_key = blob_key.to_string();
+        self.dispatch(move |graph| {
+            let result =
+                sparq_engine::query(graph, &q).map_err(|e| engine_err("append/read", e))?;
+            let mut meta = meta_from_result(&result)?;
+            if meta.blob_key != key {
+                return Err(SparqError::NotFound);
+            }
+            let directory = sparq_engine::query(graph, &directory_q)
+                .map_err(|e| engine_err("append/directory", e))?;
+            match meta_from_result(&directory) {
+                Ok(directory) => meta.append_seq = meta.append_seq.max(directory.append_seq),
+                Err(SparqError::NotFound) => {}
+                Err(e) => return Err(e),
+            }
+            super::sparq::advance_append(&mut meta)?;
+            let nonce = meta.etag.trim_matches('"').to_owned();
+            let modified = meta
+                .last_modified
+                .and_then(timestamp::to_xsd_datetime)
+                .ok_or_else(|| SparqError::Backend("invalid append timestamp".into()))?;
+            let u = sparql::update_publish_append(&iri, &key, &blob_key, &nonce, &modified, None)?;
+            let cleanup =
+                sparql::update_delete_resource(&format!("urn:x-sparq-lws:append-results/{nonce}"))?;
+            commit(graph, &format!("{u}; {cleanup}"), "publish_append")
+        })
+        .await
+    }
+
     async fn raise_marker(&self, iri: &str, value: i64) -> Result<i64, SparqError> {
         // Read and written in ONE actor job, so no other index operation lands in between.
         let q = sparql::select_meta(iri)?;
@@ -824,12 +1043,13 @@ impl SparqClient for EmbeddedSparqClient {
             let raised = stored.map_or(value, |t| t.max(value));
             if stored != Some(raised) {
                 let meta = super::sparq::marker_meta(&raised.to_string());
-                let u = sparql::update_put_meta(
+                let u = sparql::update_put_meta_with_append_seq(
                     &iri,
                     &meta.content_type,
                     &meta.blob_key,
                     &meta.etag,
                     None,
+                    meta.append_seq,
                 )?;
                 commit(graph, &u, "raise_marker")?;
             }
@@ -842,6 +1062,24 @@ impl SparqClient for EmbeddedSparqClient {
         let q = sparql::ask_exists(iri)?;
         self.dispatch(move |graph| {
             sparq_engine::ask(graph, &q).map_err(|e| engine_err("ask_exists", e))
+        })
+        .await
+    }
+
+    async fn begin_reclaim_with_appends(&self, blob_key: &str) -> Result<(bool, bool), SparqError> {
+        let referenced = sparql::ask_blob_referenced(blob_key);
+        let update = sparql::update_begin_reclaim(blob_key);
+        let appends = sparql::ask_exists(&super::append_dir(blob_key))?;
+        self.dispatch(move |graph| {
+            if sparq_engine::ask(graph, &referenced)
+                .map_err(|e| engine_err("reclaim/referenced", e))?
+            {
+                return Ok((false, false));
+            }
+            commit(graph, &update, "begin_reclaim")?;
+            let has_appends =
+                sparq_engine::ask(graph, &appends).map_err(|e| engine_err("reclaim/appends", e))?;
+            Ok((true, has_appends))
         })
         .await
     }
@@ -1170,6 +1408,12 @@ impl SparqClient for EmbeddedSparqClient {
                     blob_key,
                     etag,
                     last_modified,
+                    append_seq: var_col(&result, "appendSeq")
+                        .and_then(|col| term_value(row.get(col).and_then(|c| c.as_ref())))
+                        .map(|s| s.parse())
+                        .transpose()
+                        .map_err(|_| SparqError::Backend("invalid append sequence".into()))?
+                        .unwrap_or(0),
                 });
             }
 
@@ -1259,6 +1503,7 @@ mod tests {
             blob_key: bk.into(),
             etag: etag.into(),
             last_modified: None,
+            append_seq: 0,
         }
     }
 

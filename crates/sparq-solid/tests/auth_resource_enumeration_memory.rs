@@ -44,6 +44,10 @@ static SERIAL: Mutex<()> = Mutex::new(());
 static LIVE: AtomicUsize = AtomicUsize::new(0);
 /// The high-water mark of `LIVE` since it was last reset.
 static PEAK: AtomicUsize = AtomicUsize::new(0);
+// Observe allocations matching one full replacement-triple buffer. This separates a
+// content clone from parser and dictionary allocations without a second allocator.
+static WATCH_SIZE: AtomicUsize = AtomicUsize::new(0);
+static WATCH_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 struct Counting;
 
@@ -54,6 +58,9 @@ unsafe impl GlobalAlloc for Counting {
         // SAFETY: the layout is the caller's, forwarded unchanged to the system allocator.
         let p = unsafe { System.alloc(layout) };
         if !p.is_null() {
+            if layout.size() == WATCH_SIZE.load(Ordering::Relaxed) {
+                WATCH_COUNT.fetch_add(1, Ordering::Relaxed);
+            }
             let live = LIVE.fetch_add(layout.size(), Ordering::Relaxed) + layout.size();
             PEAK.fetch_max(live, Ordering::Relaxed);
         }
@@ -70,6 +77,9 @@ unsafe impl GlobalAlloc for Counting {
         // SAFETY: forwarded unchanged; `ptr`/`layout` are the caller's valid pair.
         let p = unsafe { System.realloc(ptr, layout, new_size) };
         if !p.is_null() {
+            if new_size == WATCH_SIZE.load(Ordering::Relaxed) {
+                WATCH_COUNT.fetch_add(1, Ordering::Relaxed);
+            }
             LIVE.fetch_sub(layout.size(), Ordering::Relaxed);
             let live = LIVE.fetch_add(new_size, Ordering::Relaxed) + new_size;
             PEAK.fetch_max(live, Ordering::Relaxed);
@@ -306,4 +316,136 @@ fn row_cap_precedes_control_document_reservation() {
 #[test]
 fn row_cap_precedes_group_document_reservation() {
     document_row_case(true);
+}
+
+#[test]
+fn acp_dependency_admission_bounds_large_control_documents_before_reconstruction() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    use oxrdf::{Literal, NamedNode};
+    use sparq_core::dict::Dict;
+    let budget = default_auth_budget();
+    let mut graph = Graph::new();
+    // Each individual source term and document fits. The dependency set exceeds
+    // only the aggregate cap, so refusing one overlarge term cannot mask the scan.
+    for i in 0..200 {
+        let iri = format!("https://pod.ex/policy{i}.acr");
+        let mut dict = Dict::new();
+        let s = dict.intern(&NamedNode::new(format!("{iri}#p")).unwrap().into());
+        let o = dict.intern(
+            &Literal::new_simple_literal("x".repeat(budget.max_input_term_bytes / 2)).into(),
+        );
+        let rows = (0..16)
+            .map(|j| {
+                let p = dict.intern(&NamedNode::new(format!("urn:pad{j}")).unwrap().into());
+                [s, p, o]
+            })
+            .collect();
+        graph
+            .add_named(
+                NamedNode::new(iri).unwrap().into(),
+                Graph::from_parts(dict, rows),
+            )
+            .unwrap();
+    }
+    let mut store = PodStore::new(graph);
+    // No prior materialization is needed for this storage primitive. The admission
+    // check must refuse before attempting to build a view of the oversized pod.
+    let body = "<https://pod.ex/new.acr#p> <http://www.w3.org/ns/solid/acp#apply> <https://pod.ex/policy0.acr#p> .";
+    let before = LIVE.load(Ordering::Relaxed);
+    PEAK.store(before, Ordering::Relaxed);
+    let error = store
+        .put_acl_acp("https://pod.ex/new.acr", body, "ntriples")
+        .unwrap_err();
+    let held = PEAK.load(Ordering::Relaxed).saturating_sub(before);
+    eprintln!("ACP dependency admission allocation peak: {held}");
+    assert_eq!(
+        sparq_solid::auth_allowance_refusal(&error),
+        Some(sparq_solid::AuthAllowance::InputBytes),
+        "{error}"
+    );
+    assert!(
+        held < 2 * budget.max_input_bytes,
+        "dependency admission retained {held} bytes"
+    );
+    assert_eq!(
+        store.graph().named().len(),
+        200,
+        "the refused write changed slots"
+    );
+}
+
+#[test]
+fn put_validation_borrows_the_admitted_content_without_a_second_triple_buffer() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    use std::fmt::Write;
+    let rows = 1024;
+    let mut body = String::new();
+    for i in 0..rows {
+        // The foreign subject forces validation to stop before any materialization.
+        // All terms still enter admission, the point where content used to be cloned.
+        writeln!(body, "<https://other.ex/s{i}> <urn:p> <urn:o> .").unwrap();
+    }
+    let mut store = PodStore::new(Graph::new());
+    // Isolate the content-buffer contract from input-byte admission.
+    let mut budget = default_auth_budget();
+    budget.max_document_bytes = usize::MAX;
+    store.set_auth_budget(budget);
+    WATCH_COUNT.store(0, Ordering::Relaxed);
+    WATCH_SIZE.store(
+        rows * std::mem::size_of::<[oxrdf::Term; 3]>(),
+        Ordering::Relaxed,
+    );
+    let error = store
+        .put_acl("https://pod.ex/doc.acl", &body, "ntriples")
+        .unwrap_err();
+    WATCH_SIZE.store(0, Ordering::Relaxed);
+    let copies = WATCH_COUNT.load(Ordering::Relaxed);
+    eprintln!("replacement-sized triple-buffer allocations: {copies}");
+    assert!(error.contains("may not state"), "{error}");
+    assert_eq!(
+        copies, 1,
+        "validation allocated a second replacement-triple buffer"
+    );
+    assert!(store.graph().named().is_empty());
+}
+
+#[test]
+fn empty_acr_descriptors_share_the_dependency_input_byte_allowance() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut graph = Graph::new();
+    for i in 0..20_000 {
+        graph
+            .add_named(
+                oxrdf::NamedNode::new(format!("https://pod.ex/policy{i}.acr"))
+                    .unwrap()
+                    .into(),
+                Graph::new(),
+            )
+            .unwrap();
+    }
+    let mut store = PodStore::new(graph);
+    let mut budget = default_auth_budget();
+    budget.max_input_bytes = budget.max_document_bytes;
+    store.set_auth_budget(budget);
+    let before = LIVE.load(Ordering::Relaxed);
+    PEAK.store(before, Ordering::Relaxed);
+    let error = store
+        .put_acl_acp(
+            "https://pod.ex/new.acr",
+            "<https://pod.ex/new.acr#p> <http://www.w3.org/ns/solid/acp#apply> <https://pod.ex/policy0.acr#p> .",
+            "ntriples",
+        )
+        .unwrap_err();
+    let held = PEAK.load(Ordering::Relaxed).saturating_sub(before);
+    eprintln!("empty ACP descriptor admission allocation peak: {held}");
+    assert_eq!(
+        sparq_solid::auth_allowance_refusal(&error),
+        Some(sparq_solid::AuthAllowance::InputBytes),
+        "{error}"
+    );
+    assert!(
+        held < 2 * budget.max_input_bytes,
+        "empty ACR descriptors retained {held} bytes before refusal"
+    );
+    assert_eq!(store.graph().named().len(), 20_000);
 }

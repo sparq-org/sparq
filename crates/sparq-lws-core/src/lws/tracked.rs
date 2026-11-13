@@ -207,6 +207,10 @@ impl<S> std::ops::Deref for Tracked<S> {
 
 #[async_trait]
 impl<S: Store> Store for Tracked<S> {
+    async fn begin_epoch(&self, lease: &crate::store::LifecycleGuard) -> ServerResult<u64> {
+        self.inner.begin_epoch(lease).await
+    }
+
     fn history_config(&self) -> crate::store::history::HistoryConfig {
         self.inner.history_config()
     }
@@ -261,6 +265,14 @@ impl<S: Store> Store for Tracked<S> {
 
     async fn exists(&self, iri: &str) -> ServerResult<bool> {
         self.inner.exists(iri).await
+    }
+
+    async fn append(&self, iri: &str, ntriples: Bytes) -> ServerResult<()> {
+        self.change(async {
+            let _m = self.gens.mutating(&[iri]);
+            self.inner.append(iri, ntriples).await
+        })
+        .await?
     }
 
     async fn write(

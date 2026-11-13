@@ -12,10 +12,14 @@
 //! `sh:parameter` / `sh:validator` declaration machinery) is walked by the
 //! sibling `w3c_sparql_component.rs` runner (sq-wys: it resolves the
 //! `owl:imports <http://datashapes.org/dash>` via a vendored excerpt and
-//! pre-binds `$PATH`). Most of `pre-binding/` (which probes the FULL pre-binding
+//! pre-binds `$PATH`). `pre-binding/` (which probes the FULL pre-binding
 //! algebra-rewrite semantics, including rejection of queries that re-bind a
-//! pre-bound variable) is still out of scope for this milestone and is not
-//! walked (see this crate's open beads — `bd list -l area:sparq-shacl`).
+//! pre-bound variable) is walked on its own two-sided ratchet
+//! ([`PRE_BINDING_PASS_FLOOR`] / [`PRE_BINDING_FAIL_CEILING`]).
+
+mod support;
+
+use support::Outcome;
 
 use oxrdf::Term;
 use sparq_core::Graph;
@@ -38,6 +42,11 @@ const SH: &str = "http://www.w3.org/ns/shacl#";
 /// Raise it THERE; the measurement narrative stays here.
 const SHACL_SPARQL_FLOOR: usize = sparq_conformance_floors::shacl::SPARQL_FLOOR;
 
+/// pre-binding/ ratchet at the pinned suite commit: the pass count may only rise
+/// and the fail count only fall. Includes `$shapesGraph` pre-binding.
+const PRE_BINDING_PASS_FLOOR: usize = 14;
+const PRE_BINDING_FAIL_CEILING: usize = 0;
+
 fn sparql_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/shacl/data-shapes/data-shapes-test-suite/tests/sparql")
@@ -54,13 +63,36 @@ fn w3c_shacl_sparql_node_and_property() {
         return;
     }
     let mut score = Scoreboard::default();
-    // Only the node/ and property/ sub-suites (plain sh:sparql).
+    // The node/ and property/ sub-suites (plain sh:sparql).
     for section in ["node", "property"] {
         let m = root.join(section).join("manifest.ttl");
         if m.exists() {
             walk_manifest(&m, &root, &mut score);
         }
     }
+    // pre-binding/ is walked on its own two-sided ratchet: `$shapesGraph`
+    // (shapesGraph-001) is not pre-bound yet, and the six `unsupported-sparql-*`
+    // entries expect `sht:Failure` from `validate_strict`.
+    let mut pre = Scoreboard::default();
+    let m = root.join("pre-binding").join("manifest.ttl");
+    if m.exists() {
+        walk_manifest(&m, &root, &mut pre);
+    }
+    println!("\nW3C SHACL-SPARQL (pre-binding) scoreboard");
+    for (id, why) in &pre.failures {
+        println!("  FAIL {id}: {why}");
+    }
+    // Not the "pass N / fail M" shape: ci.yml's ratchet step greps that for node+property.
+    println!(
+        "pre-binding: {} passed, {} failed, {} skipped",
+        pre.pass, pre.fail, pre.skip
+    );
+    assert!(
+        pre.pass >= PRE_BINDING_PASS_FLOOR && pre.fail == PRE_BINDING_FAIL_CEILING,
+        "SHACL-SPARQL pre-binding regressed: pass {} (floor {PRE_BINDING_PASS_FLOOR}), fail {} (ceiling {PRE_BINDING_FAIL_CEILING})",
+        pre.pass,
+        pre.fail
+    );
 
     println!("\nW3C SHACL-SPARQL (node + property) scoreboard");
     for (id, why) in &score.failures {
@@ -113,11 +145,6 @@ impl Scoreboard {
     }
 }
 
-enum Outcome {
-    Pass,
-    Fail(String),
-    Skip(String),
-}
 
 fn file_iri(path: &FsPath) -> String {
     format!("file://{}", path.display())
@@ -180,6 +207,10 @@ fn walk_manifest(path: &FsPath, root: &FsPath, score: &mut Scoreboard) {
                 };
                 let outcome = run_entry(&path, &g, &view, &entry)
                     .unwrap_or_else(|e| Outcome::Fail(format!("harness error: {e}")));
+                // The EARL report needs the entry's full IRI, not the root-relative id.
+                if let Term::NamedNode(n) = &entry {
+                    support::earl(n.as_str(), &outcome);
+                }
                 score.record(&id, outcome);
             }
         }
@@ -212,11 +243,19 @@ fn run_entry(file: &FsPath, g: &Graph, view: &GraphView, entry: &Term) -> Result
     };
     let data = graph_of("dataGraph")?;
     let shapes = graph_of("shapesGraph")?;
-    let report = validate(data.as_ref().unwrap_or(g), shapes.as_ref().unwrap_or(g));
-
+    let (data_g, shapes_g) = (data.as_ref().unwrap_or(g), shapes.as_ref().unwrap_or(g));
     let exp_node = view
         .object(entry, &format!("{MF}result"))
         .ok_or("entry has no mf:result")?;
+    if let Some(rejected) = support::expected_failure_shacl10(&exp_node, data_g, shapes_g) {
+        return Ok(if rejected {
+            Outcome::Pass
+        } else {
+            Outcome::Fail(support::NOT_REJECTED.into())
+        });
+    }
+    let report = validate(data_g, shapes_g);
+
     let exp_conforms = matches!(
         view.object(&exp_node, &format!("{SH}conforms")),
         Some(Term::Literal(l)) if l.value() == "true"

@@ -186,6 +186,64 @@ async fn listing_does_not_wait_for_a_member_waiting_for_its_parent() {
     drop(writer.await.unwrap());
 }
 
+#[tokio::test(start_paused = true)]
+async fn listing_fallback_times_out_and_releases_a_later_create() {
+    use super::records::LOCK_WAIT;
+
+    let (state, store) = test_store::state(100).await;
+    state.notify.pause_sweeper();
+    let app = app(&state);
+    let uri = state.cfg.absolute("/slow");
+    let release = Arc::new(Semaphore::new(0));
+    *store.hold_next_create_reply_of.lock().unwrap() = Some((uri.clone(), release.clone()));
+    let slow = tokio::spawn({
+        let app = app.clone();
+        async move { call(&app, "POST", "/", &[("slug", "slow")], "old").await }
+    });
+    tokio::time::timeout(LOCK_WAIT, async {
+        while !store.exists(&uri).await.unwrap() {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .expect("slow create reached its held store reply with the parent shared");
+    let read = tokio::spawn({
+        let app = app.clone();
+        async move { call(&app, "GET", "/", &[("accept", LWS_JSON)], "").await }
+    });
+    tokio::time::timeout(LOCK_WAIT, async {
+        while state.locks.listing_fallbacks.load(Ordering::SeqCst) == 0 {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .expect("busy member queues the exclusive fallback");
+
+    let later = call(&app, "POST", "/", &[("slug", "later")], "new");
+    tokio::pin!(later);
+    tokio::select! {
+        biased;
+        _ = &mut later => panic!("later create must queue behind the listing fallback"),
+        _ = tokio::task::yield_now() => {}
+    }
+    let created = tokio::time::timeout(LOCK_WAIT + Duration::from_millis(1), later)
+        .await
+        .expect("later create proceeds within the usual lock wait despite the held store reply");
+    assert_eq!(created.status(), StatusCode::CREATED);
+    assert!(!slow.is_finished(), "slow store reply remains held");
+    let response = read.await.unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(response.headers()[header::RETRY_AFTER], "5");
+    assert!(String::from_utf8(response_bytes(response).await.2.to_vec())
+        .unwrap()
+        .contains("the resource is busy"));
+    assert_eq!(state.locks.listing_fallbacks.load(Ordering::SeqCst), 1);
+
+    release.add_permits(1);
+    assert_eq!(slow.await.unwrap().status(), StatusCode::CREATED);
+    assert_eq!(listing(&app).await["totalItems"], 2);
+}
+
 #[tokio::test]
 async fn listings_never_show_a_create_or_update_that_is_put_back() {
     let (state, store) = test_store::state(100).await;

@@ -590,7 +590,7 @@ pub(super) fn dedup_values(vals: &mut Vec<Value>) {
 pub(super) fn value_key(v: &Value) -> String {
     match v {
         Value::Term(t) => format!("T{t}"),
-        Value::Num(n) => format!("N{}^^{}", n.lexical(), n.datatype().as_str()),
+        Value::Num(n) => format!("N{}^^{}", numeric_lexical(*n), n.datatype().as_str()),
         Value::Bool(b) => format!("B{b}"),
         Value::Unbound => "U".to_string(),
         Value::Error => "E".to_string(),

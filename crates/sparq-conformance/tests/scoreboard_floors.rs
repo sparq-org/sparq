@@ -361,6 +361,14 @@ const SHARED_CRATE_EXPECTED: &[(&str, usize)] = &[
 /// `all_crate_test_suites_are_guarded` test exempts exactly this set (and asserts
 /// nothing else escapes the textual guard).
 const LIB_SOURCED_FLOORS: &[&str] = &[
+    "W3C RDF 1.2 Turtle syntax",
+    "W3C RDF 1.2 Turtle eval",
+    "W3C RDF 1.2 TriG syntax",
+    "W3C RDF 1.2 TriG eval",
+    "W3C RDF 1.2 N-Triples syntax",
+    "W3C RDF 1.2 N-Triples C14N",
+    "W3C RDF 1.2 N-Quads syntax",
+    "W3C RDF 1.2 N-Quads C14N",
     "W3C JSON-LD 1.1 toRdf",
     "W3C JSON-LD 1.1 fromRdf",
     "W3C JSON-LD 1.1 compact",
@@ -380,6 +388,14 @@ const LIB_SOURCED_FLOORS: &[&str] = &[
 /// JSON-LD lanes the same "floor cannot silently move" protection without a
 /// hard-coded duplicate of the number in two source files.
 const LIB_SOURCED_EXPECTED: &[(&str, usize)] = &[
+    ("W3C RDF 1.2 Turtle syntax", 77),
+    ("W3C RDF 1.2 Turtle eval", 32),
+    ("W3C RDF 1.2 TriG syntax", 38),
+    ("W3C RDF 1.2 TriG eval", 26),
+    ("W3C RDF 1.2 N-Triples syntax", 34),
+    ("W3C RDF 1.2 N-Triples C14N", 41),
+    ("W3C RDF 1.2 N-Quads syntax", 31),
+    ("W3C RDF 1.2 N-Quads C14N", 41),
     ("W3C JSON-LD 1.1 toRdf", 413),
     // sq-oy1f.28 — raised 51 → 52: the lane flipped from the engine-writer
     // round-trip oracle to the native document-level `sparq_jsonld::from_rdf` (§8.1)

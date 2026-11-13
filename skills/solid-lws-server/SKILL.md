@@ -172,12 +172,36 @@ Set `PSS_SPARQ_BACKEND` to one of:
   read its own writes: a query sent after an update has completed must see what the
   update committed (one `sparq-server` does). An eventually consistent or replicated
   endpoint that can lag is not supported, because the LWS server decides what a failed
-  write left behind by reading the store straight after it. An update that times out
-  can still commit on the service afterwards. The creates and removals of grants,
-  requests and subscriptions, forward resource removals, intent creates, and the
-  content write of a resource create retain their fences. HTTP index metadata/listing
-  writes and the generic write adapter still need fencing support, so the native LWS
-  server refuses this backend (below).
+  write left behind by reading the store straight after it. Metadata upserts,
+  resource graph deletes, containment edge removals, child creates, append and fold
+  publication, and conditional empty-container deletes carry a nonce fence and writer
+  epoch in their `WHERE`.
+  A resource delete detaches its parent edge in the same update and captures the
+  removed blob key in an operation receipt. Every acknowledged update is confirmed
+  through its completion marker or receipt, including updates whose guard matched nothing.
+  An acknowledged update carrying a superseded writer epoch is reported as refused with
+  `Backend("fatal: writer epoch superseded")`, including child creates and conditional
+  empty-container deletes. After confirmation and any receipt read, the client removes
+  only that operation's marker and receipt. Cleanup is best effort: a failed cleanup
+  leaves the confirmed outcome unchanged. An unsettled outcome retains its fence and
+  any candidate blob bytes through the store and journal. Backend counters include
+  completion confirmation, receipt reads and cleanup in their HTTP request model.
+
+  `SparqClient::begin_epoch(&LifecycleGuard) -> Result<u64, SparqError>` raises the
+  reserved `urn:x-sparq-lws:writer-epoch` record before recovery, under the service's
+  lifecycle lease. HTTP checks that the guard belongs to its backend before any
+  index request. `Store::begin_epoch` and pass-through wrappers forward it.
+  The raise only advances the epoch and records a fresh owner nonce; startup confirms
+  both the epoch and its owner, so competing starts cannot claim the same epoch.
+  `sparql::update_begin_epoch(epoch, owner)` builds that raise. Every HTTP `*_fenced`
+  builder takes the epoch after its nonce; the internal `fence_guard` takes
+  `Option<u64>` (`None` for unfenced builders). Once the raise commits, updates
+  carrying an earlier epoch have no effect and are reported as refused. In-memory
+  and embedded clients return zero without I/O; HTTP clones share the active epoch. HTTP clients used without a lifecycle start use epoch
+  zero while the epoch record is absent. Nonce fences still settle writes within
+  one process. Reclaim bookkeeping and the separate body-insert helper are outside
+  this LWS write path. The native LWS server still refuses this backend because
+  `SparqClient::exclusive` provides no remote index ownership assurance.
 
 ### Native data-directory boot
 
@@ -200,6 +224,35 @@ Without a data directory, the native binary uses in-memory blobs.
 
 See [native storage](references/native-storage.md) for the `format.json` contract,
 `EmbeddedSparqClient::open_or_create` / `compact`, lock ownership and shutdown.
+
+### How to run the P0-9 measurement
+
+From the repository root, select a disk-backed scratch directory and inspect its
+mount before running (do not use tmpfs):
+
+```bash
+mkdir -p "$PWD/target/p09-durable"
+findmnt -T "$PWD/target/p09-durable"
+ulimit -n
+for count in 1000 10000 100000; do
+  TMPDIR="$PWD/target/p09-durable" P09_RESOURCES="$count" \
+    cargo test --release -p sparq-lws-core --test durable_measure \
+      durable_resource_measurement -- --ignored --exact --nocapture
+done
+```
+
+`P09_RESOURCES` is a required positive resource count; `TMPDIR` is a required
+absolute existing scratch directory. Each invocation uses a fresh, automatically
+removed data root. Default features supply `embedded-sparq` and `blob-fs`; no
+additional features are needed. The ignored test is manual and has no CI entry.
+Measured binary resources are root siblings. The JSON summary reports sequential
+PUT latency (nearest-rank percentiles, including the complete response), recursive regular-file
+count under the actual `index/` after SIGKILL, and replacement-process spawn to
+`/readyz`. Restart includes index recovery with a warm OS page cache, excludes
+post-readiness byte checks, and has a generous failure timeout. Setup is untimed;
+first, middle and last resource bytes are checked after restart. Repeat invocations
+for independent samples and retain JSON and machine details outside the repository.
+Check the process descriptor limit for large runs. A failed create aborts rather than reporting partial percentiles.
 
 ### Object-store blob plane
 
@@ -292,6 +345,70 @@ object namespace. A data-directory copy does not guarantee a complete backup,
 including for a `file://` URL. Back up and restore those bytes while the server
 is stopped, preserving blob keys and the exact URL recorded in `format.json`.
 Changing that backend or URL requires migration.
+
+### Stored inserts
+
+Insert-only PATCH without Read refuses every `If-Match` or `If-None-Match` header,
+including `*`, with the caller's usual denial before looking up the target.
+A container IRI is also refused without Read (`403` for an authenticated caller,
+`401` for an anonymous caller), whether or not it exists.
+
+`ResourceMeta::append_seq` identifies a document snapshot's last published insert
+(default `0` for old index rows). Insert records use the same field for their immutable
+predecessor, and the internal directory uses it as an allocation high-water mark.
+This preserves earlier snapshots and branches correctly when a held version is put back.
+
+The metadata mapping persists `pss:appendSeq`. Retained public metadata builders
+seed zero; internal helpers preserve complete metadata snapshots. The unused
+metadata-only `bump_append` API and its Update builder have been removed.
+
+`Store::append(iri, ntriples: Bytes)` stores request-derived N-Triples insert lines;
+its default refuses. `CompositeStore` checks only the target's index row, stores a
+fresh blob, then calls `SparqClient::publish_append(iri, key, blob_key)`. This new
+primitive atomically publishes the insert record and directory, allocates its visible
+sequence and refreshes validators while the target still names `key`. Its default
+refuses. Composite append uses publication rather than a preliminary metadata bump,
+so a read snapshot cannot acquire an insert after its validators were issued.
+HTTP append and fold publication uses both the nonce fence and the active writer
+epoch, with confirmation through a unique receipt under the same serial-update
+backend assumption as reclamation. A superseded epoch is reported as refused before
+classifying an absent receipt as a missing target or a changed snapshot.
+
+Insert records live under `store::append_dir(blob_key)`. Each insert charges its own
+bytes and one content slot; the zero-byte directory is bookkeeping, bounded by the
+retained or reclaiming document keys, and consumes no content slot. `read` and `read_at` follow immutable
+predecessor links from the snapshot's sequence and concatenate in publication order,
+only for the three line-compatible types. They insert a newline when needed. Metadata
+and insert bytes are fetched in bounded concurrent batches. Complete merged bodies
+are cached by `(blob_key, append_seq, etag)`; a cached snapshot includes all its inserts.
+Once a snapshot reaches `store::APPEND_FOLD_THRESHOLD`, a reader stores its merged
+bytes under a fresh key and uses `SparqClient::fold_appends` to compare the complete
+snapshot and atomically switch the key and clear the sequence. Validators and bytes
+stay the same. The native index locks serialize the comparison and publication; HTTP
+uses a fenced Update and unique receipt. A concurrent change cancels the fold.
+Scoped storage reads insert bytes and writes folded bytes in the original pod;
+retained version and trash records keep that same pod when folded, and their
+catalog metadata follows the new pointer in the same index transaction.
+The old directory is reclaimed when no live record, version or hold names its key.
+The first uncached read assembles the chain; a successful fold lets later reads use
+the folded base. Folding is best effort: a full shared quota or unsupported index
+can defer it while the original snapshot remains intact and readable.
+
+Individual inserts do not create history versions, even with version retention
+enabled. A fold changes storage layout only and also creates no history version.
+A later full replacement retains the then-current merged snapshot when versions are
+enabled. Replacements mint a new key and hide the old inserts;
+`reinstate` restores held metadata and its insert chain. `restore` copies already-merged
+bytes to a fresh key and resets its sequence.
+
+Reclamation removes a retired key's directory, records and blobs; interrupted reclaim
+work is retried at startup. Orphan reconciliation also claims and removes the insert
+records when it discovers document bytes left after a stop before reclaim began.
+Its report counts base-blob candidates; linked insert cleanup is part of that candidate.
+`SparqClient::begin_reclaim_with_appends` returns `(claimed, has_append_directory)`
+in the existing reclaim step. The native clients and HTTP confirmation include that
+observation, so ordinary reads and writes with no appends retain their backend counts.
+Its default conservatively requests a directory check after a successful claim.
 
 ### Child record replacement
 
@@ -421,7 +538,8 @@ mmap'd index on the running host (P3 scope). The sparq index directory holds the
 RDF graph in plaintext on disk; P1 requires a CMK-encrypted block volume
 (EBS/Azure Disk/dm-crypt). Application-level index encryption is research
 ([#2567](https://github.com/sparq-org/sparq/issues/2567)).
-ETags derive from plaintext, so equal bodies get equal ETags across pods.
+Full replacements derive ETags from plaintext. Stored inserts use fresh opaque
+ETags, so equal bodies need not have equal tags.
 
 ## Authenticate requests
 
@@ -441,10 +559,17 @@ must grant the requested `acl:Read`, `acl:Write`, `acl:Append`, or
 `acl:Control` mode. An N3 `PATCH` with a `solid:where` or `solid:deletes` reads the target, so
 it needs `acl:Read` too (`acl:Control` for an `.acl`). A `PUT`'s or `PATCH`'s response carries
 the new `ETag` only to a writer that may read the target. An insert-only `PATCH` by a writer
-without `acl:Read` appends the statements as N-Triples lines to a stored Turtle, N-Triples or
-N-Quads document without parsing it, so whether it succeeds does not depend on what is stored;
-any other stored type (JSON-LD, ...) is refused to it as a write without access is. The stored
-bytes are still read and rewritten whole, so the time an append takes follows their size. A
+without `acl:Read` stores N-Triples lines beside the document, without reading or rewriting
+its bytes. Readers see those lines in its Turtle, N-Triples or N-Quads representation,
+with a newline between the original bytes and the inserts when needed. The response is
+`204`, with no `Location` or `ETag`, whether it appended to an existing document or created
+one. Container IRIs are refused from their trailing slash alone. Other stored types
+(including JSON-LD and non-RDF types) remain refused (`403` for an authenticated writer),
+using the index's type alone: accepting lines that no representation shows would lose the
+inserted data. Creating a missing target also needs
+`acl:Append` on its container; appending to an existing document does not. CTH
+`web-access-control/protected-operation/write-access-bob.feature`, "Bob can PATCH rdf no A",
+pins the latter behavior. A full store still answers `507` against the shared ceilings. A
 reader's `PATCH` reads the document by the same stored type, keeps that type, and leaves an
 N-Quads document's named graphs as stored: a `PATCH` changes the default graph. Blank nodes a
 `PATCH` inserts are always new ones. Deleting a container also needs `acl:Read` on it
@@ -574,9 +699,11 @@ Solid/SPARQL patch forms, and `DELETE` removes a resource or an empty
 container. Use `If-Match`, `If-None-Match` and `If-Unmodified-Since` for
 conditional mutations. A concrete tag in `If-Match` or `If-None-Match`
 requires the target's read permission (`Control` for an ACL document).
-LDP exempts bare `*`: writers without Read can use `If-None-Match: *` to create
-without overwriting, or `If-Match: *` to require an existing target. Unconditional
-LDP PUT and DELETE already disclose existence through their status codes.
+LDP PUT, POST and DELETE exempt bare `*`: writers without Read can use
+`If-None-Match: *` to create without overwriting, or `If-Match: *` to require
+an existing target. Insert-only PATCH without Read refuses either header,
+including `*`, before any target lookup. Unconditional LDP PUT and DELETE already
+disclose existence through their status codes.
 `If-Unmodified-Since` is ignored when `If-Match` is
 present, when the date is not one valid HTTP-date (IMF-fixdate, RFC 850 or
 asctime; a date sent on several header lines is none), and for containers, whose
@@ -671,7 +798,10 @@ Solid collaboration room access composes an attached ODRL gate; live compaction,
 replay-byte reservations, snapshot cutoffs, bounded awareness clock tombstones,
 and socket upgrade Origin checks follow the collaboration contract. Compaction
 backs off without progress; reload preserves concurrent appends while peers continue
-editing. Admission keeps headroom for a compaction snapshot.
+editing. Failed update creates reconcile by envelope key against the room listing
+before retrying, so an already stored batch can clear and allow compaction. Folded
+resources reported missing by an authorized deletion count as already deleted.
+Admission keeps headroom for a compaction snapshot.
 See [collaboration](references/collaboration.md) for ticket JSON, room templates,
 read/write access, awareness, persistent room logs and configurable bounds.
 Live updates broadcast before persistence: clients retain their local Yjs state
@@ -715,10 +845,10 @@ Set `SOLID_SERVER_PROTOCOL=lws` to serve the W3C Linked Web Storage 1.0 protocol
 self-contained in `src/lws/`: its own authorization server, access grants,
 notifications and type index, over the same `Store` backend. It runs over the
 `memory` and `embedded` backends only; startup fails with `PSS_SPARQ_BACKEND=http`,
-because a remote write reported as failed may still commit later. Service-record creates
-and removals, forward resource removals, intent creates and a resource create's content
-write retain their fences (see below). HTTP index metadata/listing writes and the generic
-write adapter still need fencing support before this refusal can be lifted.
+because the remote index does not provide the exclusive ownership the service
+requires. HTTP metadata and containment writes carry nonce and epoch guards;
+startup establishes the epoch under the lifecycle lease before intent recovery.
+The HTTP refusal remains in place independently of those guards.
 Anyone authenticated may hold at most 16 access requests and 16 subscriptions (the owner's
 subscriptions are counted separately), and each such request body is at most 16 KiB (413).
 Both the principal's bound and the storage-wide bound return the same `429`, headers and
@@ -876,6 +1006,7 @@ cargo run -p sparq-lws-core
 
 | Variable | Meaning |
 |---|---|
+| `SOLID_SERVER_LWS_MOUNT_BASE_PATH` | Native LWS mode only: `1`, `true`, `True`, `TRUE` mount the router at the path in `SOLID_SERVER_BASE_URL`; unset, empty, `0`, `false`, `False`, `FALSE` are off (default, proxy-relative request paths). Whitespace is trimmed; any other value fails startup. See [request mapping](#native-lws-request-mapping). |
 | `SOLID_SERVER_LWS_OWNER` | Agent IRI allowed every action on the storage, and the only one who may list or issue grants. |
 | `SOLID_SERVER_LWS_OPEN` (or `SOLID_SERVER_OPEN_MODE`) | `1` disables authorization entirely and implies `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH`. Test-suite use only. |
 | `SOLID_SERVER_LWS_SPARQL_MAX_RESOURCES` | Positive integer; default 10000. With `sparql-endpoint`, bounds readable resources assembled by one LWS query; exceeding it returns `507` with problem details. |
@@ -1122,10 +1253,10 @@ What the server exposes, all discoverable from the storage description
   without retaining the state or its lifecycle lease or owing another touch. A touch with no
   owed intents starts no clearing task.
   Both fence a step's unsettled write before
-  trying the step again. Forward removals and intent creates retain their fences in the
-  journal: rollback fences before recreation or Forget, and commit fences before changing
-  the intent. A removal whose fence lands but
-  whose outcome cannot then be read stays out of force and is settled in the background once the
+  trying the step again. Forward writes, metadata deletes, member removals (including
+  legacy edges), and intent writes retain their fences in the journal: rollback fences
+  before restoration, recreation or Forget, and commit fences before changing the intent.
+  A removal whose fence lands but whose outcome cannot then be read stays out of force and is settled in the background once the
   listing can be read. A removal the store refuses for
   want of room answers `507`, the record still stored and back in force. A subscription
   being cancelled hears of no change from the moment its removal begins until it is back in
@@ -1336,10 +1467,11 @@ What the server exposes, all discoverable from the storage description
   create needs none: its metadata is written before its content and removed after it, so no
   stop leaves content without its metadata. A container listing never shows a change in
   flight to a member: quiet listings share the container lock and only try member locks.
-  A busy member or a generation change discards that attempt and queues one exclusive
-  listing, which takes no member locks. Member changes hold that container through commit
-  or put-back; the fair queue lets the fallback finish while new changes keep arriving,
-  without a churn-based `503`. A resource set aside for recovery still answers `503`. A
+  A busy member or a generation change discards that attempt and redoes the listing once
+  under the exclusive container lock, taking no member locks. Acquiring that lock uses the
+  usual lock wait; a timeout answers `503` with `Retry-After`. Member changes hold that
+  container through commit or put-back; the fair queue lets the fallback finish while new
+  changes keep arriving. A resource set aside for recovery still answers `503`. A
   container whose modification time has not yet been, or could not be, moved on after a
   change has no `Last-Modified` until it is, so `If-Modified-Since` never answers `304`
   on a stale date. A listing's `Last-Modified` is the latest of the container's own time and
@@ -1381,7 +1513,8 @@ What the server exposes, all discoverable from the storage description
 - Access grant/request IDs owned by someone else answer exactly like absent IDs for every
   method: a challenge if authentication is needed, otherwise `404`. Ownership is checked on
   a borrowed record; only a match is cloned. Subscription lookups do the same.
-- Pass-through `SparqClient` and `Store` wrappers forward `lifecycle`, `exclusive`, `call_timeout`, and supported marker
+- Pass-through `SparqClient` and `Store` wrappers forward `lifecycle`, `begin_epoch`,
+  `exclusive`, `call_timeout`, and supported marker
   operations, including `reset_marker` with its lifecycle guard. Their defaults refuse exclusive
   ownership and marker resets, and use the default call timeout. Generic `delete_resource`
   refuses marker operands, including the parent, before any backend call.
@@ -1420,7 +1553,10 @@ What the server exposes, all discoverable from the storage description
     same split (an authorized absent parent is `404`).
   - LDP DELETE retains absent `401`/`403` versus present `204`: CTH `write-access-bob.feature`,
     "Bob cannot DELETE fictive W inherited [403]" and "Bob can DELETE plain W inherited".
-  - LDP insert-only PATCH status remains deferred to the later brief.
+  - Insert-only PATCH without Read answers `204` for both append and create. Creation
+    needs container Append, whereas an existing document does not; CTH
+    `write-access-bob.feature`, "Bob can PATCH rdf no A", pins the existing case.
+    Types other than Turtle, N-Triples and N-Quads remain refused from index metadata.
 
 - A resource's types come from two places, kept apart: `Link: <…>; rel="type"` headers and
   `<> a <…>` statements in Turtle content. A PUT replaces the content-stated types, and replaces
@@ -1481,6 +1617,69 @@ Both Touchstone and the Solid CTH driver accept `PSS_SPARQ_BACKEND=durable` to t
 an ephemeral `SOLID_SERVER_DATA_DIR` across graceful and idle hard-kill restarts.
 See the [conformance harness guide](../../crates/sparq-lws-core/conformance/README.md#durable-restart-checks)
 for the storage dependencies, byte/ETag checks and unchanged suite ratchets.
+The same guide documents `run.sh --keep-earl` for native CTH reports with source
+revisions, and `ldp.sh` for the archived W3C LDP suite's Basic and Direct probe runs.
+
+## Native LWS request mapping
+
+With `SOLID_SERVER_PROTOCOL=lws`, the library router treats each request path `P`
+as relative to storage: its public resource or service URL is
+`<SOLID_SERVER_BASE_URL-without-trailing-slash>P`. The root path `/` maps to
+`<base>/`. The native binary preserves this mapping by default.
+
+For an origin-only base (`https://storage.example` or `https://storage.example/`),
+requests go directly to the native listener in either routing mode. For a path
+base (`https://storage.example/alice` or `https://storage.example/alice/`), use
+one of these setups; both base spellings select the same storage root:
+
+| Public request | Default, through a prefix-stripping proxy | Native mount (`SOLID_SERVER_LWS_MOUNT_BASE_PATH=1`) |
+|---|---|---|
+| `/alice` | Proxy forwards `/` | Native returns `308 Location: /alice/`, preserving any query |
+| `/alice/` | Proxy forwards `/` | Native forwards `/` to LWS |
+| `/alice/child` | Proxy forwards `/child` | Native forwards `/child` to LWS |
+| `/alice/alice/child` | Proxy forwards `/alice/child` | Native forwards `/alice/child` to LWS |
+| `/alice/.lws/subscriptions/` | Proxy forwards `/.lws/subscriptions/` | Native forwards `/.lws/subscriptions/` to LWS |
+| `/child` or `/alice-other/child` | Proxy should reject outside its mount | Native returns `404` |
+
+Native mount mode accepts `1`, `true`, `True`, or `TRUE` to enable it, and
+`0`, `false`, `False`, or `FALSE` to disable it. Unset or empty is off by default;
+whitespace is trimmed, and any other value (including `on` or `yes`) fails startup.
+It affects only the native LWS binary composition, not the
+library router or Solid mode. Enable it for direct serving, or behind a proxy
+that preserves the full public path:
+
+```sh
+SOLID_SERVER_PROTOCOL=lws \
+SOLID_SERVER_BASE_URL=https://storage.example/alice/ \
+SOLID_SERVER_LWS_MOUNT_BASE_PATH=1 \
+cargo run -p sparq-lws-core
+```
+
+Keep it unset behind a proxy that already strips `/alice`. The default native
+listener never strips: a direct `/alice/child` request then maps to
+`https://storage.example/alice/alice/child`. In native mount mode a stripped
+`/child` request gets `404`; it is not retried as storage-relative. Each setup
+strips once and preserves query strings, percent-encoded octets and inner slashes.
+In native mount mode the bare root `/alice` redirects with `308` to `/alice/`,
+preserving any query; `/alice/` selects the canonical storage URL directly.
+Follow resource `Location` and service URLs exactly as advertised.
+
+Origin-level protected-resource discovery is a separate mapping:
+`/.well-known/oauth-protected-resource/alice/child` must reach the native listener
+**unchanged**, outside the storage mount. Native mount mode forwards this namespace
+unchanged too; the LWS handler validates the storage scope. For the storage root,
+use `/.well-known/oauth-protected-resource/alice/` (retain its trailing slash).
+`/livez` and `/readyz` also stay at the origin. These are the exceptions to the
+native mount's outside-path `404` rule. The existing advertised authorization-server
+metadata, keys and token URLs remain beneath `/alice/.well-known/` and pass through
+the storage mapping; the native mount does not add origin-level aliases for them.
+After stripping the mount prefix, paths starting with
+`/.well-known/oauth-protected-resource` and paths containing literal or
+percent-encoded dot segments return `404`.
+The library router stays storage-relative; native integrations opt in through
+`lws::native_routing::mount_lws_router(app, base_url, enabled)`.
+`lws::native_routing::parse_mount_base_path(value)` parses the optional switch
+using the accepted values above and returns an error for an unrecognized value.
 
 ## Follow the normative specs, not this server
 

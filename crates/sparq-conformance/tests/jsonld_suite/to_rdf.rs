@@ -42,7 +42,7 @@ pub fn run_tordf(root: &Path) -> Score {
             // A NegativeEvaluationTest passes iff the parse fails (sparq
             // rejects the malformed/illegal document).
             match parsed {
-                Err(_) => s.pass(),
+                Err(_) => s.pass(&e.id),
                 Ok(_) => s.fail(&e.id, "negative test parsed without error".into()),
             }
             continue;
@@ -73,7 +73,7 @@ pub fn run_tordf(root: &Path) -> Score {
             }
         };
         if got == want {
-            s.pass();
+            s.pass(&e.id);
         } else {
             s.fail(
                 &e.id,

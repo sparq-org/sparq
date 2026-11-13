@@ -3897,7 +3897,7 @@ mod build_pool_tests {
             },
         );
         let values = (0..32).map(|n| n.to_string()).collect::<Vec<_>>().join(" ");
-        let product = format!("SELECT (COUNT(*) AS ?n) WHERE {{ VALUES ?a {{ {values} }} VALUES ?b {{ {values} }} VALUES ?c {{ {values} }} VALUES ?d {{ {values} }} }}");
+        let product = format!("SELECT (COUNT(*) AS ?n) WHERE {{ VALUES ?a {{ {values} }} VALUES ?b {{ {values} }} VALUES ?c {{ {values} }} VALUES ?d {{ {values} }} VALUES ?e {{ {values} }} }}");
         let request = |query: &str| {
             decide_bytes(serde_json::json!({
                 "dataset": WAC_NQUADS,

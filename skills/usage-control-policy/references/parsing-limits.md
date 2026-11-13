@@ -50,11 +50,17 @@ validated and deduplicated once per head; compound definitions keep the authored
 operand references. Expansion traverses these sequences with ordered deduplication,
 preserving the position of an explicitly authored direct operand. The compound
 operand count is checked before its result vector is reserved. Unreached compounds
-incur field scans without folding their collections.
+incur field scans without folding their collections. As a deliberate difference
+from the earlier parser, they do not refuse a policy for malformed collection
+operands: `odrl:and rdf:nil`, a broken tail, or a rest-only cell. The same shapes
+still refuse when a rule reaches the compound.
 
 Right-operand collections cache member identity, validation, encodability and
 joined text once per head. Mixed collection sets retain shared member groups in
-`Value::SharedSet`; parsing stores references to those groups. `Value::as_str()`
+`Value::SharedSet`; parsing stores references to those groups and builds a shared
+lexical membership index, charging its copied lexical bytes before allocation.
+Evaluation probes these groups directly and never builds joined text.
+`Value::as_str()`
 traverses and deduplicates the groups on first access and memoizes the resulting
 text. Overlapping groups keep the first member reading for coinciding parser
 keys; validation prefixes through typed groups are cached independently of later

@@ -997,11 +997,27 @@ fn right_members(
             .join("|")
             .into()
     });
+    // Index each shared group once, while the parsing ledger is still present.
+    // Evaluation can then test membership without joining or scanning a reused list.
+    let mut lexical = std::collections::HashSet::new();
+    if lexical_valid {
+        let bytes = encoded.iter().map(|(_, value)| value.len()).sum();
+        ledger
+            .charge(Dim::Bytes, bytes)
+            .map_err(|e| ledger_error(e, ConstraintBudget::Bytes))?;
+        lexical.try_reserve(encoded.len()).map_err(|_| {
+            ledger_error(
+                Exceeded::new(Dim::Alloc, usize::MAX, encoded.len()),
+                ConstraintBudget::Bytes,
+            )
+        })?;
+        lexical.extend(encoded.iter().map(|(_, value)| value.clone()));
+    }
     let result = Rc::new(RightMembers {
         first_key: first.map(|(key, _)| key),
         singleton,
         several: seen.len() > 1,
-        members: encoded.into(),
+        members: std::sync::Arc::new(crate::model::SetGroup::new(encoded, lexical)),
         typed,
         lexical_valid,
         joined,
@@ -2595,6 +2611,54 @@ mod metered_tests {
     }
 
     #[test]
+    fn evaluate_shared_sets_without_joining_or_rewalking_members() {
+        use crate::model::{SET_GROUP_PROBES, SET_TEXT_BUILDS};
+        let mut rdf = format!(
+            "@prefix o: <{ODRL_NS}> . <urn:list> <{RDF_NS}first> <urn:v0>; <{RDF_NS}rest> ("
+        );
+        for i in 1..4000 {
+            rdf.push_str(&format!(" <urn:v{i}>"));
+        }
+        rdf.push_str(") . <urn:p> o:permission <urn:r> . <urn:r> o:action o:read .\n");
+        for i in 0..4000 {
+            rdf.push_str(&format!("<urn:r> o:constraint <urn:c{i}> . <urn:c{i}> o:leftOperand o:purpose; o:operator o:isAnyOf; o:rightOperand <urn:list>, <urn:x{i}> .\n"));
+        }
+        SET_TEXT_BUILDS.with(|n| n.set(0));
+        SET_GROUP_PROBES.with(|n| n.set(0));
+        let policy = parse_policy_str(&rdf, "turtle").unwrap();
+        assert_eq!(policy.permissions[0].constraints.len(), 4000);
+        let request = crate::Request::new(format!("{ODRL_NS}read"))
+            .for_purpose(Value::Iri("urn:v3999".into()));
+        assert!(crate::evaluate(&policy, &request).allow);
+        SET_TEXT_BUILDS.with(|n| assert_eq!(n.get(), 0, "evaluation joined shared groups"));
+        SET_GROUP_PROBES.with(|n| {
+            assert!(n.get() >= 4000, "all constraints must be evaluated");
+            assert!(n.get() <= 8000, "each constraint probes at most two groups");
+        });
+
+        let subsumed = crate::Request::new(format!("{ODRL_NS}read"))
+            .for_purpose(Value::Iri("urn:child".into()))
+            .with_purpose_subsumption("urn:child", "urn:v0");
+        SET_TEXT_BUILDS.with(|n| n.set(0));
+        assert!(crate::evaluate(&policy, &subsumed).allow);
+        let subsumption_builds = SET_TEXT_BUILDS.with(|n| n.get());
+
+        let recipient_rdf = rdf.replace("o:leftOperand o:purpose", "o:leftOperand o:recipient");
+        let recipients = parse_policy_str(&recipient_rdf, "turtle").unwrap();
+        let recipient = crate::Request::new(format!("{ODRL_NS}read"))
+            .by("urn:recipient")
+            .with_party_membership("urn:recipient", "urn:v0");
+        SET_TEXT_BUILDS.with(|n| n.set(0));
+        assert!(crate::evaluate(&recipients, &recipient).allow);
+        let recipient_builds = SET_TEXT_BUILDS.with(|n| n.get());
+        assert_eq!(
+            (subsumption_builds, recipient_builds),
+            (0, 0),
+            "subsumption or recipient membership joined shared groups"
+        );
+    }
+
+    #[test]
     fn mixed_literal_prefix_validation_is_shared() {
         let mut rdf = format!("@prefix r: <{RDF_NS}> . <urn:plain> r:first \"0\"; r:rest (");
         for i in 1..128 {
@@ -2619,6 +2683,9 @@ mod metered_tests {
                 .unwrap()
                 .unwrap();
             assert!(matches!(value, Value::SharedSet(_)));
+            assert!(value.set_contains("127"));
+            assert!(value.set_contains(&format!("urn:x{i}")));
+            assert!(!value.set_contains("urn:absent"));
             assert_eq!(lists.walks.get(), 2);
             assert_eq!(lists.member_visits.get(), 256 + i + 1);
             assert_eq!(lists.validation_visits.get(), 256);

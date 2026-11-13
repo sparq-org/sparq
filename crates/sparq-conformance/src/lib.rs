@@ -103,3 +103,5 @@ pub mod differential;
 // phochste/notation3tests, fetched at run time) — binary `sparq-notation3tests`,
 // advisory lane `.github/workflows/notation3tests.yml`.
 pub mod notation3tests;
+
+mod syntax_suite;

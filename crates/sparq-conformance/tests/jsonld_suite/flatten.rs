@@ -155,7 +155,7 @@ pub fn run_flatten_native(root: &Path) -> Score {
 
         // 6. Document-level JSON-LD equality (same comparator as the expand lane).
         if json_ld_equal(&got, &want) {
-            s.pass();
+            s.pass(&e.id);
         } else {
             s.fail(&e.id, format!("flatten JSON mismatch for {}", e.id));
         }

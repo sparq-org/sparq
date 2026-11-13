@@ -158,6 +158,8 @@ pub struct InMemoryStoreLimits {
     /// Maximum aggregate bytes of stored content physically retained by the blob store.
     pub max_total_bytes: usize,
     /// Maximum stored-content entries retained by either the blob or metadata store.
+    /// Each insert consumes one entry; its zero-byte directory is bookkeeping,
+    /// bounded by retained or reclaiming document keys, and consumes no content entry.
     pub max_resource_count: usize,
     /// Maximum entries in the service pool ([`in_service_pool`]), counted apart from
     /// [`InMemoryStoreLimits::max_resource_count`].
@@ -284,9 +286,13 @@ pub fn is_data_key_record(iri: &str) -> bool {
     iri.starts_with(DATA_KEY_CONTAINER)
 }
 
-/// Refuse generic index mutations of the notification marker.
+/// Refuse generic index mutations of lifecycle records: the notification marker and writer epoch.
 pub(crate) fn refuse_marker_operands(iris: &[Option<&str>]) -> Result<(), super::SparqError> {
-    if iris.iter().flatten().any(|iri| is_service_marker(iri)) {
+    if iris
+        .iter()
+        .flatten()
+        .any(|iri| is_service_marker(iri) || *iri == super::sparql::WRITER_EPOCH)
+    {
         return Err(super::SparqError::Backend(
             "service markers require the lifecycle lease".into(),
         ));

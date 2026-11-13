@@ -305,6 +305,12 @@ impl AuthLedger {
         n: usize,
         iri: &str,
     ) -> Result<(), String> {
+        self.document_row_bytes(n, iri)?;
+        self.reserve(out, n, Dim::Nodes)
+    }
+
+    /// The same stored-row lower bound for streaming admission, without allocating rows.
+    pub(crate) fn document_row_bytes(&self, n: usize, iri: &str) -> Result<(), String> {
         let row_bytes = 3 * sparq_core::meter::TERM_NODE_BYTES;
         for (dim, limit) in [
             (Dim::DocumentBytes, self.budget.max_document_bytes),
@@ -324,7 +330,7 @@ impl AuthLedger {
                 ));
             }
         }
-        self.reserve(out, n, Dim::Nodes)
+        Ok(())
     }
 
     /// Fallible input-sized vector growth, charged before reserving memory.
@@ -486,6 +492,22 @@ impl AuthLedger {
             e.dim
         };
         let (kind, detail) = match dim {
+            Dim::Bytes | Dim::SourceBytes if iri.starts_with("ODRL ") => (
+                AuthAllowance::InputBytes,
+                format!(
+                    "the {} source contributes more than max_input_bytes ({}) to the \
+                     reasoning input; the authorization view is not built (fail-closed)",
+                    iri, self.budget.max_input_bytes
+                ),
+            ),
+            Dim::TermDepth if iri.starts_with("ODRL ") => (
+                AuthAllowance::InputTermBytes,
+                format!(
+                    "a term of the {} source exceeds the stored triple term nesting \
+                     guard ({}); the authorization view is not built (fail-closed)",
+                    iri, e.limit
+                ),
+            ),
             Dim::TermDepth => (
                 AuthAllowance::InputTermBytes,
                 format!(

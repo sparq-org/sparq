@@ -9,10 +9,20 @@ use yrs::sync::{Message, SyncMessage};
 use yrs::updates::{decoder::Decode, encoder::Encode};
 use yrs::{Doc, ReadTxn, StateVector, Text, Transact};
 
+fn restored_text(update: &[u8]) -> String {
+    let doc = Doc::new();
+    doc.transact_mut()
+        .apply_update(yrs::Update::decode_v1(update).unwrap())
+        .unwrap();
+    let text = yrs::GetString::get_string(&doc.get_or_insert_text("text"), &doc.transact());
+    text
+}
+
 #[derive(Clone, Default)]
 struct Memory {
     files: Arc<Mutex<HashMap<String, Vec<u8>>>>,
     fail: Arc<AtomicBool>,
+    fail_list: Arc<AtomicBool>,
     calls: Arc<AtomicUsize>,
     changes: Changes,
     lists: Arc<AtomicUsize>,
@@ -25,6 +35,8 @@ struct Memory {
     quiet_create: Arc<AtomicBool>,
     pause_create: Arc<AtomicBool>,
     fail_after_create: Arc<AtomicBool>,
+    delete_fault: Arc<Mutex<Option<(LogKind, Fault)>>>,
+    deletes: Arc<AtomicUsize>,
     entered: Arc<tokio::sync::Notify>,
     released: Arc<tokio::sync::Notify>,
 }
@@ -43,6 +55,9 @@ impl Authorizer for Memory {
 impl RoomStore for Memory {
     async fn list(&self, _: &str) -> Result<Vec<String>, Fault> {
         self.lists.fetch_add(1, Ordering::SeqCst);
+        if self.fail_list.load(Ordering::SeqCst) {
+            return Err(Fault::Store);
+        }
         let files = self.files.lock().unwrap().keys().cloned().collect();
         if self.pause_list.swap(false, Ordering::SeqCst) {
             self.list_entered.notify_one();
@@ -82,7 +97,20 @@ impl RoomStore for Memory {
         Ok(name)
     }
     async fn delete(&self, _: &str, _: &Agent, file: &str) -> Result<(), Fault> {
-        self.files.lock().unwrap().remove(file);
+        self.deletes.fetch_add(1, Ordering::SeqCst);
+        let mut files = self.files.lock().unwrap();
+        let kind = LogFile::decode(files.get(file).ok_or(Fault::NotFound)?)?.kind;
+        let mut fault = self.delete_fault.lock().unwrap();
+        if let Some((expected, error)) = *fault {
+            if kind == expected {
+                *fault = None;
+                if error == Fault::NotFound {
+                    files.remove(file);
+                }
+                return Err(error);
+            }
+        }
+        files.remove(file);
         Ok(())
     }
 }
@@ -118,10 +146,280 @@ async fn failed_flush_retries_and_keeps_pending_data() {
     assert!(store.calls.load(Ordering::SeqCst) >= 1);
     assert!(store.files.lock().unwrap().is_empty());
     store.fail.store(false, Ordering::SeqCst);
+    let calls = store.calls.load(Ordering::SeqCst);
+    store.fail_list.store(true, Ordering::SeqCst);
+    tokio::time::advance(std::time::Duration::from_secs(3)).await;
+    tokio::task::yield_now().await;
+    assert_eq!(
+        store.calls.load(Ordering::SeqCst),
+        calls,
+        "failed reconciliation must not attempt another create"
+    );
+    assert!(store.files.lock().unwrap().is_empty());
+    store.fail_list.store(false, Ordering::SeqCst);
     tokio::time::advance(std::time::Duration::from_secs(3)).await;
     tokio::task::yield_now().await;
     assert_eq!(store.files.lock().unwrap().len(), 1);
     relay.leave(&session).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn committed_failed_batch_reconciles_before_compaction() {
+    for quiet in [false, true] {
+        let store = Memory::default();
+        store.fail_after_create.store(true, Ordering::SeqCst);
+        store.quiet_create.store(quiet, Ordering::SeqCst);
+        let limits = Limits {
+            document_bytes: 128,
+            compact_after: 1,
+            ..Default::default()
+        };
+        let doc = Doc::with_client_id(9700);
+        let text = doc.get_or_insert_text("text");
+        text.push(&mut doc.transact_mut(), &"x".repeat(80));
+        store.files.lock().unwrap().insert(
+            "seed".into(),
+            LogFile {
+                kind: LogKind::Snapshot,
+                millis: 0,
+                nonce: 1,
+                update: doc
+                    .transact()
+                    .encode_state_as_update_v1(&StateVector::default()),
+            }
+            .encode(),
+        );
+        let relay = Relay::new(store.clone(), limits.clone(), store.changes.clone());
+        relay
+            .ticket(
+                [71; 32],
+                "room",
+                Agent {
+                    subject: "writer".into(),
+                    client: None,
+                    origin: None,
+                },
+            )
+            .await
+            .unwrap();
+        let session = relay.join([71; 32], "room").await.unwrap();
+        text.push(&mut doc.transact_mut(), &"x".repeat(20));
+        let update = doc
+            .transact()
+            .encode_state_as_update_v1(&StateVector::default());
+        relay
+            .handle(
+                &session,
+                &Message::Sync(SyncMessage::Update(update.clone())).encode_v1(),
+            )
+            .await
+            .unwrap();
+        tokio::time::advance(std::time::Duration::from_millis(500)).await;
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(store.calls.load(Ordering::SeqCst), 1);
+        let retained_bytes: usize = store.files.lock().unwrap().values().map(Vec::len).sum();
+        assert_eq!(store.files.lock().unwrap().len(), 2);
+        assert!(
+            retained_bytes + update.len() + 16 > limits.document_bytes * 3 - 16,
+            "another copy would exceed the ordinary flush budget"
+        );
+        store.fail_after_create.store(false, Ordering::SeqCst);
+        tokio::time::advance(std::time::Duration::from_millis(500)).await;
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            store.calls.load(Ordering::SeqCst),
+            2,
+            "one update and one snapshot"
+        );
+        let files = store.files.lock().unwrap();
+        assert_eq!(
+            files.len(),
+            1,
+            "the reconciled batch must allow live compaction"
+        );
+        let snapshot = LogFile::decode(files.values().next().unwrap()).unwrap();
+        assert_eq!(snapshot.kind, LogKind::Snapshot);
+        assert_eq!(restored_text(&snapshot.update), "x".repeat(100));
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn failed_create_reconciliation_keeps_newer_edits() {
+    let store = Memory::default();
+    store.fail_after_create.store(true, Ordering::SeqCst);
+    store.pause_create.store(true, Ordering::SeqCst);
+    store.quiet_create.store(true, Ordering::SeqCst);
+    let relay = Relay::new(store.clone(), Limits::default(), store.changes.clone());
+    relay
+        .ticket(
+            [74; 32],
+            "room",
+            Agent {
+                subject: "writer".into(),
+                client: None,
+                origin: None,
+            },
+        )
+        .await
+        .unwrap();
+    let session = relay.join([74; 32], "room").await.unwrap();
+    let doc = Doc::with_client_id(9750);
+    let text = doc.get_or_insert_text("text");
+    text.push(&mut doc.transact_mut(), "first");
+    let first = doc
+        .transact()
+        .encode_state_as_update_v1(&StateVector::default());
+    relay
+        .handle(
+            &session,
+            &Message::Sync(SyncMessage::Update(first)).encode_v1(),
+        )
+        .await
+        .unwrap();
+    store.entered.notified().await;
+    text.push(&mut doc.transact_mut(), "-later");
+    let latest = doc
+        .transact()
+        .encode_state_as_update_v1(&StateVector::default());
+    relay
+        .handle(
+            &session,
+            &Message::Sync(SyncMessage::Update(latest.clone())).encode_v1(),
+        )
+        .await
+        .unwrap();
+    store.pause_create.store(false, Ordering::SeqCst);
+    store.released.notify_one();
+    store.committed.notified().await;
+    store.fail_after_create.store(false, Ordering::SeqCst);
+    tokio::time::advance(std::time::Duration::from_millis(500)).await;
+    for _ in 0..10 {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(store.calls.load(Ordering::SeqCst), 2);
+    let logs = store
+        .files
+        .lock()
+        .unwrap()
+        .values()
+        .map(|body| LogFile::decode(body).unwrap())
+        .collect();
+    let restored = load(logs, Limits::default().document_bytes).unwrap();
+    assert_eq!(restored_text(&restored), "first-later");
+}
+
+#[tokio::test(start_paused = true)]
+async fn missing_folded_file_does_not_delay_compaction() {
+    for kind in [LogKind::Snapshot, LogKind::Update] {
+        let store = Memory::default();
+        *store.delete_fault.lock().unwrap() = Some((kind, Fault::NotFound));
+        let update = vec![0, 0];
+        for (name, kind) in [
+            ("snapshot", LogKind::Snapshot),
+            ("update", LogKind::Update),
+            ("another-update", LogKind::Update),
+        ] {
+            store.files.lock().unwrap().insert(
+                name.into(),
+                LogFile {
+                    kind,
+                    millis: 10,
+                    nonce: 1,
+                    update: update.clone(),
+                }
+                .encode(),
+            );
+        }
+        let relay = Relay::new(
+            store.clone(),
+            Limits {
+                compact_after: 1,
+                ..Default::default()
+            },
+            store.changes.clone(),
+        );
+        relay
+            .ticket(
+                [72; 32],
+                "room",
+                Agent {
+                    subject: "writer".into(),
+                    client: None,
+                    origin: None,
+                },
+            )
+            .await
+            .unwrap();
+        let _session = relay.join([72; 32], "room").await.unwrap();
+        tokio::time::advance(std::time::Duration::from_millis(500)).await;
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            store.deletes.load(Ordering::SeqCst),
+            3,
+            "finish in the first cycle"
+        );
+        assert!(store.delete_fault.lock().unwrap().is_none());
+        let files = store.files.lock().unwrap();
+        assert_eq!(files.len(), 1);
+        let snapshot = LogFile::decode(files.values().next().unwrap()).unwrap();
+        assert_eq!(snapshot.kind, LogKind::Snapshot);
+        assert_eq!(snapshot.update, update);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn folded_snapshot_delete_fault_keeps_updates() {
+    for error in [Fault::Store, Fault::Forbidden] {
+        let store = Memory::default();
+        *store.delete_fault.lock().unwrap() = Some((LogKind::Snapshot, error));
+        for (name, kind) in [("snapshot", LogKind::Snapshot), ("update", LogKind::Update)] {
+            store.files.lock().unwrap().insert(
+                name.into(),
+                LogFile {
+                    kind,
+                    millis: 10,
+                    nonce: 1,
+                    update: vec![0, 0],
+                }
+                .encode(),
+            );
+        }
+        let relay = Relay::new(
+            store.clone(),
+            Limits {
+                compact_after: 1,
+                ..Default::default()
+            },
+            store.changes.clone(),
+        );
+        relay
+            .ticket(
+                [73; 32],
+                "room",
+                Agent {
+                    subject: "writer".into(),
+                    client: None,
+                    origin: None,
+                },
+            )
+            .await
+            .unwrap();
+        let _session = relay.join([73; 32], "room").await.unwrap();
+        tokio::time::advance(std::time::Duration::from_millis(500)).await;
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(store.deletes.load(Ordering::SeqCst), 1);
+        let files = store.files.lock().unwrap();
+        assert!(files.contains_key("snapshot") && files.contains_key("update"));
+        assert_eq!(files.len(), 3);
+    }
 }
 
 #[tokio::test(start_paused = true)]
@@ -229,9 +527,19 @@ async fn one_authors_retry_does_not_delay_other_authors() {
 
 #[tokio::test]
 async fn flush_repersists_after_snapshot_during_create() {
+    repersist_after_snapshot(false).await;
+}
+
+#[tokio::test]
+async fn failed_flush_repersists_after_snapshot_during_create() {
+    repersist_after_snapshot(true).await;
+}
+
+async fn repersist_after_snapshot(failed: bool) {
     use std::time::Duration;
     let store = Memory::default();
     store.pause_create.store(true, Ordering::SeqCst);
+    store.fail_after_create.store(failed, Ordering::SeqCst);
     let relay = Relay::new(store.clone(), Limits::default(), store.changes.clone());
     let agent = Agent {
         subject: "writer".into(),
@@ -289,6 +597,8 @@ async fn flush_repersists_after_snapshot_during_create() {
     .unwrap();
     store.pause_create.store(false, Ordering::SeqCst);
     store.released.notify_one();
+    store.committed.notified().await;
+    store.fail_after_create.store(false, Ordering::SeqCst);
     tokio::time::timeout(Duration::from_secs(3), async {
         loop {
             let files: Vec<_> = store
@@ -374,7 +684,7 @@ async fn retry_reserves_retained_log_bytes() {
             tokio::task::yield_now().await;
         }
     }
-    assert!(store.calls.load(Ordering::SeqCst) >= 3);
+    assert_eq!(store.calls.load(Ordering::SeqCst), 1);
     let bytes: usize = store.files.lock().unwrap().values().map(Vec::len).sum();
     assert!(
         bytes <= limits.document_bytes * 4 - (limits.document_bytes + 16),

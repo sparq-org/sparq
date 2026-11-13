@@ -48,11 +48,10 @@ path = "src/bin/notation3tests.rs"
 [features]
 # sq-oy1f.2 — the W3C JSON-LD 1.1 conformance lane (toRdf + fromRdf
 # ratchets, the crate-local `tests/jsonld_suite.rs` runner). OPT-IN and OFF by
-# default so the bare `cargo test -p sparq-conformance` (and the default
-# `--workspace` shards) never link the oxjsonld parser or the engine's JSON-LD
-# writer — mirroring the lean-core opt-in posture (sparq-core/jsonld and
-# sparq-engine/serialize-rdf are themselves both off by default). When OFF the
-# runner compiles to a single self-SKIP `#[test]`; when ON it drives the suite
+# default; when disabled, that runner compiles only its self-SKIP test.
+# Dependency features may still be enabled by other workspace members. The shipping
+# RDF writers are enabled independently for syntax C14N and Eval; library defaults stay lean.
+# When OFF the runner compiles to a single self-SKIP `#[test]`; when ON it drives the suite
 # through the REAL parse (oxjsonld via sparq-core) + write (serialize-rdf via
 # sparq-engine) paths and asserts the pinned floors. Forwards to both upstream
 # features and links `oxjsonld` directly (to re-parse the writer's JSON-LD output
@@ -306,7 +305,8 @@ sparq-core = { path = "../sparq-core" }
 # plans real users execute (a rewrite that broke a W3C test would otherwise merge green).
 # The pass is result-equivalent by design; this harness crate is `publish = false` and the
 # engine LIBRARY default stays OFF, so no lean-consumer surface changes.
-sparq-engine = { path = "../sparq-engine", features = ["algebra-rewrite"] }
+# Syntax C14N and Eval use the shipping N-Quads writer, including without jsonld-suite.
+sparq-engine = { path = "../sparq-engine", features = ["algebra-rewrite", "serialize-rdf"] }
 sparq-reason = { path = "../sparq-reason" }
 # sq-pbz04.5.5 — the shared numeric value-tower, used ONLY by the `rif-wg-core`
 # arm's conclusion oracle to compare numeric literals VALUE-AWARE (via `numeric::as_numeric`)

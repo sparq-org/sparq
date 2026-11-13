@@ -17,6 +17,16 @@ permutation-indexed in-memory RDF store). You load RDF into a `Graph`, then call
 `sparq_engine` to run SELECT/ASK/CONSTRUCT/DESCRIBE and SPARQL Update. Results come back either as a
 typed `QueryResult` (rows of `Option<oxrdf::Term>`) or directly as a SPARQL-1.1-JSON string.
 
+Computed `xsd:decimal` results (arithmetic, SUM/AVG, numeric functions and SECONDS)
+drop trailing fractional zeros beyond the first fractional digit: `2.0 * 3.28084`
+returns `"6.56168"^^xsd:decimal`, `2.50` becomes `2.5`, and `2.0` stays `2.0`.
+Spellings without a fractional part, and cast results, follow the approved W3C
+SPARQL results as before: a scale-zero decimal sum can be `"6"^^xsd:decimal`,
+`xsd:decimal(0)` yields `"0"^^xsd:decimal`, and `xsd:decimal("0")` yields
+`"0.0"^^xsd:decimal`. Data/query literals retain their exact lexical form in
+plain SELECT and STR, as do MIN/MAX/SAMPLE when selecting an input term.
+Result writers preserve those terms.
+
 [Correlated EXISTS with MINUS](exists-minus.md) documents the bounded published-2013
 solution-domain correction and the remaining native practical fallbacks.
 

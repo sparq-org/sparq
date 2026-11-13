@@ -47,6 +47,10 @@ struct StorageGate {
     flush: AtomicBool,
     pause_flush: AtomicBool,
     snapshot_delete: AtomicBool,
+    missing_snapshot_delete: AtomicBool,
+    missing_snapshot_meta: AtomicBool,
+    denied_snapshot_meta: AtomicBool,
+    fail_absence_probe: AtomicBool,
     snapshot_delete_seen: tokio::sync::Notify,
     #[cfg(feature = "odrl-authz")]
     odrl_deny: AtomicBool,
@@ -82,6 +86,10 @@ struct GatedStore {
 
 #[async_trait::async_trait]
 impl Store for GatedStore {
+    async fn append(&self, iri: &str, ntriples: Bytes) -> ServerResult<()> {
+        self.inner.append(iri, ntriples).await
+    }
+
     fn exclusive(&self) -> ServerResult<()> {
         self.inner.exclusive()
     }
@@ -109,9 +117,29 @@ impl Store for GatedStore {
         self.inner.read(iri).await
     }
     async fn meta(&self, iri: &str) -> ServerResult<Option<ResourceMeta>> {
+        if iri.strip_prefix(ROOM) == Some("old-snapshot") {
+            if self.gate.denied_snapshot_meta.load(Ordering::SeqCst) {
+                self.gate.listing.store(true, Ordering::SeqCst);
+                self.gate.snapshot_delete_seen.notify_one();
+                return Err(sparq_lws_core::error::ServerError::Forbidden);
+            }
+            if self.gate.missing_snapshot_meta.swap(false, Ordering::SeqCst) {
+                self.inner.delete(iri, Some(ROOM)).await?;
+                self.gate.listing.store(true, Ordering::SeqCst);
+                self.gate.snapshot_delete_seen.notify_one();
+            }
+        }
         self.inner.meta(iri).await
     }
     async fn exists(&self, iri: &str) -> ServerResult<bool> {
+        if iri.strip_prefix(ROOM) == Some("old-snapshot")
+            && self.gate.fail_absence_probe.load(Ordering::SeqCst)
+            && !self.gate.missing_snapshot_meta.load(Ordering::SeqCst)
+        {
+            return Err(sparq_lws_core::error::ServerError::Storage(
+                "fixture existence failure".into(),
+            ));
+        }
         self.inner.exists(iri).await
     }
     async fn write(&self, iri: &str, body: Bytes, media: &str) -> ServerResult<ResourceMeta> {
@@ -142,6 +170,22 @@ impl Store for GatedStore {
             .await
     }
     async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
+        if self.gate.missing_snapshot_delete.load(Ordering::SeqCst)
+            && self
+                .inner
+                .read(iri)
+                .await
+                .is_ok_and(|r| r.body.starts_with(b"JYS1"))
+        {
+            self.inner.delete(iri, parent).await?;
+            self.gate
+                .missing_snapshot_delete
+                .store(false, Ordering::SeqCst);
+            // Prevent a later reload from masking failure of the first cleanup cycle.
+            self.gate.listing.store(true, Ordering::SeqCst);
+            self.gate.snapshot_delete_seen.notify_one();
+            return Err(sparq_lws_core::error::ServerError::NotFound);
+        }
         if self.gate.snapshot_delete.load(Ordering::SeqCst)
             && self
                 .inner
@@ -182,6 +226,22 @@ impl Store for GatedStore {
         self.inner.holds().await
     }
     async fn hold(&self, iri: &str, holder: &str) -> ServerResult<Option<ResourceMeta>> {
+        if self.gate.missing_snapshot_delete.load(Ordering::SeqCst)
+            && self
+                .inner
+                .read(iri)
+                .await
+                .is_ok_and(|r| r.body.starts_with(b"JYS1"))
+        {
+            self.inner.delete(iri, Some(ROOM)).await?;
+            self.gate
+                .missing_snapshot_delete
+                .store(false, Ordering::SeqCst);
+            // Prevent a later reload from masking failure of the first cleanup cycle.
+            self.gate.listing.store(true, Ordering::SeqCst);
+            self.gate.snapshot_delete_seen.notify_one();
+            return Err(sparq_lws_core::error::ServerError::NotFound);
+        }
         if self.gate.snapshot_delete.load(Ordering::SeqCst)
             && self
                 .inner
@@ -2507,6 +2567,133 @@ async fn connected_room_compacts_on_bytes_solid() {
 #[tokio::test]
 async fn connected_room_compacts_on_bytes_lws() {
     live_compaction(true, true).await;
+}
+
+async fn folded_snapshot_fixture(mode: bool) -> (Harness, Arc<StorageGate>, Vec<u8>) {
+    let (h, gate) = Harness::gated(
+        mode,
+        Limits {
+            compact_after: 1,
+            ..Default::default()
+        },
+    )
+    .await;
+    let doc = Doc::with_client_id(8450);
+    doc.get_or_insert_text("text")
+        .push(&mut doc.transact_mut(), "durable");
+    let update = doc
+        .transact()
+        .encode_state_as_update_v1(&StateVector::default());
+    for (name, marker) in [("old-snapshot", b"JYS1"), ("old-update", b"JYU1")] {
+        h.store
+            .create_in_container(
+                ROOM,
+                &format!("{ROOM}{name}"),
+                Bytes::from(envelope(marker, 200, 1, &update)),
+                "application/octet-stream",
+            )
+            .await
+            .unwrap();
+    }
+    (h, gate, update)
+}
+
+async fn missing_snapshot_delete(mode: bool, early: bool) {
+    let (h, gate, update) = folded_snapshot_fixture(mode).await;
+    if early {
+        gate.missing_snapshot_meta.store(true, Ordering::SeqCst);
+    } else {
+        gate.missing_snapshot_delete.store(true, Ordering::SeqCst);
+    }
+    let mut peer = h.client(OWNER, 8451).await;
+    peer.until_text("durable").await;
+    tokio::time::timeout(Duration::from_secs(4), gate.snapshot_delete_seen.notified())
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(4), async {
+        loop {
+            let files = h.store.list_children(ROOM).await.unwrap();
+            let mut logs = Vec::new();
+            for file in files {
+                let body = match h.store.read(file.as_str()).await {
+                    Ok(resource) => resource.body,
+                    Err(sparq_lws_core::error::ServerError::NotFound) => continue,
+                    Err(error) => panic!("unexpected log read failure: {error}"),
+                };
+                if body.starts_with(b"JYS1") || body.starts_with(b"JYU1") {
+                    logs.push(body);
+                }
+            }
+            if logs.len() == 1 && logs[0].starts_with(b"JYS1") {
+                assert_eq!(&logs[0][16..], update.as_slice());
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("cleanup must finish without another reload or backoff cycle");
+    gate.listing.store(false, Ordering::SeqCst);
+    gate.released.notify_waiters();
+}
+
+#[tokio::test]
+async fn missing_snapshot_delete_solid() {
+    missing_snapshot_delete(false, false).await;
+}
+
+#[tokio::test]
+async fn missing_snapshot_delete_lws() {
+    missing_snapshot_delete(true, false).await;
+}
+
+#[tokio::test]
+async fn missing_snapshot_before_delete_solid() {
+    missing_snapshot_delete(false, true).await;
+}
+
+#[tokio::test]
+async fn missing_snapshot_before_delete_lws() {
+    missing_snapshot_delete(true, true).await;
+}
+
+async fn failed_absence_check_keeps_updates(probe_fault: bool) {
+    let (h, gate, _) = folded_snapshot_fixture(false).await;
+    if probe_fault {
+        gate.missing_snapshot_meta.store(true, Ordering::SeqCst);
+        gate.fail_absence_probe.store(true, Ordering::SeqCst);
+    } else {
+        gate.denied_snapshot_meta.store(true, Ordering::SeqCst);
+    }
+    let mut peer = h.client(OWNER, 8452).await;
+    peer.until_text("durable").await;
+    tokio::time::timeout(Duration::from_secs(4), gate.snapshot_delete_seen.notified())
+        .await
+        .unwrap();
+    // Observe the next refresh to prove the failed cycle finished before inspecting storage.
+    tokio::time::timeout(Duration::from_secs(4), gate.entered.notified())
+        .await
+        .expect("a genuine deletion failure must retry cleanup");
+    assert!(h.store.exists(&format!("{ROOM}old-update")).await.unwrap());
+    assert_eq!(
+        h.store
+            .exists(&format!("{ROOM}old-snapshot"))
+            .await
+            .unwrap(),
+        !probe_fault
+    );
+    gate.listing.store(false, Ordering::SeqCst);
+    gate.released.notify_waiters();
+}
+
+#[tokio::test]
+async fn denied_present_snapshot_keeps_folded_updates() {
+    failed_absence_check_keeps_updates(false).await;
+}
+
+#[tokio::test]
+async fn failed_snapshot_absence_probe_keeps_folded_updates() {
+    failed_absence_check_keeps_updates(true).await;
 }
 
 async fn partial_snapshot_delete(mode: bool, max_nonce: bool) {

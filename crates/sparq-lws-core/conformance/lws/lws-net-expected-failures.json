@@ -34,7 +34,7 @@
     {
       "name": "Ported from manifest.jsonld: LWS Authentication: Self-signed Identity using did:key: authn-didkey-missing-credential-status",
       "category": "runner",
-      "reason": "touchstone.ttl and oldmanifest.ttl construct _:tokenEndpoint as authorizationServer + /token rather than reading token_endpoint from /.well-known/lws-configuration (LWS Authorization, authorization-server-metadata; RFC 8414). The advertised /.well-known/lws/token returns 400 application/json invalid_request for a missing subject token."
+      "reason": "Suite/Model/Resources/oldmanifest/did_key.ttl defines this test as POST {authorizationServer}/token with no credential rather than reading token_endpoint from /.well-known/lws-configuration (LWS Authorization, authorization-server-metadata; RFC 8414). The advertised /.well-known/lws/token returns 400 application/json invalid_request for a missing subject token."
     }
   ]
 }

@@ -467,7 +467,7 @@ struct FailingIndex {
 }
 
 impl FailingIndex {
-    fn error(failure: Failure) -> SparqError {
+    fn error(failure: Failure, iri: &str) -> SparqError {
         match failure {
             Failure::Missing => SparqError::NotFound,
             Failure::Full => SparqError::QuotaExceeded,
@@ -476,7 +476,7 @@ impl FailingIndex {
             }
             Failure::Unsettled => SparqError::Unsettled {
                 detail: "test pending commit".into(),
-                fence: Fence::new("test-pending", vec![]),
+                fence: Fence::new("test-pending", vec![iri.to_string()]),
             },
         }
     }
@@ -487,6 +487,19 @@ impl FailingIndex {
 
 #[async_trait]
 impl SparqClient for FailingIndex {
+    async fn fold_appends(
+        &self,
+        iri: &str,
+        expected: &ResourceMeta,
+        blob_key: &str,
+    ) -> Result<bool, SparqError> {
+        self.inner.fold_appends(iri, expected, blob_key).await
+    }
+
+    async fn publish_append(&self, iri: &str, key: &str, blob_key: &str) -> Result<(), SparqError> {
+        self.inner.publish_append(iri, key, blob_key).await
+    }
+
     fn lifecycle(&self) -> std::sync::Arc<crate::store::Lifecycle> {
         self.inner.lifecycle()
     }
@@ -499,7 +512,7 @@ impl SparqClient for FailingIndex {
             if matches!(failure, Failure::Committed) {
                 self.inner.put_meta(iri, meta).await?;
             }
-            return Err(Self::error(failure));
+            return Err(Self::error(failure, iri));
         }
         self.inner.put_meta(iri, meta).await
     }
@@ -526,7 +539,7 @@ impl SparqClient for FailingIndex {
             if matches!(failure, Failure::Committed) {
                 self.inner.create_child(container, child, meta).await?;
             }
-            return Err(Self::error(failure));
+            return Err(Self::error(failure, child));
         }
         self.inner.create_child(container, child, meta).await
     }
@@ -676,4 +689,33 @@ async fn concurrent_child_replacements_account_for_every_version() {
     #[cfg(feature = "embedded-sparq")]
     concurrent_replacements(super::super::embedded::EmbeddedSparqClient::in_memory().unwrap())
         .await;
+}
+
+#[tokio::test]
+async fn an_unsettled_rewrite_keeps_its_fence_and_candidate_blob() {
+    let store = CompositeStore::new(
+        FailingIndex {
+            inner: InMemorySparqClient::new(),
+            failure: Default::default(),
+        },
+        InMemoryBlobStore::new(),
+    );
+    let iri = "https://pod.example/d";
+    let prior = store
+        .write(iri, Bytes::from_static(b"original"), "text/plain")
+        .await
+        .unwrap();
+    *store.sparq.failure.lock().unwrap() = Some(Failure::Unsettled);
+    let outcome = store
+        .write(iri, Bytes::from_static(b"candidate"), "text/plain")
+        .await;
+    let Err(ServerError::Unsettled { fence, .. }) = outcome else {
+        panic!("{outcome:?}");
+    };
+    assert_eq!(fence, Fence::new("test-pending", vec![iri.to_string()]));
+    let keys = store.blob.list().await.unwrap();
+    assert_eq!(keys.len(), 2);
+    let candidate = keys.iter().find(|k| k.key != prior.blob_key).unwrap();
+    assert_eq!(store.blob.get(&candidate.key).await.unwrap(), "candidate");
+    assert_eq!(store.read(iri).await.unwrap().body, "original");
 }

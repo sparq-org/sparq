@@ -64,6 +64,9 @@ pub const FRAME_SUITE_BASE: &str = "https://w3c.github.io/json-ld-framing/tests/
 pub const SUITE_BASE: &str = "https://w3c.github.io/json-ld-api/tests/";
 
 pub fn suite_root() -> PathBuf {
+    if let Some(root) = std::env::var_os("SPARQ_JSONLD_ROOT") {
+        return root.into();
+    }
     // CARGO_MANIFEST_DIR = crates/sparq-conformance; the workspace root is two up.
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/w3c/json-ld-api/tests")
 }
@@ -72,11 +75,15 @@ pub fn suite_root() -> PathBuf {
 /// (`scripts/fetch-jsonld-framing-tests.sh`). Framing lives in its own W3C
 /// repo, not under `json-ld-api`.
 pub fn frame_suite_root() -> PathBuf {
+    if let Some(root) = std::env::var_os("SPARQ_JSONLD_FRAME_ROOT") {
+        return root.into();
+    }
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/w3c/json-ld-framing/tests")
 }
 
 #[derive(Default)]
 pub struct Score {
+    pub passed: std::collections::BTreeSet<String>,
     pub pass: usize,
     pub fail: usize,
     pub skip: usize,
@@ -84,7 +91,8 @@ pub struct Score {
 }
 
 impl Score {
-    pub fn pass(&mut self) {
+    pub fn pass(&mut self, id: &str) {
+        self.passed.insert(id.to_owned());
         self.pass += 1;
     }
     pub fn fail(&mut self, id: &str, why: String) {
@@ -309,3 +317,203 @@ pub fn not_implemented_counts(root: &Path) -> BTreeMap<&'static str, usize> {
 
 // sq-hmd7l.15 — the `json_ld_equal` comparator unit tests moved to the
 // lib-side `sparq_conformance::jsonld_bench` module together with the comparator.
+
+/// EARL omits JSON-LD 1.0-only entries as not applicable to a 1.1 processor.
+/// Other local skips, including optional requirements, HTML and remote documents, fail.
+pub fn report(root: &Path, cat: &str, score: &Score) {
+    if std::env::var_os("SPARQ_EARL_OUT").is_none() {
+        return;
+    }
+    let entries = read_manifest(root, cat).expect("EARL manifest must be readable");
+    let rows = outcome_rows(cat, entries.iter(), score);
+    crate::earl::emit(rows.iter().map(|(id, passed)| (id.as_str(), *passed)));
+}
+
+fn outcome_rows<'a>(
+    cat: &str,
+    entries: impl Iterator<Item = &'a Entry>,
+    score: &Score,
+) -> Vec<(String, bool)> {
+    let base = if cat == "frame" {
+        FRAME_SUITE_BASE
+    } else {
+        SUITE_BASE
+    };
+    entries
+        .filter(|e| {
+            e.spec_version.as_deref() != Some("json-ld-1.0")
+                && e.processing_mode.as_deref() != Some("json-ld-1.0")
+        })
+        .map(|e| {
+            let id = e.id.as_str();
+            let iri = if id.starts_with("https://") || id.starts_with("http://") {
+                id.to_owned()
+            } else {
+                format!("{base}{cat}-manifest{id}")
+            };
+            (iri, score.passed.contains(id))
+        })
+        .collect()
+}
+
+#[test]
+fn outcomes_cover_skips_and_distinguish_manifest_iris() {
+    let mut score = Score::default();
+    score.pass("#same");
+    score.fail("#bad", "failure".into());
+    score.skip();
+    // Omit 1.0-only entries even when a compatibility path happened to pass them.
+    score.pass("#ten-spec");
+    score.pass("#ten-mode");
+    let fixture = crate::earl::Fixture::new();
+    for cat in [
+        "toRdf",
+        "fromRdf",
+        "compact",
+        "expand",
+        "flatten",
+        "frame",
+        "html",
+        "remote-doc",
+    ] {
+        fixture.write(
+            &format!("{cat}-manifest.jsonld"),
+            serde_json::to_vec(&serde_json::json!({"sequence": [
+                {"@id": "#same", "option": {"specVersion": "json-ld-1.1", "processingMode": "json-ld-1.1"}},
+                {"@id": "#bad"},
+                {"@id": "#skip", "requires": "optional"},
+                {"@id": "#ten-spec", "option": {"specVersion": "json-ld-1.0"}},
+                {"@id": "#ten-mode", "option": {"specVersion": "json-ld-1.1", "processingMode": "json-ld-1.0"}},
+                {"@id": "#ten-both", "option": {"specVersion": "json-ld-1.0", "processingMode": "json-ld-1.0"}}
+            ]})).unwrap(),
+        );
+        let entries = read_manifest(fixture.root(), cat).unwrap();
+        let rows = outcome_rows(cat, entries.iter(), &score);
+        let base = if cat == "frame" {
+            "https://w3c.github.io/json-ld-framing/tests/"
+        } else {
+            "https://w3c.github.io/json-ld-api/tests/"
+        };
+        assert_eq!(
+            rows,
+            vec![
+                (format!("{base}{cat}-manifest#same"), true),
+                (format!("{base}{cat}-manifest#bad"), false),
+                (format!("{base}{cat}-manifest#skip"), false)
+            ]
+        );
+    }
+}
+
+#[test]
+fn reports_every_jsonld_lane_even_when_ratchets_fail() {
+    let fixture = crate::earl::Fixture::new();
+    fixture.write("empty.jsonld", "[]");
+    fixture.write("empty.nq", "");
+    fixture.write(
+        "simple.jsonld",
+        r#"{"@id":"https://example.test/s","https://example.test/p":"v"}"#,
+    );
+    fixture.write(
+        "context.jsonld",
+        r#"{"@context":{"p":"https://example.test/p"}}"#,
+    );
+    fixture.write(
+        "compacted.jsonld",
+        r#"{"@context":{"p":"https://example.test/p"},"@id":"https://example.test/s","p":"v"}"#,
+    );
+    let mut expected = Vec::new();
+    for cat in [
+        "toRdf",
+        "fromRdf",
+        "compact",
+        "expand",
+        "flatten",
+        "frame",
+        "html",
+        "remote-doc",
+    ] {
+        let input = match cat {
+            "fromRdf" => "empty.nq",
+            "compact" | "frame" => "simple.jsonld",
+            _ => "empty.jsonld",
+        };
+        let expect = match cat {
+            "toRdf" => "empty.nq",
+            "compact" | "frame" => "compacted.jsonld",
+            _ => "empty.jsonld",
+        };
+        let context = ["compact", "frame"]
+            .contains(&cat)
+            .then_some("context.jsonld");
+        fixture.write(
+            &format!("{cat}-manifest.jsonld"),
+            serde_json::to_vec(&serde_json::json!({
+                "sequence": [
+                    {"@id": "#ok", "input": input, "expect": expect,
+                     "context": context, "frame": "context.jsonld"},
+                    {"@id": "#missing", "input": "absent", "expect": expect,
+                     "context": context, "frame": "context.jsonld"},
+                    {"@id": "#skip", "input": input, "requires": "optional"}
+                ]
+            }))
+            .unwrap(),
+        );
+        let base = if cat == "frame" {
+            "https://w3c.github.io/json-ld-framing/tests/"
+        } else {
+            "https://w3c.github.io/json-ld-api/tests/"
+        };
+        for id in ["ok", "missing", "skip"] {
+            let passed = id == "ok" && !["html", "remote-doc"].contains(&cat);
+            expected.push((format!("{base}{cat}-manifest#{id}"), passed));
+        }
+    }
+    fixture.assert_report(
+        "gated::jsonld_conformance_ratchet",
+        "EARL complete jsonld",
+        &[
+            ("SPARQ_JSONLD_ROOT", fixture.root()),
+            ("SPARQ_JSONLD_FRAME_ROOT", fixture.root()),
+        ],
+        &expected,
+    );
+}
+
+#[test]
+fn explicitly_missing_jsonld_roots_fail_without_earl() {
+    let fixture = crate::earl::Fixture::new();
+    for cat in [
+        "toRdf",
+        "fromRdf",
+        "compact",
+        "expand",
+        "flatten",
+        "html",
+        "remote-doc",
+    ] {
+        fixture.write(&format!("{cat}-manifest.jsonld"), r#"{"sequence":[]}"#);
+    }
+    let absent = fixture.root().join("absent");
+    for (api_root, message) in [
+        (absent.as_path(), "configured JSON-LD suite missing"),
+        (fixture.root(), "configured JSON-LD framing suite missing"),
+    ] {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "gated::jsonld_conformance_ratchet",
+                "--nocapture",
+            ])
+            .env_remove("SPARQ_EARL_OUT")
+            .env("SPARQ_JSONLD_ROOT", api_root)
+            .env("SPARQ_JSONLD_FRAME_ROOT", &absent)
+            .output()
+            .unwrap();
+        assert!(
+            !output.status.success(),
+            "a configured missing suite must fail"
+        );
+        assert!(String::from_utf8_lossy(&output.stderr).contains(message));
+    }
+}

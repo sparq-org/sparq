@@ -62,6 +62,9 @@ mod reconcile_runtime;
 mod storage_runtime;
 
 #[cfg(not(target_arch = "wasm32"))]
+use sparq_lws_core::lws::native_routing;
+
+#[cfg(not(target_arch = "wasm32"))]
 macro_rules! native_main {
     ($($item:item)*) => {
         $($item)*
@@ -117,6 +120,8 @@ use crate::reconcile_runtime::{
 
 // --- Environment configuration keys ----------------------------------------------------------------
 const ENV_BASE_URL: &str = "SOLID_SERVER_BASE_URL";
+/// Native LWS mount: `1`/`true` strips the base URL's path once; unset keeps proxy-relative paths.
+const ENV_LWS_MOUNT_BASE_PATH: &str = "SOLID_SERVER_LWS_MOUNT_BASE_PATH";
 const ENV_BIND: &str = "SOLID_SERVER_BIND";
 const ENV_TRUSTED_ISSUER: &str = "SOLID_SERVER_TRUSTED_ISSUER";
 /// The RS's identity required in a token's `aud` (RFC 9068). Defaults to the base URL.
@@ -1153,6 +1158,11 @@ where
     // Linked Web Storage (`SOLID_SERVER_PROTOCOL=lws`): the LWS 1.0 surface replaces the Solid
     // router on the same store. Its own `SOLID_SERVER_LWS_*` settings configure it.
     if std::env::var(ENV_PROTOCOL).is_ok_and(|v| v.trim().eq_ignore_ascii_case("lws")) {
+        let mount_base_path = match std::env::var(ENV_LWS_MOUNT_BASE_PATH) {
+            Ok(value) => native_routing::parse_mount_base_path(Some(&value))?,
+            Err(std::env::VarError::NotPresent) => false,
+            Err(error) => return Err(format!("{ENV_LWS_MOUNT_BASE_PATH}: {error}").into()),
+        };
         let mut cfg = sparq_lws_core::lws::LwsConfig::from_env(base_url)?;
         // One body ceiling for both surfaces: the LWS dispatcher reads the body itself, so it is
         // handed the configured limit rather than relying on the `DefaultBodyLimit` layer.
@@ -1167,7 +1177,11 @@ where
         let _ = (issuer, jwks_cache_ttl, auth, identity);
         // The same overload stack the Solid router carries: the per-IP rate limiter, admission
         // control, the request timeout and the body ceiling, with /livez and /readyz outside it.
+        let mount_base_url = cfg.base_url.clone();
         let lws = sparq_lws_core::lws::router(store, cfg).await?;
+        let lws = native_routing::mount_lws_router(
+            lws, &mount_base_url, mount_base_path,
+        )?;
         return Ok(with_overload_layers_and_cors(lws, overload_config, cors));
     }
     // Dev/conformance seeding (gated): write the test users' WebID profiles + the container tree the

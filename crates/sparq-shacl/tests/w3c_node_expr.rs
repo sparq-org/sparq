@@ -21,16 +21,11 @@
 //!
 //! ## Order-aware comparison
 //!
-//! `mf:result` is an `rdf:list` — an ORDERED sequence. The suite's ordered
-//! operators (`concat` / `orderBy` / `limit` / `offset` / `flatMap` / a
-//! `pathValues` sequence) state a specific order, so the runner compares
-//! SEQUENCE equality (order + duplicates) first. Only when sequence equality
-//! fails does it fall back to multiset equality, recording the entry as an
-//! "order-insensitive PASS" (the set operators `union` / `intersection` /
-//! `distinct` / `instancesOf` / `nodesMatching` leave member order unspecified,
-//! so a multiset match is the correct conformance outcome for them). Both count
-//! as PASS; the split is printed so a genuine ordered-result regression is
-//! visible.
+//! `mf:result` is an `rdf:list`, an ORDERED sequence, and the suite README makes
+//! order significant: the output must equal `mf:result` as a sequence (order and
+//! duplicates) unless the action sets `sht:ignoreOrder true`, in which case any
+//! order with the same cardinalities passes. A result with the right nodes in the
+//! wrong order, on an entry without `sht:ignoreOrder`, is a FAIL.
 //!
 //! ## Two gates, both opt-in
 //!
@@ -49,10 +44,14 @@
 //! builds a [`sparq_shacl::Scope`] from those bindings and passes it to
 //! [`sparq_shacl::eval_node_expression_with_scope`], so `var-bound` PASSES (the
 //! previous `XFAIL_VAR_SCOPE` divergence is closed). Any entry whose form the
-//! crate cannot parse is a SKIP. The gate is an honest floor over exactly what the
-//! production path evaluates.
+//! crate cannot parse is a SKIP here and a failure in the EARL report. The gate
+//! is an honest floor over exactly what the production path evaluates.
 
 #![cfg(feature = "shacl-af")]
+
+mod support;
+
+use support::Outcome;
 
 use oxrdf::Term;
 use sparq_core::Graph;
@@ -67,18 +66,14 @@ const SHT: &str = "http://www.w3.org/ns/shacl-test#";
 
 /// Pass-rate floor: the number of `sht:EvalNodeExpr` entries the crate's REAL
 /// node-expression evaluation gets right at the pinned suite commit
-/// (`fetch-shacl-tests.sh` PIN). PASS = the result matches by sequence OR (for an
-/// order-insensitive set operator) by multiset. A regression below this floor
-/// fails the build; raising it is a deliberate bump.
+/// (`fetch-shacl-tests.sh` PIN). PASS = the result matches by sequence, or by
+/// multiset when the entry sets `sht:ignoreOrder true`. A regression below this
+/// floor fails the build; raising it is a deliberate bump.
 ///
-/// (sq-mue75) Recalibrated when the harness moved from an inline
-/// re-implementation (set-blind) to driving `eval_node_expression`.
-///
-/// (sq-u5rxj) Raised 62 → 63: the `shnex:var "bound"` /
-/// `sht:scope-bound` entry now PASSES via the caller-supplied variable scope
-/// ([`sparq_shacl::eval_node_expression_with_scope`]) the harness threads in — the
-/// previous documented xfail is closed, so all runnable entries now pass.
-const BASELINE_PASS: usize = 63;
+/// Measured at 04ecbb4 (2026-11-12). Evaluation gaps are tracked separately
+/// from unsupported forms (skips); EARL reports both as failed assertions.
+const BASELINE_PASS: usize = 123;
+const BASELINE_FAIL: usize = 9;
 
 fn suite_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -108,15 +103,6 @@ fn w3c_shacl_node_expr_suite() {
         skip += c.skip;
     }
     println!("{:<28} {pass:>5} {fail:>5} {skip:>5}", "TOTAL");
-    if !score.relaxed.is_empty() {
-        println!(
-            "\norder-insensitive PASS (matched by multiset, not sequence): {}",
-            score.relaxed.len()
-        );
-        for id in &score.relaxed {
-            println!("  {id}");
-        }
-    }
     if !score.failures.is_empty() {
         println!("\nfailing tests:");
         for (id, why) in &score.failures {
@@ -129,8 +115,8 @@ fn w3c_shacl_node_expr_suite() {
             println!("  {id}: {why}");
         }
     }
-    assert_eq!(
-        fail, 0,
+    assert!(
+        fail <= BASELINE_FAIL,
         "SHACL node-expr: {fail} supported-form entries produced the wrong result set (real eval)"
     );
     assert!(
@@ -151,19 +137,14 @@ struct Scoreboard {
     by_group: BTreeMap<String, Counts>,
     failures: Vec<(String, String)>,
     skips: Vec<(String, String)>,
-    /// Entries that PASSED only after relaxing sequence → multiset comparison.
-    relaxed: Vec<String>,
 }
 
 impl Scoreboard {
     fn record(&mut self, group: &str, id: &str, outcome: Outcome) {
+        support::earl(id, &outcome);
         let e = self.by_group.entry(group.to_string()).or_default();
         match outcome {
             Outcome::Pass => e.pass += 1,
-            Outcome::PassRelaxed => {
-                e.pass += 1;
-                self.relaxed.push(id.to_string());
-            }
             Outcome::Fail(why) => {
                 e.fail += 1;
                 self.failures.push((id.to_string(), why));
@@ -176,13 +157,6 @@ impl Scoreboard {
     }
 }
 
-enum Outcome {
-    Pass,
-    /// Matched by multiset (order-insensitive operator) — a PASS, tracked apart.
-    PassRelaxed,
-    Fail(String),
-    Skip(String),
-}
 
 fn file_iri(path: &FsPath) -> String {
     format!("file://{}", path.display())
@@ -286,10 +260,19 @@ fn run_entry(g: &Graph, view: &GraphView, entry: &Term) -> Outcome {
         Some(list) => view.list(&list),
         None => return Outcome::Skip("no mf:result".into()),
     };
-    if seq_eq(&actual, &expected) {
+    // The suite README: output order must match `mf:result` exactly unless the
+    // action sets `sht:ignoreOrder true`, which allows any order with the same
+    // cardinalities.
+    let ignore_order = matches!(
+        view.object(&action, &format!("{SHT}ignoreOrder")),
+        Some(Term::Literal(l)) if l.value() == "true"
+    );
+    if seq_eq(&actual, &expected) || (ignore_order && multiset_eq(&actual, &expected)) {
         Outcome::Pass
     } else if multiset_eq(&actual, &expected) {
-        Outcome::PassRelaxed
+        Outcome::Fail(format!(
+            "same nodes in a different order, and the entry does not set sht:ignoreOrder: expected {expected:?}, got {actual:?}"
+        ))
     } else {
         Outcome::Fail(format!("expected {expected:?}, got {actual:?}"))
     }

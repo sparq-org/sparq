@@ -96,8 +96,8 @@ pub fn validate_with_model(data: &Graph, model: &ShapesModel) -> ValidationRepor
 
 // STRICT validation (sq-0mjfd): returns Err(ShaclFailure) for what a conformant
 // processor REJECTS (the W3C `sht:Failure` outcome) — an unsound SHACL-SPARQL
-// pre-binding (MINUS / VALUES / SERVICE / a sub-SELECT dropping $this / a BIND
-// re-binding it), and (sq-11a) an ILL-FORMED shapes-graph construct: an unparsable
+// pre-binding (MINUS / SERVICE / VALUES mentioning a pre-bound name / AS
+// re-binding one), and (sq-11a) an ILL-FORMED shapes-graph construct: an unparsable
 // sh:path (or >1 sh:path values), a non-integer count/length (a NEGATIVE integer is
 // well-formed and stays a silent skip), a literal sh:datatype/sh:class/sh:nodeKind/
 // sh:pattern or a non-IRI list member, a malformed SHACL list (sh:in/and/or/xone/
@@ -108,7 +108,7 @@ pub fn validate_with_model(data: &Graph, model: &ShapesModel) -> ValidationRepor
 // PROPERTY shape with NO sh:path (an sh:property value, or a node typed
 // sh:PropertyShape), sh:qualifiedValueShape with NEITHER sh:qualifiedMinCount nor
 // sh:qualifiedMaxCount (both qualified components then miss a mandatory parameter),
-// an sh:nodeKind value outside the SIX sh:* kinds, and a PRESENT sh:select /
+// an sh:nodeKind value outside the supported sh:* kinds, and a PRESENT sh:select /
 // sh:sparqlExpr (on sh:sparql constraints AND on the SPARQL-based node expressions
 // of sh:targetNode/sh:values) whose text does not parse as the required query form
 // — FAIL-CLOSED relative to this engine's vendored SPARQL parser: a valid query
@@ -117,15 +117,22 @@ pub fn validate_with_model(data: &Graph, model: &ShapesModel) -> ValidationRepor
 // DATATYPE check (integer-lexical but non-xsd:integer-typed, e.g. "3"^^xsd:string —
 // bare Turtle 3 types as xsd:integer, so ordinary graphs are unaffected), a
 // qualified COUNT without sh:qualifiedValueShape (the symmetric partial-parameter
-// case), ANY sh:entailment declaration (no entailment regime is supported — the
-// SHACL §3.4 unsupported-regime failure), and (feature `shacl-af`) an
-// sh:expression / sh:nodeByExpression structural node expression that does not
+// case), an unsupported sh:entailment declaration (the SHACL §3.4 failure;
+// with `shacl-af`, sh:RulesEntailment and named sh:RuleSet regimes are supported),
+// and (feature `shacl-af`) an sh:expression / sh:nodeByExpression structural
+// node expression that does not
 // build. Construct-local checks, NOT a full SHACL-of-SHACL pass;
 // ShaclFailure.ill_formed / ShapesModel::ill_formed() carry (node, predicate,
 // message). `validate` instead SKIPS all of the above unchanged (its never-fails
 // contract) and (sq-c1v3e) surfaces each record as a ShapeDiagnostic in
 // report.diagnostics (source_component = the offending SHACL predicate IRI).
 pub fn validate_strict(data: &Graph, shapes: &Graph) -> Result<ValidationReport, ShaclFailure>;
+
+// SHACL 1.0 Appendix A admission: also reject local VALUES and subqueries
+// omitting a pre-bound name. validate_strict uses the SHACL 1.2 rules.
+pub fn validate_strict_shacl10(data: &Graph, shapes: &Graph) -> Result<ValidationReport, ShaclFailure>;
+// ShaclFailure.pre_binding carries admission failures, runtime solution-declared
+// failures and rule-execution failures; its historical field name is retained.
 pub fn validate_strict_with_model(data: &Graph, model: &ShapesModel)
     -> Result<ValidationReport, ShaclFailure>;
 
@@ -314,9 +321,17 @@ for r in &report.results {
 
 **SHACL-SPARQL (`sh:sparql`, §5.2)** — a constraint node carries an `sh:select`; it
 runs per focus node with `$this` pre-bound (and `$PATH` on property shapes), and EACH
-returned solution is one violation. `?value`→`sh:value` (defaults to the focus node
+returned solution with `failure` other than boolean true is one violation. A true
+`failure` binding makes strict validation return `Err`; lenient validation records
+a diagnostic and omits that row. `?value`→`sh:value` (defaults to the focus node
 when unprojected), `?path`→`sh:resultPath`, `?message`→`sh:resultMessage`; `{?var}` /
-`{$var}` templating in `sh:message`:
+`{$var}` templating in messages. A bound `?message` takes priority over constraint
+or validator messages, then component messages, then shape messages. Language tags
+are retained. `$currentShape` and `$shapesGraph` are pre-bound for `sh:sparql`;
+the latter identifies a queryable named graph containing the supplied shapes.
+Prefix declarations follow `owl:imports` and inverse `owl:versionIRI`; absent
+`sh:prefixes`, declarations on ontology/data/shapes/rules graph owners are used.
+For example:
 
 ```rust
 let shapes = Graph::load_str(r#"
@@ -346,23 +361,11 @@ re-materialised the whole BGP for every focus node — quadratic) with O(1) quer
 shape; the report is byte-for-byte identical. A constraint whose TOP-level form is
 NOT per-focus-equivalent — a `LIMIT`/`OFFSET`, a `GROUP BY`/aggregate not keyed on
 `$this` (an implicit single group or `GROUP BY ?other`), or `REDUCED` — falls back to
-the per-focus path automatically (a nested aggregate sub-select is always batched: the
-pre-binding rules force it to group by `$this`). `sparq_shacl::sparql_constraint_executions()`
+the per-focus path automatically. Queries with subqueries, EXISTS or nested
+solution modifiers also use the per-focus path, as do queries using
+`$currentShape` or `$shapesGraph`. `sparq_shacl::sparql_constraint_executions()`
 exposes a per-thread `sh:sparql` query-execution counter (snapshot the delta across a
 `validate` call) so a perf guard can assert the batched path fired.
-
-*Id-level core-constraint fast path (perf, sq-7d3dj.33.4).* Core constraints are
-evaluated at the **dictionary-id level**: each shape's `sh:path` is compiled once per
-`validate` (predicate IRIs → ids), the per-focus path walk and dedup run over `u32`
-ids, and the hot value checks (`sh:datatype` / `sh:pattern` / `sh:nodeKind` /
-`sh:minCount`·`maxCount` / `sh:minLength`·`maxLength` / `sh:node`, which also gets an
-id-keyed conformance memo) read the dictionary's zero-copy literal records — a term is
-materialised only for a VIOLATING value, at the report boundary. Compiled `sh:pattern`
-regexes are `Rc`-shared across focus nodes (a per-focus `Regex` clone would rebuild the
-lazy-DFA cache on every match). All of it is internal — no API or feature flag — and the
-report is byte-identical to the Term-level route: a focus node absent from the data
-dictionary (e.g. a `sh:targetNode` naming a ghost IRI) falls back to the Term-level walk,
-and the in-crate `idfast_*` differential tests diff full reports fast-vs-forced-slow.
 
 **SHACL-1.2 core constraints (always on, no feature flag).** The disjunctive
 *set* spellings of `sh:datatype` / `sh:nodeKind` — `sh:datatype ( xsd:string
@@ -378,7 +381,9 @@ SHACL list constraints validate that each value node is a well-formed SHACL list
 and `sh:uniqueValuesFor` (the listed properties' values are unique across the
 shape's target nodes — one IRI, or a SHACL list for a composite key). A value that
 is not a well-formed SHACL list violates the list constraints; a node with no
-values for any `sh:uniqueValuesFor` property is never reported.
+values for any `sh:uniqueValuesFor` property is never reported. Each offending
+value node produces one result without `sh:value`, regardless of how many peers
+share the key. `sh:TripleTerm` is a supported node kind.
 
 **SHACL-1.2 value constraints (always on, sq-sx15d).** `sh:class` also takes a
 disjunctive SHACL-list object (`sh:class ( ex:A ex:B )` — a value conforms iff it is a
@@ -390,7 +395,9 @@ trivial predicate path, so the SHACL-1.0 forms stay unchanged. `sh:someValue [ s
 is EXISTENTIAL (at least one value node must conform to the nested shape; one result on
 the focus/path when none do). `sh:singleLine true` flags string values containing a
 line break (LF/CR/FF/VT). `sh:rootClass C` requires each value node to be `C` or a
-transitive `rdfs:subClassOf`-descendant of it.
+transitive `rdfs:subClassOf`-descendant of it. A list-valued `sh:rootClass`
+accepts an IRI equal to or below any listed class. Each nonconforming reifier
+produces its own `sh:ReifierShapeConstraintComponent` result.
 
 **SHACL-1.2 per-constraint-statement reified-annotation overrides (always on, sq-pb0wm).**
 An RDF-1.2 reified annotation on a single constraint statement —
@@ -425,9 +432,27 @@ Beyond `sh:targetNode`/`Class`/`SubjectsOf`/`ObjectsOf` + implicit class targets
 - **SPARQL-valued targets / value nodes** — `sh:targetNode [ sh:select "…" ]` computes
   focus nodes from the first result variable; on a property shape `sh:values [ sh:select
   "…" ]` / `[ sh:sparqlExpr "EXPR" ]` COMPUTES the value nodes (with `$this` = focus
-  node) instead of traversing `sh:path` (the reported `sh:resultPath` is still the path).
+  node) in addition to the nodes reached by `sh:path`. Constant IRI/literal
+  `sh:values` also supplement the path. `sh:defaultValue` (constant or SPARQL
+  expression) applies only when the union is empty; values are deduplicated.
+  The reported `sh:resultPath` stays the path. SPARQL-valued `sh:deactivated`
+  suppresses validation when its only output is boolean true.
 - A constraint-level **`sh:severity`** on a `sh:SPARQLConstraint` overrides the shape's
   default severity for the results it produces.
+
+`$shapesGraph` is bound to a fresh blank node naming the shapes graph for this
+validation. That named graph is exposed only to queries referencing `$shapesGraph`;
+other queries, including `GRAPH ?g`, see the original data dataset.
+
+Validation installs a scoped engine function registry. It temporarily replaces any
+ambient registry installed with `sparq_engine::with_functions`; ambient functions
+are unavailable to SHACL queries and the previous registry is restored afterwards.
+
+Custom SPARQL functions declared as `sh:ListParameterExpressionFunction` are
+available during validation. Supported body expressions include `shnex:arg`,
+`shnex:count`, `shnex:instancesOf`, `sh:select` and `sh:sparqlExpr`. A call must
+produce exactly one node; blank arguments, missing required arguments and other
+output cardinalities are SPARQL errors.
 
 **Custom SPARQL-based constraint component (`sh:ConstraintComponent`, §6).** Declare
 the component (parameters + an `sh:ask`/`sh:select` validator) IN THE SHAPES GRAPH; it
@@ -474,292 +499,37 @@ NAME of the parameter's `sh:path` IRI (not its `sh:name` display label, §6.2.1)
 let g = sparq_shacl::load_turtle_with_base(&text, &format!("file://{path}")).unwrap();
 ```
 
-**SHACL Advanced Features rules (`sh:rule` + `sh:values`, SHACL-AF) — INFER
-triples** *(opt-in feature `shacl-af`)*. A shape's rules infer new triples for that
-shape's focus nodes (its targets). Three rule types: `sh:TripleRule` (`sh:subject`
-/ `sh:predicate` / `sh:object` node expressions — the inferred triples are the
-cartesian product of the three evaluated sets), `sh:SPARQLRule` (an `sh:construct`
-CONSTRUCT run per focus node with `$this` pre-bound), and the `sh:values` value
-rule (a property shape with a single-predicate `sh:path` and an `sh:values` node
-expression infers `(focus, predicate, v)` per evaluated `v`). Rules honour
-`sh:condition` (fire only for focus nodes conforming to every condition shape),
-`sh:order` (ascending, a rule sees earlier groups' inferences), and
-`sh:deactivated`. The engine **iterates to a fixpoint** (bounded by
-`rules::MAX_ITERATIONS = 100`); the input graph is never mutated.
+## Advanced features and validation details
 
-`Cargo.toml`: `sparq-shacl = { path = "...", features = ["shacl-af"] }`
+See [Advanced Features](references/advanced-features.md) for SHACL-AF rules,
+SHACL 1.2 inference rules and declared rule entailment, node-expression APIs and graph scopes, and [validation details](references/validation-details.md)
+for constraint coverage, prerequisites and conformance ratchets. The 1.2 rule
+executor rejects unsupported processors anywhere among the shapes graph's rules
+and rule sets, including unselected and deactivated nodes and included sets.
 
-```rust
-use sparq_core::Graph;
-let data = Graph::load_str(r#"
-    @prefix ex: <http://example.org/> .
-    ex:alice a ex:Person ; ex:firstName "Alice" .
-"#, "turtle").unwrap();
-let shapes = Graph::load_str(r#"
-    @prefix sh:  <http://www.w3.org/ns/shacl#> .
-    @prefix ex:  <http://example.org/> .
-    @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
-    ex:PersonShape a sh:NodeShape ;
-      sh:targetClass ex:Person ;
-      sh:rule [ a sh:TripleRule ;                  # infer (this, rdf:type, ex:Agent)
-        sh:subject sh:this ; sh:predicate rdf:type ; sh:object ex:Agent ] ;
-      sh:rule [ a sh:SPARQLRule ;                  # infer a label from the first name
-        sh:construct "CONSTRUCT { $this <http://example.org/label> ?n } WHERE { $this <http://example.org/firstName> ?n }" ] .
-"#, "turtle").unwrap();
+With `shacl-af`, `validate` and `validate_with_model` run declared
+`sh:RulesEntailment` or named `sh:RuleSet` regimes through the SHACL 1.2 executor;
+without a declaration they validate the supplied data. `rules12::apply_rules`
+returns `Result<Inference, String>`, while the existing top-level `apply_rules`
+and `expand` retain SHACL-AF behavior. `FactDomain::Asserted` follows `validate`,
+including declared SHACL 1.2 entailment; `FactDomain::AssertedPlusInferred` first
+adds the SHACL-AF closure and then follows the same validation path. Strict
+validation returns rule failures as errors; lenient validation reports diagnostics
+for processing failures. The SPARQL-RL language processor remains unsupported; its
+census is separate from the SHACL 1.2 EARL report, as detailed in the references.
 
-// The INFERRED triples only (data is not mutated):
-let inf = sparq_shacl::apply_rules(&data, &shapes);   // -> sparq_shacl::Inference
-//   inf.triples : Vec<oxrdf::Triple>   inf.iterations : usize   inf.capped : bool
-// Or get a fresh graph of data ∪ inferred, ready to query/validate:
-let expanded: Graph = sparq_shacl::expand(&data, &shapes);
-
-// Or select the validation fact domain directly. These APIs are also gated by
-// `shacl-af`; the existing `validate` function remains asserted-only.
-use sparq_shacl::{validate_with_domain, FactDomain};
-let asserted = validate_with_domain(&data, &shapes, FactDomain::Asserted);
-let closure = validate_with_domain(&data, &shapes, FactDomain::AssertedPlusInferred);
-```
-
-**Node-expression algebra** (operand of `sh:subject`/`sh:predicate`/`sh:object`,
-the `sh:values` value rule, and `sh:expression`): `sh:this` (focus node); a
-constant IRI/literal; a path expression `[ sh:path P ; sh:nodes N? ]` (any SHACL
-property path; the optional `sh:nodes` is itself a node expression giving the start
-nodes, default `sh:this`); a filter-shape expression `[ sh:filterShape S ; sh:nodes
-N ]` (the nodes of `N` conforming to shape `S`); `[ sh:intersection ( … ) ]`; `[
-sh:union ( … ) ]`; a bare `rdf:list` (a SHACL 1.2 list expression — its members in
-order, preserving duplicates); and the **function-expression form** (sq-mk9n). These
-nest.
-
-**Function registry (sq-mk9n):** the SHACL 1.2 built-in node-expression operators
-(`shnex:`/`sh:`) — `concat`, `count`, `sum`, `min`, `max`, `distinct`,
-`if`/`then`/`else`, `exists`, `limit`, `offset`, `instancesOf`, `nodesMatching`,
-`flatMap`, `findFirst`, `matchAll`, `remove`, `orderBy`, `var` (`"focusNode"` ⇒
-the focus; any other name resolves against a caller-supplied `Scope`, sq-u5rxj) —
-plus a custom `sh:SPARQLFunction` IRI applied to a `sh:list` of arguments
-(dispatched through the SPARQL engine with the ordered `sh:parameter` variables
-pre-bound). An unregistered function IRI is dropped (lenient), inferring nothing.
-
-**Caller-supplied variable scope (sq-u5rxj):** `eval_node_expression_with_scope(data,
-shapes, expr, focus, &Scope)` threads a `Scope` (`FxHashMap<String, Vec<Term>>`) of
-variable name → bound node set that a `shnex:var "<name>"` resolves against (the W3C
-suite's `sht:scope-<name>` injection); `eval_node_expression` is the empty-scope
-wrapper.
-
-**`sh:values` value rule:** a property shape with a single-predicate `sh:path` and
-an `sh:values` node expression infers `(focus, predicate, v)` for each evaluated
-`v`. A value rule on a `sh:property` child of a targeted node shape ranges over the
-parent's focus nodes.
-
-**`sh:expression` constraint** (`sh:ExpressionConstraintComponent`): a value node
-violates when its `sh:expression` node expression does NOT evaluate to `{ true }`
-(value = focus on a node shape; each path value on a property shape).
-
-**`sh:nodeByExpression` constraint** (`sh:NodeByExpressionConstraintComponent`):
-like `sh:node`, but the node shape is *computed* by a node expression. For each
-value node `v`, the expression is evaluated against `v` as focus to a set of
-node-shape terms; `v` violates when it does NOT conform to one of them. A constant
-IRI expression is the `sh:node` special case; an expression result naming no parsed
-shape is skipped (lenient).
-
-**Explicit graph scopes + dataset-preserving expansion (gh-6614, a capability
-addition — not a conformance fix).** `apply_rules` / `expand` see the DEFAULT graph
-only and `expand` drops named graphs (unchanged). For a dataset (`Graph` with named
-graphs, e.g. from `Graph::load_dataset(.., "nquads")`) choose the input scope and the
-derived-triple destination explicitly:
-
-```rust
-use sparq_shacl::{apply_rules_in_scope, expand_dataset, Destination, GraphScope};
-let g = |s: &str| oxrdf::Term::NamedNode(oxrdf::NamedNode::new(s).unwrap());
-// Scope: GraphScope::Default | Named(name) | Union { default: bool, named: Vec<Term> }
-let scope = GraphScope::Union { default: false, named: vec![g("urn:ex:g1"), g("urn:ex:g2")] };
-let inf = apply_rules_in_scope(&data, &shapes, &scope);           // -> Inference
-let dest = oxrdf::NamedOrBlankNode::NamedNode(oxrdf::NamedNode::new("urn:ex:derived").unwrap());
-let out = expand_dataset(&data, &shapes, &scope, &Destination::Named(dest)); // IRI or blank node only
-// out.dataset: Graph (ALL asserted graphs preserved, derived triples in the destination)
-// out.inference: Inference (triples / iterations / capped — diagnostics are not hidden)
-```
-
-Semantics: the selected graphs are merged into the working default graph that
-targets, paths, `sh:condition`, node expressions and SPARQL rules evaluate against
-(cross-graph joins work); the selected NAMED graphs are also the only ones a
-`sh:SPARQLRule` body reaches via `GRAPH <g>` / `GRAPH ?g` — an unselected graph is
-indistinguishable from an absent one, and `FROM` / `FROM NAMED` cannot widen that.
-Nothing is unioned implicitly (`Union { default: true, .. }` is the only way to add
-the default graph to a union); an absent graph name is the empty graph. Inferred
-triples feed later passes through the working scope regardless of `Destination`.
-Materialization dedups against what the destination already asserts (an identical
-triple in another graph is kept there); a `Destination::Named` graph the dataset
-lacks is appended. The input is never mutated. `GraphScope::Default` ≡ `apply_rules`.
-
-API: `apply_rules(data, shapes)`, `apply_rules_with_model(data, shapes, &model)`
-(amortise shape parsing), `expand(data, shapes) -> Graph`,
-`apply_rules_in_scope(data, shapes, &GraphScope)` /
-`apply_rules_in_scope_with_model(data, shapes, &model, &GraphScope)`,
-`expand_dataset(data, shapes, &GraphScope, &Destination) -> DatasetExpansion`,
-`validate_with_domain(data, shapes, FactDomain)` and
-`validate_with_domain_and_model(data, shapes, &model, FactDomain)` (choose asserted
-facts or the data-plus-inferred closure for validation), the node-expression
-seam `eval_node_expression(data, shapes, expr, focus) -> Option<Vec<Term>>`, and
-the conformance primitive `conforms(data, shapes, shape_node) -> ConformanceCheck`
-(call `.holds(node)` per focus). A gated W3C harness (`tests/w3c_node_expr.rs`)
-drives the `sht:EvalNodeExpr` suite — all evaluation entries pass; a companion
-harness (`tests/w3c_node_expr_constraints.rs`) drives the suite's two `sht:Validate`
-entries (`sh:expression` / `sh:nodeByExpression`) end-to-end (both self-skip when
-the suite is not fetched). Because those W3C harnesses self-skip on a fresh
-checkout, the node-expression **function operators** are also pinned by a
-fixture-independent unit suite (`tests/node_expr_operators.rs`, sq-qcnn) that drives
-every built-in (`concat`/`count`/`sum`/`min`/`max`/`distinct`/`if`/`exists`/`limit`/
-`offset`/`flatMap`/`orderBy`/`findFirst`/`matchAll`/`remove`/`instancesOf`/
-`nodesMatching`/`var` + custom `sh:SPARQLFunction`) through the public
-`eval_node_expression` seam and asserts hand-derived result sets — so the operator
-semantics are gated even when the suite is absent. The SCS parser's fail-closed
-error paths and the SHACL-SPARQL §5.2/§6 edge cases get the same treatment
-(`tests/scs_error_paths.rs` under `scs`, `tests/sparql_edge_cases.rs`). The
-pre-binding's deep-algebra arms (`push_values_down` over Group / Slice / Distinct /
-Reduced / OrderBy / Minus-left / LeftJoin-left, plus the multi-scope arms — both
-UNION branches, sibling joins, both LATERAL sides, and a projecting sub-SELECT,
-sq-mue75 / GH #4291) and the
-fail-closed runtime-error paths (an inexpressible blank-node focus, a `SERVICE`-clause
-runtime query error) are pinned directly by the in-`src/sparql.rs` unit module
-(`sparql::tests`, sq-qcnn.1 / sq-mue75): each arm is asserted both structurally (the
-`VALUES` table lands BELOW the modifier / inside every branch so `$this`/`$value`/
-`$param` stays in scope) and semantically (a real validator over real data yields the
-SHACL-spec-correct conforms/violations).
-
-## Gotchas / feature flags / prerequisites
-
-- **Base SHACL is engaged purely by depending on `sparq-shacl`** (no feature
-  needed). It transitively pulls in `sparq-engine` (to run `sh:sparql`/§6 queries).
-  Neither is in the **default** wasm dependency graph, so the default browser bundle
-  stays SHACL-free; they enter the wasm graph ONLY when a consumer opts in via
-  `sparq-wasm`'s non-default `shacl` feature, on which build `sparq-engine`'s defaults
-  (rayon/regex/digest) are dropped so the bundle stays lean. The native build is
-  unaffected (full engine defaults).
-- **SHACL-AF rules (`sh:rule`) are OPT-IN behind the `shacl-af` cargo feature.**
-  With the feature off, the base validation path carries zero rule code/parse cost
-  and the `apply_rules` / `apply_rules_with_model` / `expand` / `Inference` /
-  `apply_rules_in_scope*` / `expand_dataset` / `GraphScope` / `Destination` /
-  `DatasetExpansion` / `FactDomain` / `validate_with_domain*` symbols are absent. SHACL-AF rules are an
-  INFERENCE step (they produce triples), not part of the existing `validate(..)`
-  path. Use `FactDomain::AssertedPlusInferred` when constraints should see the rule
-  closure without expanding manually.
-- **The SHACL Compact Syntax parser is OPT-IN behind the `scs` cargo feature.**
-  With it off the `scs` module and the `parse_scs` / `parse_scs_to_graph` / `ScsError`
-  / `DEFAULT_BASE` symbols are absent (zero parser code compiled in). It adds no new
-  dependencies. Coverage is honest: any construct outside the supported grammar
-  returns a typed `ScsError` rather than mis-parsing. Both the SCS parse and the
-  reference Turtle must resolve relative IRIs against the same `base` to agree, so
-  the round-trip test passes the fixture's `BASE` (or `DEFAULT_BASE`) to both sides.
-- **Shapes-graph assembly is OPT-IN behind the `imports` cargo feature** (sq-uz0).
-  With it off the `imports` module and the `resolve_shapes_graph` / `resolve_imports`
-  / `ShapesGraphResolution` symbols are absent (zero assembly code compiled in; no
-  new dependencies). The library never dereferences an IRI itself — the loader
-  callback does — so there is no network / no SSRF surface here by construction.
-- **Rule fixpoint is bounded.** `apply_rules` iterates the rule schedule until a
-  pass infers nothing, capped at `rules::MAX_ITERATIONS` (100); `Inference::capped`
-  flags a non-terminating rule set (e.g. a CONSTRUCT minting a fresh blank node each
-  pass) whose inferred set may be incomplete.
-- **`sh:conforms` uses the SHACL-1.2 default disallowed set {Violation,Warning,Info}**
-  (sq-sx15d): a Debug/Trace-only report conforms; a Warning/Info result does NOT. For a
-  stricter "only Violation fails" gate use `conforms_violations_only()`; for a custom
-  `sh:conformanceDisallows` set use `conforms_with_disallowed(&[..])`.
-- **Ill-formed shapes are skipped by `validate`, reported as a failure by
-  `validate_strict` (sq-11a, sq-ehq4g).** A shape never declared, an unparsable path,
-  or an `sh:select` that fails to parse (e.g. undeclared prefix) contributes no
-  results; the rest of validation still runs. `validate` never returns a
-  `Result`/panics on bad shapes — so a silently-empty report can mean "no targets"
-  rather than "conforms". When the distinction matters (CI shape linting, the suite's
-  `sht:Failure` entries), `validate_strict` rejects ill-formed constructs with
-  `ShaclFailure.ill_formed` (see the strict-validation list above). A PRESENT
-  `sh:select`/`sh:sparqlExpr` whose text does not parse is rejected strictly too
-  (sq-ehq4g) — FAIL-CLOSED relative to this engine's vendored SPARQL parser, so a
-  valid query using syntax the parser lacks is also rejected; prefer fixing the query
-  (or filing the parser gap) over weakening the strict gate.
-- **An uncompilable `sh:pattern` is SKIPPED, not fail-closed (sq-lz99x).** The Rust
-  `regex` crate has no lookahead/lookbehind — neither does the XML Schema regex flavour
-  the SHACL spec ties `sh:pattern` to — so e.g. `^(?!(TODO|TBD)).*` does not compile.
-  That constraint is skipped (it reports no violations) and surfaced once in
-  `report.diagnostics` (a `ShapeDiagnostic` carrying the shape, component, and the
-  `regex` crate's error), so the skip is not silent. Earlier this wrongly flagged
-  EVERY value. To express a "must NOT start with X" check, use a POSITIVE-match
-  `sh:sparql` `REGEX(?str, "^\\s*(TODO|...)")` constraint (flag when it matches) instead.
-- **XPath-regex divergences are translated, not passed through (sq-8ro).** `sh:pattern`
-  is matched by the Rust `regex` crate, but the XPath/XSD constructs it lacks are
-  translated first (`eval.rs::compose_pattern`): the `q` flag in `sh:flags` gives XPath
-  F&O literal-pattern mode (only `i` combines with it, matching the engine's SPARQL
-  `REGEX`), and `\i` / `\I` / `\c` / `\C` (XML NameStartChar / NameChar classes and
-  complements) expand to explicit character classes — including inside `[...]`, via
-  nested classes. Look-around remains genuinely unsupported → the sq-lz99x skip path.
-- **Temporal comparison is exact, and cross-family pairs are INCOMPARABLE (GH #3526).**
-  `sh:lessThan`, `sh:lessThanOrEquals` and `sh:min/maxInclusive` / `sh:min/maxExclusive`
-  decide `xsd:dateTime` / `xsd:dateTimeStamp` / `xsd:date` / `xsd:time` through the
-  engine's shared exact comparator (`sparq_core::temporal::ExactTemporal`), not on f64
-  instants, so the ±14h mixed-timezone indeterminate window is decided on exact instants
-  rather than rounded. A temporal paired with another family compares as nothing — a date
-  against a dateTime, either against an `xsd:time`, a temporal against a non-temporal —
-  and so does an ill-formed raw lexical (a timezone-free `xsd:dateTimeStamp`, a padded
-  value: XSD whitespace processing does not apply to an RDF literal). Incomparable means a
-  validation result, not a silent pass. `sh:in` and `sh:hasValue` are RDF-**term**
-  membership (SHACL §§4.8.1–4.8.2), not value equality, so two distinct literals denoting
-  one instant are different members.
-- **Numeric comparison is exact for `xsd:decimal` and the integer family (GH #7294).** The
-  same six components compare two decimal / integer values by their lexicals, at any length,
-  so values that differ only beyond `f64` precision (`1.000000000000000015` against
-  `1.00000000000000002`, integers past 2^53) are told apart. A pair with an `xsd:float` or
-  `xsd:double` operand is promoted to the least common floating type, as SPARQL `<` is specified,
-  each operand converted once from its lexical whatever its length. `NaN` and an ill-typed
-  numeric lexical (`"1.5"^^xsd:integer`, an out-of-range `xsd:byte`, a padded value) compare
-  as nothing. A numeric bound is read once per validation run.
 - **SHACL-AF numeric node expressions preserve exact digits.** With `shacl-af`,
   `min`, `max` and `orderBy` share the range constraints' any-length exact
   integer/decimal comparison and refine mixed floating ties by exact value,
   matching engine numeric sorting. `min`/`max` retain the first member on equal
-  values and keep NaN unordered; `orderBy` sorts NaN first. `sum` adds through the
-  bounded exact decimal tower: integer-only sums stay `xsd:integer`, a decimal
+  values and keep NaN unordered; `orderBy` sorts NaN first in ascending order.
+  `sum` adds through the bounded exact decimal tower: integer-only sums stay
+  `xsd:integer`, a decimal
   operand produces `xsd:decimal`, and float/double operands promote as in engine
   arithmetic (a double operand produces `xsd:double`). Arithmetic overflow follows
   the engine's floating fallback; a valid operand beyond the arithmetic tower
-  yields no sum result. Non-numeric and ill-typed members are ignored; empty
+  yields no sum result. `sum` ignores non-numeric and ill-typed members; empty
   input sums to integer zero.
-- **Results are NOT deduplicated** across traversal routes / component occurrences — a
-  nested shape reached via two parents reports twice (intentional, matches the suite).
-- **Recursion is treated as conforming.** Re-entering the same (focus, shape) pair
-  counts as conforming (SHACL leaves recursion undefined); cyclic `sh:node`/`sh:property`
-  terminate without stack overflow.
-- **`sh:sparql` pre-binding:** `$this` (and `$PATH` on property shapes) is injected via
-  an algebra-level VALUES on the parsed query — it lands below solution modifiers (so
-  `LIMIT`/`ORDER BY`/`DISTINCT` behave correctly) AND propagates into every scope the
-  variable can reach: both UNION branches, sibling joins, both sides of a LATERAL
-  (its right side is a required part evaluated per left solution, so both sides take
-  the pre-binding exactly as a JOIN's siblings do — GH #4291), and a sub-SELECT that
-  explicitly projects the variable (sq-mue75). A `SELECT *` sub-select re-scopes the
-  variable, so the VALUES is joined above it (the spec-rejection case). Each `sh:sparql`
-  result carries `sh:sourceConstraint` (the `sh:SPARQLConstraint` node).  `sh:prefixes`
-  chases `sh:declare`(`sh:prefix`/`sh:namespace`) transitively through `owl:imports`.
-- **§6 limits:** the W3C `sparql/component/*` suite `owl:imports` the external
-  `http://datashapes.org/dash` vocabulary; it is run offline (`tests/w3c_sparql_component.rs`)
-  by resolving that import against a vendored, minimal pinned excerpt at
-  `crates/sparq-shacl/tests/vendor/dash.ttl`. The `sparql/pre-binding` *rejection*
-  channel is `validate_strict` (see above). Still out of scope: `$shapesGraph` — see the
-  crate's open beads (`bd list -l area:sparq-shacl`).
-- **W3C conformance:** 98/98 of the *1.0/1.1* core `sht:Validate` suite passes
-  (`--test w3c_core`). The **full vendored SHACL 1.2** tree is gated by a ratchet
-  (sq-6glcr) in BOTH feature states: full core **136** (default) / **137** (`shacl-af`)
-  — every in-scope core entry passes, 0 honest FAILs (sq-pb0wm closed the final
-  per-statement reified-annotation gap) — (`--test w3c_core_full_shacl12`), 1.2 SPARQL
-  **24** of 24 incl. 7 expected-rejection
-  `sht:Failure` entries (`--test w3c_sparql_shacl12`), node-expr **63**, every runnable
-  entry (driven through the REAL `eval_node_expression_with_scope`, `--test w3c_node_expr`,
-  `shacl-af`; the former `sht:scope-*` var xfail is closed, sq-u5rxj). Pass must not drop, the gap must
-  not grow — the not-yet-passing entries are the honest per-category gap map in
-  `research/shacl12-conformance-gap.md` (clustered into beads sq-sx15d / sq-rnkdh /
-  sq-mue75 / sq-0mjfd under epic sq-waf9o). Reproduce with
-  `crates/sparq-shacl/fetch-shacl-tests.sh` then
-  `cargo test -p sparq-shacl --test w3c_core` (self-skips if the gitignored suite is absent).
-- §6 SPARQL-based constraint *components* are implemented and tested
-  (`tests/sparql_components.rs` plus the W3C `sparql/component` sub-suite in
-  `tests/w3c_sparql_component.rs`); the crate README documents them under its
-  "SHACL-SPARQL + custom §6 components" feature bullet.
 
 ## See also
 

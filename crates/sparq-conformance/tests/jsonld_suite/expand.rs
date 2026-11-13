@@ -138,7 +138,7 @@ pub fn run_expand_native(root: &Path) -> Score {
         if is_negative {
             let want_code = e.expect_error_code.as_deref().unwrap_or("");
             match &outcome {
-                Err(err) if err.code().as_str() == want_code => s.pass(),
+                Err(err) if err.code().as_str() == want_code => s.pass(&e.id),
                 Err(err) => s.fail(
                     &e.id,
                     format!(
@@ -203,7 +203,7 @@ pub fn run_expand_native(root: &Path) -> Score {
             }
         }
         if json_ld_equal(&got, &want) {
-            s.pass();
+            s.pass(&e.id);
         } else {
             s.fail(
                 &e.id,

@@ -70,9 +70,15 @@ Updates are coalesced for each author and flushed on a 500 ms schedule. Separate
 authors produce separate resources through the mode's ordinary creation path.
 LWS creator metadata records the author; Solid retains the same server metadata
 beside the binary resource. A failed flush remains queued, with exponential
-retry delays capped at thirty seconds while the room remains live. Retries wait
-when another retained resource would exceed a replay or file bound. A persistence
-retry must still pass the ordinary access check. Internal create notifications
+retry delays capped at thirty seconds while the room remains live. Before retrying
+a failed create, the relay refreshes the log listing and matches the attempted
+update by its envelope timestamp and suffix. A matching record clears only the
+confirmed batch revision; newer queued edits remain pending. Records older than
+the current snapshot cutoff must still be persisted again. A failed refresh keeps
+the batch queued and backs off without another create. Reconciliation runs before
+the replay and file capacity checks; an already stored batch needs no extra copy.
+Retries wait when another retained resource would exceed a replay or file bound.
+A persistence retry must still pass the ordinary access check. Internal create notifications
 bring log-mode appends into live rooms; no periodic container scan is used.
 Queued updates are timestamped at least as late as the newest observed log header
 when flushed, including after a snapshot arrives during a retry. If a newer
@@ -101,8 +107,13 @@ The replacement snapshot sorts after all folded snapshots. If advancing a maximu
 suffix requires a new timestamp, that timestamp must have no retained update;
 compaction waits when an ordering boundary cannot be established.
 Only confirmed snapshot creation permits ordinary authorized deletion. Folded
-snapshots are deleted first; if any snapshot deletion fails, all folded update
-files remain for a later cycle. Restart reconstructs a room from those same files.
+snapshots are deleted first. `RoomStore::delete` adapters report an authorized
+missing member as `Fault::NotFound`; the relay treats it as already deleted and
+continues cleanup in the same cycle. A Solid deletion denial is treated as absence
+only when the adapter confirms that the member is missing; a present member or
+a failed existence check keeps the failure. Other deletion failures keep the remaining
+folded update files for a later cycle. Restart reconstructs a room from those
+same files.
 Loading and compaction do not hold the service-wide room admission lock during
 storage operations. Reload also reads storage outside the room lock, so connected
 peers can edit, exchange awareness and sync while a listing is pending. Its refreshed
