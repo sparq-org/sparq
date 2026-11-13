@@ -55,6 +55,11 @@ impl Session {
     fn has_sum(&self) -> bool {
         self.parameters.statistic == Statistic::CountAndSum
     }
+    fn input_contributors(&self, cs: &[&Contribution]) -> usize {
+        cs.iter()
+            .filter(|c| !self.parameters.roster[c.index as usize].compute_only)
+            .count()
+    }
     fn input_bounds(&self, i: u32) -> Result<(u64, u64)> {
         Ok(if self.party(i)?.compute_only {
             (0, 0)
@@ -489,7 +494,7 @@ pub fn receive_and_partial(
     let cs = verified_contributions(s, cs)?;
     s.identity(index, keys)?;
     guard(
-        cs.len() >= s.parameters.min_contributors as usize,
+        s.input_contributors(&cs) >= s.parameters.min_contributors as usize,
         Some(index),
         "too-few-contributors",
     )?;
@@ -718,7 +723,7 @@ fn verify_threshold(
     verify_proof(s, b"threshold-verdict", i, proof, &points, 64)
 }
 
-/// Decrypt peers' partials and finish, or refuse immediately for a roster below the minimum.
+/// Decrypt peers' partials and finish, or refuse when too few parties commit inputs.
 /// `local` is this finisher's private partial. `messages` has one packet from every peer.
 pub fn finish(
     s: &Session,
@@ -731,7 +736,7 @@ pub fn finish(
     let cs = verified_contributions(s, cs)?;
     s.identity(index, keys)?;
     let digest = contributions_digest(&cs);
-    let outcome = if cs.len() < s.parameters.min_contributors as usize {
+    let outcome = if s.input_contributors(&cs) < s.parameters.min_contributors as usize {
         Outcome::TooFewContributors {}
     } else {
         let local = local.ok_or_else(|| error(Some(index), "missing-partial"))?;
@@ -826,7 +831,7 @@ pub fn verify_outcome(s: &Session, cs: &[Contribution], output: &SignedOutcome) 
         "contributions-digest",
     )?;
     verify_signature(s.party(i)?, &outcome_bytes(output), &output.signature, i)?;
-    let enough = cs.len() >= s.parameters.min_contributors as usize;
+    let enough = s.input_contributors(&cs) >= s.parameters.min_contributors as usize;
     if matches!(output.outcome, Outcome::TooFewContributors {}) {
         return guard(!enough, Some(i), "enough-contributors");
     }
@@ -918,7 +923,9 @@ pub fn simulate_session(parameters: Parameters, parties: &[PartyInput]) -> Resul
         .iter()
         .map(|s| s.contribution.clone())
         .collect::<Vec<_>>();
-    let partials = if parties.len() >= session.parameters.min_contributors as usize {
+    let partials = if session.input_contributors(&contributions.iter().collect::<Vec<_>>())
+        >= session.parameters.min_contributors as usize
+    {
         parties
             .iter()
             .enumerate()

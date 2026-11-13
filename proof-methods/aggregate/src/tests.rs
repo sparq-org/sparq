@@ -1547,6 +1547,7 @@ fn simulation_inputs(compute_only: bool, sums: bool) -> (Parameters, Vec<PartyIn
         Statistic::CountOnly
     };
     p.min_group = if compute_only { 4 } else { 6 };
+    p.min_contributors = if compute_only { 2 } else { 3 };
     p.roster[2].compute_only = compute_only;
     let parties = f
         .keys
@@ -2089,7 +2090,7 @@ fn finisher_rechecks_inputs_even_with_coherent_signed_partials() {
 }
 
 #[test]
-fn all_compute_only_parties_compare_zero_totals() {
+fn all_compute_only_parties_refuse_without_partials() {
     for op in [ThresholdOp::GreaterOrEqual, ThresholdOp::LessThan] {
         let (mut p, mut parties) = simulation_inputs(true, true);
         p.min_group = 0;
@@ -2105,8 +2106,199 @@ fn all_compute_only_parties_compare_zero_totals() {
         }
         let f = simulate_session(p, &parties).unwrap();
         verify_outcome(&f.session, &f.contributions, &f.outcome).unwrap();
-        assert!(
-            matches!(f.outcome.outcome, Outcome::ThresholdVerdict { verdict, .. } if verdict == (op == ThresholdOp::GreaterOrEqual))
+        assert!(matches!(f.outcome.outcome, Outcome::TooFewContributors {}));
+        assert!(f.partials.is_empty());
+    }
+}
+
+#[test]
+fn only_input_parties_satisfy_contributor_minimum() {
+    for sums in [false, true] {
+        for input_parties in [2, 3] {
+            let (mut p, mut parties) = simulation_inputs(true, sums);
+            p.min_contributors = 3;
+            if input_parties == 3 {
+                let key = generate_keys(Some([4; 32]));
+                p.roster.push(Party {
+                    party_iri: "urn:party:3".into(),
+                    compute_only: false,
+                    ed25519_public_key: key.ed25519_public_key,
+                    x25519_public_key: key.x25519_public_key,
+                });
+                parties.push(PartyInput {
+                    keys: key.secret,
+                    input: Input {
+                        count: 2,
+                        sum: sums.then(|| "13".into()),
+                    },
+                });
+            }
+            let f = simulate_session(p, &parties).unwrap();
+            verify_outcome(&f.session, &f.contributions, &f.outcome).unwrap();
+            if input_parties == 2 {
+                assert!(matches!(f.outcome.outcome, Outcome::TooFewContributors {}));
+                assert!(f.partials.is_empty());
+                let state = contribute(&f.session, 2, &parties[2].keys, &parties[2].input).unwrap();
+                reject(
+                    receive_and_partial(
+                        &f.session,
+                        2,
+                        &parties[2].keys,
+                        &f.contributions,
+                        &state.local,
+                    ),
+                    Some(2),
+                    "too-few-contributors",
+                );
+                let output =
+                    finish(&f.session, 2, &parties[2].keys, &f.contributions, None, &[]).unwrap();
+                assert!(matches!(output.outcome, Outcome::TooFewContributors {}));
+                verify_outcome(&f.session, &f.contributions, &output).unwrap();
+                let mut forged = f.outcome.clone();
+                forged.outcome = Outcome::Release {
+                    count: 4,
+                    rho: sb(Scalar::ZERO),
+                    sum: sums.then(|| "21".into()),
+                    sigma: sums.then(|| sb(Scalar::ZERO)),
+                };
+                resign_simulation(&f, &mut forged);
+                reject(
+                    verify_outcome(&f.session, &f.contributions, &forged),
+                    Some(0),
+                    "too-few-contributors",
+                );
+            } else {
+                assert!(
+                    matches!(&f.outcome.outcome, Outcome::Release { count: 6, sum, .. } if *sum == sums.then(|| "34".into()))
+                );
+                assert_eq!(f.partials.len(), 4);
+                let mut forged = f.outcome.clone();
+                forged.outcome = Outcome::TooFewContributors {};
+                resign_simulation(&f, &mut forged);
+                reject(
+                    verify_outcome(&f.session, &f.contributions, &forged),
+                    Some(0),
+                    "enough-contributors",
+                );
+            }
+        }
+    }
+}
+
+fn invalid_signatures(value: serde_json::Value) -> Vec<serde_json::Value> {
+    let mut variants = Vec::new();
+    let mut missing = value.clone();
+    missing.as_object_mut().unwrap().remove("signature");
+    variants.push(missing);
+    for signature in [
+        serde_json::Value::Null,
+        serde_json::json!(false),
+        serde_json::json!(7),
+        serde_json::json!({"invalid": []}),
+        serde_json::json!(["invalid"]),
+        serde_json::json!("!"),
+        serde_json::json!("AA=="),
+        serde_json::json!("AA"),
+        serde_json::json!(Bytes(vec![0; 64])),
+    ] {
+        let mut malformed = value.clone();
+        malformed["signature"] = signature;
+        variants.push(malformed);
+    }
+    variants
+}
+
+#[test]
+fn contribution_json_signature_errors_use_attestation_failure() {
+    let f = fixture();
+    for value in invalid_signatures(serde_json::to_value(&f.contributions[1]).unwrap()) {
+        let mut cs = f.contributions.clone();
+        cs[1] = serde_json::from_value(value).unwrap();
+        let e = f.receive(&cs).err().unwrap();
+        assert_eq!(
+            e,
+            Error {
+                code: "input-not-attested".into(),
+                index: Some(1),
+                check: "signature".into()
+            }
+        );
+        assert_eq!(verify_outcome(&f.session, &cs, &f.output).unwrap_err(), e);
+    }
+    let mut other = serde_json::to_value(&f.contributions[1]).unwrap();
+    other.as_object_mut().unwrap().remove("range_proof");
+    assert!(serde_json::from_value::<Contribution>(other).is_err());
+}
+
+#[test]
+fn partial_json_signature_errors_use_existing_signature_failure() {
+    let f = fixture();
+    for index in [0, 1] {
+        for value in invalid_signatures(serde_json::to_value(&f.partials[index].local).unwrap()) {
+            let mut messages = f.messages(0);
+            let mut local = f.partials[0].local.clone();
+            if index == 0 {
+                local = serde_json::from_value(value).unwrap();
+            } else {
+                let message = messages.iter_mut().find(|m| m.index == 1).unwrap();
+                message.packet = seal(
+                    &f.session,
+                    b"partial",
+                    1,
+                    0,
+                    &f.output.contributions_digest,
+                    &serde_json::to_vec(&value).unwrap(),
+                    &mut OsRng,
+                )
+                .unwrap();
+            }
+            let e = f.finish(Some(&local), &messages).unwrap_err();
+            assert_eq!(
+                e,
+                Error {
+                    code: "protocol-error".into(),
+                    index: Some(index as u32),
+                    check: "signature".into()
+                }
+            );
+        }
+    }
+    let mut other = serde_json::to_value(&f.partials[0].local).unwrap();
+    other.as_object_mut().unwrap().remove("shares");
+    assert!(serde_json::from_value::<Partial>(other.clone()).is_err());
+    let mut messages = f.messages(0);
+    messages[0].packet = seal(
+        &f.session,
+        b"partial",
+        1,
+        0,
+        &f.output.contributions_digest,
+        &serde_json::to_vec(&other).unwrap(),
+        &mut OsRng,
+    )
+    .unwrap();
+    reject(
+        f.finish(Some(&f.partials[0].local), &messages),
+        Some(1),
+        "partial-encoding",
+    );
+}
+
+#[test]
+fn outcome_json_signature_errors_use_existing_signature_failure() {
+    let f = fixture();
+    for value in invalid_signatures(serde_json::to_value(&f.output).unwrap()) {
+        let output: SignedOutcome = serde_json::from_value(value).unwrap();
+        assert_eq!(
+            f.verify(&output).unwrap_err(),
+            Error {
+                code: "protocol-error".into(),
+                index: Some(0),
+                check: "signature".into()
+            }
         );
     }
+    let mut other = serde_json::to_value(&f.output).unwrap();
+    other.as_object_mut().unwrap().remove("outcome");
+    assert!(serde_json::from_value::<SignedOutcome>(other).is_err());
 }
