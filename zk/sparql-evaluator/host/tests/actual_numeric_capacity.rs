@@ -9,11 +9,24 @@ use std::path::PathBuf;
 
 #[test]
 fn actual_guest_rejects_numeric_capacity_after_a_successful_control() {
-    let corpus = serde_json::json!({"cases": [{
+    let mut corpus = serde_json::json!({"cases": [{
         "id": "numeric-capacity-positive-control",
         "query": "SELECT (20 + 22 AS ?x) {}",
         "expected_rows": [["\"42\"^^<http://www.w3.org/2001/XMLSchema#integer>"]]
     }]});
+    let numeric: serde_json::Value = serde_json::from_str(include_str!(
+        "../../fixtures/conformance/numeric-capacity.json"
+    ))
+    .unwrap();
+    assert_eq!(numeric["cases"].as_array().unwrap().len(), 28);
+    corpus["cases"].as_array_mut().unwrap().extend(
+        numeric["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|case| case["expectation_kind"] != "implementation_capacity")
+            .cloned(),
+    );
     let r0vm = std::env::var_os("RISC0_SERVER_PATH")
         .map(PathBuf::from)
         .expect("real local r0vm executable is required");
@@ -56,23 +69,37 @@ fn actual_guest_rejects_numeric_capacity_after_a_successful_control() {
             .unwrap_or_else(|e| panic!("{}: actual guest execution {e:#}", case["id"]));
         let journal: Journal = session.journal.decode().unwrap();
         bind_journal(&journal, &input.request).unwrap();
-        let CanonicalResult::Select { rows, .. } = journal.result else {
-            panic!("{}: SELECT expected", case["id"])
-        };
-        assert_eq!(
-            serde_json::json!(rows),
-            case["expected_rows"],
-            "{}",
-            case["id"]
-        );
+        if let Some(expected) = case.get("expected_result") {
+            assert_eq!(
+                serde_json::json!(journal.result),
+                *expected,
+                "{}",
+                case["id"]
+            );
+        } else {
+            let CanonicalResult::Select { rows, .. } = journal.result else {
+                panic!("{}: SELECT expected", case["id"])
+            };
+            assert_eq!(
+                serde_json::json!(rows),
+                case["expected_rows"],
+                "{}",
+                case["id"]
+            );
+        }
     }
-    assert_eq!(rec_cases, 1, "execute the successful arithmetic control");
+    assert_eq!(
+        rec_cases, 8,
+        "execute arithmetic and exact comparison controls"
+    );
     // Positive executions above distinguish an actual relation rejection from a broken executor.
-    let rejected: serde_json::Value = serde_json::from_str(include_str!(
-        "../../fixtures/conformance/numeric-capacity.json"
-    ))
-    .unwrap();
-    for case in rejected["cases"].as_array().unwrap() {
+    let rejected: Vec<_> = numeric["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|case| case["expectation_kind"] == "implementation_capacity")
+        .collect();
+    for case in &rejected {
         let dataset = PrivateDataset {
             ntriples: case["dataset_ntriples"].as_str().unwrap().into(),
             salt: [17; 32],
@@ -108,7 +135,7 @@ fn actual_guest_rejects_numeric_capacity_after_a_successful_control() {
             case["id"]
         );
     }
-    assert_eq!(rejected["cases"].as_array().unwrap().len(), 21);
+    assert_eq!(rejected.len(), 21);
 }
 
 #[test]
@@ -117,11 +144,24 @@ fn actual_v2_guest_rejects_numeric_capacity_after_a_successful_control() {
         Dialect, Journal, Policy, PrivateDataset, Request, VERSION, Witness, bind_journal,
         dataset_commitment,
     };
-    let corpus = serde_json::json!({"cases": [{
+    let mut corpus = serde_json::json!({"cases": [{
         "id": "numeric-capacity-positive-control",
         "query": "SELECT (20 + 22 AS ?x) {}",
         "expected_rows": [["\"42\"^^<http://www.w3.org/2001/XMLSchema#integer>"]]
     }]});
+    let numeric: serde_json::Value = serde_json::from_str(include_str!(
+        "../../fixtures/conformance/numeric-capacity.json"
+    ))
+    .unwrap();
+    assert_eq!(numeric["cases"].as_array().unwrap().len(), 28);
+    corpus["cases"].as_array_mut().unwrap().extend(
+        numeric["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|case| case["expectation_kind"] != "implementation_capacity")
+            .cloned(),
+    );
     let r0vm = std::env::var_os("RISC0_SERVER_PATH")
         .map(PathBuf::from)
         .expect("real local r0vm executable is required");
@@ -165,23 +205,37 @@ fn actual_v2_guest_rejects_numeric_capacity_after_a_successful_control() {
             .unwrap_or_else(|e| panic!("{}: actual guest execution {e:#}", case["id"]));
         let journal: Journal = session.journal.decode().unwrap();
         bind_journal(&journal, &input.request).unwrap();
-        let CanonicalResult::Select { rows, .. } = journal.result else {
-            panic!("{}: SELECT expected", case["id"])
-        };
-        assert_eq!(
-            serde_json::json!(rows),
-            case["expected_rows"],
-            "{}",
-            case["id"]
-        );
+        if let Some(expected) = case.get("expected_result") {
+            assert_eq!(
+                serde_json::json!(journal.result),
+                *expected,
+                "{}",
+                case["id"]
+            );
+        } else {
+            let CanonicalResult::Select { rows, .. } = journal.result else {
+                panic!("{}: SELECT expected", case["id"])
+            };
+            assert_eq!(
+                serde_json::json!(rows),
+                case["expected_rows"],
+                "{}",
+                case["id"]
+            );
+        }
     }
-    assert_eq!(rec_cases, 1, "execute the successful arithmetic control");
+    assert_eq!(
+        rec_cases, 8,
+        "execute arithmetic and exact comparison controls"
+    );
     // Positive executions above distinguish an actual relation rejection from a broken executor.
-    let rejected: serde_json::Value = serde_json::from_str(include_str!(
-        "../../fixtures/conformance/numeric-capacity.json"
-    ))
-    .unwrap();
-    for case in rejected["cases"].as_array().unwrap() {
+    let rejected: Vec<_> = numeric["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|case| case["expectation_kind"] == "implementation_capacity")
+        .collect();
+    for case in &rejected {
         let dataset = PrivateDataset {
             nquads: case["dataset_ntriples"].as_str().unwrap().into(),
             named_graphs: Vec::new(),
@@ -218,5 +272,5 @@ fn actual_v2_guest_rejects_numeric_capacity_after_a_successful_control() {
             case["id"]
         );
     }
-    assert_eq!(rejected["cases"].as_array().unwrap().len(), 21);
+    assert_eq!(rejected.len(), 21);
 }

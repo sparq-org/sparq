@@ -59,8 +59,16 @@ length and with canceling huge start/length would clip to `"abcd"` and `"a"`;
 supporting these requires checked lexical arithmetic, not independently saturating
 each argument. Their expected strings remain in the capacity corpus for follow-up.
 
-The [21-case capacity corpus](../../../zk/sparql-evaluator/fixtures/conformance/numeric-capacity.json)
-contains explicit capacity rejections, not W3C conformance successes. Native
+The [28-case numeric corpus](../../../zk/sparql-evaluator/fixtures/conformance/numeric-capacity.json)
+contains seven exact-result cases and 21 explicit representation-capacity
+rejections. The retained comparison and ordering inputs have full positive goldens;
+each has a separate replacement capacity control. Well-formed integer/decimal
+lexicals have no mantissa or scale limit for comparison alone, so larger operands
+cannot restore those former failures. The replacements exercise mixed comparisons
+with double operands and arithmetic before comparison or sorting. Their large
+stored integers and mixed-comparison decimal exceed the signed `i128` lane;
+the SECONDS arithmetic control exceeds its decimal mantissa. These are bounded
+consumer limits, not limits of exact integer/decimal comparison. Native
 tests exercise interpreted aggregate arguments and compiled expressions, stored dense/compressed consumers,
 large parallel thresholds and reentrant state. The model also preserves all 167
 normative goldens in the 169-case builtin corpus while rejecting its two separately
