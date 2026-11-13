@@ -2351,9 +2351,9 @@ dependencies = [
 
 [[package]]
 name = "i_float"
-version = "3.0.0"
+version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "519b2780a1187eeed09145e5d168863c87f0d704abe84084206ebd897f99c6dc"
+checksum = "9ecaff1ce29bcacd72cdf581ba6fce636ef4c4e0b2da7e7846dd0137d98141e2"
 dependencies = [
  "libm",
 ]
@@ -2368,13 +2368,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "i_key_sort"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "14269ee362009550495e20650ff3c2bca14a8147fe251e216760381ffed90b6f"
+
+[[package]]
 name = "i_overlay"
 version = "4.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8dd314b4668e2b3a12508f2e125558c82a6c0a8636fa5107a900f79ce414e450"
 dependencies = [
  "i_float 1.16.0",
- "i_key_sort",
+ "i_key_sort 0.10.3",
  "i_shape 1.18.0",
  "i_tree 0.18.0",
  "rayon",
@@ -2382,14 +2388,14 @@ dependencies = [
 
 [[package]]
 name = "i_overlay"
-version = "7.0.2"
+version = "9.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf284de04038af713dad8b4a88d2bc97f1c8c0a87fc1f43e28e3b965d0136d9e"
+checksum = "913fd692c02408adc76cead636f8e7e07c705f8b995a8b54b454b995e8e197d5"
 dependencies = [
- "i_float 3.0.0",
- "i_key_sort",
- "i_shape 3.0.0",
- "i_tree 0.19.0",
+ "i_float 5.0.0",
+ "i_key_sort 0.12.0",
+ "i_shape 5.0.0",
+ "i_tree 0.20.0",
 ]
 
 [[package]]
@@ -2403,11 +2409,11 @@ dependencies = [
 
 [[package]]
 name = "i_shape"
-version = "3.0.0"
+version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90b2ee7bae072887c579a2f2fd2a7fa1c29cceecfae1998ef940061c5570afff"
+checksum = "fa1878f91ef7921feaf1b2346253ebc5e661878b22d5715195c1d5dcf0f20ae5"
 dependencies = [
- "i_float 3.0.0",
+ "i_float 5.0.0",
 ]
 
 [[package]]
@@ -2418,9 +2424,9 @@ checksum = "4804bdc1dc124eb7e1aa9e144ecc04096bcf787a10a15fa44af682b51f0f6cce"
 
 [[package]]
 name = "i_tree"
-version = "0.19.0"
+version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e9d4a992a9fe83130f41ceacceac3bb116a4355dfc9c8d6ecea4f1e4b4c6caf"
+checksum = "048af31de955890c62a8506fec511335a5089e91e1c516537add16f96c507d84"
 
 [[package]]
 name = "iana-time-zone"
@@ -5287,7 +5293,7 @@ dependencies = [
  "crs-definitions",
  "geo",
  "geo-types",
- "i_overlay 7.0.2",
+ "i_overlay 9.1.0",
  "oxrdf 0.3.3",
  "proj4rs",
  "proptest",
