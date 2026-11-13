@@ -14,6 +14,36 @@ proof configuration must name `schnorr-poseidon2-merkle-2026` with
 Run `cargo test -p sparq-merkle-suite` for native compatibility and constant pins.
 The toolchain workflow also executes the Noir library and differential witnesses.
 
+For reproducible issuers use the seeded entry points:
+
+```rust
+use sparq_merkle_suite::poseidon;
+let key = poseidon::keypair_from_seed(&[7; 32]);
+let document = "<urn:subject> <urn:claim> \"example\" .\n";
+let config = "<urn:proof> <https://w3id.org/security#cryptosuite> \"schnorr-poseidon2-merkle-2026\" .\n";
+let credential = poseidon::issue_deterministic(document, config, &key, &[9; 32]).unwrap();
+assert!(poseidon::verify(&credential, &key.public_key()));
+```
+
+The deterministic entry point is safe only if a salt seed is never reused across
+different content. Keep key and salt seeds private. Key derivation hashes the
+keypair label and the full seed with SHA-512, reduces into the existing scalar
+field, and maps zero to one. Salt derivation uses its own label, seed, signer
+coordinates and length-framed canonical document/configuration bytes. Existing
+`sig::sign_deterministic` derives its nonce from the secret key and signed message.
+
+The default-on `os-random` feature exposes `random::issue(document, config, &key)`
+for fresh platform entropy, with uniform field rejection sampling. It is separate
+from the pure seeded core. Build that core for the WebAssembly package with:
+
+```sh
+cargo build -p sparq-merkle-suite --target wasm32-unknown-unknown --no-default-features
+```
+
+Target-specific backend features select JavaScript entropy support required by
+the existing RDF/curve dependencies. The seeded functions never call those
+backends, a clock or file APIs. No dependency primitive is copied or changed.
+
 ## ✨ Features
 
 The shared `comparison_key` validates built-in integer subtypes, preserves the

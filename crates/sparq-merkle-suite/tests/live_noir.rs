@@ -11,6 +11,8 @@ use std::{
 mod cases;
 #[path = "support/credential.rs"]
 mod credential;
+#[path = "support/solid_profile.rs"]
+mod solid_profile;
 #[path = "../../sparq-zk/tests/support/mod.rs"]
 mod support;
 
@@ -227,5 +229,117 @@ fn credential_modes_match_vectors_and_compiled_public_abi() {
         );
         assert_ne!(a, b);
     }
+    support::complete(gate);
+}
+
+#[test]
+fn solid_app_suite_profile_opens_in_revealed_mode() {
+    use oxrdf::Term;
+    use serde_json::json;
+    use sha2::{Digest, Sha256};
+    let gate = match support::gate("solid_app_suite_profile_opens_in_revealed_mode", &["nargo"]) {
+        Some(g) => g,
+        None => return,
+    };
+    assert_compiler(&gate);
+    let key = p::keypair_from_seed(&[7; 32]);
+    let c = p::issue_deterministic(
+        &solid_profile::document(),
+        &solid_profile::configuration(),
+        &key,
+        &[9; 32],
+    )
+    .unwrap();
+    assert!(p::verify(&c, &key.public_key()));
+    let metadata = p::verify_and_open(&c, &key.public_key()).unwrap();
+    fn padded(text: &str, capacity: usize) -> Vec<u8> {
+        assert!(text.len() <= capacity);
+        let mut bytes = text.as_bytes().to_vec();
+        bytes.resize(capacity, 0);
+        bytes
+    }
+    fn raw(term: Option<&Term>, l: usize, d: usize, g: usize) -> Value {
+        let (kind, text, dt, lang, key) = match term {
+            Some(Term::NamedNode(n)) => (1, n.as_str(), "", "", [0; 31]),
+            Some(Term::BlankNode(n)) => (2, n.as_str(), "", "", [0; 31]),
+            Some(Term::Literal(t)) => (
+                3,
+                t.value(),
+                t.datatype().as_str(),
+                t.language().unwrap_or(""),
+                sparq_merkle_suite::comparison_key(t),
+            ),
+            Some(Term::Triple(_)) => panic!("triple terms are not admitted"),
+            None => (0, "", "", "", [0; 31]),
+        };
+        json!({"bound":term.is_some(),"kind":kind,"lexical":padded(text,l),"lexical_len":text.len(),"datatype":padded(dt,d),"datatype_len":dt.len(),"language":padded(lang,g),"language_len":lang.len(),"key":key})
+    }
+    let rows = oxttl::NQuadsParser::new()
+        .for_slice(c.document.as_bytes())
+        .map(Result::unwrap)
+        .collect::<Vec<_>>();
+    assert_eq!(rows.len(), 42);
+    let mut opening = Vec::new();
+    for q in rows {
+        assert!(q.graph_name.is_default_graph());
+        let mut graph = raw(None, 128, 64, 1);
+        graph["bound"] = json!(true);
+        opening.push(vec![
+            raw(Some(&Term::from(q.subject)), 128, 64, 1),
+            raw(Some(&Term::NamedNode(q.predicate)), 128, 64, 1),
+            raw(Some(&q.object), 128, 64, 1),
+            graph,
+        ]);
+    }
+    opening.resize(64, vec![raw(None, 128, 64, 1); 4]);
+    let mut salts = (0..c.count)
+        .map(|i| field_to_hex(&p::leaf_salt(c.salt, i)))
+        .collect::<Vec<_>>();
+    salts.resize(64, field_to_hex(&Fr::from(0u64)));
+    let config: [u8; 32] = Sha256::digest(c.proof_config.as_bytes()).into();
+    let (x, y) = key.public_key().coords().unwrap();
+    let message = p::signed_message(c.salt, c.count, c.root, &config, metadata.digest);
+    let input = json!({"raw":opening,"salts":salts,"salt":field_to_hex(&c.salt),"count":c.count,
+        "config":[u128::from_be_bytes(config[..16].try_into().unwrap()).to_string(),u128::from_be_bytes(config[16..].try_into().unwrap()).to_string()],
+        "pk":{"x":field_to_hex(&x),"y":field_to_hex(&y)},
+        "created_raw":raw(metadata.created.as_ref(),32,128,64),"method_raw":raw(metadata.verification_method.as_ref(),32,128,64),
+        "purpose":padded("revocation",32),"purpose_len":10,"index":padded("0007",32),"index_len":4});
+    // Narrow witnessed metadata buffers are widened with constant zero tails;
+    // every length and every supplied byte is still checked by the core opener.
+    let source = r#"use core::suite_entry::{BoundedTermOpening, TermOpening};
+use std::collections::bounded_vec::BoundedVec;
+fn widen(a: BoundedTermOpening<128,64,1>) -> TermOpening<128> {
+    assert((a.lexical_len<=128)&(a.datatype_len<=64)&(a.language_len<=1));
+    let mut dt = [0;128]; for i in 0..64 { dt[i] = a.datatype[i]; }
+    let mut lang = [0;64]; lang[0] = a.language[0];
+    TermOpening { bound:a.bound,kind:a.kind,lexical:a.lexical,lexical_len:a.lexical_len,
+        datatype:dt,datatype_len:a.datatype_len,language:lang,language_len:a.language_len,key:a.key }
+}
+fn absent() -> TermOpening<128> {
+    TermOpening { bound:false,kind:0,lexical:[0;128],lexical_len:0,datatype:[0;128],datatype_len:0,language:[0;64],language_len:0,key:[0;31] }
+}
+fn main(raw:[[BoundedTermOpening<128,64,1>;4];64],salts:[Field;64],salt:Field,count:u32,
+    config:pub [u128;2],pk:pub compose::issuer::Point,created_raw:TermOpening<32>,method_raw:TermOpening<32>,
+    purpose:[u8;32],purpose_len:u32,index:[u8;32],index_len:u32) -> pub Field {
+    let mut full = [[absent();4];64];
+    for i in 0..64 { for j in 0..4 { full[i][j] = widen(raw[i][j]); } }
+    let opened = core::suite::open_credential_revealed(full,salts,salt,count,config,created_raw,method_raw,pk,0);
+    assert(opened.count()==42);
+    assert(opened.created().known());
+    let status = opened.property(opened.credential_subject(),core::term::iri_credential_status());
+    let purpose_cell = opened.property(status,core::term::iri_status_purpose());
+    let index_cell = opened.property(status,core::term::iri_status_index());
+    assert(!core::suite_metadata::open_status_purpose(purpose_cell,BoundedVec::from_parts_unchecked(purpose,purpose_len)));
+    assert(core::suite_metadata::open_status_index(index_cell,BoundedVec::from_parts_unchecked(index,index_len))==7);
+    let message = opened.message(); println(message); message
+}"#;
+    let scratch = Scratch::new();
+    project(&scratch.0, "solid_profile", source);
+    prover(&scratch.0, &input);
+    let stdout = execute(&gate, &scratch.0);
+    assert!(
+        stdout.contains(&field_to_hex(&message)),
+        "revealed profile message differs: {stdout}"
+    );
     support::complete(gate);
 }

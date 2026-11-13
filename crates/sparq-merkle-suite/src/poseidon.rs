@@ -2,7 +2,7 @@
 use crate::{comparison_key, Error, Fr, KEY_BYTES};
 use ark_ff::{BigInteger, PrimeField};
 use oxrdf::{GraphName, Quad, Term};
-use sha2::{Digest, Sha256};
+use sha2::{Digest, Sha256, Sha512};
 use sparq_zk::{poseidon2, sig};
 
 /// Data Integrity cryptosuite name.
@@ -40,6 +40,54 @@ pub fn hash_bytes(domain: u64, bytes: &[u8]) -> Fr {
 /// Field identifier of this cryptosuite, using the suite-specific byte domain.
 pub fn suite_id() -> Fr {
     hash_bytes(SUITE_DOMAIN, SCHNORR_POSEIDON2_MERKLE_2026.as_bytes())
+}
+
+/// Derive a reproducible Baby Jubjub key from every byte of the seed.
+/// Hash the key-derivation label and seed, reduce into the existing scalar field,
+/// and deterministically map zero to one. Public-key derivation reuses `sig`.
+pub fn keypair_from_seed(seed: &[u8; 32]) -> sig::SecretKey {
+    let mut hash = Sha512::new();
+    hash.update(b"sparq-merkle-suite/keypair/v1\0");
+    hash.update(seed);
+    key_from_digest(&hash.finalize())
+}
+
+fn key_from_digest(digest: &[u8]) -> sig::SecretKey {
+    let mut key = sig::SecretKey(PrimeField::from_be_bytes_mod_order(digest));
+    if key.0 == Default::default() {
+        key.0 = 1u64.into();
+    }
+    key
+}
+
+/// Reproducible issuance with an explicit private salt seed.
+/// Safe only if the salt seed is never reused across different content.
+/// Canonical document/configuration bytes and the signer key bind the derived
+/// field salt; the existing signer derives its nonce from the key and message.
+pub fn issue_deterministic(
+    document: &str,
+    proof_config: &str,
+    key: &sig::SecretKey,
+    salt_seed: &[u8; 32],
+) -> Result<Credential, Error> {
+    let document = sparq_canon::canonicalize_nquads(document)
+        .map_err(|_| Error("document canonicalization rejected"))?;
+    let proof_config = crate::canonical_config(proof_config, SCHNORR_POSEIDON2_MERKLE_2026)?;
+    let (x, y) = key
+        .public_key()
+        .coords()
+        .ok_or(Error("invalid issuer key"))?;
+    let mut hash = Sha512::new();
+    hash.update(b"sparq-merkle-suite/tree-salt/v1\0");
+    hash.update(salt_seed);
+    hash.update(field_bytes(x));
+    hash.update(field_bytes(y));
+    for bytes in [document.as_bytes(), proof_config.as_bytes()] {
+        hash.update((bytes.len() as u64).to_be_bytes());
+        hash.update(bytes);
+    }
+    let salt = Fr::from_be_bytes_mod_order(&hash.finalize());
+    issue(&document, &proof_config, key, salt)
 }
 
 /// A validated RDF term and its bound cell components for the Noir host.
@@ -218,7 +266,7 @@ pub struct Credential {
     pub document: String,
     /// Canonical Data Integrity configuration.
     pub proof_config: String,
-    /// Private, canonical field salt. Issuers must draw a fresh uniform salt.
+    /// Private, canonical field salt from fresh randomness or seeded issuance.
     pub salt: Fr,
     /// The signed quad count.
     pub count: u32,
@@ -229,7 +277,7 @@ pub struct Credential {
 }
 
 /// Issue after RDFC-1.0 canonicalization. The signer is the existing Baby Jubjub
-/// signer; the caller supplies fresh private field randomness.
+/// signer; the caller supplies the private field salt.
 pub fn issue(
     document: &str,
     proof_config: &str,
@@ -332,4 +380,14 @@ pub fn credential_cells(quad: &Quad, index: u32) -> Result<[TermCell; 4], Error>
             .checked_add(1)
             .ok_or(Error("credential scope capacity"))?,
     )
+}
+
+#[cfg(test)]
+mod seeded_key_tests {
+    #[test]
+    fn zero_digest_maps_to_a_valid_nonzero_key() {
+        let key = super::key_from_digest(&[0; 64]);
+        assert_eq!(key.0, 1u64.into());
+        assert!(key.public_key().is_prime_order());
+    }
 }

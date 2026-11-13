@@ -6,6 +6,8 @@
 pub mod keys;
 pub mod metadata;
 pub mod poseidon;
+#[cfg(feature = "os-random")]
+pub mod random;
 pub mod sha256;
 
 pub use keys::{comparison_key, key_class};
