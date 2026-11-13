@@ -1617,21 +1617,27 @@ carries review markers pending re-review.)_
 
 ## Sharing a request ledger with ingestion
 
-`AuthLedger::new(AuthBudget)` starts one request's input counters and deadline.
-Pass `ledger.core()` to `Graph::load_metered` (dataset) or
-`Graph::load_metered_with_base` (one document), then use
-`store.materialize_wac_in(&mut ledger)` or `store.materialize_acp_in(&mut ledger)`.
-The `_in` methods share the remaining input and closure allowances, including
-resource enumeration; they preserve normal view installation and context handling.
-Construct the ledger with the store's budget. `checkpoint()` checks its deadline;
-`input_refusal(Exceeded)` returns the usual tagged authorization refusal.
-`AuthAllowance::PolicyInput` identifies request policy-parser budget refusals.
-`store.group_docs()` borrows the lazily cached set of referenced group-document URLs.
+`AuthLedger::new(AuthBudget)` starts input counters and the request deadline.
+Use `AuthLedger::with_source_limit(budget, transport_bytes)` for an HTTP dataset,
+then `with_dataset_bytes` around `Graph::load_metered` and `union_metered`.
+Dataset rows have a separate source-sized fact account; projection does not charge
+facts again. `max_input_facts` continues to bound assembled materializer input.
+`load_document(text, format, iri)` parses one authorization document;
+`document_refusal(error, iri)` names that document in its tagged refusal.
+`core()` is crate-private. `spent(dim)` permits read-only inspection.
 
-For a full HTTP dataset, use `ledger.with_dataset_bytes(|core| ...)` around metered
-loading and union projection. Its cumulative allowance is sixteen times the source
-cap. `with_policy_bytes` supplies the policy parser's separate byte account,
-bounded by thirty-two times the source cap;
-retain `default_policy_limits_for` inside it. The control/group-document input
-allowance remains unchanged. Source, facts, nodes, query rows and decision work
-remain shared across all these phases.
+Pass this ledger to `store.materialize_wac_in` or `materialize_acp_in`, using the
+store's budget. Input assembly enumerates resources once against its input
+allowance; provenance pruning has a separate allowance with the same deadline.
+`checkpoint()` checks that deadline. `input_refusal(Exceeded)` returns the usual
+tagged request refusal. `AuthAllowance::PolicyInput` identifies policy budgets.
+`group_docs()` is the conservative set used for update invalidation;
+`input_group_docs()` selects only accepted WAC controls read by the installed view.
+
+Dataset terms use the dataset retention ceiling; the materializer keeps its
+control/group term-size cap. Dataset byte retention is bounded by 64 times the transport source cap;
+`with_policy_bytes` has a separate cumulative ceiling of thirty-two times that cap.
+Trusted callers of these scoped methods must retain the parser's tighter phase
+limits via `with_phase_limits(default_policy_limits_for(...), ...)`. Each policy
+parse and membership phase gets its own graph-sized allowance. ODRL evaluations
+retain their independent lane bound, separate from earlier closure work.

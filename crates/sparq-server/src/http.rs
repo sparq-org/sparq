@@ -814,13 +814,18 @@ pub struct ServerConfig {
     pub solid_authz_trust: bool,
     /// Combined verify budget for one trust block.
     ///
-    /// Default: 4096. Counts certification signatures, potential rule/credential pairs,
+    /// Default: 16384. Counts certification signatures, potential rule/credential pairs,
     /// one canonicalize-and-commit per presented credential, and public-key decodes
     /// (one per direct rule, two per certification). Each depth-one certification also
     /// counts as one potential rule. `SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS` overrides it;
     /// zero permits none of this work. Excess returns 403 before key decoding or admission.
     #[cfg(feature = "solid-authz-trust")]
     pub solid_authz_trust_max_pairs: usize,
+    /// Original certification-signature plus potential rule/credential pair allowance.
+    /// Default: 4096. `SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIR_CHECKS` overrides it.
+    /// It is checked alongside the combined decode/commit budget before work begins.
+    #[cfg(feature = "solid-authz-trust")]
+    pub solid_authz_trust_max_pair_checks: usize,
     /// Maximum certifications parsed from one trust block.
     ///
     /// Default: 2048. `SPARQ_SOLID_AUTHZ_TRUST_MAX_CERTIFICATIONS` overrides it;
@@ -1027,7 +1032,9 @@ impl Default for ServerConfig {
             // Calibrated against the main trust lane; bound verification and SHACL work
             // independently because a small pair count can still carry a large graph.
             #[cfg(feature = "solid-authz-trust")]
-            solid_authz_trust_max_pairs: 4096,
+            solid_authz_trust_max_pairs: 16384,
+            #[cfg(feature = "solid-authz-trust")]
+            solid_authz_trust_max_pair_checks: 4096,
             #[cfg(feature = "solid-authz-trust")]
             solid_authz_trust_max_certifications: 2048,
             #[cfg(feature = "solid-authz-trust")]
@@ -1369,6 +1376,10 @@ impl ServerConfig {
             (
                 "SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS",
                 &mut cfg.solid_authz_trust_max_pairs,
+            ),
+            (
+                "SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIR_CHECKS",
+                &mut cfg.solid_authz_trust_max_pair_checks,
             ),
             (
                 "SPARQ_SOLID_AUTHZ_TRUST_MAX_CERTIFICATIONS",
@@ -12652,11 +12663,13 @@ mod from_env_tests {
         let _env = env_guard();
         for name in [
             "SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS",
+            "SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIR_CHECKS",
             "SPARQ_SOLID_AUTHZ_TRUST_MAX_CERTIFICATIONS",
             "SPARQ_SOLID_AUTHZ_TRUST_MAX_VALIDATION_WORK",
         ] {
             let limit = |cfg: &ServerConfig| match name {
                 "SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS" => cfg.solid_authz_trust_max_pairs,
+                "SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIR_CHECKS" => cfg.solid_authz_trust_max_pair_checks,
                 "SPARQ_SOLID_AUTHZ_TRUST_MAX_CERTIFICATIONS" => {
                     cfg.solid_authz_trust_max_certifications
                 }

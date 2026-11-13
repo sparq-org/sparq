@@ -1167,6 +1167,32 @@ fn group_doc_of(group_iri: &str) -> &str {
     group_iri.split('#').next().unwrap_or(group_iri)
 }
 
+/// Group documents named by accepted WAC controls. Unlike update invalidation,
+/// ingestion follows only the documents the WAC input assembler actually reads.
+pub(crate) fn accepted_group_docs(graph: &Graph) -> FxHashSet<String> {
+    let mut docs = FxHashSet::default();
+    for (name, sub) in graph.named() {
+        let Some(iri) = graph_iri(name) else { continue };
+        if iri.starts_with(RESERVED_PREFIX) || !iri.ends_with(ACL_SUFFIX) {
+            continue;
+        }
+        let triples = graph_triples(sub);
+        if triples.iter().any(|triple| !admits(triple, iri)) {
+            continue;
+        }
+        for triple in triples {
+            if let (Term::NamedNode(p), Term::NamedNode(o)) = (&triple[1], &triple[2]) {
+                if p.as_str() == ACL_AGENT_GROUP
+                    && !group_doc_of(o.as_str()).starts_with(RESERVED_PREFIX)
+                {
+                    docs.insert(group_doc_of(o.as_str()).to_owned());
+                }
+            }
+        }
+    }
+    docs
+}
+
 /// Every graph IRI referenced as an `acl:agentGroup` group document by an access-control
 /// document currently in `graph` — the WAC group-membership INPUTS of the auth view.
 ///
@@ -2722,5 +2748,26 @@ mod tests {
         store.put_acl("https://pod.ex/n1.acl", body, "turtle").unwrap();
         let s = Session { agent: Some("https://alice.ex/me"), client: None, issuer: None, now: None };
         assert!(store.accessible(&s, Mode::Read).iter().any(|r| r.as_str() == doc));
+    }
+}
+
+#[cfg(test)]
+mod accepted_group_tests {
+    use super::*;
+    #[test]
+    fn input_groups_only_follow_accepted_wac_controls() {
+        let mut graph = Graph::load_dataset(concat!(
+            "<https://pod.ex/.acl#r> <http://www.w3.org/ns/auth/acl#agentGroup> <https://pod.ex/accepted#team> <https://pod.ex/.acl> .\n",
+            "<https://pod.ex/bad.acl#r> <http://www.w3.org/ns/auth/acl#agentGroup> <https://pod.ex/rejected#team> <https://pod.ex/bad.acl> .\n",
+            "<https://outside.ex/s> <urn:p> <urn:o> <https://pod.ex/bad.acl> .\n",
+            "<https://pod.ex/x.acr#r> <http://www.w3.org/ns/auth/acl#agentGroup> <https://pod.ex/acp#team> <https://pod.ex/x.acr> .\n"),"nquads").unwrap();
+        assert_eq!(
+            accepted_group_docs(&graph),
+            ["https://pod.ex/accepted".to_owned()].into_iter().collect()
+        );
+        assert_eq!(referenced_group_docs(&graph).len(), 3);
+        let mut store = crate::PodStore::new(std::mem::take(&mut graph));
+        store.materialize_acp().unwrap();
+        assert!(store.input_group_docs().is_empty());
     }
 }

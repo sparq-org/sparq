@@ -1140,5 +1140,23 @@ already spent, preserving stricter total caps and counters.
 `meter::ByteAccount` and `Ledger::with_byte_account` retain cumulative bytes for
 one class of work while sharing source, facts and work counters. The caller's
 original byte account is restored even on unwinding. `Graph::union_metered`
-projects admitted graphs without charging source bytes again; rows and terms are
-still charged before retention.
+projects admitted graphs without charging source bytes or facts again; retained
+terms and buffers are checked before retention.
+
+`Graph::union_metered` projects already admitted rows and charges retained terms
+and buffers without charging source bytes or facts again.
+`Graph::load_metered_precharged` is for trusted ingestion that has already charged
+external source bytes before appending separately bounded generated facts; all
+term, fact and buffer checks still run. Ordinary callers use `load_metered`.
+`FactAccount` with `Ledger::with_fact_account` separates cumulative fact classes,
+restoring the original account on return or unwind. `with_phase_limits` restores
+limits while preserving counters, so consecutive phases each receive their cap.
+
+`Ledger::with_term_limit` scopes a class-specific term-size ceiling and restores it
+on unwind. Dataset ingestion derives that ceiling from its aggregate retention
+allowance; control/group documents retain their materializer term cap.
+
+For a folded document, `Graph::load_metered_with_base` charges term bytes and
+facts once per distinct stored triple. Repeated source rows still contribute
+source bytes. Dataset ingestion retains its per-source-row accounting in the
+separate dataset account.

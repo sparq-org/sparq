@@ -221,9 +221,6 @@ pub struct SolidServerConfig {
     pub query_timeout_ms: Option<u64>,
     /// Row cap on any materialised query result (`None` = uncapped).
     pub max_rows: Option<usize>,
-    /// Maximum JSON-RPC message bytes, checked before parsing. Default: 16 MiB;
-    /// `None` disables the cap, as for [`crate::ServerConfig::max_request_bytes`].
-    pub max_request_bytes: Option<usize>,
     /// The server name reported in the `initialize` handshake.
     pub server_name: String,
 }
@@ -241,7 +238,6 @@ impl Default for SolidServerConfig {
             query_timeout_secs: Some(30),
             query_timeout_ms: None,
             max_rows: Some(1_000_000),
-            max_request_bytes: Some(crate::server::DEFAULT_MAX_REQUEST_BYTES),
             server_name: "sparq-mcp-solid".to_string(),
         }
     }
@@ -257,6 +253,7 @@ impl Default for SolidServerConfig {
 pub struct SolidMcpServer {
     store: PodStore,
     config: SolidServerConfig,
+    max_request_bytes: Option<usize>,
     /// sq-cmjmr — the topics this session subscribed to plus the queue of
     /// content-free notifications awaiting [`SolidMcpServer::take_notifications`]. Bound
     /// to this server (⇒ to this one authenticated session), so a subscription can never
@@ -733,6 +730,12 @@ impl SolidMcpServer {
         Self::with_config(store, SolidServerConfig::default())
     }
 
+    /// Set the pre-parse JSON-RPC byte cap; `None` disables it.
+    /// New servers use the same default as the core MCP server.
+    pub fn set_max_request_bytes(&mut self, max: Option<usize>) {
+        self.max_request_bytes = max;
+    }
+
     /// Build a pod server over `store` with an explicit [`SolidServerConfig`],
     /// (re-)materializing the authorization view under the configured model so the
     /// served view is never stale and always matches [`SolidServerConfig::acp`].
@@ -748,6 +751,7 @@ impl SolidMcpServer {
         let mut server = SolidMcpServer {
             store,
             config,
+            max_request_bytes: Some(crate::server::DEFAULT_MAX_REQUEST_BYTES),
             subs: Subscriptions::default(),
         };
         server.rematerialize()?;
@@ -775,7 +779,7 @@ impl SolidMcpServer {
     /// (`Some(response)` for a request, `None` for a notification, and top-level
     /// JSON-RPC batch arrays accepted per JSON-RPC 2.0 §6).
     pub fn handle_message(&mut self, raw: &str) -> Option<String> {
-        if let Some(max) = self.config.max_request_bytes {
+        if let Some(max) = self.max_request_bytes {
             if raw.len() > max {
                 return Some(crate::server::oversized(max));
             }
@@ -1586,21 +1590,24 @@ impl SolidMcpServer {
         self.gate_write(&url, Mode::Write)?;
 
         // PARSE FIRST — a malformed body is rejected before anything mutates.
-        let new_graph = if self.store.group_docs().contains(&url) {
-            let mut ledger = sparq_solid::AuthLedger::new(self.store.auth_budget());
-            Graph::load_metered_with_base(&content, fmt, &url, ledger.core()).map_err(|error| {
-                match error {
+        let new_graph = if self.store.input_group_docs().contains(&url) {
+            let mut ledger = sparq_solid::AuthLedger::with_source_limit(
+                self.store.auth_budget(),
+                self.max_request_bytes.unwrap_or(usize::MAX),
+            );
+            ledger
+                .load_document(&content, fmt, &url)
+                .map_err(|error| match error {
                     sparq_core::meter::LoadError::Parse(error) => {
                         format!("content for <{url}> did not parse as {fmt}: {error}")
                     }
                     sparq_core::meter::LoadError::Ledger(error) => {
                         format!(
                             "content for <{url}> was refused: {}",
-                            ledger.input_refusal(error)
+                            ledger.document_refusal(error, &url)
                         )
                     }
-                }
-            })?
+                })?
         } else {
             Graph::load_str_with_base(&content, fmt, &url)
                 .map_err(|e| format!("content for <{url}> did not parse as {fmt}: {e}"))?
@@ -1878,17 +1885,15 @@ mod unit {
     fn oversized_messages_never_reach_json_parsing() {
         let mut server = SolidMcpServer::with_config(
             PodStore::new(Graph::default()),
-            SolidServerConfig {
-                max_request_bytes: Some(4),
-                ..Default::default()
-            },
+            SolidServerConfig::default(),
         )
         .unwrap();
+        server.set_max_request_bytes(Some(4));
         crate::server::RAW_PARSES.with(|count| count.set(0));
         let response = server.handle_message("invalid JSON").unwrap();
         assert_eq!(response, crate::server::oversized(4));
         crate::server::RAW_PARSES.with(|count| assert_eq!(count.get(), 0));
-        server.config.max_request_bytes = None;
+        server.max_request_bytes = None;
         assert!(server
             .handle_message(r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#)
             .is_some());
@@ -2022,6 +2027,91 @@ mod unit {
     }
 
     #[test]
+    fn only_accepted_wac_group_documents_use_document_ingestion_caps() {
+        for acp in [false, true] {
+            let mut server = write_server();
+            let graph = server.store.graph();
+            let acl=&graph.named().iter().find(|(name,_)| matches!(name,Term::NamedNode(n) if n.as_str()=="https://pod.ex/.acl")).unwrap().1;
+            let acl = acl
+                .iter_ids()
+                .map(|row| {
+                    let terms = row.map(|id| acl.dict().term(id));
+                    format!("{} {} {} .", terms[0], terms[1], terms[2])
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            let acl = acl
+                .lines()
+                .filter(|line| !line.contains("agentGroup"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let mut data =
+                String::from("<https://pod.ex/group> <urn:p> <urn:o> <https://pod.ex/group> .\n");
+            if acp {
+                for (subject, predicate, object) in [
+                    (
+                        "https://pod.ex/.acr",
+                        "memberAccessControl",
+                        "https://pod.ex/.acr#c",
+                    ),
+                    ("https://pod.ex/.acr#c", "apply", "https://pod.ex/.acr#p"),
+                    (
+                        "https://pod.ex/.acr#p",
+                        "allow",
+                        "http://www.w3.org/ns/auth/acl#Read",
+                    ),
+                    (
+                        "https://pod.ex/.acr#p",
+                        "allow",
+                        "http://www.w3.org/ns/auth/acl#Write",
+                    ),
+                    ("https://pod.ex/.acr#p", "allOf", "https://pod.ex/.acr#m"),
+                    ("https://pod.ex/.acr#m", "agent", "https://alice.ex/card#me"),
+                ] {
+                    data.push_str(&format!("<{subject}> <http://www.w3.org/ns/solid/acp#{predicate}> <{object}> <https://pod.ex/.acr> .\n"));
+                }
+                data.push_str("<https://pod.ex/.acr#g> <http://www.w3.org/ns/auth/acl#agentGroup> <https://pod.ex/group#team> <https://pod.ex/.acr> .\n");
+            } else {
+                for line in acl.lines() {
+                    data.push_str(&format!(
+                        "{} <https://pod.ex/.acl> .\n",
+                        line.trim_end_matches('.').trim()
+                    ));
+                }
+                data.push_str("<https://pod.ex/bad.acl#g> <http://www.w3.org/ns/auth/acl#agentGroup> <https://pod.ex/group#team> <https://pod.ex/bad.acl> .\n<https://outside.ex/s> <urn:p> <urn:o> <https://pod.ex/bad.acl> .\n");
+            }
+            server = SolidMcpServer::with_config(
+                PodStore::new(Graph::load_dataset(&data, "nquads").unwrap()),
+                SolidServerConfig {
+                    acp,
+                    agent: Some("https://alice.ex/card#me".into()),
+                    allow_update: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert!(server.store.input_group_docs().is_empty());
+            assert!(server.store.group_docs().contains("https://pod.ex/group"));
+            let payload = format!("<#s> <urn:p> \"{}\" .", "x".repeat(70_000));
+            let result=server.tool_resource_put(&json!({"url":"https://pod.ex/group","content":payload,"content_type":"text/turtle"}));
+            assert!(result.is_ok(), "ACP={acp}: {result:?}");
+        }
+    }
+
+    #[test]
+    fn duplicate_group_rows_keep_stored_document_accounting() {
+        let mut server = write_server();
+        let content = "<#team> <urn:p> <urn:o> .\n".repeat(60000);
+        assert!(content.len() > 1 << 20);
+        let result = server.tool_resource_put(
+            &json!({"url":"https://pod.ex/group","content":content,"content_type":"text/turtle"}),
+        );
+        assert!(result.is_ok(), "{result:?}");
+        let name = Term::NamedNode(NamedNode::new("https://pod.ex/group").unwrap());
+        assert_eq!(server.store.graph().named_graph(&name).unwrap().len(), 1);
+    }
+
+    #[test]
     fn refused_group_put_is_metered_before_the_slot_is_taken() {
         let mut server = write_server();
         assert!(server.store.group_docs().contains("https://pod.ex/group"));
@@ -2043,6 +2133,8 @@ mod unit {
             sparq_solid::auth_allowance_refusal(&error),
             Some(sparq_solid::AuthAllowance::InputBytes)
         );
+        assert!(error.contains("document <https://pod.ex/group>"), "{error}");
+        assert!(!error.contains("request input"), "{error}");
         assert_eq!(pod_bytes(&server), before);
         assert_eq!(server.store.auth_generation(), generation);
         server

@@ -212,6 +212,26 @@ impl ByteAccount {
     }
 }
 
+/// A cumulative fact allowance for one class of work on a shared [`Ledger`].
+/// Other ledger dimensions remain shared while this account is active.
+#[derive(Clone, Debug)]
+pub struct FactAccount {
+    limit: usize,
+    spent: usize,
+}
+
+impl FactAccount {
+    /// Create a fact account with no work spent.
+    pub fn new(limit: usize) -> Self {
+        Self { limit, spent: 0 }
+    }
+
+    /// Facts charged across every use of this account.
+    pub fn spent(&self) -> usize {
+        self.spent
+    }
+}
+
 /// Running work counters with atomic refusal of compound byte charges.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
@@ -298,6 +318,83 @@ impl Ledger {
             account,
         };
         scope.swap();
+        work(&mut *scope.ledger)
+    }
+
+    /// Run work against a separate cumulative fact account. Source, bytes, nodes,
+    /// query rows and decision work still use this ledger's counters and limits.
+    /// The original fact account is restored on return or unwinding.
+    pub fn with_fact_account<T>(
+        &mut self,
+        account: &mut FactAccount,
+        work: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        struct Scope<'a> {
+            ledger: &'a mut Ledger,
+            account: &'a mut FactAccount,
+        }
+        impl Scope<'_> {
+            fn swap(&mut self) {
+                std::mem::swap(&mut self.ledger.limits.facts, &mut self.account.limit);
+                std::mem::swap(
+                    &mut self.ledger.spent[Dim::Facts as usize],
+                    &mut self.account.spent,
+                );
+            }
+        }
+        impl Drop for Scope<'_> {
+            fn drop(&mut self) {
+                self.swap();
+            }
+        }
+        let mut scope = Scope {
+            ledger: self,
+            account,
+        };
+        scope.swap();
+        work(&mut *scope.ledger)
+    }
+
+    /// Use a class-specific term-size ceiling, restoring the original on unwind.
+    /// Trusted ingestion callers derive this ceiling from their source/byte account;
+    /// aggregate term bytes remain charged by the ordinary term methods.
+    pub fn with_term_limit<T>(&mut self, limit: usize, work: impl FnOnce(&mut Self) -> T) -> T {
+        struct Restore<'a> {
+            ledger: &'a mut Ledger,
+            limit: usize,
+        }
+        impl Drop for Restore<'_> {
+            fn drop(&mut self) {
+                self.ledger.limits.term_bytes = self.limit;
+            }
+        }
+        let previous = self.limits.term_bytes;
+        self.limits.term_bytes = limit;
+        let scope = Restore {
+            ledger: self,
+            limit: previous,
+        };
+        work(&mut *scope.ledger)
+    }
+
+    /// Apply one phase's caps relative to prior work, restoring limits afterwards.
+    /// Counters remain cumulative, including when the phase unwinds.
+    pub fn with_phase_limits<T>(&mut self, limits: Limits, work: impl FnOnce(&mut Self) -> T) -> T {
+        struct Restore<'a> {
+            ledger: &'a mut Ledger,
+            limits: Limits,
+        }
+        impl Drop for Restore<'_> {
+            fn drop(&mut self) {
+                self.ledger.limits = self.limits;
+            }
+        }
+        let previous = self.limits;
+        self.cap_remaining(limits);
+        let scope = Restore {
+            ledger: self,
+            limits: previous,
+        };
         work(&mut *scope.ledger)
     }
 
@@ -974,5 +1071,78 @@ mod byte_account_tests {
         assert_eq!(account.spent(), 5);
         assert_eq!(ledger.spent(Dim::Bytes), 2);
         assert_eq!(ledger.remaining(Dim::Bytes), 1);
+    }
+}
+
+#[cfg(test)]
+mod phase_account_tests {
+    use super::*;
+    #[test]
+    fn term_ceiling_is_scoped_and_restored_on_unwind() {
+        let limit = TERM_NODE_BYTES + 5;
+        let mut ledger = Ledger::new(Limits {
+            term_bytes: limit,
+            ..Limits::default()
+        });
+        ledger.close_document();
+        ledger.with_term_limit(1024, |core| {
+            core.term(TermRef::Iri("urn:long-content")).unwrap()
+        });
+        assert_eq!(
+            ledger
+                .term(TermRef::Iri("urn:long-content"))
+                .unwrap_err()
+                .dim,
+            Dim::TermBytes
+        );
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ledger.with_term_limit(1024, |_| panic!("restore term cap"));
+        }));
+        assert_eq!(ledger.limits().term_bytes, limit);
+    }
+
+    #[test]
+    fn facts_and_phase_limits_restore_without_erasing_work() {
+        let mut ledger = Ledger::new(Limits {
+            facts: 1,
+            query_rows: 10,
+            ..Limits::default()
+        });
+        let mut account = FactAccount::new(2);
+        ledger.with_fact_account(&mut account, |core| core.charge(Dim::Facts, 2).unwrap());
+        assert_eq!(account.spent(), 2);
+        assert_eq!(ledger.spent(Dim::Facts), 0);
+        assert!(ledger
+            .with_fact_account(&mut account, |core| core.charge(Dim::Facts, 1))
+            .is_err());
+        ledger.charge(Dim::Facts, 1).unwrap();
+        for _ in 0..2 {
+            ledger.with_phase_limits(
+                Limits {
+                    query_rows: 2,
+                    ..Limits::default()
+                },
+                |core| {
+                    core.charge(Dim::QueryRows, 2).unwrap();
+                    assert!(core.charge(Dim::QueryRows, 1).is_err());
+                },
+            );
+        }
+        assert_eq!(ledger.spent(Dim::QueryRows), 4);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ledger.with_fact_account(&mut account, |core| {
+                core.with_phase_limits(
+                    Limits {
+                        query_rows: 0,
+                        ..Limits::default()
+                    },
+                    |_| panic!("restore"),
+                );
+            });
+        }));
+        assert!(result.is_err());
+        assert_eq!(ledger.limits().facts, 1);
+        assert_eq!(ledger.limits().query_rows, 10);
+        assert_eq!(ledger.spent(Dim::Facts), 1);
     }
 }

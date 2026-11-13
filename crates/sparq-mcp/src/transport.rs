@@ -10,8 +10,6 @@
 
 use std::io::{self, BufRead, Write};
 
-#[cfg(test)]
-use crate::jsonrpc::INVALID_REQUEST;
 use crate::server::McpServer;
 
 /// Serve the MCP protocol over an arbitrary reader/writer pair using the stdio

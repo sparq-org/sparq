@@ -72,6 +72,210 @@
       "body": "{\"wacAllow\":\"user=\\\"\\\",public=\\\"\\\"\"}",
       "status": 200
     },
+    "boundary/assembled-facts/0/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 200
+    },
+    "boundary/assembled-facts/0/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[{\"o\":{\"type\":\"literal\",\"value\":\"hello\"}}]}}",
+      "status": 200
+    },
+    "boundary/assembled-facts/0/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"read\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "boundary/assembled-facts/1/decide": {
+      "body": "{\"error\":\"could not materialise the authorization view\"}",
+      "status": 503
+    },
+    "boundary/assembled-facts/1/query": {
+      "body": "{\"error\":\"could not materialise the authorization view\"}",
+      "status": 503
+    },
+    "boundary/assembled-facts/1/wac-allow": {
+      "body": "{\"error\":\"could not materialise the authorization view\"}",
+      "status": 503
+    },
+    "boundary/content/32000/false/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 200
+    },
+    "boundary/content/32000/false/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[{\"o\":{\"type\":\"literal\",\"value\":\"hello\"}}]}}",
+      "status": 200
+    },
+    "boundary/content/32000/false/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"read\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "boundary/content/32000/true/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 200
+    },
+    "boundary/content/32000/true/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[{\"o\":{\"type\":\"literal\",\"value\":\"hello\"}}]}}",
+      "status": 200
+    },
+    "boundary/content/32000/true/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"read\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "boundary/content/32001/false/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 200
+    },
+    "boundary/content/32001/false/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[{\"o\":{\"type\":\"literal\",\"value\":\"hello\"}}]}}",
+      "status": 200
+    },
+    "boundary/content/32001/false/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"read\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "boundary/content/32001/true/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 200
+    },
+    "boundary/content/32001/true/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[{\"o\":{\"type\":\"literal\",\"value\":\"hello\"}}]}}",
+      "status": 200
+    },
+    "boundary/content/32001/true/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"read\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "boundary/content/33000/false/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 200
+    },
+    "boundary/content/33000/false/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[{\"o\":{\"type\":\"literal\",\"value\":\"hello\"}}]}}",
+      "status": 200
+    },
+    "boundary/content/33000/false/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"read\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "boundary/content/33000/true/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 200
+    },
+    "boundary/content/33000/true/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[{\"o\":{\"type\":\"literal\",\"value\":\"hello\"}}]}}",
+      "status": 200
+    },
+    "boundary/content/33000/true/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"read\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "boundary/content/40000/false/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 200
+    },
+    "boundary/content/40000/false/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[{\"o\":{\"type\":\"literal\",\"value\":\"hello\"}}]}}",
+      "status": 200
+    },
+    "boundary/content/40000/false/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"read\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "boundary/content/40000/true/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 200
+    },
+    "boundary/content/40000/true/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[{\"o\":{\"type\":\"literal\",\"value\":\"hello\"}}]}}",
+      "status": 200
+    },
+    "boundary/content/40000/true/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"read\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "boundary/dense-source/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 200
+    },
+    "boundary/dense-source/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[{\"o\":{\"type\":\"literal\",\"value\":\"hello\"}}]}}",
+      "status": 200
+    },
+    "boundary/dense-source/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"read\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "boundary/long-content-term/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 200
+    },
+    "boundary/long-content-term/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[{\"o\":{\"type\":\"literal\",\"value\":\"hello\"}}]}}",
+      "status": 200
+    },
+    "boundary/long-content-term/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"read\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "boundary/resource-bytes/0/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 200
+    },
+    "boundary/resource-bytes/0/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[{\"o\":{\"type\":\"literal\",\"value\":\"hello\"}}]}}",
+      "status": 200
+    },
+    "boundary/resource-bytes/0/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"read\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "boundary/resource-bytes/1/decide": {
+      "body": "{\"error\":\"could not materialise the authorization view\"}",
+      "status": 503
+    },
+    "boundary/resource-bytes/1/query": {
+      "body": "{\"error\":\"could not materialise the authorization view\"}",
+      "status": 503
+    },
+    "boundary/resource-bytes/1/wac-allow": {
+      "body": "{\"error\":\"could not materialise the authorization view\"}",
+      "status": 503
+    },
+    "boundary/resources/2000/300/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 200
+    },
+    "boundary/resources/2000/300/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[{\"o\":{\"type\":\"literal\",\"value\":\"hello\"}}]}}",
+      "status": 200
+    },
+    "boundary/resources/2000/300/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"read\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "boundary/resources/4000/200/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 200
+    },
+    "boundary/resources/4000/200/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[{\"o\":{\"type\":\"literal\",\"value\":\"hello\"}}]}}",
+      "status": 200
+    },
+    "boundary/resources/4000/200/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"read\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "boundary/resources/6000/120/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 200
+    },
+    "boundary/resources/6000/120/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[{\"o\":{\"type\":\"literal\",\"value\":\"hello\"}}]}}",
+      "status": 200
+    },
+    "boundary/resources/6000/120/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"read\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
     "empty/None/read/decide": {
       "body": "{\"aclLink\":null,\"allow\":false,\"governingAcl\":null,\"grantedModes\":[],\"scope\":null,\"status\":\"noAcl\"}",
       "status": 403
@@ -216,6 +420,114 @@
       "body": "{\"error\":\"'dataset' is not valid N-Quads\"}",
       "status": 400
     },
+    "odrl-boundary/collection/9998/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":false,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 403
+    },
+    "odrl-boundary/collection/9998/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[{\"o\":{\"type\":\"literal\",\"value\":\"other\"}}]}}",
+      "status": 200
+    },
+    "odrl-boundary/collection/9998/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "odrl-boundary/collection/9999/decide": {
+      "body": "{\"error\":\"the ODRL policy and its collection memberships exceed this lane's evaluation bound (fail-closed)\"}",
+      "status": 400
+    },
+    "odrl-boundary/collection/9999/query": {
+      "body": "{\"error\":\"the ODRL policy and its collection memberships exceed this lane's evaluation bound (fail-closed)\"}",
+      "status": 400
+    },
+    "odrl-boundary/collection/9999/wac-allow": {
+      "body": "{\"error\":\"the ODRL policy and its collection memberships exceed this lane's evaluation bound (fail-closed)\"}",
+      "status": 400
+    },
+    "odrl-boundary/content/16500/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 200
+    },
+    "odrl-boundary/content/16500/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[{\"o\":{\"type\":\"literal\",\"value\":\"hello\"}}]}}",
+      "status": 200
+    },
+    "odrl-boundary/content/16500/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"read\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "odrl-boundary/content/20000/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 200
+    },
+    "odrl-boundary/content/20000/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[{\"o\":{\"type\":\"literal\",\"value\":\"hello\"}}]}}",
+      "status": 200
+    },
+    "odrl-boundary/content/20000/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"read\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "odrl-boundary/content/25000/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 200
+    },
+    "odrl-boundary/content/25000/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[{\"o\":{\"type\":\"literal\",\"value\":\"hello\"}}]}}",
+      "status": 200
+    },
+    "odrl-boundary/content/25000/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"read\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "odrl-boundary/content/31000/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 200
+    },
+    "odrl-boundary/content/31000/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[{\"o\":{\"type\":\"literal\",\"value\":\"hello\"}}]}}",
+      "status": 200
+    },
+    "odrl-boundary/content/31000/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"read\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "odrl-boundary/content/40000/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 200
+    },
+    "odrl-boundary/content/40000/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[{\"o\":{\"type\":\"literal\",\"value\":\"hello\"}}]}}",
+      "status": 200
+    },
+    "odrl-boundary/content/40000/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"read\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "odrl-boundary/dense-source/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 200
+    },
+    "odrl-boundary/dense-source/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[{\"o\":{\"type\":\"literal\",\"value\":\"hello\"}}]}}",
+      "status": 200
+    },
+    "odrl-boundary/dense-source/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"read\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "odrl-boundary/long-content-term/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 200
+    },
+    "odrl-boundary/long-content-term/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[{\"o\":{\"type\":\"literal\",\"value\":\"hello\"}}]}}",
+      "status": 200
+    },
+    "odrl-boundary/long-content-term/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"read\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
     "permission/decide": {
       "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
       "status": 200
@@ -250,6 +562,78 @@
     },
     "prohibition/wac-allow": {
       "body": "{\"wacAllow\":\"user=\\\"\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "transport-boundary/0/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 200
+    },
+    "transport-boundary/0/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[{\"o\":{\"type\":\"literal\",\"value\":\"hello\"}}]}}",
+      "status": 200
+    },
+    "transport-boundary/0/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"read\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "transport-boundary/1/decide": {
+      "body": "{\"error\":\"Failed to buffer the request body: length limit exceeded\"}",
+      "status": 413
+    },
+    "transport-boundary/1/query": {
+      "body": "{\"error\":\"Failed to buffer the request body: length limit exceeded\"}",
+      "status": 413
+    },
+    "transport-boundary/1/wac-allow": {
+      "body": "{\"error\":\"Failed to buffer the request body: length limit exceeded\"}",
+      "status": 413
+    },
+    "trust-boundary/budget/1/1/2048/decide": {
+      "body": "{\"aclLink\":null,\"allow\":false,\"governingAcl\":null,\"grantedModes\":[],\"scope\":null,\"status\":\"resolved\",\"trustDenied\":true,\"trustDenyReason\":\"trust rule/credential pair limit exceeded\"}",
+      "status": 403
+    },
+    "trust-boundary/budget/16/256/0/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\",\"trustJustification\":{\"admittedCount\":256,\"admittedSource\":\"urn:issuer\",\"certGraphDerived\":false}}",
+      "status": 200
+    },
+    "trust-boundary/budget/17/241/0/decide": {
+      "body": "{\"aclLink\":null,\"allow\":false,\"governingAcl\":null,\"grantedModes\":[],\"scope\":null,\"status\":\"resolved\",\"trustDenied\":true,\"trustDenyReason\":\"trust rule/credential pair limit exceeded\"}",
+      "status": 403
+    },
+    "trust-boundary/budget/2/1/2047/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\",\"trustJustification\":{\"admittedCount\":1,\"admittedSource\":\"urn:issuer\",\"certGraphDerived\":true}}",
+      "status": 200
+    },
+    "trust-boundary/content/32000/false/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\",\"trustJustification\":{\"admittedCount\":1,\"admittedSource\":\"urn:issuer\",\"certGraphDerived\":false}}",
+      "status": 200
+    },
+    "trust-boundary/content/32000/true/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\",\"trustJustification\":{\"admittedCount\":1,\"admittedSource\":\"urn:issuer\",\"certGraphDerived\":false}}",
+      "status": 200
+    },
+    "trust-boundary/content/32001/false/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\",\"trustJustification\":{\"admittedCount\":1,\"admittedSource\":\"urn:issuer\",\"certGraphDerived\":false}}",
+      "status": 200
+    },
+    "trust-boundary/content/32001/true/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\",\"trustJustification\":{\"admittedCount\":1,\"admittedSource\":\"urn:issuer\",\"certGraphDerived\":false}}",
+      "status": 200
+    },
+    "trust-boundary/content/33000/false/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\",\"trustJustification\":{\"admittedCount\":1,\"admittedSource\":\"urn:issuer\",\"certGraphDerived\":false}}",
+      "status": 200
+    },
+    "trust-boundary/content/33000/true/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\",\"trustJustification\":{\"admittedCount\":1,\"admittedSource\":\"urn:issuer\",\"certGraphDerived\":false}}",
+      "status": 200
+    },
+    "trust-boundary/content/40000/false/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\",\"trustJustification\":{\"admittedCount\":1,\"admittedSource\":\"urn:issuer\",\"certGraphDerived\":false}}",
+      "status": 200
+    },
+    "trust-boundary/content/40000/true/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\",\"trustJustification\":{\"admittedCount\":1,\"admittedSource\":\"urn:issuer\",\"certGraphDerived\":false}}",
       "status": 200
     },
     "wac/None/read/decide": {
@@ -325,5 +709,5 @@
       "status": 200
     }
   },
-  "source": "77072da807ad658244c8702d24ec774fae3ae35b"
+  "source": "2a2939594440d2a33d77aae20b9ca5beb15a46ee"
 }

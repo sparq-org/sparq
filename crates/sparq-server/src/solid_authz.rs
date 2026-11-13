@@ -742,7 +742,7 @@ fn parse_request(body: &Bytes) -> Result<AuthzRequest, Response> {
 // `Response` is large; same `result_large_err` allow as `parse_request` / the crate's
 // other handler helpers. Only the trust lane and the tests take a whole request; the
 // stateless lane owns the fields instead ([`with_store_work`]).
-#[cfg(any(test, feature = "solid-authz-trust"))]
+#[cfg(test)]
 #[allow(clippy::result_large_err)]
 fn build_store(req: &AuthzRequest) -> Result<PodStore, Response> {
     build_store_from(&req.dataset, req.view)
@@ -751,7 +751,7 @@ fn build_store(req: &AuthzRequest) -> Result<PodStore, Response> {
 /// [`build_store`] over the two fields it reads, so the blocking-pool lane
 /// ([`with_store_work`]) can own them for the task rather than borrow the request.
 // `Response` is large; same `result_large_err` allow as the rest of this module.
-#[cfg(any(test, feature = "solid-authz-trust"))]
+#[cfg(test)]
 #[allow(clippy::result_large_err)]
 fn build_store_from(dataset: &str, requested_view: Option<AuthView>) -> Result<PodStore, Response> {
     build_store_from_in(
@@ -770,7 +770,7 @@ fn body_budget_response(kind: Option<AuthAllowance>) -> Response {
     )
 }
 
-#[cfg(any(test, feature = "solid-authz-trust"))]
+#[cfg(test)]
 #[allow(clippy::result_large_err)]
 fn build_store_from_in(
     dataset: &str,
@@ -1372,8 +1372,14 @@ where
     F: FnOnce(&PodStore, &AuthzRequest) -> T + Send + 'static,
 {
     let owned = req.clone();
+    let source_limit = state.config().max_body_bytes;
     on_build_pool(state, move || {
-        let mut ledger = AuthLedger::new(sparq_solid::default_auth_budget());
+        let mut ledger =
+            AuthLedger::with_source_limit(sparq_solid::default_auth_budget(), source_limit);
+        #[cfg(feature = "odrl-authz")]
+        if owned.carries_odrl {
+            odrl_request_context(&owned, mode)?;
+        }
         let graph = load_body_graph_in(&owned.dataset, &mut ledger)?;
         #[cfg(feature = "odrl-authz")]
         let policy_graph = if owned.carries_odrl {
@@ -2074,7 +2080,9 @@ fn trust_authz_decide_blocking(
         .saturating_add(credentials_count)
         .saturating_add(rules_val.len())
         .saturating_add(certs_val.len().saturating_mul(2));
-    if verifies > config.solid_authz_trust_max_pairs {
+    if verifies > config.solid_authz_trust_max_pairs
+        || certs_val.len().saturating_add(pairs) > config.solid_authz_trust_max_pair_checks
+    {
         return json_response(
             StatusCode::FORBIDDEN,
             trust_deny_json("trust verify budget exceeded"),
@@ -2347,7 +2355,7 @@ fn trust_authz_decide_blocking(
     // Build the store over the original dataset with admitted facts injected.
     let admitted_count = all_admitted.len();
     let admitted_source = all_admitted.first().map(|f| f.issuer.as_str().to_owned());
-    let store = match build_store_with_admitted(req, &all_admitted) {
+    let store = match build_store_with_admitted_limit(req, &all_admitted, config.max_body_bytes) {
         Ok(store) => store,
         Err(response) => return response,
     };
@@ -2406,14 +2414,36 @@ fn trust_authz_decide_blocking(
 /// HONEST SCOPE: this is a PoC injection path (anchored-not-proven; sq-qhy4 pending external
 /// audit). A production wiring would use `trust:admitted`-named-graph tagging and epoch-based
 /// cache invalidation (design `research/solid-trust-graph-authz-design.md`).
-#[cfg(feature = "solid-authz-trust")]
+#[cfg(all(test, feature = "solid-authz-trust"))]
 #[allow(clippy::result_large_err)]
 fn build_store_with_admitted(
     req: &AuthzRequest,
     admitted: &[sparq_trust::AdmittedFact],
 ) -> Result<sparq_solid::PodStore, Response> {
+    build_store_with_admitted_limit(
+        req,
+        admitted,
+        crate::http::ServerConfig::default().max_body_bytes,
+    )
+}
+
+#[cfg(feature = "solid-authz-trust")]
+#[allow(clippy::result_large_err)]
+fn build_store_with_admitted_limit(
+    req: &AuthzRequest,
+    admitted: &[sparq_trust::AdmittedFact],
+    source_limit: usize,
+) -> Result<PodStore, Response> {
     use std::fmt::Write as _;
-    // POSITIONAL format args throughout (CodeQL rust/unused-variable guard).
+    let mut ledger =
+        AuthLedger::with_source_limit(sparq_solid::default_auth_budget(), source_limit);
+    ledger
+        .with_dataset_bytes(|core| {
+            core.charge(sparq_core::meter::Dim::SourceBytes, req.dataset.len())
+        })
+        .map_err(|error| {
+            body_budget_response(materialize_refusal_kind(&ledger.input_refusal(error)))
+        })?;
     let mut augmented = req.dataset.clone();
     for fact in admitted {
         // Named-graph position: the document of the fact's subject (a group IRI's group
@@ -2440,23 +2470,25 @@ fn build_store_with_admitted(
             fact.triple.object,
         );
     }
-    // Delegate to the unchanged build_store path (WAC/ACP inference + materialisation).
-    let augmented_req = AuthzRequest {
-        // sq-snopa.8 — the trust lane decides over THIS augmented body dataset; the
-        // stateful lane is refused before `trust_authz_decide` is ever reached.
-        source: AuthzSource::Body,
-        #[cfg(feature = "odrl-authz")]
-        carries_odrl: false,
-        dataset: augmented,
-        agent: req.agent.clone(),
-        client: req.client.clone(),
-        issuer: req.issuer.clone(),
-        now: req.now.clone(),
-        // The model is the request's own: inferred from its dataset before any fact is added,
-        // so an admitted fact never switches it.
-        view: Some(req.view.unwrap_or_else(|| infer_view(&req.dataset))),
-    };
-    build_store(&augmented_req)
+    let generated_len = augmented.len().saturating_sub(req.dataset.len());
+    let graph = ledger
+        .with_dataset_bytes(|core| {
+            core.charge(sparq_core::meter::Dim::GeneratedBytes, generated_len)?;
+            sparq_core::Graph::load_metered_precharged(&augmented, "nquads", core)
+        })
+        .map_err(|error| match error {
+            sparq_core::meter::LoadError::Parse(_) => {
+                json_error(StatusCode::BAD_REQUEST, "'dataset' is not valid N-Quads")
+            }
+            sparq_core::meter::LoadError::Ledger(error) => {
+                body_budget_response(materialize_refusal_kind(&ledger.input_refusal(error)))
+            }
+        })?;
+    materialize_body_graph_in(
+        graph,
+        req.view.unwrap_or_else(|| infer_view(&req.dataset)),
+        &mut ledger,
+    )
 }
 
 /// (sq-pfae.17) Serialise a 403 trust-deny JSON body. The reason string is NEVER
@@ -2696,6 +2728,7 @@ fn apply_odrl_lane_in(
     mode: Mode,
     ledger: &mut AuthLedger,
 ) -> Result<(), Response> {
+    odrl_request_context(req, mode)?;
     let policy_graph =
         union_policy_graph_in(&req.dataset, ledger).map_err(|error| match error {
             sparq_core::meter::LoadError::Parse(_) => {
@@ -2706,6 +2739,31 @@ fn apply_odrl_lane_in(
             }
         })?;
     apply_odrl_graph_in(store, req, mode, &policy_graph, ledger)
+}
+
+#[cfg(feature = "odrl-authz")]
+#[allow(clippy::result_large_err)]
+fn odrl_request_context(req: &AuthzRequest, mode: Mode) -> Result<(&'static str, &str), Response> {
+    // 1. The query-action contract: only `read` maps (sq-lrtc3.2). Refuse any other
+    //    mode rather than guess an ODRL action for it (fail-closed).
+    let Some(action) = odrl_action_for_mode(mode) else {
+        return Err(json_error(
+            StatusCode::BAD_REQUEST,
+            "the dataset carries ODRL policies; the ODRL lane covers the read/query \
+             action only (fail-closed)",
+        ));
+    };
+    // 2. A concrete party: bridged grants AND denies are principal-scoped triples, so
+    //    an anonymous session would leave an applicable prohibition unenforceable
+    //    against any static public grant (fail-OPEN). Refuse instead.
+    let Some(agent) = req.agent.as_deref() else {
+        return Err(json_error(
+            StatusCode::FORBIDDEN,
+            "the dataset carries ODRL policies; the ODRL lane requires an \
+             authenticated agent (fail-closed)",
+        ));
+    };
+    Ok((action, agent))
 }
 
 #[cfg(feature = "odrl-authz")]
@@ -2731,37 +2789,20 @@ fn apply_odrl_graph_in(
     policy_graph: &sparq_core::Graph,
     ledger: &mut AuthLedger,
 ) -> Result<(), Response> {
-    // 1. The query-action contract: only `read` maps (sq-lrtc3.2). Refuse any other
-    //    mode rather than guess an ODRL action for it (fail-closed).
-    let Some(action) = odrl_action_for_mode(mode) else {
-        return Err(json_error(
-            StatusCode::BAD_REQUEST,
-            "the dataset carries ODRL policies; the ODRL lane covers the read/query \
-             action only (fail-closed)",
-        ));
-    };
-    // 2. A concrete party: bridged grants AND denies are principal-scoped triples, so
-    //    an anonymous session would leave an applicable prohibition unenforceable
-    //    against any static public grant (fail-OPEN). Refuse instead.
-    let Some(agent) = req.agent.as_deref() else {
-        return Err(json_error(
-            StatusCode::FORBIDDEN,
-            "the dataset carries ODRL policies; the ODRL lane requires an \
-             authenticated agent (fail-closed)",
-        ));
-    };
+    let (action, agent) = odrl_request_context(req, mode)?;
     // 3. Preserve the policy parser's input-sized allowance independently of
     // control-document bytes. All other work remains on the request ledger.
-    let (policy, shared_bytes_limited) = ledger.with_policy_bytes(|core| {
+    let (policy, _) = ledger.with_policy_bytes(|core| {
         let policy_limits = sparq_policy::default_policy_limits_for(policy_graph, None);
         let shared_bytes_limited =
             core.remaining(sparq_core::meter::Dim::Bytes) < policy_limits.bytes;
-        core.cap_remaining(policy_limits);
+        core.with_phase_limits(policy_limits, |core| {
         core.charge(sparq_core::meter::Dim::QueryRows, policy_graph.len())
             .map_err(|_| body_budget_response(Some(AuthAllowance::PolicyInput)))?;
         let policy = sparq_policy::parse_policy_metered(policy_graph, core)
             .map_err(|error| policy_error_response(error, shared_bytes_limited))?;
         Ok::<_, Response>((policy, shared_bytes_limited))
+        })
     })?;
     // 4. Refuse an unimplementable `odrl:conflict` strategy UP FRONT: under e.g.
     //    `odrl:perm` NONE of the policy's rules can be trusted into deny-overrides
@@ -2800,8 +2841,12 @@ fn apply_odrl_graph_in(
     //    non-matching / unevidenced rule materialises nothing) and idempotent; the deny
     //    side wins at enforcement (∪ allow ∖ ∪ deny).
     let members = ledger.with_policy_bytes(|core| {
-        sparq_policy::target_memberships_metered(&policy, policy_graph, core)
-            .map_err(|error| policy_error_response(error, shared_bytes_limited))
+        let limits = sparq_policy::default_policy_limits_for(policy_graph, None);
+        let shared_bytes_limited = core.remaining(sparq_core::meter::Dim::Bytes) < limits.bytes;
+        core.with_phase_limits(limits, |core| {
+            sparq_policy::target_memberships_metered(&policy, policy_graph, core)
+                .map_err(|error| policy_error_response(error, shared_bytes_limited))
+        })
     })?;
     // 7. Bound the work before doing it: every (rule, evaluated target) pair is one
     //    evaluation. Over the cap the request is refused, never evaluated in part.
@@ -2817,12 +2862,6 @@ fn apply_odrl_graph_in(
              bound (fail-closed)",
         ));
     }
-    ledger
-        .core()
-        .charge(sparq_core::meter::Dim::JoinRows, evaluations)
-        .map_err(|error| {
-            body_budget_response(materialize_refusal_kind(&ledger.input_refusal(error)))
-        })?;
     let requests: Vec<sparq_policy::Request> = targets
         .iter()
         .map(|t| (t.as_str(), None))
@@ -3647,48 +3686,42 @@ mod odrl_tests {
         }
     }
 
-    #[test]
-    fn odrl_uses_the_request_ledgers_remaining_input() {
-        let req = authz_req(format!("{CONTENT}{}", permit_nq(ALICE)), Some(ALICE));
-        let mut store = build_store(&req).unwrap();
-        let budget = store.auth_budget();
-        let mut ledger = AuthLedger::new(budget);
-        ledger
-            .core()
-            .charge(sparq_core::meter::Dim::Facts, budget.max_input_facts)
-            .unwrap();
-        let response = apply_odrl_lane_in(&mut store, &req, Mode::Read, &mut ledger).unwrap_err();
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-        let mut fresh = AuthLedger::new(budget);
-        apply_odrl_lane_in(&mut store, &req, Mode::Read, &mut fresh).unwrap();
+    #[tokio::test]
+    async fn odrl_request_checks_precede_projection_allowances() {
+        let mut dataset = format!("{CONTENT}{}", permit_nq(ALICE));
+        dataset.push_str("invalid after policy source\n");
+        for (mode, agent, status) in [
+            ("write", Some(ALICE), StatusCode::BAD_REQUEST),
+            ("read", None, StatusCode::FORBIDDEN),
+        ] {
+            let body = serde_json::json!({"dataset":dataset,"resource":N1,"mode":mode,"session":{"agent":agent}});
+            let state = AppState::with_config(
+                sparq_core::Graph::default(),
+                crate::http::ServerConfig {
+                    solid_authz: true,
+                    ..Default::default()
+                },
+            );
+            let response = decide_endpoint(
+                State(state),
+                HeaderMap::new(),
+                Bytes::from(body.to_string()),
+            )
+            .await;
+            assert_eq!(response.status(), status);
+        }
     }
 
     #[test]
-    fn odrl_policy_bytes_are_independent_of_control_document_bytes() {
-        use sparq_core::meter::Dim;
-        let constraints = concat!(
-            "_:perm <http://www.w3.org/ns/odrl/2/constraint> _:c .\n",
-            "_:c <http://www.w3.org/ns/odrl/2/leftOperand> <http://www.w3.org/ns/odrl/2/purpose> .\n",
-            "_:c <http://www.w3.org/ns/odrl/2/operator> <http://www.w3.org/ns/odrl/2/eq> .\n",
-            "_:c <http://www.w3.org/ns/odrl/2/rightOperand> \"research\" .\n",
-        );
-        let req = authz_req(
-            format!("{CONTENT}{}{constraints}", permit_nq(ALICE)),
-            Some(ALICE),
-        );
+    fn odrl_projection_does_not_spend_materializer_facts() {
+        let req = authz_req(format!("{CONTENT}{}", permit_nq(ALICE)), Some(ALICE));
         let mut store = build_store(&req).unwrap();
-        assert!(!reads_n1(&store, ALICE));
-        let budget = store.auth_budget();
+        let mut budget = store.auth_budget();
+        budget.max_input_facts = 0;
         let mut ledger = AuthLedger::new(budget);
-        ledger.core().close_document();
-        ledger
-            .core()
-            .charge(Dim::Bytes, budget.max_input_bytes)
-            .unwrap();
         apply_odrl_lane_in(&mut store, &req, Mode::Read, &mut ledger).unwrap();
-        assert!(!reads_n1(&store, ALICE), "unevidenced purpose still denies");
-        ledger.with_policy_bytes(|core| assert!(core.spent(Dim::Bytes) > 0));
-        assert_eq!(ledger.core().spent(Dim::Bytes), budget.max_input_bytes);
+        assert_eq!(ledger.spent(sparq_core::meter::Dim::Facts), 0);
+        assert!(reads_n1(&store, ALICE));
     }
 
     #[test]
@@ -3717,24 +3750,15 @@ mod odrl_tests {
     }
 
     #[test]
-    fn odrl_decisions_charge_the_remaining_work_before_writing() {
-        use sparq_core::meter::Dim;
+    fn odrl_evaluations_have_their_own_phase_allowance() {
         let req = authz_req(format!("{CONTENT}{}", permit_nq(ALICE)), Some(ALICE));
         let mut store = build_store(&req).unwrap();
-        let budget = store.auth_budget();
+        let mut budget = store.auth_budget();
+        budget.max_decision_join_rows = 0;
         let mut ledger = AuthLedger::new(budget);
-        ledger
-            .core()
-            .charge(Dim::JoinRows, budget.max_decision_join_rows)
-            .unwrap();
-        let generation = store.auth_generation();
-        let response = apply_odrl_lane_in(&mut store, &req, Mode::Read, &mut ledger).unwrap_err();
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(store.auth_generation(), generation);
-        assert_eq!(
-            ledger.core().spent(Dim::JoinRows),
-            budget.max_decision_join_rows
-        );
+        apply_odrl_lane_in(&mut store, &req, Mode::Read, &mut ledger).unwrap();
+        assert!(reads_n1(&store, ALICE));
+        assert_eq!(ledger.spent(sparq_core::meter::Dim::JoinRows), 0);
     }
 
     #[test]
@@ -5934,9 +5958,10 @@ mod trust_limit_tests {
     #[tokio::test]
     async fn default_pair_cap_accepts_boundary_and_refuses_one_more_before_verification() {
         let defaults = ServerConfig::default();
-        assert_eq!(defaults.solid_authz_trust_max_pairs, 4096);
-        let (status, deny, calls) = run(defaults.clone(), body(16, 241, 1, 0)).await;
-        assert!(16 * 242 + 241 > defaults.solid_authz_trust_max_pairs);
+        assert_eq!(defaults.solid_authz_trust_max_pairs, 16384);
+        assert_eq!(defaults.solid_authz_trust_max_pair_checks, 4096);
+        let (status, deny, calls) = run(defaults.clone(), body(17, 241, 1, 0)).await;
+        assert_eq!(17 * 241, defaults.solid_authz_trust_max_pair_checks + 1);
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert_eq!(deny["trustDenied"], true);
         assert_eq!(deny["allow"], false);
@@ -5944,10 +5969,10 @@ mod trust_limit_tests {
             calls, 0,
             "no derivation or admission call may start for an over-cap block"
         );
-        let (status, allow, calls) = run(defaults, body(16, 240, 1, 0)).await;
+        let (status, allow, calls) = run(defaults, body(16, 256, 1, 0)).await;
         assert_eq!(status, StatusCode::OK, "{allow}");
         assert_eq!(allow["allow"], true);
-        assert_eq!(allow["trustJustification"]["admittedCount"], 240);
+        assert_eq!(allow["trustJustification"]["admittedCount"], 256);
         assert!(calls > 0);
     }
 
@@ -5955,7 +5980,10 @@ mod trust_limit_tests {
     async fn combined_verify_cap_counts_certifications_before_verification() {
         let config = ServerConfig::default();
         let certs = config.solid_authz_trust_max_certifications;
-        assert!(certs * 4 + 3 > config.solid_authz_trust_max_pairs);
+        assert_eq!(
+            certs + (1 + certs),
+            config.solid_authz_trust_max_pair_checks + 1
+        );
         let (status, deny, calls) = run(config, body(1, 1, 1, certs)).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert_eq!(deny["trustDenied"], true);
@@ -5963,9 +5991,12 @@ mod trust_limit_tests {
         assert_eq!(calls, 0, "the combined cap must precede derivation and admission");
 
         let config = ServerConfig::default();
-        let certs = 1023;
-        assert_eq!(certs * 4 + 3, config.solid_authz_trust_max_pairs - 1);
-        let (status, allow, calls) = run(config, body(1, 1, 1, certs)).await;
+        let certs = 2047;
+        assert_eq!(
+            certs + (2 + certs),
+            config.solid_authz_trust_max_pair_checks
+        );
+        let (status, allow, calls) = run(config, body(2, 1, 1, certs)).await;
         assert_eq!(status, StatusCode::OK, "{allow}");
         assert_eq!(allow["allow"], true);
         assert!(calls > 0);
@@ -6131,14 +6162,15 @@ mod request_ledger_tests {
 
     #[test]
     fn parse_refusals_precede_view_builds() {
-        for (source, bytes, facts) in [
-            ("invalid N-Quads", 1, usize::MAX),
-            ("<urn:s> <urn:p> <urn:o> .\ninvalid", usize::MAX, 0),
+        for (source, source_limit, exhaust_facts) in [
+            ("invalid N-Quads", 1, false),
+            ("<urn:s> <urn:p> <urn:o> .\ninvalid", 1024, true),
         ] {
-            let mut budget = sparq_solid::default_auth_budget();
-            budget.max_input_bytes = bytes;
-            budget.max_input_facts = facts;
-            let mut ledger = AuthLedger::new(budget);
+            let mut ledger =
+                AuthLedger::with_source_limit(sparq_solid::default_auth_budget(), source_limit);
+            if exhaust_facts {
+                ledger.with_dataset_bytes(|core| core.charge(Dim::Facts, source_limit).unwrap());
+            }
             BODY_VIEWS.with(|count| count.set(0));
             let response = build_store_from_in(source, None, &mut ledger)
                 .err()
@@ -6149,7 +6181,7 @@ mod request_ledger_tests {
     }
 
     #[test]
-    fn materialization_uses_the_parses_remaining_facts() {
+    fn materializer_fact_cap_only_counts_assembled_input() {
         let dataset = "<https://pod.ex/n1> <urn:p> <urn:o> <https://pod.ex/n1> .";
         let mut budget = sparq_solid::default_auth_budget();
         budget.max_input_facts = 1;
@@ -6158,9 +6190,59 @@ mod request_ledger_tests {
             let response = build_store_from_in(dataset, Some(view), &mut ledger)
                 .err()
                 .unwrap();
-            assert_eq!(ledger.core().spent(Dim::Facts), 1);
+            assert!(ledger.spent(Dim::Facts) <= 1);
             assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
         }
+    }
+
+    #[tokio::test]
+    async fn raised_transport_limit_raises_dataset_source_allowance() {
+        let mut data = String::from("<https://pod.ex/n1> <urn:p> <urn:o> <https://pod.ex/n1> .\n");
+        data.push_str(&"<a:s> <a:> <a:>.\n".repeat(70000));
+        assert!(data.len() > 1 << 20);
+        data.push_str(concat!(
+            "<https://pod.ex/.acl#r> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <https://pod.ex/.acl> .\n",
+            "<https://pod.ex/.acl#r> <http://www.w3.org/ns/auth/acl#default> <https://pod.ex/> <https://pod.ex/.acl> .\n",
+            "<https://pod.ex/.acl#r> <http://www.w3.org/ns/auth/acl#agent> <https://alice.ex/card#me> <https://pod.ex/.acl> .\n",
+            "<https://pod.ex/.acl#r> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> <https://pod.ex/.acl> .\n"));
+        let body = serde_json::json!({"dataset":data,"resource":"https://pod.ex/n1","mode":"read","session":{"agent":"https://alice.ex/card#me"}});
+        let config = crate::http::ServerConfig {
+            solid_authz: true,
+            max_body_bytes: 2 << 20,
+            ..Default::default()
+        };
+        assert!(body.to_string().len() < config.max_body_bytes);
+        let response = decide_endpoint(
+            State(AppState::with_config(sparq_core::Graph::default(), config)),
+            HeaderMap::new(),
+            Bytes::from(body.to_string()),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[cfg(feature = "solid-authz-trust")]
+    #[test]
+    fn trust_source_limit_precedes_generated_fact_text() {
+        use oxrdf::{NamedNode, Triple};
+        let req=parse_request(&Bytes::from(serde_json::json!({"dataset":"<https://pod.ex/n1> <urn:p> <urn:o> <https://pod.ex/n1> .\n","session":{"agent":"https://alice.ex/card#me"}}).to_string())).unwrap();
+        let fact = sparq_trust::AdmittedFact {
+            triple: Triple::new(
+                NamedNode::new("https://pod.ex/group#t").unwrap(),
+                NamedNode::new("urn:p").unwrap(),
+                NamedNode::new("urn:o").unwrap(),
+            ),
+            issuer: NamedNode::new("urn:issuer").unwrap(),
+        };
+        let store = build_store_with_admitted_limit(&req, &[fact], req.dataset.len());
+        assert!(
+            store.is_ok(),
+            "generated text does not spend external source allowance"
+        );
+        let refusal = build_store_with_admitted_limit(&req, &[], req.dataset.len() - 1)
+            .err()
+            .unwrap();
+        assert_eq!(refusal.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 
     #[test]

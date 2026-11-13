@@ -629,7 +629,7 @@ impl PodStore {
         &mut self,
         ledger: &mut AuthLedger,
     ) -> Result<MaterializeStats, String> {
-        let resources = loader::resources(&self.graph, ledger)?;
+        let resources = self.enumerate_resources(ledger.materialize_deadline())?;
         let stats = materialize::materialize_wac_in(&mut self.graph, self.auth_limits, ledger)?;
         let provenance = std::mem::take(&mut self.acp_context.0);
         self.acp_context.0 = self.existing_provenance(&provenance, false, &resources);
@@ -649,7 +649,7 @@ impl PodStore {
     ) -> Result<MaterializeStats, String> {
         self.usable_acp_context()?;
         let (provenance, credentials) = self.acp_context.clone();
-        let resources = loader::resources(&self.graph, ledger)?;
+        let resources = self.enumerate_resources(ledger.materialize_deadline())?;
         let stats = materialize::materialize_acp_in(
             &mut self.graph,
             &provenance,
@@ -1245,6 +1245,16 @@ impl PodStore {
         // `.acl` write that starts (or stops) referencing a group document is reflected on
         // the next update's re-materialization decision.
         self.group_docs.take();
+    }
+
+    /// Group documents read by the installed WAC model, from accepted controls only.
+    /// ACP and stores without an installed WAC view return an empty set.
+    pub fn input_group_docs(&self) -> FxHashSet<String> {
+        if self.installed_acp == Some(false) {
+            loader::accepted_group_docs(&self.graph)
+        } else {
+            FxHashSet::default()
+        }
     }
 
     /// The graphs the current access-control documents reference via `acl:agentGroup`,

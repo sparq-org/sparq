@@ -26,10 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **sparq-server / sparq-mcp:** stateless authorization parsing and Solid group
   writes use the request ledger; MCP message limits apply before JSON parsing.
-  The combined trust verify budget also counts public-key decoding and each
-  credential's canonicalize-and-commit before admission. Dataset and policy byte
-  accounts retain the control/group input budget's scope and the ODRL collection
-  evaluation boundary.
+  Dataset ingestion, assembled authorization input and policy phases retain
+  separate accounting scopes. Resource pruning preserves the request deadline
+  without spending the input enumeration allowance again. Group writes meter
+  only documents read by accepted WAC controls.
 
 - **sparq-lws-core:** metadata writes, resource deletes, containment removals and
   append/fold publication use fenced HTTP updates. Resource deletion detaches its
@@ -52,6 +52,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The builtin LWS.net ratchet checks exact expected failure names and requires their removal when they pass.
 
 ### Changed
+
+- **sparq-server:** combined trust pricing includes public-key decoding and each
+  credential's canonicalize-and-commit before admission. Its default allowance
+  accommodates the existing rule/credential and certification boundaries, while
+  the original pairing allowance remains independently enforced.
 
 - **sparq-lws-core:** insert-only LDP PATCH without Read stores inserts beside a
   Turtle, N-Triples or N-Quads document and returns `204` with no Location or ETag

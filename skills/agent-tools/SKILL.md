@@ -357,7 +357,8 @@ Each request line is capped by `ServerConfig::max_request_bytes` (default
 `INVALID_REQUEST` error (id `null`) and is discarded as it streams, never buffered whole.
 Both `McpServer::handle_message` and `SolidMcpServer::handle_message` apply the
 same byte check before JSON parsing, including batches and notifications.
-`SolidServerConfig::max_request_bytes` has the same default and `None` override.
+`SolidMcpServer::set_max_request_bytes(Some(bytes))` changes the same default cap;
+passing `None` disables it. `SolidServerConfig` retains its existing struct fields.
 Embedders should also bound buffering at their transport boundary.
 
 Solid ACL/ACR puts use `PodStore` admission before replacing a slot. Writes to a
@@ -427,3 +428,8 @@ not mutate the graph).
 - **MCP spec** — <https://modelcontextprotocol.io>.
 - **NL→SPARQL & schema grounding** — [`genai-retrieval`](../genai-retrieval/SKILL.md).
 - **Underlying query API** — [`sparql-query`](../sparql-query/SKILL.md).
+
+Solid resource writes meter group documents only when the installed model is WAC
+and an accepted control document references the URL. ACP references and rejected
+controls do not make ordinary content a group input. Refusals name the written
+URL and preserve its previous slot and authorization generation.
