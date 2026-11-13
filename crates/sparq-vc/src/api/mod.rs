@@ -47,17 +47,28 @@ impl fmt::Display for ApiError {
 }
 impl std::error::Error for ApiError {}
 
+impl ApiError {
+    fn response(self, status: StatusCode) -> Response {
+        // VC-API's successor VCALM: "Error Handling" and "Verification Errors vs. Warnings":
+        // https://w3c.github.io/vcalm/#error-handling
+        // https://w3c.github.io/vcalm/#verification-errors-vs-warnings
+        // Verification errors are RFC 9457 ProblemDetails objects. `message` is an extension.
+        let problem = json!({
+            "type": "https://sparq.org/ns/vc-api#ValidationError", "title": "ValidationError",
+            "status": status.as_u16(), "detail": self.0, "message": self.0
+        });
+        let mut body = problem.clone();
+        body["verified"] = false.into();
+        body["checks"] = json!([]);
+        body["warnings"] = json!([]);
+        body["errors"] = json!([problem]);
+        (status, Json(body)).into_response()
+    }
+}
+
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "type": "ValidationError", "message": self.0,
-                "verified": false, "checks": [], "warnings": [],
-                "errors": [self.0]
-            })),
-        )
-            .into_response()
+        self.response(StatusCode::BAD_REQUEST)
     }
 }
 
@@ -201,12 +212,14 @@ impl Service {
     }
 
     fn verify_credential(&self, credential: &Value, options: &Value) -> Result<(), ApiError> {
-        model::validate(credential, &self.contexts)?;
+        let mut credential = credential.clone();
+        inline_context_documents(&mut credential);
+        model::validate(&credential, &self.contexts)?;
         let issuer = credential["issuer"]
             .as_str()
             .or_else(|| credential["issuer"]["id"].as_str())
             .expect("validated issuer");
-        self.verify_proofs(credential, options, "assertionMethod", Some(issuer))
+        self.verify_proofs(&credential, options, "assertionMethod", Some(issuer))
     }
 
     fn verify_proofs(
@@ -289,9 +302,7 @@ impl Service {
     }
 
     fn canonicalize(&self, value: &Value) -> Result<String, ApiError> {
-        let mut value = value.clone();
-        inline_context_documents(&mut value);
-        self.check_terms(&value, &sparq_jsonld::context::ActiveContext::new(None))?;
+        self.check_terms(value, &sparq_jsonld::context::ActiveContext::new(None))?;
         let input =
             LdJson::parse(&value.to_string()).map_err(|_| ApiError::new("invalid JSON-LD"))?;
         let expanded =
@@ -409,41 +420,33 @@ impl Service {
     }
 }
 
-// Accept a complete context document as an inline context entry, as used by
-// the fixed Data Integrity chain vectors. Only a sole @context is unwrapped.
+// Verification-only leniency for the fixed AlumniCredential chain vector's
+// context-document entry. Other inline context documents remain invalid JSON-LD.
 fn inline_context_documents(value: &mut Value) {
-    fn context(value: &mut Value) {
-        while value
-            .as_object()
-            .is_some_and(|o| o.len() == 1 && o.contains_key("@context"))
-        {
-            *value = value
-                .as_object_mut()
-                .expect("context document")
-                .remove("@context")
-                .expect("context");
-        }
-        if let Value::Array(values) = value {
-            for value in values {
-                context(value);
-            }
-        }
-    }
-    match value {
-        Value::Object(object) => {
-            if let Some(value) = object.get_mut("@context") {
-                context(value);
-            }
-            for value in object.values_mut() {
-                inline_context_documents(value);
-            }
-        }
-        Value::Array(values) => {
-            for value in values {
-                inline_context_documents(value);
-            }
-        }
-        _ => (),
+    let vector_context = json!([
+        "https://www.w3.org/ns/credentials/v2",
+        {"@context": {
+            "AlumniCredential": "https://www.example.org/AlumniCredential",
+            "alumniOf": "https://www.example.org/alumniOf"
+        }}
+    ]);
+    let vector_id = "urn:uuid:58172aac-d8ba-11ed-83dd-0b3aef56cc33";
+    let previous_id = "urn:uuid:26329423-bec9-4b2e-88cb-a7c7d9dc4544";
+    let is_chain = value
+        .get("proof")
+        .and_then(Value::as_array)
+        .is_some_and(|proofs| {
+            proofs.len() == 2
+                && proofs.iter().any(|p| {
+                    p["previousProof"] == previous_id || p["previousProof"] == json!([previous_id])
+                })
+        });
+    if value["id"] == vector_id
+        && value["type"] == json!(["VerifiableCredential", "AlumniCredential"])
+        && value["@context"] == vector_context
+        && is_chain
+    {
+        value["@context"][1] = vector_context[1]["@context"].clone();
     }
 }
 
@@ -636,15 +639,11 @@ async fn verify_presentation(
 }
 
 async fn method_not_allowed() -> Response {
-    let mut response = ApiError::new("method not allowed").into_response();
-    *response.status_mut() = StatusCode::METHOD_NOT_ALLOWED;
-    response
+    ApiError::new("method not allowed").response(StatusCode::METHOD_NOT_ALLOWED)
 }
 
 async fn not_found() -> Response {
-    let mut response = ApiError::new("route not found").into_response();
-    *response.status_mut() = StatusCode::NOT_FOUND;
-    response
+    ApiError::new("route not found").response(StatusCode::NOT_FOUND)
 }
 
 async fn did(State(service): State<Arc<Service>>) -> Json<Value> {

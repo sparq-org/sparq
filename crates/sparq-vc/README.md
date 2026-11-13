@@ -38,4 +38,6 @@ HTTP runner, presentation verification at `POST /presentations/verify`, and `spa
 and comes from `SPARQ_VC_TEST_SEED`; JSON-LD contexts are prepared before startup.
 See [the runbook](vercel/README.md) and
 [usage skill](../../skills/vc-api/SKILL.md) for configuration, W3C suite runs,
-and the separate Vercel adapter.
+and the separate Vercel adapter. Related-resource digests are checked against
+exact bytes of any document already held in its offline cache; unknown resource
+IDs are signed unchanged and their resource integrity is not checked.

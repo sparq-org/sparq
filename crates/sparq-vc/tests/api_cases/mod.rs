@@ -293,18 +293,23 @@ async fn previous_proof_suite_vector_and_dependency_order() {
     let app = app();
     let vc: Value =
         serde_json::from_str(include_str!("../api-fixtures/previous-proof.json")).unwrap();
-    for reverse in [false, true] {
-        let mut vc = vc.clone();
-        if reverse {
-            vc["proof"].as_array_mut().unwrap().reverse();
+    for list in [false, true] {
+        for reverse in [false, true] {
+            let mut document = vc.clone();
+            if list {
+                document["proof"][1]["previousProof"] = json!([vc["proof"][1]["previousProof"]]);
+            }
+            if reverse {
+                document["proof"].as_array_mut().unwrap().reverse();
+            }
+            let (status, body) = post(
+                &app,
+                "/credentials/verify",
+                json!({"verifiableCredential":document}),
+            )
+            .await;
+            accepted(status, &body);
         }
-        let (status, body) = post(
-            &app,
-            "/credentials/verify",
-            json!({"verifiableCredential":vc}),
-        )
-        .await;
-        accepted(status, &body);
     }
     let mut invalid_context = vc.clone();
     invalid_context["@context"][1]["discarded"] = "https://example.org/discarded".into();
@@ -533,7 +538,7 @@ async fn verification_routes_share_request_errors_and_limits() {
         ] {
             let (status, body) = request(&app, "POST", path, body, "application/json").await;
             rejected(status, &body);
-            assert!(!body["errors"][0]
+            assert!(!body["errors"][0]["message"]
                 .as_str()
                 .unwrap()
                 .contains("[object Object]"));
@@ -659,8 +664,312 @@ async fn route_errors_use_the_same_readable_problem_shape() {
         let (status, body) = request(&app, method, path, "{}".into(), "application/json").await;
         assert_eq!(status, expected);
         assert_eq!(body["message"], message);
-        assert_eq!(body["errors"], json!([message]));
-        assert_eq!(body["type"], "ValidationError");
+        assert_eq!(body["errors"][0]["message"], message);
+        assert_eq!(body["errors"][0]["detail"], message);
+        assert_eq!(body["errors"][0]["status"], expected.as_u16());
+        assert_eq!(body["errors"][0]["title"], "ValidationError");
+        assert_eq!(body["type"], "https://sparq.org/ns/vc-api#ValidationError");
+        assert_eq!(body["errors"][0]["type"], body["type"]);
         assert_eq!(body["verified"], false);
+    }
+}
+
+#[tokio::test]
+async fn held_resources_check_every_cached_document_and_digest() {
+    let mut documents = context_documents();
+    documents.insert("urn:held:fixture".into(), "fixture-held bytes\n".into());
+    let mut seed = [0; 32];
+    rand_core::OsRng.fill_bytes(&mut seed);
+    let app = router(Service::new(
+        &seed,
+        OfflineContexts::from_documents(documents.clone()).unwrap(),
+    ));
+    let signer = TestSigner::new();
+    for (id, bytes) in &documents {
+        for (field, matching, wrong, message) in [
+            (
+                "digestSRI",
+                format!(
+                    "sha256-{}",
+                    STANDARD.encode(Sha256::digest(bytes.as_bytes()))
+                ),
+                format!("sha256-{}", STANDARD.encode([0; 32])),
+                "relatedResource digestSRI mismatch for held resource",
+            ),
+            (
+                "digestSRI",
+                format!(
+                    "sha384-{}",
+                    STANDARD.encode(Sha384::digest(bytes.as_bytes()))
+                ),
+                format!("sha384-{}", STANDARD.encode([0; 48])),
+                "relatedResource digestSRI mismatch for held resource",
+            ),
+            (
+                "digestSRI",
+                format!(
+                    "sha512-{}",
+                    STANDARD.encode(Sha512::digest(bytes.as_bytes()))
+                ),
+                format!("sha512-{}", STANDARD.encode([0; 64])),
+                "relatedResource digestSRI mismatch for held resource",
+            ),
+            (
+                "digestMultibase",
+                format!(
+                    "u{}",
+                    URL_SAFE_NO_PAD.encode(Sha256::digest(bytes.as_bytes()))
+                ),
+                format!("u{}", URL_SAFE_NO_PAD.encode([0; 32])),
+                "relatedResource digestMultibase mismatch for held resource",
+            ),
+        ] {
+            let mut input = credential();
+            input["relatedResource"] =
+                json!({"id":id, field:matching, "mediaType":"application/ld+json"});
+            let signed = issue(&app, input.clone()).await;
+            assert_eq!(signed["relatedResource"], input["relatedResource"]);
+            let (status, body) = post(
+                &app,
+                "/credentials/verify",
+                json!({"verifiableCredential":signed}),
+            )
+            .await;
+            accepted(status, &body);
+            input["relatedResource"][field] = wrong.clone().into();
+            let (status, body) =
+                post(&app, "/credentials/issue", json!({"credential":input})).await;
+            rejected(status, &body);
+            assert_eq!(body["message"], message, "{id}");
+            input["issuer"] = signer.did.clone().into();
+            input["proof"] = signer.sign(&input, signer.proof("assertionMethod"));
+            let (status, body) = post(
+                &app,
+                "/credentials/verify",
+                json!({"verifiableCredential":input}),
+            )
+            .await;
+            rejected(status, &body);
+            assert_eq!(body["message"], message, "{id}");
+            let mut unknown = credential();
+            unknown["relatedResource"] =
+                json!({"id":"https://unavailable.example/resource", field:wrong});
+            let signed = issue(&app, unknown.clone()).await;
+            assert_eq!(signed["relatedResource"], unknown["relatedResource"]);
+            let (status, body) = post(
+                &app,
+                "/credentials/verify",
+                json!({"verifiableCredential":signed}),
+            )
+            .await;
+            accepted(status, &body);
+        }
+    }
+    // Both advertised digests must match, even when the other one is correct.
+    for field in ["digestSRI", "digestMultibase"] {
+        let mut input = credential();
+        let bytes = documents["https://www.w3.org/ns/credentials/v2"].as_bytes();
+        input["relatedResource"] = json!({"id":"https://www.w3.org/ns/credentials/v2",
+            "digestSRI": format!("sha384-{}", STANDARD.encode(Sha384::digest(bytes))),
+            "digestMultibase": format!("u{}", URL_SAFE_NO_PAD.encode(Sha256::digest(bytes)))});
+        input["relatedResource"][field] = if field == "digestSRI" {
+            format!("sha384-{}", STANDARD.encode([0; 48]))
+        } else {
+            format!("u{}", URL_SAFE_NO_PAD.encode([0; 32]))
+        }
+        .into();
+        let (status, body) = post(&app, "/credentials/issue", json!({"credential":input})).await;
+        rejected(status, &body);
+        assert!(body["message"]
+            .as_str()
+            .unwrap()
+            .contains("mismatch for held resource"));
+    }
+}
+
+#[tokio::test]
+async fn github_context_bytes_match_the_suite_digests_and_preserve_jsonld() {
+    let app = app();
+    for resource in [
+        json!({"id":"https://www.w3.org/ns/credentials/v2", "digestSRI":"sha384-l/HrjlBCNWyAX91hr6LFV2Y3heB5Tcr6IeE4/Tje8YyzYBM8IhqjHWiWpr8+ZbYU"}),
+        json!({"id":"https://www.w3.org/ns/credentials/v2", "digestMultibase":"uWZVc7WaX1h4D8rJVb-vlMIqxaEKEb1tYbX8fet7JJzQ"}),
+    ] {
+        let mut vc = credential();
+        vc["relatedResource"] = resource;
+        issue(&app, vc).await;
+    }
+    let mut vc = credential();
+    vc["relatedResource"] = json!({"id":"https://www.w3.org/ns/credentials/v2", "digestMultibase":"uM4RgWQc3RUDtjJCSgTJtTfvpZ7SPEg_LNO0ESlovQC0"});
+    let (status, body) = post(&app, "/credentials/issue", json!({"credential":vc})).await;
+    rejected(status, &body);
+    assert_eq!(
+        body["message"],
+        "relatedResource digestMultibase mismatch for held resource"
+    );
+    let documents = context_documents();
+    let manifest: Value =
+        serde_json::from_str(include_str!("../api-fixtures/contexts/manifest.json")).unwrap();
+    for (url, filename) in CONTEXT_FILES {
+        assert_eq!(
+            hex::encode(Sha256::digest(documents[*url].as_bytes())),
+            manifest[*filename]["sha256"]
+        );
+    }
+    let reformatted: BTreeMap<_, _> = documents
+        .iter()
+        .map(|(url, text)| {
+            let value: Value = serde_json::from_str(text).unwrap();
+            (url.clone(), serde_json::to_string(&value).unwrap())
+        })
+        .collect();
+    let mut seed = [0; 32];
+    rand_core::OsRng.fill_bytes(&mut seed);
+    let reformatted_app = router(Service::new(
+        &seed,
+        OfflineContexts::from_documents(reformatted).unwrap(),
+    ));
+    let vc = issue(&app, credential()).await;
+    let (status, body) = post(
+        &reformatted_app,
+        "/credentials/verify",
+        json!({"verifiableCredential":vc}),
+    )
+    .await;
+    accepted(status, &body);
+    let signer = TestSigner::new();
+    let mut vp = presentation();
+    vp["verifiableCredential"] = json!([vc]);
+    let (status, body) = verify_vp(&reformatted_app, signer.presentation(vp)).await;
+    accepted(status, &body);
+}
+
+#[tokio::test]
+async fn fixed_context_document_leniency_is_verification_only() {
+    let app = app();
+    let raw: Value =
+        serde_json::from_str(include_str!("../api-fixtures/previous-proof.json")).unwrap();
+    let text = raw.to_string();
+    let documents = context_documents();
+    let result = oxjsonld::JsonLdParser::new()
+        .for_slice(text.as_bytes())
+        .with_load_document_callback(move |url, _| {
+            Ok(oxjsonld::JsonLdRemoteDocument {
+                document: documents[url].as_bytes().to_vec(),
+                document_url: url.into(),
+            })
+        })
+        .collect::<Result<Vec<_>, _>>();
+    assert!(
+        result.is_err(),
+        "ordinary JSON-LD processing must reject the raw vector context"
+    );
+    let (status, body) = post(
+        &app,
+        "/credentials/verify",
+        json!({"verifiableCredential":raw}),
+    )
+    .await;
+    accepted(status, &body);
+    let mut unsigned = raw.clone();
+    unsigned.as_object_mut().unwrap().remove("proof");
+    let (status, body) = post(&app, "/credentials/issue", json!({"credential":unsigned})).await;
+    rejected(status, &body);
+    assert!(body["message"]
+        .as_str()
+        .unwrap()
+        .contains("keyword redefinition"));
+    let signer = TestSigner::new();
+    for changed in ["id", "type", "context", "chain", "count"] {
+        let mut document = raw.clone();
+        document.as_object_mut().unwrap().remove("proof");
+        document["issuer"] = signer.did.clone().into();
+        document["@context"][1] = raw["@context"][1]["@context"].clone();
+        match changed {
+            "id" => document["id"] = "urn:credential:ordinary".into(),
+            "type" => document["type"] = json!(["VerifiableCredential"]),
+            "context" => document["@context"][1]["other"] = "https://example.org/other".into(),
+            _ => (),
+        }
+        let mut first = signer.proof("assertionMethod");
+        first["id"] = raw["proof"][0]["id"].clone();
+        first = signer.sign(&document, first);
+        let mut terminal = signer.proof("assertionMethod");
+        terminal["created"] = "2023-02-26T22:16:38Z".into();
+        let mut input = document.clone();
+        if changed != "chain" {
+            terminal["previousProof"] = raw["proof"][0]["id"].clone();
+            input["proof"] = json!([first]);
+        }
+        terminal = signer.sign(&input, terminal);
+        let third = signer.sign(&document, signer.proof("assertionMethod"));
+        document["proof"] = if changed == "count" {
+            json!([first, terminal, third])
+        } else {
+            json!([first, terminal])
+        };
+        document["@context"][1] = json!({"@context":document["@context"][1]});
+        let (status, body) = post(
+            &app,
+            "/credentials/verify",
+            json!({"verifiableCredential":document}),
+        )
+        .await;
+        rejected(status, &body);
+        assert!(
+            body["message"]
+                .as_str()
+                .unwrap()
+                .contains("keyword redefinition"),
+            "{changed}: {body}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn terminal_controller_policy_rejects_notary_and_cosigner_shapes() {
+    let app = app();
+    let issuer = TestSigner::new();
+    let notary = TestSigner::new();
+    let mut vc = credential();
+    vc["issuer"] = issuer.did.clone().into();
+    let mut first = issuer.proof("assertionMethod");
+    first["id"] = "urn:proof:issuer".into();
+    first = issuer.sign(&vc, first);
+    let mut single = vc.clone();
+    single["proof"] = first.clone();
+    let (status, body) = post(
+        &app,
+        "/credentials/verify",
+        json!({"verifiableCredential":single}),
+    )
+    .await;
+    accepted(status, &body);
+    for countersignature in [false, true] {
+        let mut input = vc.clone();
+        let mut proof = notary.proof("assertionMethod");
+        if countersignature {
+            proof["previousProof"] = "urn:proof:issuer".into();
+            input["proof"] = json!([first]);
+        }
+        let proof = notary.sign(&input, proof);
+        for reverse in [false, true] {
+            let mut document = vc.clone();
+            document["proof"] = if reverse {
+                json!([proof, first])
+            } else {
+                json!([first, proof])
+            };
+            let (status, body) = post(
+                &app,
+                "/credentials/verify",
+                json!({"verifiableCredential":document}),
+            )
+            .await;
+            rejected(status, &body);
+            assert_eq!(
+                body["message"],
+                "verificationMethod controller must be the did:key issuer or holder"
+            );
+        }
     }
 }

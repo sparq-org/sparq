@@ -111,9 +111,14 @@ fn rejected(status: StatusCode, body: &Value) {
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert_eq!(body["verified"], false);
     assert!(!body["errors"].as_array().unwrap().is_empty());
-    assert_eq!(body["type"], "ValidationError");
+    assert_eq!(body["type"], "https://sparq.org/ns/vc-api#ValidationError");
+    assert!(body["errors"][0].is_object());
+    assert_eq!(body["errors"][0]["type"], body["type"]);
+    assert_eq!(body["errors"][0]["title"], "ValidationError");
+    assert_eq!(body["errors"][0]["status"], 400);
+    assert_eq!(body["errors"][0]["detail"], body["message"]);
     assert!(body["message"].as_str().is_some_and(|s| !s.is_empty()));
-    assert_eq!(body["message"], body["errors"][0]);
+    assert_eq!(body["message"], body["errors"][0]["message"]);
 }
 
 #[tokio::test]
@@ -141,7 +146,7 @@ async fn issue_verify_round_trip_and_tamper_detection() {
     )
     .await;
     rejected(status, &body);
-    assert_eq!(body["errors"][0], "proof verification failed");
+    assert_eq!(body["errors"][0]["message"], "proof verification failed");
     let mut reordered = vc.clone();
     reordered["proof"] = json!([vc["proof"]]);
     let (status, body) = post(
@@ -378,7 +383,7 @@ async fn proof_errors_and_requested_options() {
     .await;
     rejected(status, &body);
     assert_eq!(
-        body["errors"][0],
+        body["errors"][0]["message"],
         "verificationMethod controller must be the did:key issuer or holder"
     );
 }
@@ -412,15 +417,15 @@ async fn offline_contexts_include_nested_references_and_protected_terms() {
 async fn related_resource_shape_and_digest_encodings() {
     let app = app();
     let bytes = include_str!("api-fixtures/base.jsonld").as_bytes();
-    let resource = json!({"id":"https://www.w3.org/ns/credentials/v2",
+    let resource = json!({"id":"urn:resource:format-check",
         "digestSRI":format!("sha384-{}", STANDARD.encode(Sha384::digest(bytes))),
         "digestMultibase":format!("u{}", URL_SAFE_NO_PAD.encode(Sha256::digest(bytes)))});
     let mut vc = credential();
     vc["relatedResource"] = resource.clone();
     issue(&app, vc).await;
     for resources in [
-        json!({"id":"https://www.w3.org/ns/credentials/v2", "digestSRI":"sha384-l/HrjlBCNWyAX91hr6LFV2Y3heB5Tcr6IeE4/Tje8YyzYBM8IhqjHWiWpr8+ZbYU"}),
-        json!({"id":"https://www.w3.org/ns/credentials/v2", "digestMultibase":"uWZVc7WaX1h4D8rJVb-vlMIqxaEKEb1tYbX8fet7JJzQ"}),
+        json!({"id":"urn:resource:sri", "digestSRI":"sha384-l/HrjlBCNWyAX91hr6LFV2Y3heB5Tcr6IeE4/Tje8YyzYBM8IhqjHWiWpr8+ZbYU"}),
+        json!({"id":"urn:resource:multibase", "digestMultibase":"uWZVc7WaX1h4D8rJVb-vlMIqxaEKEb1tYbX8fet7JJzQ"}),
         json!([{"id":"https://unavailable.example/resource", "mediaType":"application/ld+json", "digestSRI":resource["digestSRI"]}]),
         json!({"id":"urn:resource:sha512", "digestSRI":format!("sha512-{}",STANDARD.encode(Sha512::digest(bytes)))}),
     ] {
@@ -533,7 +538,7 @@ async fn unmapped_claims_are_rejected_and_named_graph_claims_are_bound() {
     vc["credentialSubject"]["unmappedClaim"] = "unmapped".into();
     let (status, body) = post(&app, "/credentials/issue", json!({"credential":vc})).await;
     rejected(status, &body);
-    assert_eq!(body["errors"][0], "unmapped JSON-LD property");
+    assert_eq!(body["errors"][0]["message"], "unmapped JSON-LD property");
     let mut vc = credential();
     vc["credentialSubject"]["@graph"] = json!([{"id":"urn:graph:subject","name":"Graph claim"}]);
     let mut vc = issue(&app, vc).await;

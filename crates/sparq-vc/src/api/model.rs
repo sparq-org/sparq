@@ -7,6 +7,7 @@ use base64::{
 use chrono::{DateTime, FixedOffset};
 use oxrdf::NamedNode;
 use serde_json::Value;
+use sha2::{Digest as _, Sha256, Sha384, Sha512};
 
 use super::{ApiError, OfflineContexts};
 
@@ -218,6 +219,19 @@ pub(super) fn validate(vc: &Value, cache: &OfflineContexts) -> Result<(), ApiErr
                     })
                 });
                 require(valid, "invalid relatedResource digestSRI")?;
+                if let Some(bytes) = cache.held_bytes(id) {
+                    let sri = value.as_str().expect("validated digestSRI");
+                    let (algorithm, _) = sri.split_once('-').expect("validated digestSRI");
+                    let digest = match algorithm {
+                        "sha256" => STANDARD.encode(Sha256::digest(bytes.as_bytes())),
+                        "sha384" => STANDARD.encode(Sha384::digest(bytes.as_bytes())),
+                        _ => STANDARD.encode(Sha512::digest(bytes.as_bytes())),
+                    };
+                    require(
+                        sri == format!("{algorithm}-{digest}"),
+                        "relatedResource digestSRI mismatch for held resource",
+                    )?;
+                }
             }
             if let Some(value) = resource.get("digestMultibase") {
                 let valid = value.as_str().is_some_and(|s| match s.strip_prefix('u') {
@@ -227,6 +241,16 @@ pub(super) fn validate(vc: &Value, cache: &OfflineContexts) -> Result<(), ApiErr
                     None => false,
                 });
                 require(valid, "invalid relatedResource digestMultibase")?;
+                if let Some(bytes) = cache.held_bytes(id) {
+                    let expected = format!(
+                        "u{}",
+                        URL_SAFE_NO_PAD.encode(Sha256::digest(bytes.as_bytes()))
+                    );
+                    require(
+                        value.as_str() == Some(expected.as_str()),
+                        "relatedResource digestMultibase mismatch for held resource",
+                    )?;
+                }
             }
         }
     }

@@ -1,7 +1,10 @@
 // Bound input/output before RDFC and meter its HNDQ calls and permutations.
 use crate::{CanonError, Digest};
 use oxrdf::{GraphName, NamedOrBlankNode, Quad, Term};
-use std::{collections::HashMap, fmt::Write};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Write,
+};
 
 /// Explicit resource limits for the standard RDFC-1.0 entry points.
 ///
@@ -90,7 +93,7 @@ fn prepare(
         text: String::new(),
         limit: limits.max_input_bytes,
     };
-    let mut related: HashMap<&str, ()> = HashMap::new();
+    let mut related: HashSet<&str> = HashSet::new();
     let mut occurrences = 0_usize;
     for quad in dataset {
         if matches!(quad.object, Term::Triple(_)) {
@@ -115,7 +118,7 @@ fn prepare(
             occurrences = occurrences
                 .checked_add(1)
                 .ok_or_else(|| capacity("canonical input size overflow"))?;
-            related.entry(node).or_default();
+            related.insert(*node);
         }
         let written = match &quad.graph_name {
             GraphName::DefaultGraph => {

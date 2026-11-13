@@ -47,3 +47,13 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(re.findall(r'const ROUTE: &str = "([^"]+)";', source),
                          ['/presentations/verify'])
         self.assertIn('include!("../adapter.rs");', source)
+
+    def test_each_vercel_bin_uses_the_runtime_handler_entry_point(self):
+        manifest = tomllib.loads((ROOT / 'Cargo.toml').read_text())
+        for binary in manifest['bin']:
+            with self.subTest(binary=binary['name']):
+                source = (ROOT / binary['path']).read_text()
+                body, = re.findall(
+                    r'async fn main\(\) -> Result<\(\), vercel_runtime::Error> \{\s*(.*?)\s*\}',
+                    source, re.DOTALL)
+                self.assertEqual(body, 'vercel_runtime::run(handler).await')

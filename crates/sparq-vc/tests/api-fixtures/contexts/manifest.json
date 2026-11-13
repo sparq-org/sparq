@@ -1,8 +1,8 @@
 {
   "credentials-v2.jsonld": {
     "url": "https://www.w3.org/ns/credentials/v2",
-    "resolvedUrl": "npm @digitalbazaar/credentials-context@3.2.0 contexts/v2.jsonld",
-    "sha256": "8a9f494a89ecc51db093e90e84713e07e84d6d9204364a9b3c7868b21751236f"
+    "resolvedUrl": "https://raw.githubusercontent.com/w3c/vc-data-model/main/contexts/credentials/v2",
+    "sha256": "59955ced6697d61e03f2b2556febe5308ab16842846f5b586d7f1f7adec92734"
   },
   "credentials-v1.jsonld": {
     "url": "https://www.w3.org/2018/credentials/v1",

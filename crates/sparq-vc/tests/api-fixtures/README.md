@@ -34,3 +34,13 @@ They come from the packages and source listed in that manifest. The package
 license notices are retained in `contexts/LICENSE-*`; credential, DID and examples
 context data use the W3C Software and Document License. New suite replays use these contexts; older
 credential tests retain the local vocabulary fixtures described above.
+
+The credentials-v2 snapshot now uses the exact GitHub document from
+`w3c/vc-data-model/main/contexts/credentials/v2`, recorded in the manifest.
+Its JSON value equals the earlier npm `@digitalbazaar/credentials-context@3.2.0`
+copy; formatting differs, so resource digests differ. The GitHub bytes match the
+pinned suite's positive related-resource digests. Tests check manifest hashes and
+verify credential/presentation signatures with independently reformatted contexts.
+The fixed previous-proof vector contains a nonstandard inline context-document
+entry. An ordinary processor rejects it; only verification of the documented
+vector shape accepts the compatibility form. Issuance remains strict.

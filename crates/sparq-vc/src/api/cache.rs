@@ -71,10 +71,12 @@ impl OfflineContexts {
     }
 
     pub(super) fn bytes(&self, url: &str) -> Result<&str, ApiError> {
-        self.0
-            .get(url)
-            .map(String::as_str)
+        self.held_bytes(url)
             .ok_or_else(|| ApiError::new("URL is absent from the offline cache"))
+    }
+
+    pub(super) fn held_bytes(&self, url: &str) -> Option<&str> {
+        self.0.get(url).map(String::as_str)
     }
 }
 

@@ -42,8 +42,13 @@ cargo run -p sparq-vc --features vc-api --bin sparq-vc-api
 | `GET /did.json` | None | 200, public test issuer DID document |
 
 Malformed JSON, invalid credentials, unsupported options, and invalid proofs
-return 400 with `type: "ValidationError"`, a readable `message` string,
-`verified: false`, empty `checks`/`warnings`, and `errors:[message]`.
+return 400 with `verified: false`, empty `checks`/`warnings`, and
+`errors:[ProblemDetails]`, following the VC-API successor's
+[Error Handling](https://w3c.github.io/vcalm/#error-handling) and
+[Verification Errors vs. Warnings](https://w3c.github.io/vcalm/#verification-errors-vs-warnings)
+sections. Each problem has `type: "https://sparq.org/ns/vc-api#ValidationError"`,
+`title: "ValidationError"`, HTTP `status`, a readable `detail`, and a `message`
+string extension; the top-level body mirrors these problem fields.
 JSON and JSON-LD media types are
 accepted. Unknown routes return 404 and unsupported methods return 405 with
 the same problem shape. Request bodies are limited to 256 KiB and JSON nesting depth 64.
@@ -70,11 +75,21 @@ are errors. Other cryptosuites are unsupported.
 Dates are validated as timestamp strings and checked for interval ordering;
 verification with `checks: ["proof"]` does not apply a current-time validity policy.
 Status and schema properties are checked for data-model shape. Related-resource
-objects are signed as supplied without retrieving their IDs or comparing resource
-contents. IDs must be unique absolute IRIs; a digest is required. `digestSRI`
+objects are signed as supplied without retrieving their IDs. If an ID names any
+document already held in the offline cache, issuance and verification compare
+all supplied digests against its exact held bytes. Every cached context and any
+additional trusted cached document is covered. Unknown IDs are accepted unchanged
+when their shape and digest encodings are valid; integrity of resources the
+service does not hold is **not checked**. IDs must be unique absolute IRIs;
+a digest is required. `digestSRI`
 accepts SHA-256/384/512 standard base64 digests; `digestMultibase` accepts
 `u`-prefixed unpadded base64url SHA-256 digests; optional `mediaType` must be a
-nonempty string.
+nonempty string. Held-byte mismatches return `relatedResource digestSRI mismatch
+for held resource` or `relatedResource digestMultibase mismatch for held resource`
+in the problem's `detail` and `message`; these errors do not imply a remote fetch.
+The staged credentials-v2 fixture and cache use the GitHub document's exact bytes,
+which match the suite digests. The npm document has the same JSON-LD content
+with different formatting and therefore different resource digests.
 
 Presentation verification checks its context order, type, optional ID/holder,
 every embedded credential through the credential verifier, and every presentation
@@ -82,8 +97,15 @@ proof with purpose `authentication`. Request challenge/domain options bind the
 presentation proofs; credential assertion proofs use the credential verifier's
 default proof check. An omitted holder is supported; when present, it must match
 the terminal proof's `did:key` controller. A missing proof, unsupported kind, or
-failed proof returns an error. Context documents embedded as inline context
-entries are unwrapped only when they contain a sole `@context` member.
+failed proof returns an error. Binding applies to every terminal proof, so this
+profile rejects an issuer proof followed by a different notary's countersignature
+and unordered credential proof sets containing another co-signer.
+
+Inline context-document entries are invalid JSON-LD. Verification has one leniency
+for the fixed AlumniCredential chain in `tests/api-fixtures/previous-proof.json`,
+matching its document ID, types, exact context and two-proof reference shape (a string or singleton-list reference).
+Only its root credential context is unwrapped. Issuance never emits this form;
+other inline context documents are rejected.
 Enveloping operations are outside this service's scope.
 
 ## Run the W3C suites on the maintainer's Mac

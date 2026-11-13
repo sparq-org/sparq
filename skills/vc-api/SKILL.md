@@ -29,8 +29,10 @@ retrieve remote contexts or resources.
 - `POST /presentations/verify` accepts `{verifiablePresentation, options?}`
   and returns the same proof-check result after checking every presentation
   proof and every embedded credential through the credential verifier.
-- Rejections return 400 with `type: "ValidationError"`, a readable `message`
-  string, `verified:false`, empty `checks`/`warnings`, and `errors:[message]`.
+- Rejections return 400 with `verified:false`, empty `checks`/`warnings`, and
+  `errors:[ProblemDetails]`. Each problem has a URL-valued `type`, `title`, HTTP
+  `status`, readable `detail`, and a `message` string extension. The top-level
+  body also exposes that problem's fields for direct error readers.
   Unknown routes return 404 and unsupported methods return 405 with that shape.
 - `GET /did.json` returns a public DID document with `testOnly: true`.
 
@@ -49,16 +51,33 @@ Proofs may be an object or a nonempty set. `previousProof` is a string or
 nonempty list of proof IDs in that set. Dependencies verify first; terminal
 credential proofs must use the issuer's key, while referenced proofs may use
 other `did:key` controllers. Unknown, missing, duplicate, self and cyclic
-references reject. Limits: 256 KiB per request, JSON nesting depth 64,
+references reject. This profile binds every terminal proof (one that no other
+proof references) to the issuer or holder. An issuer proof followed by a different
+notary's countersignature, and an unordered credential proof set with another
+co-signer, are rejected even when their signatures are valid.
+
+Limits: 256 KiB per request, JSON nesting depth 64,
 32 credentials per presentation, 64 proofs per document, 64 references per proof,
 and chain depth 16 (including the current proof).
 
 Issuance preserves and signs `relatedResource` objects without dereferencing
-IDs or comparing resource contents. Each needs a unique absolute `id` and
+IDs. If an ID belongs to any document held in the offline cache, both issuance
+and verification compare each supplied digest against those exact held bytes.
+This covers every context URL and any additional trusted cached document;
+a mismatch returns a readable held-resource digest error. For unknown IDs,
+resource integrity is **not checked**: validly encoded descriptors are signed
+unchanged, without retrieving their contents. Each needs a unique absolute `id` and
 `digestSRI` (SHA-256/384/512, standard base64) or `digestMultibase` (`u`, unpadded
 base64url SHA-256); optional `mediaType` is a nonempty string. Contexts use only
-the startup cache. Complete context documents used as inline context entries
-are accepted by unwrapping a sole `@context` member before RDF expansion.
+the startup cache. The staged credentials-v2 fixture uses the GitHub context's
+exact bytes; the npm copy has identical JSON-LD content but different digest bytes.
+
+Ordinary inline `{"@context": ...}` context-document entries are invalid JSON-LD.
+Verification makes one compatibility exception for the fixed AlumniCredential
+chain in `tests/api-fixtures/previous-proof.json`, matching its document ID, types,
+exact context and two-proof reference shape (a string or singleton-list reference). Only that root credential context is
+unwrapped. Issuance always uses strict context processing and never emits this
+form. Other inline context documents remain errors.
 
 To embed without a listener, use `sparq_vc::api::{router, Service,
 OfflineContexts}`. `OfflineContexts::from_directory(&Path)` loads all
