@@ -8,6 +8,7 @@ on:
     paths:
       - "proof-methods/**"
       - "zk/sparql-evaluator/model/**"
+      - "zk/sparql-evaluator/host/**"
       - "vendor/spargebra-shim/**"
       - ".github/workflows/proof-methods.yml"
   push:
@@ -15,6 +16,7 @@ on:
     paths:
       - "proof-methods/**"
       - "zk/sparql-evaluator/model/**"
+      - "zk/sparql-evaluator/host/**"
       - "vendor/spargebra-shim/**"
       - ".github/workflows/proof-methods.yml"
 
@@ -60,6 +62,15 @@ jobs:
 
       - name: Clippy
         run: cargo clippy --locked --release --manifest-path proof-methods/Cargo.toml --all-features --all-targets -- -D warnings
+
+      - name: Set up the locked guest compiler for native host tests
+        uses: ./.github/actions/zk-exact-setup
+        with:
+          cache-key: proof-methods-authrdf-native
+
+      - name: Authenticated RDF command-line native process tests
+        # Builds the guest but neither executes it nor generates a proof.
+        run: cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator --features authenticated-rdf --test authrdf_cli
 
       - name: VOLE and ACIR scripts parse and unit tests
         run: |

@@ -476,3 +476,120 @@ Everything under "Not established" in the
 
 The verifier's key table is the only trust input. No performance or cycle
 figure is claimed.
+
+## Command-line front end
+
+The host's `authrdf_cli` example accepts JSON files from a caller that spawns a
+process. It is research grade, not externally audited, and proves the V5 relation
+only. The holder may omit credentials. Credential status, holder binding, validity
+periods and DID resolution are not checked unless the query itself checks a field;
+checking a field does not implement status retrieval, holder authentication or DID
+resolution. `issue` is a **test issuer**, not a production credential issuer.
+
+Build from the repository root with the locked guest compiler configured as in the
+existing exact-evaluator setup:
+
+```sh
+cargo build --locked --manifest-path zk/sparql-evaluator/Cargo.toml \
+  -p sparq-proved-evaluator --features authenticated-rdf --example authrdf_cli
+cli="$CARGO_TARGET_DIR/debug/examples/authrdf_cli"
+```
+
+The document must be N-Quads containing only the default graph and must satisfy
+V5's credential profile, including a single VerifiableCredential resource and its
+issuer. For example, save this as `credential.nq`:
+
+```nquads
+<urn:credential:example> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://www.w3.org/2018/credentials#VerifiableCredential> .
+<urn:credential:example> <https://www.w3.org/2018/credentials#issuer> <https://issuer.example/> .
+<urn:person:example> <https://example.org/birthDate> "2000-05-01"^^<http://www.w3.org/2001/XMLSchema#date> .
+```
+
+Supply a test signing seed through `TEST_SEED_HEX`, and fresh cryptographically
+random nonzero challenges and blinding through `NONCE_HEX` and `SALT_HEX`. These
+hexadecimal inputs and public keys must encode exactly thirty-two bytes; issuer
+signatures encode exactly sixty-four bytes. All hex is lowercase, without a prefix.
+The CLI does not generate randomness. Command arguments may be visible to other
+local processes; use this seed interface only for test issuance.
+
+```sh
+"$cli" issue --seed-hex "$TEST_SEED_HEX" \
+  --issuer https://issuer.example/ \
+  --verification-method https://issuer.example/keys/assertion \
+  --document credential.nq --created 2026-01-01T00:00:00Z --out credential.json
+```
+
+`--created` is optional and must satisfy the model's admitted dateTime lexical
+profile. The issued JSON contains `document`, `proof_config`, `signature_hex`,
+`public_key_hex`, `issuer` and `verification_method`. Issuance uses the model's own
+canonical signing message, then checks the signature natively before writing.
+
+The verifier supplies `keys.json`, an array of objects containing `issuer`,
+`verification_method` and `public_key_hex`. Pin these keys independently; copying a
+holder's suggested key does not establish issuer trust. Save the query as `rule.rq`:
+
+```sparql
+ASK {
+  ?p <https://example.org/birthDate> ?d .
+  FILTER(?d <= "2008-11-13"^^<http://www.w3.org/2001/XMLSchema#date>)
+}
+```
+
+```sh
+"$cli" request --query rule.rq --keys keys.json --authority holder-declared \
+  --nonce-hex "$NONCE_HEX" --out request.json
+```
+
+The request uses `Policy::new(keys)` and the default V3 evaluation policy. Its
+stdout `request_digest` is the exact full request digest bound by the journal,
+including the query text, policy, authority and nonce; record that as the rule
+digest. `digest-query` is omitted because the model exposes no standalone query
+hash function. `--authority verifier-agreed:<anchor-hex>` instead requires an
+independently obtained authenticated dataset commitment from the model under the
+same policy and salt. Bare `verifier-agreed` is refused because it lacks an anchor.
+The default `--signature-mode hidden` checks issuer signatures inside the proof.
+
+Obtain `approved-guest/guest.bin` and `approved-guest/pin.json` from an independent
+approval of the existing `export_authrdf_guest` output. The directory and pin are
+trusted configuration, never presentation-supplied. The local exporter is:
+
+```sh
+cargo run --locked --manifest-path zk/sparql-evaluator/Cargo.toml \
+  -p sparq-proved-evaluator --features authenticated-rdf \
+  --example export_authrdf_guest -- approved-guest
+"$cli" prove --request request.json --credentials credential.json \
+  --salt-hex "$SALT_HEX" --guest approved-guest --r0vm "$R0VM" \
+  --out presentation.json
+mkdir -p verifier
+"$cli" verify --presentation presentation.json --request request.json \
+  --guest approved-guest --nonce-store verifier/nonces.json
+```
+
+`--credentials` accepts several paths after the flag. `prove` uses the existing
+Succinct prover with dev mode disabled. It prints the canonical `result`,
+`presentation_bytes` and `prove_ms`. No witness is printed. Every `--out` path
+must be new, including dangling symbolic links; existing files are never replaced.
+
+`verify` uses the verifier's independent request, prints `verified`, canonical
+`result`, `request_digest`, `dataset_commitment`, `provenance` and `verify_ms` on
+success, and consumes the nonce only after all proof and request checks succeed.
+It prints `{"verified":false,"reason":"<error kind>"}` and exits unsuccessfully
+on rejection. Other errors also go to stderr with an unsuccessful exit status.
+Retain the returned provenance; holder-selected credentials are not a complete
+wallet or world view.
+
+The nonce store is created on the first successful consumption and replaced
+atomically under a persistent sibling `.lock` file, so concurrent local processes share replay protection.
+Corrupt or inaccessible storage fails closed. Keep the directory, store and lock
+verifier-owned; never remove the lock during use, reset the store or use separate
+stores for the same challenge domain. This local file store is not a distributed
+nonce service. A failed persistence operation may have consumed the nonce already;
+retry with a fresh challenge. Invalid proofs do not create the store or lock.
+
+For `--signature-mode revealed`, supply `verify --signatures signatures.json`.
+That JSON is an array of lowercase signature hex strings in the journal's
+`signed_messages` order, which can differ from input credential order. The caller
+retains the issuer signatures separately; the prover strips them from the witness.
+The verifier checks them through `verify_revealed_with_artifact` before nonce
+consumption. The existing revealed-mode privacy caveats above apply. Hidden-mode
+verification refuses `--signatures`.

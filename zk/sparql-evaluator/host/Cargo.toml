@@ -54,3 +54,8 @@ required-features = ["authenticated-rdf"]
 [[example]]
 name = "canon_differential"
 required-features = ["phase-cycles"]
+
+# JSON process interface; uses only the existing native host relation.
+[[example]]
+name = "authrdf_cli"
+required-features = ["authenticated-rdf"]
