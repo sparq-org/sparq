@@ -9,6 +9,7 @@ import { installPinnedCrs } from './crs.mjs';
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const assets = fileURLToPath(new URL('../assets/', import.meta.url));
 const members = JSON.parse(readFileSync(join(assets, 'members.json')));
+const nativePins = JSON.parse(readFileSync(join(root, 'crates/sparq-zk-compose/tests/result_method_keys.json')));
 const pins = readFileSync(join(root, '.github/workflows/zk-toolchain.yml'), 'utf8');
 const nargoVersion = pins.match(/NARGO_VERSION: "([^"]+)"/)[1];
 const bbVersion = pins.match(/BB_VERSION: "([^"]+)"/)[1];
@@ -27,6 +28,10 @@ try {
     const runtime = Object.fromEntries(['noir_version', 'hash', 'abi', 'bytecode'].map(key => [key, compiled[key]]));
     writeFileSync(join(assets, entry.acir), JSON.stringify(runtime) + '\n');
     run('bb', ['write_vk', '-b', join(assets, entry.acir), '-o', scratch, '-t', 'noir-recursive', '-c', join(scratch, 'crs')]);
+    if (nativePins.target !== 'noir-recursive' ||
+        digest(join(scratch, 'vk')) !== nativePins.members[entry.member]?.vk_sha256) {
+      throw new Error(`native canonical VK mismatch: ${entry.member}`);
+    }
     copyFileSync(join(scratch, 'vk'), join(assets, entry.vk));
   }
   writeFileSync(join(assets, 'provenance.json'), JSON.stringify({
