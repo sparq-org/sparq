@@ -305,13 +305,15 @@ def exact_differential(output, binary, runtime):
             with raw.open("w") as stdout:
                 subprocess.run([str(binary)], stdout=stdout, check=True,
                                env=dict(os.environ, RISC0_SERVER_PATH=str(driver)))
-            records = [json.loads(line) for line in raw.open()]
+            with raw.open() as source:
+                records = [json.loads(line) for line in source]
             if len(records) != 2 or {row["version"] for row in records} != {1, 2}:
                 raise ValueError("incomplete production exact-image entry coverage")
             if previous is not None:
                 compare(previous, records)
             previous = records
-    validate_observations([json.loads(line) for line in counters.open()], 2, SAMPLES)
+    with counters.open() as source:
+        validate_observations([json.loads(line) for line in source], 2, SAMPLES)
 
 
 def run(output, binary, runtime):

@@ -16,7 +16,8 @@
 # CI, so the whole class of "SHA pin silently disabled an install-action gate" can
 # never recur.
 #
-# RULE: scan .github/workflows/*.yml (+ *.yaml). For every step whose `uses:` value
+# RULE: scan workflows and local action.yml/action.yaml files. For every step
+# whose `uses:` value
 # is `taiki-e/install-action@<ref>` where <ref> is a 40-char hex commit SHA (i.e. a
 # SHA pin, not a `@v2`/`@cargo-llvm-cov` tag), FAIL unless that SAME step has a
 # `with:` mapping containing a `tool:` key. A step pinned to a *tag* (`@v2.81.10`,
@@ -36,8 +37,8 @@
 # none); 1 with a per-offence message otherwise.
 #
 # Usage:
-#   check-install-action-tool.py                  # scan .github/workflows
-#   check-install-action-tool.py --root <dir>     # scan <dir>/.github/workflows
+#   check-install-action-tool.py                  # scan workflows and local actions
+#   check-install-action-tool.py --root <dir>     # scan <dir>/.github
 #   check-install-action-tool.py --self-test      # hermetic logic self-test
 #
 # stdlib-only.
@@ -180,15 +181,14 @@ def scan_text(text: str) -> list[str]:
 
 
 def scan_workflows(root: Path) -> list[tuple[Path, str]]:
-    """Scan every workflow file under `root`/.github/workflows. Returns a list of
+    """Scan workflows and local actions under `root`/.github. Returns a list of
     (file, offending `uses:` line) pairs."""
     wf_dir = root / ".github" / "workflows"
     results: list[tuple[Path, str]] = []
-    if not wf_dir.is_dir():
-        return results
-    for path in sorted(wf_dir.iterdir()):
-        if path.suffix not in (".yml", ".yaml"):
-            continue
+    paths = [*wf_dir.glob("*.yml"), *wf_dir.glob("*.yaml")]
+    actions_dir = root / ".github" / "actions"
+    paths += [*actions_dir.rglob("action.yml"), *actions_dir.rglob("action.yaml")]
+    for path in sorted(paths):
         try:
             text = path.read_text(encoding="utf-8", errors="ignore")
         except OSError:
@@ -325,7 +325,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--root",
         default=str(REPO_ROOT),
-        help="repo root whose .github/workflows is scanned (default: this repo).",
+        help="repo root whose workflows and local actions are scanned (default: this repo).",
     )
     ap.add_argument(
         "--self-test",

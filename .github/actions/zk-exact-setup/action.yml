@@ -1,0 +1,47 @@
+name: Exact evaluator toolchain setup
+description: Install the pinned toolchains and restore the evaluator build cache.
+inputs:
+  cache-key:
+    description: Cache key for this evaluator job.
+    required: true
+  clippy:
+    description: Install the pinned host compiler's Clippy component.
+    required: false
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - name: Install checksum-pinned RISC Zero binaries and guest Rust
+      # Official release-asset SHA256 digests, pinned with the exact SDK version.
+      shell: bash
+      run: |
+        set -euo pipefail
+        tool_root="$RUNNER_TEMP/sparq-risc0-3.0.6"
+        mkdir -p "$tool_root/bin" "$tool_root/home/toolchains/v1.97.0-rust-x86_64-unknown-linux-gnu"
+        curl --fail --location --retry 3 https://github.com/risc0/risc0/releases/download/v3.0.6/cargo-risczero-x86_64-unknown-linux-gnu.tgz -o "$tool_root/cli.tgz"
+        curl --fail --location --retry 3 https://github.com/risc0/rust/releases/download/r0.1.97.0/rust-toolchain-x86_64-unknown-linux-gnu.tar.gz -o "$tool_root/rust.tar.gz"
+        echo "615d961bfb81d318db5071d7548389c850e324ac7f421c075176daf26082a60a  $tool_root/cli.tgz" | sha256sum --check --strict
+        echo "100b597d605b706bec94e1d32bfaaf5851df8d75173f986d4b56a3e90916be53  $tool_root/rust.tar.gz" | sha256sum --check --strict
+        tar -xzf "$tool_root/cli.tgz" -C "$tool_root/bin"
+        tar -xzf "$tool_root/rust.tar.gz" -C "$tool_root/home/toolchains/v1.97.0-rust-x86_64-unknown-linux-gnu"
+        printf '[default_versions]\nrust = "1.97.0"\n' > "$tool_root/home/settings.toml"
+        "$tool_root/bin/r0vm" --version
+        echo "$tool_root/bin" >> "$GITHUB_PATH"
+        echo "RISC0_HOME=$tool_root/home" >> "$GITHUB_ENV"
+        echo "RISC0_SERVER_PATH=$tool_root/bin/r0vm" >> "$GITHUB_ENV"
+
+    - name: Activate pinned host Rust
+      shell: bash
+      env:
+        INSTALL_CLIPPY: ${{ inputs.clippy }}
+      run: |
+        rustup show active-toolchain
+        if [ "$INSTALL_CLIPPY" = true ]; then
+          rustup component add clippy
+        fi
+
+    - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      with:
+        key: ${{ inputs.cache-key }}
+        workspaces: zk/sparql-evaluator
+        save-if: ${{ github.ref == 'refs/heads/main' }}
