@@ -2,7 +2,8 @@
 name = "sparq_noir_query_core"
 type = "lib"
 authors = ["sparq"]
-# nargo beta.21 rejects prerelease compiler_version requirements; live tests enforce the pin.
+compiler_version = ">=1.0.0"
+# The live tests enforce the exact compiler and backend pins.
 
 [dependencies]
 sparq_ieee754 = { git = "https://github.com/sparq-org/noir_IEEE754", tag = "v0.11.0" }
