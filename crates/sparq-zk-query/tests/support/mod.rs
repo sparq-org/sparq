@@ -1,91 +1,15 @@
 use oxrdf::{Literal, NamedNode, Term};
 use sparq_zk_query::{
-    interp::{Cell, CredentialCells, EncodeTerm, Word},
+    interp::{Cell, CredentialCells, EncodeTerm},
     Error,
 };
 
-/// Test-only supplied cells. This is not the credential suite's term encoder.
+/// The fixed credential-suite encoder also drives the operator fixtures.
 pub struct FixtureEncoder;
 impl EncodeTerm for FixtureEncoder {
     fn encode(&self, term: &Term) -> Result<Cell, Error> {
-        let mut enc = *blake3::hash(term.to_string().as_bytes()).as_bytes();
-        enc[0] = 0;
-        let mut c = Cell {
-            bound: true,
-            kind: match term {
-                Term::NamedNode(_) => 1,
-                Term::BlankNode(_) => 2,
-                _ => 3,
-            },
-            enc,
-            ..Cell::default()
-        };
-        if let Term::Literal(l) = term {
-            let mut dt = *blake3::hash(l.datatype().as_str().as_bytes()).as_bytes();
-            dt[0] = 0;
-            c.dt = dt;
-            match l
-                .datatype()
-                .as_str()
-                .strip_prefix("http://www.w3.org/2001/XMLSchema#")
-            {
-                Some("integer" | "decimal") => {
-                    let n = l
-                        .value()
-                        .parse::<f64>()
-                        .map_err(|_| Error::Invalid("fixture number".into()))?;
-                    let scaled = (n * 1e6).round() as i128 * 1_000_000_000_000;
-                    c.key_class = 1;
-                    c.key = decimal(scaled);
-                }
-                Some("boolean") => {
-                    c.key_class = 5;
-                    c.key[2] = u8::from(matches!(l.value(), "true" | "1"));
-                }
-                Some("date") => {
-                    let lexical = l
-                        .value()
-                        .strip_suffix('Z')
-                        .ok_or_else(|| Error::Unsupported("fixture date timezone".into()))?;
-                    let date = chrono::NaiveDate::parse_from_str(lexical, "%Y-%m-%d")
-                        .map_err(|e| Error::Invalid(e.to_string()))?;
-                    let seconds = date.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp();
-                    c.key_class = 3;
-                    c.key = decimal(i128::from(seconds) * 1_000_000_000_000_000_000);
-                }
-                Some("dateTime") => {
-                    let date = chrono::DateTime::parse_from_rfc3339(l.value())
-                        .map_err(|e| Error::Invalid(e.to_string()))?;
-                    c.key_class = 3;
-                    c.key = decimal(
-                        i128::from(date.timestamp()) * 1_000_000_000_000_000_000
-                            + i128::from(date.timestamp_subsec_nanos()) * 1_000_000_000,
-                    );
-                }
-                Some("string") => {
-                    assert!(l.value().len() <= 30);
-                    c.key_class = 6;
-                    c.key[2..2 + l.value().len()].copy_from_slice(l.value().as_bytes());
-                }
-                _ => {}
-            }
-        }
-        Ok(c)
+        sparq_zk_query::credential::SuiteEncoder.encode(term)
     }
-}
-
-fn decimal(n: i128) -> Word {
-    let mut key = [0; 32];
-    key[2] = 0x80;
-    let bytes = n.unsigned_abs().to_be_bytes();
-    let mut carry = 0i16;
-    for i in (0..32).rev() {
-        let delta = if i >= 16 { i16::from(bytes[i - 16]) } else { 0 };
-        let value = i16::from(key[i]) + if n < 0 { -delta } else { delta } + carry;
-        key[i] = value.rem_euclid(256) as u8;
-        carry = value.div_euclid(256);
-    }
-    key
 }
 
 pub fn iri(s: &str) -> Term {
@@ -172,6 +96,15 @@ pub const DIFFERENTIAL_QUERIES: &[&str] = &[
 
 #[allow(dead_code)]
 pub fn assert_engine(query: &str, rdf: &str, actual: &sparq_zk_query::interp::ResultValue) {
+    assert_engine_with_encoder(query, rdf, actual, &FixtureEncoder)
+}
+#[allow(dead_code)]
+pub fn assert_engine_with_encoder(
+    query: &str,
+    rdf: &str,
+    actual: &sparq_zk_query::interp::ResultValue,
+    encoder: &impl EncodeTerm,
+) {
     use sparq_zk_query::interp::ResultValue;
     let graph = sparq_core::Graph::load_str(rdf, "ntriples").unwrap();
     let expected: serde_json::Value =
@@ -217,7 +150,7 @@ pub fn assert_engine(query: &str, rdf: &str, actual: &sparq_zk_query::interp::Re
                         }
                         other => panic!("binding type {other:?}"),
                     };
-                    cells.push(term.as_ref().map(|t| FixtureEncoder.encode(t).unwrap().enc));
+                    cells.push(term.as_ref().map(|t| encoder.encode(t).unwrap().enc));
                 }
                 expected_rows.push(cells);
             }
@@ -273,14 +206,14 @@ pub fn n0_cases() -> Vec<N0Case> {
     let numeric="<urn:a> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:b> <urn:p> \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n";
     let linked = "<urn:a> <urn:q> <urn:g> .\n<urn:b> <urn:q> <urn:h> .\n";
     let decimals="<urn:a> <urn:p> \"1.25\"^^<http://www.w3.org/2001/XMLSchema#decimal> .\n<urn:b> <urn:p> \"2.5\"^^<http://www.w3.org/2001/XMLSchema#decimal> .\n";
-    let dates="<urn:a> <urn:p> \"2024-01-01Z\"^^<http://www.w3.org/2001/XMLSchema#date> .\n<urn:b> <urn:p> \"2024-02-01Z\"^^<http://www.w3.org/2001/XMLSchema#date> .\n";
+    let dates="<urn:a> <urn:p> \"2024-01-01\"^^<http://www.w3.org/2001/XMLSchema#date> .\n<urn:b> <urn:p> \"2024-02-01\"^^<http://www.w3.org/2001/XMLSchema#date> .\n";
     vec![
         N0Case{name:"bgp", query:"SELECT ?s ?x WHERE {?s <urn:p> ?x}",sources:vec![numeric.into()]},
         N0Case{name:"join-one-credential",query:"SELECT ?s WHERE {?s <urn:p> ?x . ?s <urn:q> ?y}",sources:vec![format!("{numeric}{linked}")]},
         N0Case{name:"join-two-credentials",query:"SELECT ?s WHERE {?s <urn:p> ?x . ?s <urn:q> ?y}",sources:vec![numeric.into(),linked.into()]},
         N0Case{name:"integer-range",query:"SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x >= 1 && ?x < 2)}",sources:vec![numeric.into()]},
         N0Case{name:"decimal-range",query:"SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x >= 1.25 && ?x < 2.5)}",sources:vec![decimals.into()]},
-        N0Case{name:"date-range",query:"PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x >= \"2024-01-01Z\"^^xsd:date && ?x < \"2024-02-01Z\"^^xsd:date)}",sources:vec![dates.into()]},
+        N0Case{name:"date-range",query:"PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x >= \"2024-01-01\"^^xsd:date && ?x < \"2024-02-01\"^^xsd:date)}",sources:vec![dates.into()]},
         N0Case{name:"membership",query:"SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x IN (1,3))}",sources:vec![numeric.into()]},
         N0Case{name:"values",query:"SELECT ?s WHERE {?s <urn:p> ?x VALUES ?x {1 UNDEF}}",sources:vec![numeric.into()]},
         N0Case{name:"projection-bag",query:"SELECT ?p WHERE {?s ?p ?o}",sources:vec![numeric.into()]},

@@ -21,22 +21,15 @@ fn generation_is_byte_identical_and_constants_are_inputs() {
     assert_eq!(generate(&a).unwrap(), generate(&b).unwrap());
     let package = generate(&a).unwrap();
     let source = &package.files[&format!("{}/src/main.nr", package.name)];
-    for op in [
-        "open_dataset",
-        "scan",
-        "filter",
-        "project",
-        "distinct",
-        "slice",
-        "select",
-    ] {
+    for op in ["scan", "filter", "project", "distinct", "slice", "select"] {
         assert!(
             source.contains(&format!("ops_core::{op}("))
                 || source.contains(&format!("ops_core::{op}::<")),
             "{op}"
         );
     }
-    assert!(source.contains("ops_core_statement::bind_select("));
+    assert!(source.contains("ops_core_statement::bind_select_authenticated("));
+    assert!(source.contains("core::ops_core_suite::open_one"));
     assert!(!source.contains("urn:p"));
     assert!(!source.contains("assert("));
     assert!(!source.contains("for "));
@@ -57,4 +50,65 @@ fn join_values_membership_and_ask_are_gadget_calls() {
     }
     assert!(source.contains("ops_core_expr::evaluate("));
     assert_eq!(p.files.len(), 3);
+}
+
+#[test]
+fn committed_smoke_package_is_exactly_generated_with_its_original_manifest() {
+    let plan = lower(
+        "ASK {}",
+        Bounds {
+            credentials: 1,
+            quads_per_credential: 4,
+            rows_per_table: 2,
+        },
+    )
+    .unwrap();
+    let package = generate(&plan).unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../zk/noir-query/fixtures/generated_smoke");
+    for (path, expected) in package.files {
+        assert_eq!(std::fs::read_to_string(root.join(path)).unwrap(), expected);
+    }
+    assert_eq!(
+        root.join("zk").canonicalize().unwrap(),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../zk")
+            .canonicalize()
+            .unwrap()
+    );
+}
+
+#[test]
+fn heterogeneous_credential_buckets_are_shape_and_their_limits_are_public_inputs() {
+    let b = Bounds {
+        credentials: 4,
+        quads_per_credential: 64,
+        rows_per_table: 4,
+    };
+    let a = lower("ASK {}", b)
+        .unwrap()
+        .with_credential_quad_bounds(&[8, 16, 64, 8])
+        .unwrap();
+    let same = lower("ASK {}", b)
+        .unwrap()
+        .with_credential_quad_bounds(&[7, 15, 63, 5])
+        .unwrap();
+    let other = lower("ASK {}", b)
+        .unwrap()
+        .with_credential_quad_bounds(&[16, 8, 64, 8])
+        .unwrap();
+    assert_eq!(a.hash(), same.hash());
+    assert_eq!(generate(&a).unwrap(), generate(&same).unwrap());
+    assert_ne!(a.hash(), other.hash());
+    assert_eq!(a.credential_quad_capacities(), vec![8, 16, 64, 8]);
+    let p = generate(&a).unwrap();
+    let source = &p.files[&format!("{}/src/main.nr", p.name)];
+    assert!(source.contains("TermOpening<32>; 4]; 8]"));
+    assert!(source.contains("CredentialProof<16>"));
+    assert!(source.contains("CredentialProof<64>"));
+    for token in ["assert(", "for ", "if "] {
+        assert!(!source.contains(token));
+    }
+    assert!(a.clone().with_credential_quad_bounds(&[8, 16]).is_err());
+    assert!(a.with_credential_quad_bounds(&[0, 16, 64, 8]).is_err());
 }

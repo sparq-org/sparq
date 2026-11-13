@@ -185,3 +185,172 @@ fn table(rows: &[Vec<Cell>], schema: &Schema) -> Result<String, Error> {
         array(padded)
     ))
 }
+
+/// Render complete lexical openings, suite signatures and issuer membership.
+pub fn prover_toml_authenticated(
+    plan: &Plan,
+    credentials: &[crate::credential::Credential],
+    trace: &Trace,
+    request_digest: [u8; 32],
+    presentation_salt: [u8; 32],
+    issuer_root: [u8; 32],
+) -> Result<String, Error> {
+    use crate::credential::{SuiteEncoder, LEXICAL_CAPACITY};
+    use sha2::{Digest, Sha256};
+    use sparq_merkle_suite::poseidon as suite;
+    use sparq_zk::{field::field_to_hex, sig};
+    let cells = credentials
+        .iter()
+        .enumerate()
+        .map(|(i, c)| c.cells(i as u32))
+        .collect::<Result<Vec<_>, _>>()?;
+    plan.bounds()
+        .check_credentials(&cells.iter().map(|c| c.quads.len()).collect::<Vec<_>>())?;
+    let input_commitment = crate::credential::dataset_commitment(credentials, presentation_salt);
+    let statement = crate::statement::Statement {
+        request_digest,
+        input_commitment,
+        signature_mode: 1,
+        result: trace.result.clone(),
+    };
+    let words = crate::statement::Layout::new(plan).reconstruct_authenticated(
+        plan,
+        &statement,
+        issuer_root,
+    )?;
+    let base = prover_toml(
+        plan,
+        &cells,
+        &SuiteEncoder,
+        trace,
+        request_digest,
+        presentation_salt,
+    )?;
+    let cap = plan.capacity();
+    let mut raw = vec![];
+    let mut proofs = vec![];
+    let capacities = plan.credential_quad_capacities();
+    for (c, &capacity) in capacities.iter().enumerate() {
+        let mut quads = vec![];
+        if let Some(credential) = credentials.get(c) {
+            if credential.issuer_root()? != issuer_root {
+                return Err(Error::Invalid("issuer membership root".into()));
+            }
+            for q in credential.quads()? {
+                quads.push(serde_json::json!([
+                    term_opening(Some(&oxrdf::Term::from(q.subject)))?,
+                    term_opening(Some(&oxrdf::Term::NamedNode(q.predicate)))?,
+                    term_opening(Some(&q.object))?,
+                    term_opening(None)?,
+                ]));
+            }
+            let config: [u8; 32] =
+                Sha256::digest(credential.credential.proof_config.as_bytes()).into();
+            let w = sig::in_circuit_witness(
+                &credential.issuer,
+                &credential.signed_message(),
+                &credential.credential.signature,
+            )
+            .ok_or_else(|| Error::Invalid("suite signature witness".into()))?;
+            let salts = (0..capacity)
+                .map(|i| {
+                    field_to_hex(&if i < credential.credential.count {
+                        suite::leaf_salt(credential.credential.salt, i)
+                    } else {
+                        sparq_merkle_suite::Fr::from(0u64)
+                    })
+                })
+                .collect::<Vec<_>>();
+            proofs.push(serde_json::json!({"salt":field_to_hex(&credential.credential.salt),"salts":salts,
+                "config":[u128::from_be_bytes(config[..16].try_into().unwrap()).to_string(),u128::from_be_bytes(config[16..].try_into().unwrap()).to_string()],
+                "pk":{"x":field_to_hex(&w.pk_x),"y":field_to_hex(&w.pk_y)},"r":{"x":field_to_hex(&w.r_x),"y":field_to_hex(&w.r_y)},
+                "s":field_to_hex(&w.s),"e":field_to_hex(&w.e),"e_k":field_to_hex(&w.e_k),"issuer_index":credential.issuer_index,
+                "issuer_siblings":credential.issuer_siblings.iter().map(field_to_hex).collect::<Vec<_>>()}));
+        } else {
+            proofs.push(serde_json::json!({"salt":"0","salts":vec!["0";capacity as usize],"config":["0","0"],
+                "pk":{"x":"0","y":"0"},"r":{"x":"0","y":"0"},"s":"0","e":"0","e_k":"0","issuer_index":0,"issuer_siblings":vec!["0";4]}));
+        }
+        let padding = serde_json::json!({"bound":false,"kind":0,"lexical":vec![0;LEXICAL_CAPACITY],"lexical_len":0,"datatype":vec![0;128],"datatype_len":0,"language":vec![0;64],"language_len":0,"key":vec![0;31]});
+        quads.resize(
+            capacity as usize,
+            serde_json::json!([padding, padding, padding, padding]),
+        );
+        raw.push(serde_json::Value::Array(quads));
+    }
+    let mut out = String::new();
+    for line in base.lines() {
+        if line.starts_with("credentials = ") {
+            for (c, credential) in raw.iter().enumerate() {
+                writeln!(out, "credential_{c} = {}", json_toml(credential)).unwrap();
+            }
+        } else if line.starts_with("input_commitment = ") {
+            writeln!(
+                out,
+                "input_commitment = {}",
+                array(input_commitment.iter().map(u8::to_string))
+            )
+            .unwrap();
+        } else if line.starts_with("signature_mode = ") {
+            writeln!(out, "signature_mode = 1").unwrap();
+        } else if line.starts_with("statement_binding = ") {
+            writeln!(out, "statement_binding = {}", field(*words.last().unwrap())).unwrap();
+        } else {
+            writeln!(out, "{line}").unwrap();
+        }
+    }
+    writeln!(out, "issuer_root = {}", field(issuer_root)).unwrap();
+    for (c, proof) in proofs.iter().enumerate() {
+        writeln!(out, "credential_proof_{c} = {}", json_toml(proof)).unwrap();
+    }
+    let mut quad_bounds = plan.credential_quad_bounds();
+    quad_bounds.resize(cap.credentials as usize, 0);
+    writeln!(
+        out,
+        "credential_quad_bounds = {}",
+        array(quad_bounds.iter().map(u32::to_string))
+    )
+    .unwrap();
+    Ok(out)
+}
+
+fn term_opening(term: Option<&oxrdf::Term>) -> Result<serde_json::Value, Error> {
+    let (kind, text, dt, lang, key) = match term {
+        None => (0, "", "", "", [0; 31]),
+        Some(oxrdf::Term::NamedNode(n)) => (1, n.as_str(), "", "", [0; 31]),
+        Some(oxrdf::Term::BlankNode(n)) => (2, n.as_str(), "", "", [0; 31]),
+        Some(oxrdf::Term::Literal(l)) => (
+            3,
+            l.value(),
+            l.datatype().as_str(),
+            l.language().unwrap_or(""),
+            sparq_merkle_suite::comparison_key(l),
+        ),
+        Some(oxrdf::Term::Triple(_)) => return Err(Error::Excluded("triple term".into())),
+    };
+    let pad = |text: &str, capacity: usize| -> Result<Vec<u8>, Error> {
+        if text.len() > capacity {
+            return Err(Error::Capacity("term opening bytes".into()));
+        }
+        let mut bytes = text.as_bytes().to_vec();
+        bytes.resize(capacity, 0);
+        Ok(bytes)
+    };
+    Ok(
+        serde_json::json!({"bound":true,"kind":kind,"lexical":pad(text,crate::credential::LEXICAL_CAPACITY)?,"lexical_len":text.len(),
+        "datatype":pad(dt,128)?,"datatype_len":dt.len(),"language":pad(lang,64)?,"language_len":lang.len(),"key":key.as_slice()}),
+    )
+}
+fn json_toml(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Array(values) => array(values.iter().map(json_toml)),
+        serde_json::Value::Object(values) => format!(
+            "{{ {} }}",
+            values
+                .iter()
+                .map(|(k, v)| format!("{k} = {}", json_toml(v)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        _ => value.to_string(),
+    }
+}

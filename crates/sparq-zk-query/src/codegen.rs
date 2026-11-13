@@ -14,15 +14,38 @@ pub struct Package {
     pub files: BTreeMap<String, String>,
 }
 
-/// Generate the query's program. The credential opening remains the documented stand-in.
+/// Generate the query program with complete suite authentication.
 pub fn generate(plan: &Plan) -> Result<Package, Error> {
+    generate_inner(plan, true)
+}
+
+/// Operator-relation fixture. It has no credential-authentication claim.
+pub fn generate_operator_fixture(plan: &Plan) -> Result<Package, Error> {
+    generate_inner(plan, false)
+}
+
+fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
     let hash: String = plan.hash().iter().map(|b| format!("{b:02x}")).collect();
     let name = format!("query_{hash}");
     let mut source = String::from(
-        "// Research query program; credential opening is a stand-in pending suite integration.\n\
-         use core::table::{TermCell, Table, unbound};\n\
-         use core::{ops_core, ops_core_expr, ops_core_statement};\n\nfn main(\n",
+        "// Research query program; the selected library entry point defines its credential contract.\n\
+         use core::table::{TermCell, Table};\n\
+         use core::{ops_core, ops_core_statement};\n\nfn main(\n",
     );
+    if plan
+        .nodes
+        .iter()
+        .any(|n| matches!(n.operator, Operator::Filter(..)))
+    {
+        source = source.replacen("\nfn main(", "\nuse core::ops_core_expr;\nfn main(", 1);
+    }
+    if plan
+        .nodes
+        .iter()
+        .any(|n| matches!(n.operator, Operator::Scan(..) | Operator::Values(..)))
+    {
+        source = source.replacen("\nfn main(", "\nuse core::table::unbound;\nfn main(", 1);
+    }
     let term_ids: Vec<_> = plan
         .parameters
         .iter()
@@ -55,8 +78,24 @@ pub fn generate(plan: &Plan) -> Result<Package, Error> {
     };
     let cap = plan.capacity;
     let layout = crate::statement::Layout::new(plan);
-    source.push_str(&layout.declarations());
-    writeln!(source,"    credentials: [[[TermCell; 4]; {}]; {}],\n    counts: [u32; {}],\n    credential_count: u32,\n    presentation_salt: [u8; 32],",cap.quads_per_credential,cap.credentials,cap.credentials).unwrap();
+    source.push_str(&if authenticated {
+        layout.declarations_authenticated()
+    } else {
+        layout.declarations()
+    });
+    if authenticated {
+        for (c, n) in plan.credential_quad_capacities().into_iter().enumerate() {
+            writeln!(source,"    credential_{c}: [[core::suite_entry::TermOpening<32>; 4]; {n}],\n    credential_proof_{c}: core::ops_core_suite::CredentialProof<{n}>,").unwrap();
+        }
+        writeln!(
+            source,
+            "    counts: [u32; {}],\n    credential_count: u32,\n    presentation_salt: [u8; 32],",
+            cap.credentials
+        )
+        .unwrap();
+    } else {
+        writeln!(source,"    credentials: [[[TermCell; 4]; {}]; {}],\n    counts: [u32; {}],\n    credential_count: u32,\n    presentation_salt: [u8; 32],",cap.quads_per_credential,cap.credentials,cap.credentials).unwrap();
+    }
     for (i, node) in plan.nodes.iter().enumerate() {
         writeln!(
             source,
@@ -76,8 +115,38 @@ pub fn generate(plan: &Plan) -> Result<Package, Error> {
     } else {
         "_dataset"
     };
-    writeln!(source,"    let {dataset_name} = ops_core::open_dataset::<{}, {}, {}>(credentials, counts, credential_count, bounds);",cap.credentials,cap.quads_per_credential,cap.credentials*cap.quads_per_credential).unwrap();
-    source.push_str("    ops_core_statement::check_dataset(credentials, counts, credential_count, presentation_salt, input_commitment, signature_mode);\n");
+    if authenticated {
+        let capacities = plan.credential_quad_capacities();
+        let total: u32 = capacities.iter().sum();
+        writeln!(source,"    let credential_flags = core::ops_core_suite::credential_flags::<{}>(credential_count, bounds[0], signature_mode);",cap.credentials).unwrap();
+        let mut offset = 0;
+        writeln!(
+            source,
+            "    let dataset_start = core::ops_core_suite::empty_dataset::<{total}>();"
+        )
+        .unwrap();
+        for (c, n) in capacities.iter().enumerate() {
+            writeln!(source,"    let opened_{c} = core::ops_core_suite::open_one(credential_{c}, credential_proof_{c}, counts[{c}], credential_flags[{c}], credential_quad_bounds[{c}], {c}, issuer_root);").unwrap();
+            let prior = if c == 0 {
+                "dataset_start".to_owned()
+            } else {
+                format!("dataset_{}", c - 1)
+            };
+            writeln!(source,"    let dataset_{c} = core::ops_core_suite::append_credential({prior}, opened_{c}, {offset});").unwrap();
+            offset += n;
+        }
+        writeln!(
+            source,
+            "    let {dataset_name} = dataset_{};",
+            capacities.len() - 1
+        )
+        .unwrap();
+        let messages = array((0..capacities.len()).map(|c| format!("opened_{c}.message")));
+        writeln!(source,"    core::ops_core_statement::check_suite_dataset({messages}, credential_count, presentation_salt, input_commitment);").unwrap();
+    } else {
+        writeln!(source,"    let {dataset_name} = ops_core::open_dataset::<{}, {}, {}>(credentials, counts, credential_count, bounds);",cap.credentials,cap.quads_per_credential,cap.credentials*cap.quads_per_credential).unwrap();
+        source.push_str("    ops_core_statement::check_dataset(credentials, counts, credential_count, presentation_salt, input_commitment, signature_mode);\n");
+    }
     for (i, node) in plan.nodes.iter().enumerate() {
         let schema = &node.output.variables;
         let columns = |id: NodeId| -> String {
@@ -183,7 +252,17 @@ pub fn generate(plan: &Plan) -> Result<Package, Error> {
         ResultForm::Ask => "bind_ask",
         ResultForm::Select => "bind_select",
     };
-    writeln!(source, "    ops_core_statement::{binder}(request_digest, input_commitment, signature_mode, bounds, parameters, indices, result, statement_binding);\n}}\n").unwrap();
+    let binder = if authenticated {
+        format!("{binder}_authenticated")
+    } else {
+        binder.to_owned()
+    };
+    let issuer_argument = if authenticated {
+        "issuer_root, credential_quad_bounds, "
+    } else {
+        ""
+    };
+    writeln!(source, "    ops_core_statement::{binder}({issuer_argument}request_digest, input_commitment, signature_mode, bounds, parameters, indices, result, statement_binding);\n}}\n").unwrap();
     let files=BTreeMap::from([
         ("Nargo.toml".into(),format!("[workspace]\nmembers = [\"{name}\"]\n")),
         (format!("{name}/Nargo.toml"),format!("[package]\nname = \"{name}\"\ntype = \"bin\"\nauthors = [\"sparq\"]\ncompiler_version = \">=1.0.0\"\n\n[dependencies]\ncore = {{ path = \"../zk/noir-query/core\" }}\n")),

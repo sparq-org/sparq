@@ -98,13 +98,19 @@ COPIED = (
     "crates/sparq-zk/Cargo.toml",
     "crates/sparq-zk-compose/tests",
     "crates/sparq-zk-compose/Cargo.toml",
+    "crates/sparq-zk-query/tests",
+    "crates/sparq-zk-query/Cargo.toml",
 )
 # The `src` trees are 2.6 MB of Rust and the checker reads every line of them, so a
 # test that is about `tests/` copies only each crate root (enough for the src scan
 # dirs to exist and for CHECK F to read its declaration) and passes full_src=True
 # only where a src region is the subject.
-SRC_TREES = ("crates/sparq-zk/src", "crates/sparq-zk-compose/src")
-LIB_ROOTS = ("crates/sparq-zk/src/lib.rs", "crates/sparq-zk-compose/src/lib.rs")
+SRC_TREES = ("crates/sparq-zk/src", "crates/sparq-zk-compose/src", "crates/sparq-zk-query/src")
+LIB_ROOTS = (
+    "crates/sparq-zk/src/lib.rs",
+    "crates/sparq-zk-compose/src/lib.rs",
+    "crates/sparq-zk-query/src/lib.rs",
+)
 # Gate call sites in `src` test regions, which the lib test target runs.
 SRC_GATED = (
     "crates/sparq-zk-compose/src/driver.rs",

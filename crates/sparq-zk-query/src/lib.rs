@@ -3,6 +3,7 @@
 pub mod answer;
 pub mod capacity;
 pub mod codegen;
+pub mod credential;
 pub mod driver;
 pub mod interp;
 pub mod interp_closed_group;

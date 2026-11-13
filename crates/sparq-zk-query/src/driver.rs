@@ -1,15 +1,16 @@
 //! Query preparation and proof lifecycle over the shared native proving driver.
-//! This draft primitive uses supplied cells pending credential-suite integration.
+//! Credential authentication uses the shared Merkle suite and issuer membership.
 
 use crate::{
     answer::Answer,
     capacity::Bounds,
     codegen,
-    interp::{self, CredentialCells, EncodeTerm},
+    credential::{Credential, SuiteEncoder},
+    interp::{self, EncodeTerm},
     lower::lower,
     plan::Plan,
     request::{self, Request},
-    statement::{dataset_commitment, public_input_bytes, Layout, Statement},
+    statement::{public_input_bytes, Layout, Statement},
     witness, Error,
 };
 use oxrdf::Term;
@@ -101,6 +102,18 @@ impl Compiler {
     }
     pub fn prepare(&self, query: &str, bounds: Bounds) -> Result<Prepared, Error> {
         let plan = lower(query, bounds)?;
+        self.prepare_plan(plan)
+    }
+    /// Select heterogeneous quad buckets from verifier-declared limits.
+    pub fn prepare_with_credential_quad_bounds(
+        &self,
+        query: &str,
+        bounds: Bounds,
+        quad_bounds: &[u32],
+    ) -> Result<Prepared, Error> {
+        self.prepare_plan(lower(query, bounds)?.with_credential_quad_bounds(quad_bounds)?)
+    }
+    fn prepare_plan(&self, plan: Plan) -> Result<Prepared, Error> {
         let compiled = self.compiled(&plan)?;
         Ok(Prepared {
             descriptor: request::descriptor(&plan, &compiled.key)?,
@@ -149,7 +162,7 @@ impl Compiler {
         let artifact = driver.compile().map_err(infrastructure)?;
         let artifact = serde_json::from_slice(&fs::read(artifact).map_err(infrastructure)?)
             .map_err(infrastructure)?;
-        Layout::new(plan).audit_artifact(&artifact)?;
+        Layout::new(plan).audit_authenticated_artifact(&artifact)?;
         let key = driver
             .canonical_vk(workspace.path())
             .map_err(infrastructure)?;
@@ -168,29 +181,45 @@ impl Compiler {
     pub fn prove(
         &self,
         request: &Request,
-        credentials: &[CredentialCells],
+        credentials: &[Credential],
         vocabulary: &[Term],
-        encoder: &impl EncodeTerm,
+        _encoder: &impl EncodeTerm,
         salt: [u8; 32],
         now: impl Fn() -> u64,
     ) -> Result<Presentation, Error> {
         let plan = request.plan()?;
         let compiled = self.checked_key(request, &plan)?;
+        let issuer_root = request.issuer_root()?;
         freshness(request, now())?;
-        let trace = interp::evaluate(&plan, credentials, encoder)?;
+        let encoder = &SuiteEncoder;
+        let cells = credentials
+            .iter()
+            .enumerate()
+            .map(|(i, c)| c.cells(i as u32))
+            .collect::<Result<Vec<_>, _>>()?;
+        let trace = interp::evaluate(&plan, &cells, encoder)?;
         let result = Answer::release(&trace.result, &plan, vocabulary, encoder)?;
-        let input_commitment = dataset_commitment(credentials, salt)?;
+        let input_commitment = crate::credential::dataset_commitment(credentials, salt);
         agreement(request, input_commitment)?;
         let statement = Statement {
             request_digest: request.digest(),
             input_commitment,
-            signature_mode: 0,
+            signature_mode: 1,
             result: result.encode(encoder)?,
         };
-        let public =
-            public_input_bytes(&Layout::new(&plan).reconstruct(&plan, &statement, encoder)?);
-        let input =
-            witness::prover_toml(&plan, credentials, encoder, &trace, request.digest(), salt)?;
+        let public = public_input_bytes(&Layout::new(&plan).reconstruct_authenticated(
+            &plan,
+            &statement,
+            issuer_root,
+        )?);
+        let input = witness::prover_toml_authenticated(
+            &plan,
+            credentials,
+            &trace,
+            request.digest(),
+            salt,
+            issuer_root,
+        )?;
         let work = tempfile::Builder::new()
             .prefix("proof_")
             .tempdir_in(&self.root)
@@ -208,7 +237,7 @@ impl Compiler {
         let presentation = Presentation {
             request_digest: statement.request_digest,
             input_commitment,
-            signature_mode: 0,
+            signature_mode: 1,
             result,
             proof: artifacts.proof,
         };
@@ -223,11 +252,13 @@ impl Compiler {
         &self,
         request: &Request,
         presentation: &Presentation,
-        encoder: &impl EncodeTerm,
+        _encoder: &impl EncodeTerm,
         expected_audience: &Identifier,
         store: &dyn ChallengeStore,
         now: impl Fn() -> u64,
     ) -> Result<Answer, Error> {
+        let encoder = &SuiteEncoder;
+        let issuer_root = request.issuer_root()?;
         if request.stored().audience() != expected_audience {
             return Err(Error::Invalid("request audience".into()));
         }
@@ -245,8 +276,11 @@ impl Compiler {
             signature_mode: presentation.signature_mode,
             result: presentation.result.encode(encoder)?,
         };
-        let public =
-            public_input_bytes(&Layout::new(&plan).reconstruct(&plan, &statement, encoder)?);
+        let public = public_input_bytes(&Layout::new(&plan).reconstruct_authenticated(
+            &plan,
+            &statement,
+            issuer_root,
+        )?);
         let work = tempfile::Builder::new()
             .prefix("verify_")
             .tempdir_in(&self.root)

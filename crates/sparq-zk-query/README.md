@@ -21,35 +21,54 @@ The composed manifest is superseded by the query method.
 
 ## 🚀 Host contracts
 
-Run the host contracts with `cargo test -p sparq-zk-query`. The interpreter's
+Run the host contracts with `cargo test -p sparq-zk-query`. The default-off
+`ordered-json` feature selects serde_json's insertion-order map backend for the
+request canonicalization regression tests. Run those with
+`cargo test -p sparq-zk-query --features ordered-json`. The interpreter's
 seeded differential test accepts `SPARQ_NOIR_QUERY_SEED` as an optional integer
 seed; unset, it replays its fixed regression seeds. This setting affects test
-inputs only. The fixture encoder supplies test cells under the stand-in contract.
+inputs only. Operator fixtures use the credential suite's term encoder.
 Native execution tests use the shared live-toolchain gate and run explicitly
 with `cargo test -p sparq-zk-query --test execution -- --ignored`.
 
 The draft proof primitive is `method::Compiler` (`prepare`, `prove`, `verify`).
 Choose an artifact root outside an existing Nargo workspace. Use `with_crs_path`
-to select a writable local CRS dependency cache. It verifies
-only the explicitly marked supplied-cell profile while the suite lane is pending.
-The public protocol adapter, credential authentication and envelope are separate
-integration work; this draft primitive does not advertise those obligations.
+to select a writable local CRS dependency cache. Generated proof programs open
+complete Poseidon Merkle-suite credentials, recompute the supported literal keys,
+and verify hidden signatures and membership in the verifier's issuer set. The
+public protocol adapter and holder, status and validity envelope belong to the
+statement lane. This primitive refuses those envelope requirements.
 
-`Request::new` stores the exact native key with the shared protocol request and
-request bounds. The holder compares that key with its own compilation before
+`Request::new_authenticated` stores the exact native key, authoritative issuer-set
+root, shared protocol request and public bounds. `Compiler::prove` takes complete
+`credential::Credential` inputs with private lexical, signature and membership
+material. Its encoder argument is retained for adapter compatibility; proof and
+verification use the fixed `credential::SuiteEncoder`. Structural draft requests
+created with `Request::new` cannot produce an authenticated proof. The holder compares that key with its own compilation before
 reading private inputs. The verifier derives its plan and constants from its
 stored request, re-encodes the RDF answer and consumes the original shared
 challenge only after proof verification and a final validity check.
 
 Public inputs, in declaration order: request digest, salted input commitment,
-signature mode, request bounds, constant cells, slice indices, canonical result
-and statement binding. Public scalars are canonical big endian field words.
+signature mode, request bounds, constant cells, slice indices, canonical result,
+issuer-set root, ordered credential quad bounds and statement binding. Public scalars are canonical big endian field words.
 Term cells flatten as bound, kind, encoding, key class, key, datatype, language
 and credential scope. SELECT tables flatten their padded rows before their length.
 `statement::Layout` defines the declaration schema and
 reconstruction and audits the locally compiled ABI. The salt, credential cells
-and all intermediate tables are private. The supplied-cell dataset commitment
-is a draft integration stand-in, replaced with the suite's signed messages.
+and all intermediate tables are private. The dataset commitment hashes a method
+domain, the private presentation salt and the ordered authenticated suite messages.
+It is a distinct profile from the detached evaluator's commitment.
+
+`prepare_with_credential_quad_bounds` and
+`Request::new_authenticated_with_quad_bounds` select separate quad buckets for the
+ordered credential slots from public limits. The plan hash includes those buckets;
+the exact limits remain public inputs. Private counts cannot select another key.
+The initial literal profile admits integer, decimal, date, dateTime, boolean and
+string datatypes within the suite's representable ranges. Unsupported datatypes,
+timezoned dates and opened lexical forms beyond the profile's bound are refused.
+The library's supplied-cell entry point serves operator fixtures only; the proof
+lifecycle always uses suite authentication.
 
 The digest is SHA-256 over RDFC canonical N-Quads of the method-specific query request.
 The exact typed protocol encoding is an explicitly named method parameter inside

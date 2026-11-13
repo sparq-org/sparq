@@ -175,11 +175,21 @@ local CRS cache directory; absent this setting, the native tool uses its default
 The query compiler exposes the same explicit path setting. Its draft
 `method::Compiler::{prepare, prove, verify}` primitive lives in `driver.rs`;
 `request::Request` owns the stored protocol request, bounds and expected key.
-The primitive supports the explicitly marked supplied-cell profile pending suite
-integration. Verification derives its plan, constants and result encoding from
-the stored request and RDF answer, and consumes the shared original challenge
-last. It does not advertise credential authentication or envelope enforcement. Toolchain pins and the
-verifier target are independent of the cache location.
+The generated proof path opens complete Poseidon Merkle-suite credentials and
+uses the shared hidden signature and issuer-membership relations. Construct its
+request with `Request::new_authenticated`, providing the verifier's authoritative
+issuer-set root. `Compiler::prove` takes `credential::Credential` inputs; the fixed
+`credential::SuiteEncoder` drives request constants and RDF result reconstruction.
+For distinct public quad limits per credential slot, use
+`prepare_with_credential_quad_bounds` and
+`Request::new_authenticated_with_quad_bounds`. The default-off `ordered-json` test feature exercises request canonicalization
+with the insertion-order JSON backend. The statement binds the issuer root
+and ordered quad limits as well as the request, commitment and result. Operator
+fixtures have a separate supplied-cell entry point. The statement lane supplies
+the protocol adapter and holder, status and validity envelope. Verification derives
+its plan and result encoding from the stored request and RDF answer and consumes
+the original challenge last. Toolchain pins and verifier target are independent
+of the cache location.
 
 ## Prerequisites
 

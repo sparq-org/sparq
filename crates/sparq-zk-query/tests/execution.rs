@@ -7,7 +7,7 @@ use fixture_support::{fixture, FixtureEncoder};
 use sparq_zk_compose::driver::ProgramProver;
 use sparq_zk_query::{
     capacity::Bounds,
-    codegen::generate,
+    codegen::generate_operator_fixture as generate,
     interp::{evaluate, ResultValue},
     lower::lower,
     witness::prover_toml,

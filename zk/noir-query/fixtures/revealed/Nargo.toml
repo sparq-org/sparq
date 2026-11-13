@@ -1,0 +1,7 @@
+[package]
+name="credential_revealed"
+type="bin"
+compiler_version="=1.0.0"
+[dependencies]
+core={path="../../core"}
+compose={path="../../../compose/compose_core"}
