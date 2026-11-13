@@ -6,6 +6,7 @@ pub mod codegen;
 pub mod credential;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod driver;
+pub mod envelope_policy;
 pub mod interp;
 pub mod lower;
 pub mod plan;
