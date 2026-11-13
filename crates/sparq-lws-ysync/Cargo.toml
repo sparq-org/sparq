@@ -8,7 +8,8 @@ description = "Internal Yjs room relay and append-only room log"
 publish = false
 
 [dependencies]
-yrs = { version = "=0.28.1", features = ["sync"] }
+# yrs >=0.27 uses if-let guards requiring Rust 1.95; keep the Rust 1.88 MSRV.
+yrs = { version = ">=0.26.0, <0.27.0", features = ["sync"] }
 async-trait = "0.1"
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
 serde_json = "1"
