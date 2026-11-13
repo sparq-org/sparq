@@ -5,6 +5,7 @@
   "rewrites": [
     {"source": "/credentials/issue", "destination": "/api/issue"},
     {"source": "/credentials/verify", "destination": "/api/verify"},
+    {"source": "/presentations/verify", "destination": "/api/verify-presentation"},
     {"source": "/did.json", "destination": "/api/did"}
   ]
 }

@@ -1,6 +1,6 @@
 ---
 name: vc-api
-description: Run the opt-in sparq-vc credential issue/verify HTTP test endpoint, prepare its offline JSON-LD context cache, embed its axum router, and run the W3C VC Data Model 2.0 and eddsa-rdfc-2022 suites locally.
+description: Run the opt-in sparq-vc credential issue/verify and presentation verify HTTP test endpoint, prepare its offline JSON-LD context cache, embed its axum router, and run the W3C VC Data Model 2.0 and eddsa-rdfc-2022 suites locally.
 license: MIT
 ---
 
@@ -26,15 +26,39 @@ retrieve remote contexts or resources.
   preserving optional issuer metadata.
 - `POST /credentials/verify` accepts `{verifiableCredential, options?}` and
   returns 200 with `{verified:true, checks:["proof"], warnings:[], errors:[]}`.
-  A rejection returns 400 with `verified:false` and `{type,message}` errors.
+- `POST /presentations/verify` accepts `{verifiablePresentation, options?}`
+  and returns the same proof-check result after checking every presentation
+  proof and every embedded credential through the credential verifier.
+- Rejections return 400 with `type: "ValidationError"`, a readable `message`
+  string, `verified:false`, empty `checks`/`warnings`, and `errors:[message]`.
+  Unknown routes return 404 and unsupported methods return 405 with that shape.
 - `GET /did.json` returns a public DID document with `testOnly: true`.
 
 Issue options: `type`, `cryptosuite`, `proofPurpose`, `verificationMethod`,
 `created`, `domain`, `challenge`. Supported identifiers are `DataIntegrityProof`,
 `eddsa-rdfc-2022`, and `assertionMethod`. Verify accepts those identifiers,
 `checks: ["proof"]`, `domain`, and `challenge`. Defaults select a proof check;
-current-time credential validity, presentation operations, and proof chains
-are outside this endpoint's scope. Requests are limited to 256 KiB.
+current-time credential validity is outside this endpoint's scope. Presentation
+proofs use `authentication`; supplied challenge/domain options bind the
+presentation's proofs. Embedded credentials use assertion proofs and the existing
+credential verifier's default proof check. A supplied holder must match the
+terminal presentation proof's `did:key` controller; holder omission is supported.
+Unsupported proof kinds and unsigned documents are errors.
+
+Proofs may be an object or a nonempty set. `previousProof` is a string or
+nonempty list of proof IDs in that set. Dependencies verify first; terminal
+credential proofs must use the issuer's key, while referenced proofs may use
+other `did:key` controllers. Unknown, missing, duplicate, self and cyclic
+references reject. Limits: 256 KiB per request, JSON nesting depth 64,
+32 credentials per presentation, 64 proofs per document, 64 references per proof,
+and chain depth 16 (including the current proof).
+
+Issuance preserves and signs `relatedResource` objects without dereferencing
+IDs or comparing resource contents. Each needs a unique absolute `id` and
+`digestSRI` (SHA-256/384/512, standard base64) or `digestMultibase` (`u`, unpadded
+base64url SHA-256); optional `mediaType` is a nonempty string. Contexts use only
+the startup cache. Complete context documents used as inline context entries
+are accepted by unwrapping a sole `@context` member before RDF expansion.
 
 To embed without a listener, use `sparq_vc::api::{router, Service,
 OfflineContexts}`. `OfflineContexts::from_directory(&Path)` loads all

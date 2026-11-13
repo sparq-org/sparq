@@ -2,7 +2,7 @@
 use oxrdf::{BlankNode, GraphName, NamedNode, Quad, Term};
 use sha2::Sha256;
 use sparq_canon::{
-    CanonicalizationLimits, canonicalize_quads_bounded_with, issue_quads_bounded_with,
+    canonicalize_quads_bounded_with, issue_quads_bounded_with, CanonicalizationLimits,
 };
 
 fn limits() -> CanonicalizationLimits {
@@ -57,12 +57,10 @@ fn each_capacity_rejects_and_hndq_limit_reaches_the_library() {
             2 => cap.max_output_bytes = 1,
             _ => cap.max_permutation_steps = 1,
         }
-        assert!(
-            canonicalize_quads_bounded_with::<Sha256>(&graph, &cap)
-                .unwrap_err()
-                .to_string()
-                .contains(expected)
-        );
+        assert!(canonicalize_quads_bounded_with::<Sha256>(&graph, &cap)
+            .unwrap_err()
+            .to_string()
+            .contains(expected));
         assert!(issue_quads_bounded_with::<Sha256>(&graph, &cap).is_err());
     }
     let mut cap = limits();
@@ -72,33 +70,47 @@ fn each_capacity_rejects_and_hndq_limit_reaches_the_library() {
 }
 
 #[test]
-fn repeated_related_occurrences_are_counted_before_permutations() {
-    // Same neighbouring node through eight different predicates: counting only
-    // distinct neighbours would admit degree one and fail this regression.
-    let graph: Vec<_> = (0..8).map(|i| edge("a", &format!("p{i}"), "b")).collect();
-    let error = canonicalize_quads_bounded_with::<Sha256>(&graph, &limits()).unwrap_err();
-    assert!(error.to_string().contains("permutation capacity"));
-    // A node used as both subject and object contributes its quad twice to
-    // the library's mention map; blank graph-name occurrences also count.
-    let graph: Vec<_> = (0..4)
-        .map(|i| {
-            Quad::new(
-                BlankNode::new("a").unwrap(),
-                NamedNode::new(format!("http://ex/p{i}")).unwrap(),
-                BlankNode::new("a").unwrap(),
-                BlankNode::new("b").unwrap(),
-            )
+fn high_degree_with_unique_first_degree_hashes_needs_no_permutations() {
+    let graph: Vec<_> = (0..30).map(|i| edge("a", &format!("p{i}"), "b")).collect();
+    let mut cap = limits();
+    cap.max_hndq_calls = 0;
+    cap.max_permutation_steps = 0;
+    assert_eq!(
+        canonicalize_quads_bounded_with::<Sha256>(&graph, &cap).unwrap(),
+        sparq_canon::canonicalize_quads_with::<Sha256>(&graph).unwrap()
+    );
+    assert_eq!(
+        issue_quads_bounded_with::<Sha256>(&graph, &cap).unwrap(),
+        sparq_canon::issue_quads_with::<Sha256>(&graph).unwrap()
+    );
+}
+
+#[test]
+fn permutation_budget_is_shared_across_calls_and_counts_skipped_candidates() {
+    let graph: Vec<_> = (0..5)
+        .flat_map(|a| {
+            (0..5)
+                .filter(move |b| a != *b)
+                .map(move |b| edge(&format!("n{a}"), "p", &format!("n{b}")))
         })
         .collect();
-    assert!(canonicalize_quads_bounded_with::<Sha256>(&graph, &limits()).is_err());
-    let mut many = limits();
-    many.max_hndq_calls = usize::MAX;
-    assert!(canonicalize_quads_bounded_with::<Sha256>(&[edge("a", "p", "b")], &many).is_err());
-    // Exercise checked factorial overflow, not only the configured small cap.
-    let graph: Vec<_> = (0..30).map(|i| edge("a", &format!("p{i}"), "b")).collect();
-    many.max_hndq_calls = 1;
-    many.max_permutation_steps = usize::MAX;
-    assert!(canonicalize_quads_bounded_with::<Sha256>(&graph, &many).is_err());
+    let mut cap = limits();
+    cap.max_hndq_calls = usize::MAX;
+    cap.max_permutation_steps = 8;
+    for result in [
+        canonicalize_quads_bounded_with::<Sha256>(&graph, &cap).map(|_| ()),
+        issue_quads_bounded_with::<Sha256>(&graph, &cap).map(|_| ()),
+    ] {
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("permutation capacity"));
+    }
+    cap.max_permutation_steps = 20_000;
+    assert_eq!(
+        canonicalize_quads_bounded_with::<Sha256>(&graph, &cap).unwrap(),
+        sparq_canon::canonicalize_quads_with::<Sha256>(&graph).unwrap()
+    );
 }
 
 #[test]

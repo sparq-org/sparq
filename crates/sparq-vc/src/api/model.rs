@@ -7,7 +7,6 @@ use base64::{
 use chrono::{DateTime, FixedOffset};
 use oxrdf::NamedNode;
 use serde_json::Value;
-use sha2::{Digest as _, Sha256, Sha384};
 
 use super::{ApiError, OfflineContexts};
 
@@ -36,7 +35,7 @@ fn iri(value: &Value) -> Result<(), ApiError> {
     )
 }
 
-fn objects(value: &Value) -> Result<Vec<&Value>, ApiError> {
+pub(super) fn objects(value: &Value) -> Result<Vec<&Value>, ApiError> {
     let values = match value.as_array() {
         Some(values) => values.iter().collect::<Vec<_>>(),
         None => vec![value],
@@ -74,8 +73,8 @@ pub(super) fn timestamp(value: &str) -> Result<DateTime<FixedOffset>, ApiError> 
         .map_err(|_| ApiError::new("dateTimeStamp requires a timezone and a supported year"))
 }
 
-pub(super) fn validate(vc: &Value, cache: &OfflineContexts) -> Result<(), ApiError> {
-    require(vc.is_object(), "credential must be an object")?;
+fn document(vc: &Value, cache: &OfflineContexts, kind: &str) -> Result<(), ApiError> {
+    require(vc.is_object(), "document must be an object")?;
     let contexts = vc
         .get("@context")
         .and_then(Value::as_array)
@@ -96,12 +95,36 @@ pub(super) fn validate(vc: &Value, cache: &OfflineContexts) -> Result<(), ApiErr
         }
     }
     require(
-        types(&vc["type"])?.contains(&"VerifiableCredential"),
-        "type must include VerifiableCredential",
+        types(&vc["type"])?.contains(&kind),
+        &format!("type must include {kind}"),
     )?;
     if let Some(id) = vc.get("id") {
         iri(id)?;
     }
+    Ok(())
+}
+
+pub(super) fn presentation(vp: &Value, cache: &OfflineContexts) -> Result<(), ApiError> {
+    document(vp, cache, "VerifiablePresentation")?;
+    if let Some(holder) = vp.get("holder") {
+        iri(if holder.is_object() {
+            &holder["id"]
+        } else {
+            holder
+        })?;
+    }
+    if let Some(credentials) = vp.get("verifiableCredential") {
+        require(
+            objects(credentials)?.len() <= 32,
+            "presentation exceeds 32 credentials",
+        )?;
+    }
+    Ok(())
+}
+
+pub(super) fn validate(vc: &Value, cache: &OfflineContexts) -> Result<(), ApiError> {
+    document(vc, cache, "VerifiableCredential")?;
+    let contexts = vc["@context"].as_array().expect("validated contexts");
     let issuer = vc
         .get("issuer")
         .ok_or_else(|| ApiError::new("issuer is required"))?;
@@ -174,24 +197,36 @@ pub(super) fn validate(vc: &Value, cache: &OfflineContexts) -> Result<(), ApiErr
                 resource.get("digestSRI").is_some() || resource.get("digestMultibase").is_some(),
                 "relatedResource requires a digest",
             )?;
-            let bytes = cache.bytes(id)?.as_bytes();
-            if let Some(value) = resource.get("digestSRI") {
+            if let Some(value) = resource.get("mediaType") {
                 require(
-                    value.as_str().is_some_and(|v| {
-                        v == format!("sha384-{}", STANDARD.encode(Sha384::digest(bytes)))
-                            || v == format!("sha256-{}", STANDARD.encode(Sha256::digest(bytes)))
-                    }),
-                    "relatedResource digestSRI mismatch",
+                    value.as_str().is_some_and(|s| !s.is_empty()),
+                    "relatedResource mediaType must be a string",
                 )?;
             }
+            if let Some(value) = resource.get("digestSRI") {
+                let valid = value.as_str().is_some_and(|s| {
+                    s.split_once('-').is_some_and(|(algorithm, digest)| {
+                        let length = match algorithm {
+                            "sha256" => 32,
+                            "sha384" => 48,
+                            "sha512" => 64,
+                            _ => return false,
+                        };
+                        STANDARD
+                            .decode(digest)
+                            .is_ok_and(|bytes| bytes.len() == length)
+                    })
+                });
+                require(valid, "invalid relatedResource digestSRI")?;
+            }
             if let Some(value) = resource.get("digestMultibase") {
-                require(
-                    value.as_str()
-                        == Some(
-                            format!("u{}", URL_SAFE_NO_PAD.encode(Sha256::digest(bytes))).as_str(),
-                        ),
-                    "relatedResource digestMultibase mismatch",
-                )?;
+                let valid = value.as_str().is_some_and(|s| match s.strip_prefix('u') {
+                    Some(encoded) => URL_SAFE_NO_PAD
+                        .decode(encoded)
+                        .is_ok_and(|bytes| bytes.len() == 32),
+                    None => false,
+                });
+                require(valid, "invalid relatedResource digestMultibase")?;
             }
         }
     }

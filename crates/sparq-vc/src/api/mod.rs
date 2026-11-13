@@ -5,6 +5,7 @@
 
 mod cache;
 mod model;
+mod proofs;
 
 use std::{fmt, sync::Arc};
 
@@ -51,8 +52,9 @@ impl IntoResponse for ApiError {
         (
             StatusCode::BAD_REQUEST,
             Json(json!({
+                "type": "ValidationError", "message": self.0,
                 "verified": false, "checks": [], "warnings": [],
-                "errors": [{"type": "ValidationError", "message": self.0}]
+                "errors": [self.0]
             })),
         )
             .into_response()
@@ -107,7 +109,7 @@ impl Service {
     }
 
     fn issue(&self, request: &Value) -> Result<Value, ApiError> {
-        let options = options(request, true)?;
+        let options = options(request, true, "assertionMethod")?;
         let mut vc = request
             .get("credential")
             .filter(|v| v.is_object())
@@ -155,7 +157,7 @@ impl Service {
                 proof[field] = value.clone();
             }
         }
-        validate_proof(&proof)?;
+        validate_proof(&proof, "assertionMethod")?;
         let hash_data = self.hash_data(&vc, &proof)?;
         let signature = self.key.inner.sign(&hash_data);
         proof["proofValue"] = super::encode_proof_value(&signature).into();
@@ -163,34 +165,79 @@ impl Service {
         Ok(json!({"verifiableCredential": vc}))
     }
 
-    fn verify(&self, request: &Value) -> Result<Value, ApiError> {
-        let options = options(request, false)?;
-        let mut vc = request
-            .get("verifiableCredential")
+    fn verify_request(&self, request: &Value, presentation: bool) -> Result<Value, ApiError> {
+        let purpose = if presentation {
+            "authentication"
+        } else {
+            "assertionMethod"
+        };
+        let options = options(request, false, purpose)?;
+        let field = if presentation {
+            "verifiablePresentation"
+        } else {
+            "verifiableCredential"
+        };
+        let document = request
+            .get(field)
             .filter(|v| v.is_object())
-            .cloned()
-            .ok_or_else(|| ApiError::new("verifiableCredential must be an object"))?;
-        model::validate(&vc, &self.contexts)?;
-        let proofs = vc
+            .ok_or_else(|| ApiError::new(format!("{field} must be an object")))?;
+        if presentation {
+            model::presentation(document, &self.contexts)?;
+            if let Some(credentials) = document.get("verifiableCredential") {
+                for credential in model::objects(credentials)? {
+                    self.verify_credential(credential, &json!({}))?;
+                }
+            }
+            let holder = document.get("holder").map(|h| {
+                h.as_str()
+                    .or_else(|| h["id"].as_str())
+                    .expect("validated holder")
+            });
+            self.verify_proofs(document, &options, purpose, holder)?;
+        } else {
+            self.verify_credential(document, &options)?;
+        }
+        Ok(json!({"verified": true, "checks": ["proof"], "warnings": [], "errors": []}))
+    }
+
+    fn verify_credential(&self, credential: &Value, options: &Value) -> Result<(), ApiError> {
+        model::validate(credential, &self.contexts)?;
+        let issuer = credential["issuer"]
+            .as_str()
+            .or_else(|| credential["issuer"]["id"].as_str())
+            .expect("validated issuer");
+        self.verify_proofs(credential, options, "assertionMethod", Some(issuer))
+    }
+
+    fn verify_proofs(
+        &self,
+        document: &Value,
+        options: &Value,
+        purpose: &str,
+        controller: Option<&str>,
+    ) -> Result<(), ApiError> {
+        let mut unsecured = document.clone();
+        let proofs = unsecured
             .as_object_mut()
-            .expect("validated credential")
+            .expect("validated document")
             .remove("proof")
             .ok_or_else(|| ApiError::new("proof is required"))?;
-        let proofs = proofs
+        let proofs: Vec<_> = proofs
             .as_array()
             .map_or_else(|| vec![&proofs], |a| a.iter().collect());
-        require(!proofs.is_empty(), "proof must not be empty")?;
-        for proof in proofs {
-            validate_proof(proof)?;
+        let plan = proofs::Plan::new(&proofs, purpose)?;
+        for index in plan.order {
+            let proof = proofs[index];
             let vm = string(proof, "verificationMethod")?;
-            let issuer = vc["issuer"]
-                .as_str()
-                .or_else(|| vc["issuer"]["id"].as_str())
-                .expect("validated issuer");
-            require(
-                vm.split('#').next() == Some(issuer) && issuer.starts_with("did:key:"),
-                "verificationMethod controller must be the did:key issuer",
-            )?;
+            if !plan.referenced[index] {
+                if let Some(controller) = controller {
+                    require(
+                        vm.split('#').next() == Some(controller)
+                            && controller.starts_with("did:key:"),
+                        "verificationMethod controller must be the did:key issuer or holder",
+                    )?;
+                }
+            }
             for field in ["domain", "challenge"] {
                 if let Some(value) = options.get(field) {
                     require(
@@ -204,11 +251,20 @@ impl Service {
                 .map_err(|_| ApiError::new("unresolvable verificationMethod"))?;
             let signature = super::decode_proof_value(string(proof, "proofValue")?)
                 .map_err(|_| ApiError::new("invalid proofValue"))?;
-            let hash_data = self.hash_data(&vc, proof)?;
+            let mut input = unsecured.clone();
+            if !plan.dependencies[index].is_empty() {
+                input["proof"] = Value::Array(
+                    plan.dependencies[index]
+                        .iter()
+                        .map(|&i| proofs[i].clone())
+                        .collect(),
+                );
+            }
+            let hash_data = self.hash_data(&input, proof)?;
             key.verify(&hash_data, &signature)
                 .map_err(|_| ApiError::new("proof verification failed"))?;
         }
-        Ok(json!({"verified": true, "checks": ["proof"], "warnings": [], "errors": []}))
+        Ok(())
     }
 
     fn hash_data(&self, vc: &Value, proof: &Value) -> Result<Vec<u8>, ApiError> {
@@ -233,7 +289,9 @@ impl Service {
     }
 
     fn canonicalize(&self, value: &Value) -> Result<String, ApiError> {
-        self.check_terms(value, &sparq_jsonld::context::ActiveContext::new(None))?;
+        let mut value = value.clone();
+        inline_context_documents(&mut value);
+        self.check_terms(&value, &sparq_jsonld::context::ActiveContext::new(None))?;
         let input =
             LdJson::parse(&value.to_string()).map_err(|_| ApiError::new("invalid JSON-LD"))?;
         let expanded =
@@ -331,6 +389,9 @@ impl Service {
                     }
                     let child_context = active.term_definition(key).and_then(|d| d.context());
                     let scoped = match child_context {
+                        Some(LdJson::Raw(raw)) if raw == "null" => {
+                            sparq_jsonld::context::ActiveContext::new(None)
+                        }
                         Some(context) => process(&active, context)?,
                         None => active.clone(),
                     };
@@ -345,6 +406,44 @@ impl Service {
             _ => (),
         }
         Ok(())
+    }
+}
+
+// Accept a complete context document as an inline context entry, as used by
+// the fixed Data Integrity chain vectors. Only a sole @context is unwrapped.
+fn inline_context_documents(value: &mut Value) {
+    fn context(value: &mut Value) {
+        while value
+            .as_object()
+            .is_some_and(|o| o.len() == 1 && o.contains_key("@context"))
+        {
+            *value = value
+                .as_object_mut()
+                .expect("context document")
+                .remove("@context")
+                .expect("context");
+        }
+        if let Value::Array(values) = value {
+            for value in values {
+                context(value);
+            }
+        }
+    }
+    match value {
+        Value::Object(object) => {
+            if let Some(value) = object.get_mut("@context") {
+                context(value);
+            }
+            for value in object.values_mut() {
+                inline_context_documents(value);
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                inline_context_documents(value);
+            }
+        }
+        _ => (),
     }
 }
 
@@ -389,7 +488,7 @@ fn seed_from_hex(text: &str) -> Result<[u8; 32], ApiError> {
     Ok(seed)
 }
 
-fn options(request: &Value, issue: bool) -> Result<Value, ApiError> {
+fn options(request: &Value, issue: bool, purpose: &str) -> Result<Value, ApiError> {
     require(request.is_object(), "request must be an object")?;
     let options = request.get("options").cloned().unwrap_or_else(|| json!({}));
     let object = options
@@ -420,7 +519,7 @@ fn options(request: &Value, issue: bool) -> Result<Value, ApiError> {
             match field.as_str() {
                 "type" => require(value == "DataIntegrityProof", "unsupported proof type")?,
                 "cryptosuite" => require(value == "eddsa-rdfc-2022", "unsupported cryptosuite")?,
-                "proofPurpose" => require(value == "assertionMethod", "unsupported proofPurpose")?,
+                "proofPurpose" => require(value == purpose, "unsupported proofPurpose")?,
                 "created" | "verificationMethod" => {
                     require(issue, "unsupported verification option")?
                 }
@@ -431,7 +530,7 @@ fn options(request: &Value, issue: bool) -> Result<Value, ApiError> {
     Ok(options)
 }
 
-fn validate_proof(proof: &Value) -> Result<(), ApiError> {
+fn validate_proof(proof: &Value, purpose: &str) -> Result<(), ApiError> {
     let object = proof
         .as_object()
         .ok_or_else(|| ApiError::new("proof must be an object"))?;
@@ -455,6 +554,7 @@ fn validate_proof(proof: &Value) -> Result<(), ApiError> {
                     | "domain"
                     | "challenge"
                     | "proofValue"
+                    | "previousProof"
             )
         }),
         "unsupported proof option",
@@ -468,7 +568,7 @@ fn validate_proof(proof: &Value) -> Result<(), ApiError> {
         "unsupported cryptosuite",
     )?;
     require(
-        string(proof, "proofPurpose")? == "assertionMethod",
+        string(proof, "proofPurpose")? == purpose,
         "unsupported proofPurpose",
     )?;
     let mut config = crate::ProofConfig::new(string(proof, "verificationMethod")?);
@@ -490,9 +590,27 @@ fn validate_proof(proof: &Value) -> Result<(), ApiError> {
 type RequestJson = Result<Json<Value>, JsonRejection>;
 
 fn request_json(input: RequestJson) -> Result<Value, ApiError> {
-    input
-        .map(|Json(value)| value)
-        .map_err(|_| ApiError::new("expected a JSON request body"))
+    let Json(value) =
+        input.map_err(|_| ApiError::new("expected a JSON request body within 256 KiB"))?;
+    fn depth(value: &Value, level: usize) -> Result<(), ApiError> {
+        require(level <= 64, "JSON nesting depth exceeds 64")?;
+        match value {
+            Value::Array(values) => {
+                for child in values {
+                    depth(child, level + 1)?;
+                }
+            }
+            Value::Object(values) => {
+                for child in values.values() {
+                    depth(child, level + 1)?;
+                }
+            }
+            _ => (),
+        }
+        Ok(())
+    }
+    depth(&value, 0)?;
+    Ok(value)
 }
 
 async fn issue(
@@ -507,7 +625,26 @@ async fn verify(
     State(service): State<Arc<Service>>,
     input: RequestJson,
 ) -> Result<impl IntoResponse, ApiError> {
-    Ok(Json(service.verify(&request_json(input)?)?))
+    Ok(Json(service.verify_request(&request_json(input)?, false)?))
+}
+
+async fn verify_presentation(
+    State(service): State<Arc<Service>>,
+    input: RequestJson,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(service.verify_request(&request_json(input)?, true)?))
+}
+
+async fn method_not_allowed() -> Response {
+    let mut response = ApiError::new("method not allowed").into_response();
+    *response.status_mut() = StatusCode::METHOD_NOT_ALLOWED;
+    response
+}
+
+async fn not_found() -> Response {
+    let mut response = ApiError::new("route not found").into_response();
+    *response.status_mut() = StatusCode::NOT_FOUND;
+    response
 }
 
 async fn did(State(service): State<Arc<Service>>) -> Json<Value> {
@@ -515,13 +652,17 @@ async fn did(State(service): State<Arc<Service>>) -> Json<Value> {
 }
 
 /// POST `/credentials/issue` (201), POST `/credentials/verify` (200), and
-/// GET `/did.json`. Rejected JSON and credentials return 400 with `errors` and
+/// POST `/presentations/verify` (200), and GET `/did.json`. Rejections return 400
+/// with a readable `message`, `errors`, and
 /// `verified: false`. Request bodies are limited to 256 KiB.
 pub fn router(service: Service) -> Router {
     Router::new()
         .route("/credentials/issue", post(issue))
         .route("/credentials/verify", post(verify))
+        .route("/presentations/verify", post(verify_presentation))
         .route("/did.json", get(did))
+        .method_not_allowed_fallback(method_not_allowed)
+        .fallback(not_found)
         .layer(DefaultBodyLimit::max(256 * 1024))
         .with_state(Arc::new(service))
 }

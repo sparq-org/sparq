@@ -1048,6 +1048,7 @@ fn hash_n_degree_quads<D: Digest>(
         let mut span_hndq_5_4_flag = false;
 
         'perm_loop: for p in blank_node_list.iter().permutations(blank_node_list.len()) {
+            call_counter.permutation()?;
             #[cfg(feature = "log")]
             {
                 if !span_hndq_5_4_flag {

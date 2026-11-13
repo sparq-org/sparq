@@ -24,6 +24,7 @@ pub fn canonicalize_quads(input_quads: &[Quad]) -> Result<String, Canonicalizati
 #[derive(Default)]
 pub struct CanonicalizationOptions {
     pub hndq_call_limit: Option<usize>,
+    pub permutation_limit: Option<usize>,
 }
 
 /// Given some options (e.g., call limit), returns the serialized canonical form of the
@@ -45,7 +46,8 @@ pub fn issue_with<D: Digest>(
     input_dataset: &Dataset,
     options: &CanonicalizationOptions,
 ) -> Result<HashMap<String, String>, CanonicalizationError> {
-    let hndq_call_counter = SimpleHndqCallCounter::new(options.hndq_call_limit);
+    let hndq_call_counter = SimpleHndqCallCounter::new(options.hndq_call_limit)
+        .with_permutation_limit(options.permutation_limit);
     canonicalize_core::<D>(input_dataset, hndq_call_counter)
 }
 
@@ -63,7 +65,8 @@ pub fn issue_quads_with<D: Digest>(
     options: &CanonicalizationOptions,
 ) -> Result<HashMap<String, String>, CanonicalizationError> {
     let input_dataset = Dataset::from_iter(input_quads);
-    let hndq_call_counter = SimpleHndqCallCounter::new(options.hndq_call_limit);
+    let hndq_call_counter = SimpleHndqCallCounter::new(options.hndq_call_limit)
+        .with_permutation_limit(options.permutation_limit);
     canonicalize_core::<D>(&input_dataset, hndq_call_counter)
 }
 

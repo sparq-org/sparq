@@ -41,7 +41,7 @@ pub struct OfflineContexts(Arc<BTreeMap<String, String>>);
 
 impl OfflineContexts {
     /// Load all [`CONTEXT_FILES`] from a trusted directory at service startup.
-    /// Original bytes are retained for related-resource digest checks.
+    /// Context bytes are retained exactly as staged.
     pub fn from_directory(path: &Path) -> Result<Self, ApiError> {
         let documents = CONTEXT_FILES
             .iter()

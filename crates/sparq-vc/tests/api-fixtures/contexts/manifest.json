@@ -1,0 +1,37 @@
+{
+  "credentials-v2.jsonld": {
+    "url": "https://www.w3.org/ns/credentials/v2",
+    "resolvedUrl": "npm @digitalbazaar/credentials-context@3.2.0 contexts/v2.jsonld",
+    "sha256": "8a9f494a89ecc51db093e90e84713e07e84d6d9204364a9b3c7868b21751236f"
+  },
+  "credentials-v1.jsonld": {
+    "url": "https://www.w3.org/2018/credentials/v1",
+    "resolvedUrl": "npm @digitalbazaar/credentials-context@3.2.0 contexts/v1.jsonld",
+    "sha256": "00d7dd6d3ad8b920e3e550dd3a3d9090bffcac84cdbf943da6924b3e0a5c8bb8"
+  },
+  "examples-v2.jsonld": {
+    "url": "https://www.w3.org/ns/credentials/examples/v2",
+    "resolvedUrl": "github w3c/vc-data-model main contexts/credentials/examples/v2",
+    "sha256": "57393fbc69d6efb9b9b5dc9cb6b9880b0944360abfe2eaf459c9e58cf2279d7c"
+  },
+  "data-integrity-v2.jsonld": {
+    "url": "https://w3id.org/security/data-integrity/v2",
+    "resolvedUrl": "npm @digitalbazaar/data-integrity-context@2.0.1",
+    "sha256": "0f77743daf5b4e8fc067fc5ba5b21044283053aa717fc6b0219843bed3b00363"
+  },
+  "data-integrity-v1.jsonld": {
+    "url": "https://w3id.org/security/data-integrity/v1",
+    "resolvedUrl": "npm @digitalbazaar/data-integrity-context@2.0.1",
+    "sha256": "b5d829bd09aa7c42abc6efa0c8ed7635313b5487f37ccfce3ecd149ca9418554"
+  },
+  "multikey-v1.jsonld": {
+    "url": "https://w3id.org/security/multikey/v1",
+    "resolvedUrl": "npm @digitalbazaar/multikey-context@2.0.1",
+    "sha256": "c5f3806f8286920573221938917988a18a4cc5a09e968d29649613c7a1c2b1f6"
+  },
+  "did-v1.jsonld": {
+    "url": "https://www.w3.org/ns/did/v1",
+    "resolvedUrl": "npm did-context@3.1.1",
+    "sha256": "62c1054bf404d6dd3a4b26b64f830fd72095f6a26edc4469908c94351352ce5f"
+  }
+}

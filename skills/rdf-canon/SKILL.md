@@ -65,13 +65,12 @@ bound encoding, first-degree hashing and sorting. No new default feature is need
 
 The underlying library's default HNDQ limit is 4000 calls. That counter counts
 recursive function entries, not permutation candidates skipped within an entry.
-The bounded APIs additionally compute `calls × d × d!`, where `d` is the largest
-number of related blank-node occurrences for any input blank node, including
-repetitions across quads or term positions. Each call has at most `d` groups
-and each group's permutation loop has at most `d!` iterations. Checked arithmetic
-and an excessive bound return `CanonError::Canonicalization` before that work.
-This deliberately rejects some easy inputs whose first-degree hashes would
-resolve quickly. No weaker comparison or alternate canonicalization is substituted.
+The bounded APIs additionally count every permutation candidate across all
+HNDQ calls, including candidates skipped by path pruning. The budget is shared
+through recursive calls and checked before each candidate is processed.
+Exhaustion returns `CanonError::Canonicalization`. High-degree inputs resolved
+by first-degree hashing consume no permutation budget. The canonical form is
+unchanged.
 These are algorithmic/input bounds, not elapsed-time or process-memory guarantees.
 Tests: `crates/sparq-canon/tests/bounded_canonicalization.rs`.
 

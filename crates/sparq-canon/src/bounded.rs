@@ -1,12 +1,11 @@
-// Bound the library's uncounted permutation loops before invoking RDFC.
+// Bound input/output before RDFC and meter its HNDQ calls and permutations.
 use crate::{CanonError, Digest};
 use oxrdf::{GraphName, NamedOrBlankNode, Quad, Term};
 use std::{collections::HashMap, fmt::Write};
 
 /// Explicit resource limits for the standard RDFC-1.0 entry points.
 ///
-/// The permutation limit is a conservative upper bound, not a measured cost.
-/// It can reject an easy graph whose first-degree hashes would resolve quickly.
+/// The permutation limit counts candidates across all HNDQ calls.
 /// These limits bound input, output and algorithmic work, not elapsed time or RSS.
 #[derive(Clone, Copy, Debug)]
 pub struct CanonicalizationLimits {
@@ -15,7 +14,7 @@ pub struct CanonicalizationLimits {
     pub max_output_bytes: usize,
     /// Passed explicitly to the vendored RDFC total HNDQ-call counter.
     pub max_hndq_calls: usize,
-    /// Maximum precomputed upper bound on all permutation-loop iterations.
+    /// Maximum total permutation-loop iterations across all HNDQ calls.
     pub max_permutation_steps: usize,
 }
 
@@ -32,6 +31,7 @@ pub fn canonicalize_quads_bounded_with<D: Digest>(
         &quads,
         &crate::rdfc::CanonicalizationOptions {
             hndq_call_limit: Some(limits.max_hndq_calls),
+            permutation_limit: Some(limits.max_permutation_steps),
         },
     )
     .map_err(|error| CanonError::Canonicalization(error.to_string()))?;
@@ -54,6 +54,7 @@ pub fn issue_quads_bounded_with<D: Digest>(
         &quads,
         &crate::rdfc::CanonicalizationOptions {
             hndq_call_limit: Some(limits.max_hndq_calls),
+            permutation_limit: Some(limits.max_permutation_steps),
         },
     )
     .map_err(|error| CanonError::Canonicalization(error.to_string()))
@@ -89,7 +90,7 @@ fn prepare(
         text: String::new(),
         limit: limits.max_input_bytes,
     };
-    let mut related: HashMap<&str, usize> = HashMap::new();
+    let mut related: HashMap<&str, ()> = HashMap::new();
     let mut occurrences = 0_usize;
     for quad in dataset {
         if matches!(quad.object, Term::Triple(_)) {
@@ -109,23 +110,12 @@ fn prepare(
                 _ => None,
             },
         ];
-        // Count occurrences, not distinct neighbours. rdf-canon's Hn lists can
-        // repeat a related node across quads or graph/subject/object positions.
-        // Counting a quad again for repeated owner positions only overestimates.
+        // Keep the occurrence count for the canonical-label output allowance.
         for node in nodes.iter().flatten() {
             occurrences = occurrences
                 .checked_add(1)
                 .ok_or_else(|| capacity("canonical input size overflow"))?;
-            let degree = related.entry(node).or_default();
-            *degree = degree
-                .checked_add(
-                    nodes
-                        .iter()
-                        .flatten()
-                        .filter(|other| *other != node)
-                        .count(),
-                )
-                .ok_or_else(|| capacity("canonical related-node overflow"))?;
+            related.entry(node).or_default();
         }
         let written = match &quad.graph_name {
             GraphName::DefaultGraph => {
@@ -154,29 +144,5 @@ fn prepare(
     if output_bound > limits.max_output_bytes {
         return Err(capacity("canonical output capacity"));
     }
-    let degree = related.values().copied().max().unwrap_or(0);
-    let mut factorial = 1_usize;
-    for value in 2..=degree {
-        factorial = factorial
-            .checked_mul(value)
-            .filter(|bound| *bound <= limits.max_permutation_steps)
-            .ok_or_else(|| capacity("canonical permutation capacity"))?;
-    }
-    // In the vendored rdf-canon 0.15.3 (src/rdfc/canon.rs), hash_n_degree_quads checks the global
-    // call counter before its body. Hn has at most degree groups, each with
-    // <= degree occurrences. Its sole permutation loop has <= degree! entries
-    // per group, including entries skipped before recursive calls are counted.
-    // Thus all calls together have <= calls * degree * degree! entries.
-    let permutations = limits
-        .max_hndq_calls
-        .checked_mul(degree)
-        .and_then(|bound| bound.checked_mul(factorial))
-        .ok_or_else(|| capacity("canonical permutation capacity"))?;
-    if permutations > limits.max_permutation_steps {
-        return Err(capacity("canonical permutation capacity"));
-    }
-    // Encoding, first-degree hashing and sorting are bounded by input quads
-    // and bytes. Within a permutation, issuer/path sizes are bounded by the
-    // input blank-node count and degree. No host timeout is the work guard.
     crate::parse_02(&document.text)
 }

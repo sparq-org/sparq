@@ -135,3 +135,14 @@ The following stay green:
 [canon]: https://www.w3.org/TR/rdf-canon/#canon-algorithm
 [hndq]: https://www.w3.org/TR/rdf-canon/#hash-nd-quads
 [hrbn]: https://www.w3.org/TR/rdf-canon/#hash-related-blank-node
+
+## 3. Explicit permutation budget
+
+The internal options accept an optional permutation limit. The HNDQ counter
+holds the remaining candidate count alongside its call budget. Every candidate
+in the lazy permutation iterator decrements that count before path processing,
+including candidates later skipped by pruning. Both bounded public entry points
+supply this budget; default entry points retain their existing behavior.
+The input/output preflight remains in `bounded.rs`. Regression tests compare
+bounded and standard output for high-degree first-degree-resolved inputs and
+exercise budget exhaustion across HNDQ calls.
