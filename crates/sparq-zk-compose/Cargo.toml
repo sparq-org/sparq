@@ -11,10 +11,10 @@ categories.workspace = true
 description = "ZK proof composition for sparq: ProofManifest + nargo/bb prover driver + verifier over the per-property Noir circuit family (stage 2)"
 publish = false
 
-# Like sparq-zk: NOTHING in the workspace depends on this crate, so default
-# builds and the wasm artifact are byte-identical with or without it. The
-# circuit family it drives lives at zk/compose/ (proved via nargo/bb
-# subprocesses, not linked).
+# The separate result host adapter opts into this capability crate. Core/default
+# builds and the lean wasm package do not depend on it. The native circuit driver
+# uses subprocesses; successful-result preparation and reconstruction also compile
+# for wasm32.
 
 [features]
 default = []
@@ -60,8 +60,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # sq-aih (audit #4 durability): advisory file locking (`flock`) for the
 # DURABLE single-use nonce store (`FileSeenNonces`). Cross-process atomic
-# check-and-append. This crate is native-only (it drives nargo/bb subprocesses and
-# nothing in the workspace depends on it), so `libc` never reaches the wasm build.
+# check-and-append. The file-backed store and subprocess driver are native-only;
+# libc is excluded from the wasm result host.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 libc = { workspace = true }
 
 [dev-dependencies]

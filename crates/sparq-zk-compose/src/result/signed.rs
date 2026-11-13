@@ -6,15 +6,18 @@
 //! public. This remains research-stage and is not externally audited.
 
 use super::{
-    prepare_result_numeric, public_statement_for, reject, verify_statement, CircuitProver,
-    CredentialCapacity, DisclosedTerm, FieldHex, NumericContract, NumericProfile, PreparedResult,
-    PresentationView, ResultCredential, ResultError, ResultOptions, ResultPolicy, ResultWork,
-    SeenNonces, VerifiedResult, VerifierNonce, WitnessSelection,
+    prepare_result_numeric, reject,
+    CredentialCapacity, DisclosedTerm, FieldHex, NumericProfile, PreparedResult,
+    ResultCredential, ResultError, ResultOptions, ResultPolicy, ResultWork,
+    VerifierNonce, WitnessSelection,
 };
 use oxrdf::Term;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
+#[cfg(not(target_arch = "wasm32"))]
+use super::{public_statement_for, verify_statement, CircuitProver, NumericContract, PresentationView, SeenNonces, VerifiedResult};
 
 // The public version and independently derived key separate this relation from
 // both unsigned contracts, including the predicate-free members.
@@ -42,6 +45,7 @@ pub struct SignedResultPresentation {
     pub proof: Vec<u8>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl SignedResultPresentation {
     fn view(&self) -> PresentationView<'_> {
         PresentationView {
@@ -94,6 +98,7 @@ impl PreparedSignedResult {
     /// # Errors
     /// Rejects invalid labels, toolchain mismatches, unsatisfied witnesses,
     /// backend errors, and reconstructed-public-ABI mismatches.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn prove(
         &self,
         prover: &CircuitProver,
@@ -178,6 +183,7 @@ pub fn prepare_signed_result_with_options(
 /// # Errors
 /// Rejects malformed, unsupported, inconsistent, replayed or cryptographically
 /// invalid presentations, and backend or toolchain failures.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn verify_signed_result(
     expected_query: &str,
     presentation: &SignedResultPresentation,

@@ -1,0 +1,35 @@
+[package]
+name = "sparq-zk-result-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+publish = false
+description = "JSON host adapter for the successful-result relation"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+sparq-zk-compose = { path = "../sparq-zk-compose", features = ["successful-results"] }
+sparq-zk = { path = "../sparq-zk" }
+sparq-core = { path = "../sparq-core" }
+sparq-engine = { path = "../sparq-engine" }
+oxrdf.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+wasm-bindgen = "=0.2.122"
+sha2 = "0.10"
+
+[build-dependencies]
+serde_json = "1"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+getrandom_current = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
+getrandom_latest = { package = "getrandom", version = "0.4", features = ["wasm_js"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+getrandom_latest = { package = "getrandom", version = "0.4" }
