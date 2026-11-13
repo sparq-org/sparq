@@ -10,13 +10,17 @@ identity. Issuer identities, capacities and result size are observable.
 Build the library for wasm32 and generate the Node bindings with wasm-bindgen.
 Consumers use the prebuilt [Node package](../../js/zk-result/README.md).
 
-The JSON functions are `testIssuerKeygen(seedHex)`,
+The JSON functions are `issuerKeygen()`, `testIssuerKeygen(seedHex)`,
 `issue(issuerJson, graphNQuads, statusRefJson)`,
 `prepare(queryText, credentialsJson, policyJson, nonceHex, optionsJson)`,
 `reconstructPublicInputs(expectedQueryText, presentationJson, policyJson, nonceHex)`
 and `canonicalVkHash(member)`. Successful calls return JSON strings, except the
 key-hash function, which returns a digest string. Errors throw strings in JS.
-The issuer helper is deterministic test issuance only.
+`issuerKeygen()` returns `{ secretKeyHex, publicKey }` from platform CSPRNG
+entropy. The caller must store and protect the secret; the package never persists
+it. Keys remain research grade, not externally audited. `testIssuerKeygen`
+retains its deterministic `{ seedHex, publicKey }` test-only format. `issue`
+accepts either format, checks the public key, and rejects mixed fields.
 
 Pass `{}` for default preparation options. Optional `hideInTwo`, `hideInU64` and
 `firstSuccess` booleans default to false; `maxSearchSteps` defaults to the shared

@@ -61,13 +61,29 @@ are `{ status_list, version, index }`. Credential objects contain `graphNQuads`,
 `salt`, `issuer`, `signature` and `statusRef`. They contain private material and
 must remain in the prover's wallet.
 
-`testIssuerKeygen(seedHex)` accepts a hexadecimal unsigned seed and is exclusively
-a deterministic test-issuer helper. `issue(issuer, graphNQuads, statusRef)` signs a
-string-canonical graph using the method-bound presentation attestation and a fresh
-salt. It is test issuance under that helper's key, not production key management.
-Production issuer identities, key custody and authenticated status acquisition
-belong to the application. Random salts and proving secrets use platform CSPRNG
-entropy, including `crypto.getRandomValues` in Node; no stub entropy is installed.
+`issuerKeygen()` returns `{ secretKeyHex, publicKey }` using the platform CSPRNG.
+The caller must store and protect the secret; the package never persists it.
+The key and signature scheme remain research grade and not externally audited.
+`secretKeyHex` is exactly 64 lowercase, unprefixed hex digits encoding the canonical
+little-endian scalar bytes. Import rejects zero, out-of-range scalars, malformed
+hex and wrong lengths. `issue` also checks that `publicKey` matches the secret.
+Serialized key objects can be restored by the caller and passed directly to `issue`.
+Exported strings and JavaScript memory are not automatically erased.
+
+```js
+import { issuerKeygen, issue } from '@sparq-org/zk-result';
+const issuer = issuerKeygen(); // Store issuer securely before issuing credentials.
+const credential = issue(issuer, graphNQuads, statusRef);
+```
+
+`testIssuerKeygen(seedHex)` retains its deterministic `{ seedHex, publicKey }`
+format and is exclusively a test helper. `issue(issuer, graphNQuads, statusRef)`
+accepts either key format and rejects objects mixing seed and secret fields.
+It signs a string-canonical graph using the method-bound presentation attestation
+and a fresh salt. Issuer identities, key custody and authenticated status
+acquisition belong to the application. Random keys, salts and proving secrets use
+platform CSPRNG entropy, including `crypto.getRandomValues` in Node; no stub entropy
+is installed.
 Generate nonces with the application's CSPRNG and supply the same nonce to both
 parties.
 
