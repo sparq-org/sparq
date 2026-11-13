@@ -1,4 +1,4 @@
-// Original queries and goldens remain immutable; these are native definitions.
+// Retained queries, reviewed goldens and typed capacity controls are native evidence.
 #![cfg(feature = "graph-results")]
 
 use sparq_engine::{BudgetExceeded, EvaluationCapacity};
@@ -25,9 +25,9 @@ fn inputs(query: &str, data: &str, agreed: bool) -> (v2::Witness, v3::Witness) {
     })
 }
 
-fn original_cases() -> Vec<(serde_json::Value, EvaluationCapacity)> {
+fn capacity_cases() -> Vec<(serde_json::Value, EvaluationCapacity)> {
     let numeric: serde_json::Value = serde_json::from_str(include_str!("../../fixtures/conformance/numeric-capacity.json")).unwrap();
-    let mut cases: Vec<_> = numeric["cases"].as_array().unwrap().iter().cloned().map(|case| (case, EvaluationCapacity::NumericRepresentation)).collect();
+    let mut cases: Vec<_> = numeric["cases"].as_array().unwrap().iter().filter(|case| case["expectation_kind"] == "implementation_capacity").cloned().map(|case| (case, EvaluationCapacity::NumericRepresentation)).collect();
     assert_eq!(cases.len(), 21);
     let temporal: serde_json::Value = serde_json::from_str(include_str!("../../fixtures/conformance/temporal-capacity.json")).unwrap();
     for id in ["dynamic-coalesce", "dynamic-bind-false-ask", "dynamic-filter-false-ask", "dynamic-cast", "zero-year-strdt", "zero-year-cast"] {
@@ -45,9 +45,9 @@ fn original_cases() -> Vec<(serde_json::Value, EvaluationCapacity)> {
 }
 
 #[test]
-fn original_29_capacity_ids_keep_typed_causes_in_both_versions_and_authorities() {
+fn all_29_capacity_cases_keep_typed_causes_in_both_versions_and_authorities() {
     let mut contexts = [0; 2];
-    for (case, cause) in original_cases() {
+    for (case, cause) in capacity_cases() {
         for agreed in [false, true] {
             let (w2, w3) = inputs(case["query"].as_str().unwrap(), case["dataset_ntriples"].as_str().unwrap_or_default(), agreed);
             assert_eq!(v2::evaluate_detailed(&w2).unwrap_err(), EvaluationError::Capacity(cause), "V2 {}", case["id"]);
@@ -59,6 +59,26 @@ fn original_29_capacity_ids_keep_typed_causes_in_both_versions_and_authorities()
         }
     }
     assert_eq!(contexts, [58, 58]);
+}
+
+#[test]
+fn promoted_numeric_cases_keep_exact_results_in_both_versions_and_authorities() {
+    let numeric: serde_json::Value = serde_json::from_str(include_str!("../../fixtures/conformance/numeric-capacity.json")).unwrap();
+    let mut contexts = [0; 2];
+    for case in numeric["cases"].as_array().unwrap().iter().filter(|case| case["expectation_kind"] != "implementation_capacity") {
+        for agreed in [false, true] {
+            let (w2, w3) = inputs(case["query"].as_str().unwrap(), case["dataset_ntriples"].as_str().unwrap(), agreed);
+            let j2 = v2::evaluate_detailed(&w2).unwrap_or_else(|error| panic!("V2 {}: {error:?}", case["id"]));
+            let j3 = v3::evaluate_detailed(&w3).unwrap_or_else(|error| panic!("V3 {}: {error:?}", case["id"]));
+            assert_eq!(serde_json::json!(j2.result), case["expected_result"], "V2 {}", case["id"]);
+            assert_eq!(serde_json::json!(j3.result), case["expected_result"], "V3 {}", case["id"]);
+            assert_eq!(serde_json::to_vec(&j2).unwrap(), serde_json::to_vec(&v2::evaluate(&w2).unwrap()).unwrap());
+            assert_eq!(serde_json::to_vec(&j3).unwrap(), serde_json::to_vec(&v3::evaluate(&w3).unwrap()).unwrap());
+            contexts[0] += 1;
+            contexts[1] += 1;
+        }
+    }
+    assert_eq!(contexts, [14, 14]);
 }
 
 #[test]

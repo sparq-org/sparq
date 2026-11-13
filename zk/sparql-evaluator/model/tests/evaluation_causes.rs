@@ -40,22 +40,64 @@ fn expect_capacity(case: &serde_json::Value, cause: EvaluationCapacity) {
     ] {
         let mut input = input.clone();
         input.request.authority = authority;
-        let error = evaluate_detailed(&input).unwrap_err();
+        let error =
+            evaluate_detailed(&input).expect_err(&format!("{}: expected capacity", case["id"]));
         assert_eq!(error, EvaluationError::Capacity(cause), "{}", case["id"]);
         assert_eq!(evaluate(&input).unwrap_err(), Rejected::from(error));
     }
 }
 
 #[test]
-fn numeric_original_capacity_cases_keep_an_actual_typed_cause() {
+fn numeric_cases_keep_exact_results_and_actual_typed_causes() {
     let corpus: serde_json::Value = serde_json::from_str(include_str!(
         "../../fixtures/conformance/numeric-capacity.json"
     ))
     .unwrap();
-    assert_eq!(corpus["cases"].as_array().unwrap().len(), 21);
-    for case in corpus["cases"].as_array().unwrap() {
-        expect_capacity(case, EvaluationCapacity::NumericRepresentation);
+    let cases = corpus["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 28);
+    let mut counts = (0, 0);
+    let mut promoted = std::collections::BTreeSet::new();
+    let mut replaced = std::collections::BTreeSet::new();
+    for case in cases {
+        if case["expectation_kind"] == "implementation_capacity" {
+            counts.1 += 1;
+            expect_capacity(case, EvaluationCapacity::NumericRepresentation);
+            if let Some(id) = case["capacity_replacement_for"].as_str() {
+                assert!(replaced.insert(id), "duplicate capacity replacement: {id}");
+            }
+        } else {
+            counts.0 += 1;
+            assert!(promoted.insert(case["id"].as_str().unwrap()));
+            let input = witness(
+                case["query"].as_str().unwrap(),
+                case["dataset_ntriples"].as_str().unwrap(),
+            );
+            for authority in [
+                input.request.authority.clone(),
+                DatasetAuthority::HolderDeclared,
+            ] {
+                let mut input = input.clone();
+                input.request.authority = authority;
+                let journal = evaluate_detailed(&input)
+                    .unwrap_or_else(|error| panic!("{}: {error:?}", case["id"]));
+                assert_eq!(
+                    serde_json::json!(journal.result),
+                    case["expected_result"],
+                    "{}",
+                    case["id"]
+                );
+                assert_eq!(
+                    serde_json::to_vec(&journal).unwrap(),
+                    serde_json::to_vec(&evaluate(&input).unwrap()).unwrap()
+                );
+            }
+        }
     }
+    assert_eq!(counts, (7, 21));
+    assert_eq!(
+        promoted, replaced,
+        "each promotion retains a typed capacity control"
+    );
 }
 
 #[test]
