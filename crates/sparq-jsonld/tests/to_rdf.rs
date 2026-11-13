@@ -93,3 +93,43 @@ fn numeric_overflow_returns_an_error() {
         sparq_jsonld::JsonLdErrorCode::InvalidValueObjectValue
     );
 }
+
+#[test]
+fn generalized_predicate_shares_the_subject_blank_node_identifier() {
+    let input = Json::parse(r#"{"@id":"_:p","_:p":"v"}"#).unwrap();
+    let mut options = JsonLdOptions::default();
+    options.produce_generalized_rdf = true;
+    let quads = to_rdf(&input, &options, &NoopLoader).unwrap();
+    assert_eq!(quads.len(), 1);
+    assert!(matches!(quads[0].predicate, RdfTerm::BlankNode(_)));
+    assert_eq!(quads[0].subject, quads[0].predicate);
+    assert_eq!(
+        quads[0].object,
+        RdfTerm::typed_literal("v", "http://www.w3.org/2001/XMLSchema#string")
+    );
+
+    let flattened = sparq_jsonld::flatten(&input, &options, &NoopLoader).unwrap();
+    let Json::Arr(nodes) = flattened else {
+        panic!("flattened array")
+    };
+    let id = nodes[0].get("@id").and_then(Json::as_str).unwrap();
+    assert!(
+        nodes[0].get(id).is_some(),
+        "flattening must share the same relabeling"
+    );
+}
+
+#[test]
+fn generalized_reverse_predicate_shares_the_object_blank_node_identifier() {
+    let input = Json::parse(r#"{"@id":"_:p","@reverse":{"_:p":{"@id":"_:o"}}}"#).unwrap();
+    let mut options = JsonLdOptions::default();
+    options.produce_generalized_rdf = true;
+    let quads = to_rdf(&input, &options, &NoopLoader).unwrap();
+    assert_eq!(quads.len(), 1);
+    assert!(matches!(quads[0].predicate, RdfTerm::BlankNode(_)));
+    assert_eq!(quads[0].object, quads[0].predicate);
+    assert_ne!(quads[0].subject, quads[0].object);
+    assert!(to_rdf(&input, &JsonLdOptions::default(), &NoopLoader)
+        .unwrap()
+        .is_empty());
+}

@@ -29,6 +29,7 @@ use super::{has_keyword_form, is_keyword, ActiveContext, Direction, Override, Te
 use super::iri::relativize_iri;
 use crate::fx::FxMap;
 use crate::json::Json;
+use crate::options::ProcessingMode;
 
 // ---------------------------------------------------------------------------
 // §4.3 Inverse Context Creation
@@ -341,7 +342,8 @@ fn is_graph_object_shape(j: &Json) -> bool {
 /// object); it governs which containers and type/language keys are preferred.
 /// Pass `None` when compacting a bare IRI (e.g. a `@type` value).
 /// `vocab` indicates vocab-relative compaction; `reverse` marks a
-/// `@reverse` property.
+/// `@reverse` property. This string-only helper retains the input IRI on a
+/// prefix-confusion error; document compaction reports that error to the caller.
 ///
 /// (sq-90mu3)
 pub fn compact_iri(
@@ -352,14 +354,28 @@ pub fn compact_iri(
     vocab: bool,
     reverse: bool,
 ) -> String {
+    try_compact_iri(ctx, inverse, iri, value, vocab, reverse, ProcessingMode::JsonLd11)
+        .unwrap_or_else(|_| iri.to_string())
+}
+
+/// Preserve the algorithm's error outcome for document compaction and its memos.
+pub(crate) fn try_compact_iri(
+    ctx: &ActiveContext,
+    inverse: &InverseContext,
+    iri: &str,
+    value: Option<&Json>,
+    vocab: bool,
+    reverse: bool,
+    mode: ProcessingMode,
+) -> Result<String, crate::error::JsonLdError> {
     // §7.1 step 1: empty / null — return as-is.
     if iri.is_empty() {
-        return iri.to_string();
+        return Ok(iri.to_string());
     }
 
     // §7.1 step 2: keyword or keyword alias (shortest, then lexicographic least).
     if is_keyword(iri) {
-        return inverse.aliases.get(iri).cloned().unwrap_or_else(|| iri.to_string());
+        return Ok(inverse.aliases.get(iri).cloned().unwrap_or_else(|| iri.to_string()));
     }
 
     // §7.1 step 3 (spec "IRI Compaction" step 2): vocab=true AND iri appears in the
@@ -578,7 +594,7 @@ pub fn compact_iri(
             // Only a term mapping to `id_iri` can round-trip, so skip the nested
             // compaction when there is none.
             let round_trips = inverse.has_iri(id_iri) && {
-                let compacted_id = compact_iri(ctx, inverse, id_iri, None, true, false);
+                let compacted_id = try_compact_iri(ctx, inverse, id_iri, None, true, false, mode)?;
                 ctx.term_definitions
                     .get(&compacted_id)
                     .map(|d| d.iri.as_deref() == Some(id_iri))
@@ -616,7 +632,7 @@ pub fn compact_iri(
         // step 2.17: Term Selection.
         let pvs: Vec<&str> = preferred_values.iter().map(|pv| pv.as_ref()).collect();
         if let Some(term) = select_term(inverse, iri, &containers, type_language, &pvs) {
-            return term;
+            return Ok(term);
         }
     }
 
@@ -637,7 +653,7 @@ pub fn compact_iri(
                     && !suffix.contains(':')
                     && !suffix.starts_with('@')
                 {
-                    return suffix.to_string();
+                    return Ok(suffix.to_string());
                 }
             }
         }
@@ -680,12 +696,22 @@ pub fn compact_iri(
     }
 
     if let Some(compact) = best_compact {
-        // §7.1 step 5.x: use the compact IRI if vocab is false, or if it
-        // does not itself appear in the inverse context (which would mean it
-        // was already resolved to a term above).
-        if !vocab || !inverse.inner.contains_key(&compact) {
-            return compact;
-        }
+        return Ok(compact);
+    }
+
+    // IRI Compaction fallback: only this branch can confuse an absolute IRI
+    // with a prefix. A selected term or compact IRI may have the same spelling.
+    // The JSON-LD 1.0 algorithm has no prefix-confusion error (frame/t0010).
+    if mode != ProcessingMode::JsonLd10
+        && crate::context::iri::is_absolute_iri(iri)
+        && iri.split_once(':').is_some_and(|(prefix, suffix)| {
+            !suffix.starts_with("//")
+                && ctx.term_definition(prefix).is_some_and(|d| d.is_prefix())
+        })
+    {
+        return Err(crate::error::JsonLdError::new(
+            crate::error::JsonLdErrorCode::IriConfusedWithPrefix,
+        ));
     }
 
     // §7.1 step 6: base-relative IRI (vocab=false path). RFC 3986 §5.3-style
@@ -702,7 +728,7 @@ pub fn compact_iri(
                 // ("@" + ALPHA) would be misread as a keyword where an IRI is
                 // expected — disambiguate with a "./" prefix (W3C compact/0111).
                 if has_keyword_form(&relative) {
-                    return format!("./{}", relative);
+                    return Ok(format!("./{}", relative));
                 }
                 // Likewise a reference spelled like a keyword alias (e.g. of `@id`;
                 // other terms are not consulted for ids) or with a colon in its first
@@ -718,17 +744,17 @@ pub fn compact_iri(
                     // "./" before a same-document "#…" / "?…" reference would drop the
                     // base's last segment, so those keep the absolute IRI.
                     if relative.starts_with(['#', '?']) {
-                        return iri.to_string();
+                        return Ok(iri.to_string());
                     }
-                    return format!("./{}", relative);
+                    return Ok(format!("./{}", relative));
                 }
-                return relative;
+                return Ok(relative);
             }
         }
     }
 
     // §7.1 step 7: nothing worked — return the IRI unchanged.
-    iri.to_string()
+    Ok(iri.to_string())
 }
 
 // ---------------------------------------------------------------------------

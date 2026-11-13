@@ -135,6 +135,8 @@ It returns `Result<Vec<RdfQuad>, JsonLdError>`, using the same crate-local RDF m
 It expands first, validates conflicting indexes, and converts named graphs, lists,
 JSON literals and scalar values. `rdf_direction` supports both direction encodings;
 `produce_generalized_rdf` defaults to false and enables blank-node predicates when true.
+Blank-node subjects, objects, types and ordinary/reverse predicates share the same
+identifier issuer, preserving their identity when relabeled.
 The CLI/server and `Graph::load_str(doc, "jsonld")` continue to use oxjsonld.
 
 For compacted flattening, call
@@ -159,7 +161,11 @@ resolves to the spec default for the active processing mode.
 Every operation returns a `JsonLdError` carrying a `JsonLdErrorCode` — the full W3C
 error-code registry, whose `as_str()` is the exact spec string (e.g. `"invalid frame"`,
 `"invalid @embed value"`, `"loading document failed"`), so negative-test assertions are
-exact.
+exact. A selected compact IRI may validly have the original IRI spelling; prefix
+confusion in JSON-LD 1.1 mode is checked only after term, vocabulary and compact-IRI
+selection fail, before base-relative compaction. JSON-LD 1.0 compatibility mode
+retains the legacy behavior without that error, including a property whose IRI
+spelling becomes a compact IRI under a frame's context.
 
 ### Document loading is deny-by-default
 

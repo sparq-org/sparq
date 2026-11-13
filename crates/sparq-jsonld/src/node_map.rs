@@ -17,6 +17,7 @@
 
 use crate::fx::{FxMap, FxSet};
 use crate::json::Json;
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 /// A blank-node identifier issuer (§7.4 *Generate Blank Node Identifier*). Maps an input
@@ -403,6 +404,7 @@ fn process_node_members(
                     let reference =
                         Json::Obj(vec![("@id".to_string(), Json::Str(id.to_string()))]);
                     for (property, values) in reverse_map {
+                        let property = relabel_property(property, issuer);
                         for v in as_array(values) {
                             // Recurse as a top-level node (no active subject/property): this
                             // mints the reverse object's id and folds its own members in.
@@ -419,7 +421,7 @@ fn process_node_members(
                                     node_map,
                                     active_graph,
                                     &sub,
-                                    property,
+                                    &property,
                                     reference.clone(),
                                 );
                             }
@@ -439,19 +441,29 @@ fn process_node_members(
             // step 5.9: an ordinary property. Ensure it exists (even if empty), then recurse
             // its values as being under (active_graph, id, key).
             _ => {
-                ensure_property(node_map, active_graph, id, key);
+                let property = relabel_property(key, issuer);
+                ensure_property(node_map, active_graph, id, &property);
                 let mut no_list = None;
                 node_map_gen(
                     value,
                     node_map,
                     active_graph,
                     Some(id),
-                    Some(key),
+                    Some(&property),
                     &mut no_list,
                     issuer,
                 );
             }
         }
+    }
+}
+
+/// Property labels and node identifiers share one blank-node namespace.
+fn relabel_property<'a>(property: &'a str, issuer: &mut BlankNodeIssuer) -> Cow<'a, str> {
+    if property.starts_with("_:") {
+        Cow::Owned(issuer.issue(Some(property)))
+    } else {
+        Cow::Borrowed(property)
     }
 }
 

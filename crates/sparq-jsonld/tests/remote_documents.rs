@@ -202,3 +202,97 @@ fn remote_flattening_uses_the_final_url_for_relative_output() {
     };
     assert_eq!(nodes[0].get("@id").and_then(Json::as_str), Some("child"));
 }
+
+#[test]
+fn valid_compact_iri_can_keep_the_original_spelling() {
+    let input = Json::parse(r#"{"@id":"urn:x","https://ex/p":"v"}"#).unwrap();
+    let context = Json::parse(r#"{"@vocab":"urn:","urn":{"@id":"","@prefix":true}}"#).unwrap();
+    for _ in 0..2 {
+        let output =
+            sparq_jsonld::compact::compact(&input, &context, &JsonLdOptions::default(), &Loader)
+                .unwrap();
+        assert_eq!(output.get("@id").and_then(Json::as_str), Some("urn:x"));
+        assert_eq!(
+            expand(&output, &JsonLdOptions::default(), &Loader).unwrap(),
+            expand(&input, &JsonLdOptions::default(), &Loader).unwrap()
+        );
+    }
+}
+
+#[test]
+fn valid_compact_iri_is_kept_when_its_iri_is_in_the_inverse_context() {
+    let input = Json::parse(r#"{"@id":"https://ex/s","urn:x":"v"}"#).unwrap();
+    let context = Json::parse(
+        r#"{"@vocab":"urn:","urn":{"@id":"","@prefix":true},"x":null,"other":{"@id":"urn:x","@type":"@id"}}"#,
+    )
+    .unwrap();
+    // `other` cannot compact a literal, and `x` blocks vocabulary compaction.
+    for _ in 0..2 {
+        let output =
+            sparq_jsonld::compact::compact(&input, &context, &JsonLdOptions::default(), &Loader)
+                .unwrap();
+        assert_eq!(output.get("urn:x").and_then(Json::as_str), Some("v"));
+        assert_eq!(
+            expand(&output, &JsonLdOptions::default(), &Loader).unwrap(),
+            expand(&input, &JsonLdOptions::default(), &Loader).unwrap()
+        );
+    }
+}
+
+#[test]
+fn prefix_confusion_is_detected_before_base_relativization() {
+    let input = Json::parse(r#"{"@id":"urn:x","https://ex/p":"v"}"#).unwrap();
+    let context =
+        Json::parse(r#"{"urn":{"@id":"https://vocab.example/","@prefix":true}}"#).unwrap();
+    let mut options = JsonLdOptions::default();
+    options.base = Some("urn:base".into());
+    for _ in 0..2 {
+        assert_eq!(
+            sparq_jsonld::compact::compact(&input, &context, &options, &Loader)
+                .unwrap_err()
+                .code(),
+            E::IriConfusedWithPrefix
+        );
+    }
+}
+
+#[test]
+fn null_remote_context_restores_original_document_base() {
+    struct Remote<'a>(&'a str);
+    impl DocumentLoader for Remote<'_> {
+        fn load_document(&self, _: &str) -> Result<RemoteDocument, JsonLdError> {
+            Ok(RemoteDocument::new(self.0, "https://final.example/doc"))
+        }
+    }
+    let mut options = JsonLdOptions::default();
+    options.base = Some("https://override.example/base/".into());
+    let url = Json::Str("https://request.example/doc".into());
+    for (document, expected) in [
+        (
+            r#"{"@id":"child","https://ex/p":"v"}"#,
+            "https://override.example/base/child",
+        ),
+        (
+            r#"{"@context":null,"@id":"child","https://ex/p":"v"}"#,
+            "https://final.example/child",
+        ),
+        (
+            r#"{"@context":[{"@base":"https://local.example/"},null],"@id":"child","https://ex/p":"v"}"#,
+            "https://final.example/child",
+        ),
+    ] {
+        let output = expand(&url, &options, &Remote(document)).unwrap();
+        let Json::Arr(nodes) = output else {
+            panic!("expanded array")
+        };
+        assert_eq!(nodes[0].get("@id").and_then(Json::as_str), Some(expected));
+    }
+    let inline = Json::parse(r#"{"@context":null,"@id":"child","https://ex/p":"v"}"#).unwrap();
+    let Json::Arr(nodes) = expand(&inline, &options, &Loader).unwrap() else {
+        panic!("expanded array")
+    };
+    assert_eq!(
+        nodes[0].get("@id").and_then(Json::as_str),
+        Some("https://override.example/base/child")
+    );
+}

@@ -37,7 +37,7 @@
 //! (deny-by-default via [`NoopLoader`](crate::loader::NoopLoader)).
 
 use crate::cache::Lru;
-use crate::context::inverse::{compact_iri, InverseContext};
+use crate::context::inverse::{try_compact_iri, InverseContext};
 use crate::context::{budget, ActiveContext, Direction, Override};
 use crate::error::{JsonLdError, JsonLdErrorCode as E};
 use crate::expand::{expand, expand_value};
@@ -223,7 +223,7 @@ fn root_ctx(
     }
     let active =
         ActiveContext::new(base).process(ctx_value, options.base.as_deref(), loader, options)?;
-    let ctx = Rc::new(Ctx::new(active));
+    let ctx = Rc::new(Ctx::new(active, options.processing_mode));
     if cacheable {
         ROOT_CACHE.with(|cache| {
             cache.borrow_mut().insert(RootContext {
@@ -366,7 +366,12 @@ impl Env<'_> {
             prev = p.previous_context.as_deref();
         }
         let retained = root.retained.get() + held;
-        let ctx = Rc::new(Ctx::with_budget(active, Rc::clone(&root.memo_used), Rc::clone(&root.confused_iri)));
+        let ctx = Rc::new(Ctx::with_budget(
+            active,
+            self.options.processing_mode,
+            Rc::clone(&root.memo_used),
+            Rc::clone(&root.confused_iri),
+        ));
         // Once a context has not fitted, the cache takes no more until the next call.
         let fits = !root.overflowed.get()
             && root.derived.borrow().len() < DERIVED_CAP
@@ -387,6 +392,7 @@ impl Env<'_> {
 /// of repeated inverse construction.
 struct Ctx {
     confused_iri: Rc<Cell<bool>>,
+    mode: ProcessingMode,
     active: ActiveContext,
     inverse: InverseContext,
     /// Memoised IRI Compaction results: iri → (shape, vocab, reverse, result).
@@ -409,15 +415,21 @@ struct Ctx {
 }
 
 impl Ctx {
-    fn new(active: ActiveContext) -> Ctx {
-        Ctx::with_budget(active, Rc::default(), Rc::default())
+    fn new(active: ActiveContext, mode: ProcessingMode) -> Ctx {
+        Ctx::with_budget(active, mode, Rc::default(), Rc::default())
     }
 
     /// A context whose memo insertions count against `memo_used`.
-    fn with_budget(active: ActiveContext, memo_used: Rc<Cell<usize>>, confused_iri: Rc<Cell<bool>>) -> Ctx {
+    fn with_budget(
+        active: ActiveContext,
+        mode: ProcessingMode,
+        memo_used: Rc<Cell<usize>>,
+        confused_iri: Rc<Cell<bool>>,
+    ) -> Ctx {
         let inverse = active.inverse_context();
         Ctx {
             confused_iri,
+            mode,
             active,
             inverse,
             memo: RefCell::default(),
@@ -454,33 +466,57 @@ impl Ctx {
     /// IRI Compaction against this context (see `context::inverse`'s `compact_iri`),
     /// memoised for the value shapes in [`Shape`].
     fn ciri(&self, iri: &str, value: Option<&Json>, vocab: bool, reverse: bool) -> String {
-        let check = |result: String| {
-            let confused = result == iri && !self.active.has_term(iri)
-                && iri.split_once(':').is_some_and(|(prefix, suffix)| {
-                    !suffix.starts_with("//")
-                        && self.active.term_definition(prefix).is_some_and(|d| d.is_prefix())
-                });
-            if confused {
+        let check = |result: Result<String, JsonLdError>| match result {
+            Ok(result) => (result, false),
+            Err(_) => {
                 self.confused_iri.set(true);
+                (iri.to_string(), true)
             }
-            (result, confused)
         };
         let Some(shape) = Shape::of(value, &self.inverse) else {
-            return check(compact_iri(&self.active, &self.inverse, iri, value, vocab, reverse)).0;
+            return check(try_compact_iri(
+                &self.active,
+                &self.inverse,
+                iri,
+                value,
+                vocab,
+                reverse,
+                self.mode,
+            ))
+            .0;
         };
         let hit = |e: &&MemoEntry| e.1 == vocab && e.2 == reverse && e.0.is(&shape);
         if let Some(entries) = self.memo.borrow().get(iri) {
             if let Some(e) = entries.iter().find(hit) {
                 debug_assert_eq!(
                     e.3,
-                    compact_iri(&self.active, &self.inverse, iri, value, vocab, reverse),
+                    try_compact_iri(
+                        &self.active,
+                        &self.inverse,
+                        iri,
+                        value,
+                        vocab,
+                        reverse,
+                        self.mode,
+                    )
+                    .unwrap_or_else(|_| iri.to_string()),
                     "memoised IRI compaction diverged for {iri}"
                 );
-                if e.4 { self.confused_iri.set(true); }
+                if e.4 {
+                    self.confused_iri.set(true);
+                }
                 return e.3.clone();
             }
         }
-        let (result, confused) = check(compact_iri(&self.active, &self.inverse, iri, value, vocab, reverse));
+        let (result, confused) = check(try_compact_iri(
+            &self.active,
+            &self.inverse,
+            iri,
+            value,
+            vocab,
+            reverse,
+            self.mode,
+        ));
         let mut memo = self.memo.borrow_mut();
         let entries = match memo.get_mut(iri) {
             Some(entries) => entries,
@@ -1958,7 +1994,7 @@ mod tests {
     // Within one call, new IRIs stop being memoised once the shared budget is spent.
     #[test]
     fn memo_is_bounded_within_a_call() {
-        let ctx = Ctx::new(ActiveContext::new(None));
+        let ctx = Ctx::new(ActiveContext::new(None), ProcessingMode::JsonLd11);
         for i in 0..MEMO_CALL_CAP + 10 {
             ctx.ciri(&format!("http://ex/n{i}"), None, false, false);
         }
