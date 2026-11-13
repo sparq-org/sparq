@@ -54,3 +54,8 @@ required-features = ["authenticated-rdf"]
 [[example]]
 name = "canon_differential"
 required-features = ["phase-cycles"]
+
+# Offline answer sizing and verification; never generates a proof.
+[[example]]
+name = "paper_verify"
+required-features = ["authenticated-rdf"]

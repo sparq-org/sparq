@@ -301,7 +301,7 @@ def main() -> int:
         run_logged(test + ["-p", "sparq-proved-evaluator-model", "--features", "authenticated-rdf",
                            "--lib", "--test", "authenticated_rdf"], "native-authrdf", output, env, commands)
         run_logged(test + ["-p", "sparq-proved-evaluator", "--features", "authenticated-rdf",
-                           "--test", "authenticated_rdf"], "native-authrdf-host", output, env, commands)
+                           "--lib", "--test", "authenticated_rdf", "--example", "paper_sweep", "--example", "paper_verify"], "native-authrdf-host", output, env, commands)
         run_logged(["cargo", "clippy", "--locked", "--manifest-path", MANIFEST, "--workspace",
                     "--all-targets", "--features", "sparq-proved-evaluator/authenticated-rdf", "--",
                     "-D", "warnings"], "lint-authrdf", output, env, commands)

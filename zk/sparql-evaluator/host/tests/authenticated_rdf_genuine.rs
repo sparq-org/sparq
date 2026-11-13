@@ -263,8 +263,14 @@ impl Setup {
         assert!(r0vm.is_file(), "r0vm must be an executable file");
         let (pin, pin_bytes) = load_pin(&job.pin);
         let (exact_pin, exact_pin_bytes) = load_pin(&job.exact_pin);
-        assert_ne!(pin.sha256, exact_pin.sha256, "V5 and exact artifacts must differ");
-        assert_ne!(pin.image_id, exact_pin.image_id, "V5 and exact image IDs must differ");
+        assert_ne!(
+            pin.sha256, exact_pin.sha256,
+            "V5 and exact artifacts must differ"
+        );
+        assert_ne!(
+            pin.image_id, exact_pin.image_id,
+            "V5 and exact image IDs must differ"
+        );
         let (guest, guest_bytes) = load_guest(&job.guest, &pin);
         let (exact_guest, exact_bytes) = load_guest(&job.exact_guest, &exact_pin);
         let inputs = json!({
@@ -350,7 +356,12 @@ fn altered_result(presentation: &Presentation, journal: &auth::Journal) -> Prese
 }
 
 /// The same receipt through the V3 API under the V5 image; never accepted.
-fn v3_api_control(s: &Setup, case: &Case, original: &Request, presentation: &Presentation) -> Value {
+fn v3_api_control(
+    s: &Setup,
+    case: &Case,
+    original: &Request,
+    presentation: &Presentation,
+) -> Value {
     let v3_request = v3::Request {
         version: v3::VERSION,
         contract: ProofContract::ExactDataset,
@@ -368,8 +379,16 @@ fn v3_api_control(s: &Setup, case: &Case, original: &Request, presentation: &Pre
     let Err(Error(error)) = outcome else {
         panic!("{}: the V3 API accepted a V5 receipt", case.id);
     };
-    assert!(V3_API_REJECTIONS.contains(&error), "{}: v3_api_same_image: {error}", case.id);
-    assert_eq!(nonces.calls, 0, "{}: v3_api_same_image reached the store", case.id);
+    assert!(
+        V3_API_REJECTIONS.contains(&error),
+        "{}: v3_api_same_image: {error}",
+        case.id
+    );
+    assert_eq!(
+        nonces.calls, 0,
+        "{}: v3_api_same_image reached the store",
+        case.id
+    );
     json!({ "control": "v3_api_same_image", "error": error, "nonce_calls": 0 })
 }
 
@@ -391,10 +410,14 @@ fn binding_controls(
         assert_ne!(&request, original, "{name}");
         substituted.push((name, request));
     };
-    edit("changed_query_same_form", &|r| r.query = case.changed_query.into());
+    edit("changed_query_same_form", &|r| {
+        r.query = case.changed_query.into()
+    });
     let wrong = nonce_for(&s.seed, &format!("{}/wrong-nonce", case.id));
     edit("wrong_nonce", &|r| r.nonce = wrong);
-    edit("policy_rows_tightened", &|r| r.policy.evaluation.dataset.max_rows -= 1);
+    edit("policy_rows_tightened", &|r| {
+        r.policy.evaluation.dataset.max_rows -= 1
+    });
     // Key-table controls change the verifier's own expectation, never a holder table.
     edit("key_table_widened", &|r| {
         r.policy.authorization.push(fixture::authorized(
@@ -420,35 +443,62 @@ fn binding_controls(
             let mut flipped = s.anchor;
             flipped[0] ^= 1;
             edit("wrong_agreed_anchor", &|r| {
-                r.authority = DatasetAuthority::VerifierAgreed { commitment: flipped };
+                r.authority = DatasetAuthority::VerifierAgreed {
+                    commitment: flipped,
+                };
             });
             let resalted = fixture::anchor(fixture::OTHER_SALT);
             edit("anchor_under_other_salt", &|r| {
-                r.authority = DatasetAuthority::VerifierAgreed { commitment: resalted };
+                r.authority = DatasetAuthority::VerifierAgreed {
+                    commitment: resalted,
+                };
             });
         }
         Authority::Holder => {
             // The journal's own commitment does not upgrade holder selection.
             let published = journal.dataset_commitment;
             edit("authority_holder_to_agreed", &|r| {
-                r.authority = DatasetAuthority::VerifierAgreed { commitment: published };
+                r.authority = DatasetAuthority::VerifierAgreed {
+                    commitment: published,
+                };
             });
         }
     }
     for (name, request) in &substituted {
-        refused(case, name, attempt(presentation, request, &s.guest), BINDING, &mut passed);
+        refused(
+            case,
+            name,
+            attempt(presentation, request, &s.guest),
+            BINDING,
+            &mut passed,
+        );
     }
 
     let tampered = altered_result(presentation, journal);
     let outcome = attempt(&tampered, original, &s.guest);
-    refused(case, "altered_journal_result", outcome, IDENTITY, &mut passed);
+    refused(
+        case,
+        "altered_journal_result",
+        outcome,
+        IDENTITY,
+        &mut passed,
+    );
     let mut flipped = presentation.clone();
     flipped.receipt.journal.bytes[0] ^= 1;
     let outcome = attempt(&flipped, original, &s.guest);
     refused(case, "flipped_journal_byte", outcome, IDENTITY, &mut passed);
     let outcome = attempt(presentation, original, &s.exact_guest);
-    refused(case, "cross_image_exact_guest", outcome, IDENTITY, &mut passed);
-    let fake = fixture::fake_receipt(s.guest.image_id(), presentation.receipt.journal.bytes.clone());
+    refused(
+        case,
+        "cross_image_exact_guest",
+        outcome,
+        IDENTITY,
+        &mut passed,
+    );
+    let fake = fixture::fake_receipt(
+        s.guest.image_id(),
+        presentation.receipt.journal.bytes.clone(),
+    );
     let outcome = attempt(&fake, original, &s.guest);
     refused(case, "fake_receipt", outcome, NOT_SUCCINCT, &mut passed);
     passed.push(v3_api_control(s, case, original, presentation));
@@ -468,7 +518,12 @@ fn nonce_controls(
     assert_eq!(used.calls, 2, "{}: replay store calls", case.id);
     let mut broken = CountingNonces::broken();
     let failure = verify_with_artifact(presentation, request, &mut broken, &s.guest);
-    assert_eq!(failure.err(), Some(STORE_FAILURE), "{}: store failure propagates", case.id);
+    assert_eq!(
+        failure.err(),
+        Some(STORE_FAILURE),
+        "{}: store failure propagates",
+        case.id
+    );
     assert_eq!(broken.calls, 1, "{}: store failure calls", case.id);
     vec![
         json!({ "control": "replay_same_store", "error": REPLAYED, "nonce_calls": 2 }),
@@ -481,7 +536,12 @@ fn run_case(s: &Setup, case: &Case) -> Value {
     let witness = fixture::witness(case.query, case.authority.dataset(s.anchor), nonce);
     let request = witness.request.clone();
     let native = auth::evaluate(&witness).expect("native oracle");
-    assert_eq!(native.result, case.expect.result(), "{}: hand-defined result", case.id);
+    assert_eq!(
+        native.result,
+        case.expect.result(),
+        "{}: hand-defined result",
+        case.id
+    );
     s.evidence.start(case.id, &request);
     eprintln!("authrdf genuine: {} proof starts", case.id);
     let presentation = prove_with_artifact(&witness, &s.r0vm, &s.guest)
@@ -492,10 +552,36 @@ fn run_case(s: &Setup, case: &Case) -> Value {
     let journal = verify_with_artifact(&presentation, &request, &mut nonces, &s.guest)
         .unwrap_or_else(|error| panic!("{}: verification: {error}", case.id));
     assert_eq!(nonces.calls, 1, "{}: nonce consumed once", case.id);
+    // Reuse this receipt: the timed production path makes one receipt check
+    // and consumes one nonce in its own verifier store, without another proof.
+    let answer = sparq_proved_evaluator::authenticated_rdf::AnswerPresentation {
+        presentation: presentation.clone(),
+        signatures: None,
+    };
+    let start = std::time::Instant::now();
+    let mut timed_nonces = CountingNonces::default();
+    let (timed_journal, times) =
+        sparq_proved_evaluator::authenticated_rdf::verify_answer_with_artifact_timed(
+            &answer,
+            &request,
+            &mut timed_nonces,
+            &s.guest,
+        )
+        .expect("timed production verification");
+    let elapsed = start.elapsed();
+    assert_eq!(timed_journal, journal);
+    assert_eq!(timed_nonces.calls, 1);
+    assert!(times.signatures.is_none());
+    assert!(times.receipt + times.request <= elapsed);
     let status = genuine_status(&presentation);
     assert_eq!(journal, native, "{}: guest vs native model", case.id);
     assert_eq!(journal.result, case.expect.result(), "{}", case.id);
-    assert_eq!(journal.provenance, case.authority.provenance(), "{}", case.id);
+    assert_eq!(
+        journal.provenance,
+        case.authority.provenance(),
+        "{}",
+        case.id
+    );
     assert_eq!(journal.dataset_commitment, s.anchor, "{}", case.id);
     eprintln!("authrdf genuine: {} verified", case.id);
 
@@ -515,7 +601,10 @@ fn run_case(s: &Setup, case: &Case) -> Value {
     s.evidence.record(
         case.id,
         "published W3C vc-di-eddsa eddsa-rdfc-2022 vector; public data only",
-        &request, &presentation, details)
+        &request,
+        &presentation,
+        details,
+    )
 }
 
 #[test]
@@ -523,7 +612,10 @@ fn run_case(s: &Setup, case: &Case) -> Value {
 fn genuine_authrdf_receipts_verify_declared_cases_and_reject_controls() {
     fixture::check_published_vector();
     let s = Setup::load();
-    eprintln!("authrdf genuine: evidence directory {}", s.evidence.root().display());
+    eprintln!(
+        "authrdf genuine: evidence directory {}",
+        s.evidence.root().display()
+    );
     let declared: Vec<&str> = s.cases.iter().map(|case| case.id).collect();
     eprintln!("authrdf genuine: declared cases {declared:?}");
     let expected: serde_json::Map<String, Value> = s
@@ -577,7 +669,10 @@ fn genuine_authrdf_receipts_verify_declared_cases_and_reject_controls() {
         .iter()
         .map(|record| record["case"].as_str().expect("case ID"))
         .collect();
-    assert_eq!(completed, declared, "completed cases differ from the declared cases");
+    assert_eq!(
+        completed, declared,
+        "completed cases differ from the declared cases"
+    );
     let completed_expected: serde_json::Map<String, Value> = cases
         .iter()
         .map(|record| {
@@ -585,7 +680,10 @@ fn genuine_authrdf_receipts_verify_declared_cases_and_reject_controls() {
             (id, record["details"]["expected"].clone())
         })
         .collect();
-    assert_eq!(completed_expected, expected, "expected results differ from the declared cases");
+    assert_eq!(
+        completed_expected, expected,
+        "expected results differ from the declared cases"
+    );
     let controls: usize = cases
         .iter()
         .map(|record| record["details"]["controls"].as_array().map_or(0, Vec::len))
@@ -625,16 +723,25 @@ fn genuine_job_rejects_unknown_fields_and_invalid_seeds() {
     assert_eq!(parsed.cases, ["ask-true-verifier-agreed"]);
     let mut extra = job.clone();
     extra["r0vm"] = json!("/abs/r0vm");
-    let error = serde_json::from_value::<Job>(extra).err().unwrap().to_string();
+    let error = serde_json::from_value::<Job>(extra)
+        .err()
+        .unwrap()
+        .to_string();
     assert!(error.contains("unknown field `r0vm`"), "{error}");
     // Case selection is required; there is no implicit default set.
     let mut missing = job.clone();
     assert!(missing.as_object_mut().unwrap().remove("cases").is_some());
-    let error = serde_json::from_value::<Job>(missing).err().unwrap().to_string();
+    let error = serde_json::from_value::<Job>(missing)
+        .err()
+        .unwrap()
+        .to_string();
     assert!(error.contains("missing field `cases`"), "{error}");
     let mut scalar = job;
     scalar["cases"] = json!("ask-true-verifier-agreed");
-    assert!(serde_json::from_value::<Job>(scalar).is_err(), "cases must be a list");
+    assert!(
+        serde_json::from_value::<Job>(scalar).is_err(),
+        "cases must be a list"
+    );
     for bad in ["00".repeat(32), "0g".repeat(32), "01".into()] {
         assert!(parse_seed(&bad).is_err(), "{bad}");
     }
@@ -678,14 +785,109 @@ fn genuine_job_case_selection_is_bounded_known_and_distinct() {
     let rejected: [(Vec<&str>, &str); 7] = [
         (vec![], "cases must list 1 to 6 case IDs, not 0"),
         (seven, "cases must list 1 to 6 case IDs, not 7"),
-        (vec![all[0], all[0]], "duplicate case `select-bag-verifier-agreed`"),
-        (vec![all[5], all[2], all[5]], "duplicate case `construct-holder-declared`"),
+        (
+            vec![all[0], all[0]],
+            "duplicate case `select-bag-verifier-agreed`",
+        ),
+        (
+            vec![all[5], all[2], all[5]],
+            "duplicate case `construct-holder-declared`",
+        ),
         (vec!["select-bag"], "unknown case `select-bag`"),
-        (vec![all[1], "SELECT-BAG-HOLDER-DECLARED"], "unknown case `SELECT-BAG-HOLDER-DECLARED`"),
+        (
+            vec![all[1], "SELECT-BAG-HOLDER-DECLARED"],
+            "unknown case `SELECT-BAG-HOLDER-DECLARED`",
+        ),
         (vec![""], "unknown case ``"),
     ];
     for (declared, error) in rejected {
         let outcome = select_cases(&ids(&declared)).err();
         assert_eq!(outcome.as_deref(), Some(error), "{declared:?}");
+    }
+}
+
+#[test]
+#[ignore = "genuine proofs: needs SPARQ_AUTHRDF_PROOF_JOB, a real RISC0_SERVER_PATH and approved guests and pins"]
+fn genuine_revealed_receipt_stage_timings_and_legacy_entry_point_agree() {
+    use sparq_proved_evaluator::authenticated_rdf::{
+        AnswerPresentation, verify_answer_with_artifact_timed, verify_revealed_with_artifact,
+    };
+    use sparq_proved_evaluator_model::merkle_suite;
+    let s = Setup::load();
+    for suite in [
+        auth::Cryptosuite::EddsaRdfc2022,
+        auth::Cryptosuite::EddsaSha256Merkle2026,
+    ] {
+        let mut credential = fixture::payment_credential();
+        if suite == auth::Cryptosuite::EddsaSha256Merkle2026 {
+            let key = ed25519_dalek::SigningKey::from_bytes(&fixture::hex(
+                "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+            ));
+            let config = fixture::PAYMENT_PROOF.replace("eddsa-rdfc-2022", suite.name());
+            credential =
+                merkle_suite::issue(fixture::PAYMENT_DOCUMENT, &config, &key, [0x40; 32]).unwrap();
+        }
+        let signature = credential.signature.drain(..64).collect::<Vec<_>>();
+        let request = Request {
+            version: auth::VERSION,
+            query: fixture::ASK_PAYMENT_RETURNED.into(),
+            authority: DatasetAuthority::HolderDeclared,
+            policy: fixture::payment_policy()
+                .with_cryptosuite(suite)
+                .with_signature_mode(auth::SignatureMode::Revealed),
+            nonce: nonce_for(&s.seed, suite.name()),
+        };
+        let witness = auth::Witness {
+            request: request.clone(),
+            dataset: fixture::credentials(vec![credential], fixture::SALT),
+        };
+        let presentation =
+            prove_with_artifact(&witness, &s.r0vm, &s.guest).expect("opt-in genuine proof");
+        let answer = AnswerPresentation {
+            presentation,
+            signatures: Some(vec![signature]),
+        };
+        for case in [
+            "valid",
+            "tamper",
+            "wrong_nonce",
+            "wrong_request",
+            "bad_signature",
+            "replay",
+        ] {
+            let mut answer = answer.clone();
+            let mut expected = request.clone();
+            let mut old_nonces = CountingNonces::default();
+            let mut new_nonces = CountingNonces::default();
+            match case {
+                "tamper" => answer.presentation.receipt.journal.bytes[0] ^= 1,
+                "wrong_nonce" => expected.nonce[0] ^= 1,
+                "wrong_request" => expected.query = fixture::ASK_PAYMENT_SETTLED.into(),
+                "bad_signature" => answer.signatures.as_mut().unwrap()[0][0] ^= 1,
+                "replay" => {
+                    old_nonces.consume(expected.nonce).unwrap();
+                    new_nonces.consume(expected.nonce).unwrap();
+                }
+                _ => {}
+            }
+            let old = verify_revealed_with_artifact(
+                &answer.presentation,
+                &expected,
+                answer.signatures.as_ref().unwrap(),
+                &mut old_nonces,
+                &s.guest,
+            );
+            let start = std::time::Instant::now();
+            let timed =
+                verify_answer_with_artifact_timed(&answer, &expected, &mut new_nonces, &s.guest);
+            let elapsed = start.elapsed();
+            if let Ok((_, times)) = &timed {
+                assert!(times.signatures.is_some());
+                assert!(times.receipt + times.signatures.unwrap() + times.request <= elapsed);
+            }
+            assert_eq!(timed.map(|(journal, _)| journal), old, "{suite:?}/{case}");
+            assert_eq!(new_nonces.calls, old_nonces.calls);
+            assert_eq!(old.is_ok(), case == "valid");
+        }
     }
 }

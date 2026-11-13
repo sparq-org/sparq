@@ -5,6 +5,10 @@
 //! graph. It uses an explicitly supplied local r0vm executable, never a cloud
 //! prover. The executable sees the private witness, as does its local caller.
 
+// Share integration fixtures with the private staged-verifier unit tests.
+#[cfg(test)]
+extern crate self as sparq_proved_evaluator;
+
 use risc0_zkvm::{
     ExecutorEnv, ExternalProver, InnerReceipt, Prover, ProverOpts, Receipt, VerifierContext,
 };
