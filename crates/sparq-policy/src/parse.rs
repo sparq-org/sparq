@@ -250,7 +250,10 @@ pub fn target_memberships(
     target_memberships_metered(policy, graph, &mut ledger)
 }
 
-fn target_memberships_metered(
+/// Extract target memberships using the caller's remaining policy ledger.
+/// # Errors
+/// Returns query or constraint-budget refusals, as [`target_memberships`].
+pub fn target_memberships_metered(
     policy: &Policy,
     graph: &Graph,
     ledger: &mut Ledger,

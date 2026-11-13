@@ -1119,3 +1119,26 @@ Rules that follow:
 - `fused-decompress-parse` — choosing gzip vs zstd vs bzip2 and fusing decode with parse (measured numbers).
 - `rust-parallel-parsing` — how the chunk-parallel N-Triples/Turtle scanners work, and when NOT to parallelize.
 - `hdt-format` — the HDT binary layout internals and the `hdt`-crate wrapping/decode performance.
+
+## Explicitly metered loads
+
+`Graph::load_metered(text, format, &mut meter::Ledger)` preserves named graphs like
+`load_dataset`, using a serial parser. `load_metered_with_base(text, format, base,
+&mut ledger)` resolves document-relative IRIs and folds named graphs like
+`load_str_with_base`. Supported formats and aliases follow those existing loaders.
+The dataset loader closes the per-document window for the aggregate parse; the
+base-aware document loader respects the current window. Use `open_document()`
+between separately metered documents.
+Source bytes are charged before parsing, then term bytes and facts before retaining
+each row or building indexes. Charges remain on failure, so reuse the ledger only
+when that matches the caller's request accounting.
+`Ledger::cap_remaining(Limits)` tightens later-phase allowances relative to work
+already spent, preserving stricter total caps and counters.
+`meter::LoadError::Parse(String)` distinguishes syntax/format errors from
+`LoadError::Ledger(Exceeded)`. Existing loaders retain their behavior.
+
+`meter::ByteAccount` and `Ledger::with_byte_account` retain cumulative bytes for
+one class of work while sharing source, facts and work counters. The caller's
+original byte account is restored even on unwinding. `Graph::union_metered`
+projects admitted graphs without charging source bytes again; rows and terms are
+still charged before retention.

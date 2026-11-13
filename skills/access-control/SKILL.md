@@ -1116,7 +1116,7 @@ over-cap name after lowering its budget. A refused addition leaves the installed
 place and grants nothing to the refused resource.
 
 **The whole decision.** Because `ClosureLimits` is per closure, an ACP view's three strata and
-a bridged ODRL policy's five strata could each spend the full allowance. One crate-internal
+a bridged ODRL policy's five strata could each spend the full allowance. One
 `AuthLedger` wraps `sparq_core::meter::Ledger` and the store's `AuthBudget`.
 WAC and ACP share it between input assembly and every stratum of one materialization;
 the ODRL bridge shares it across its strata. Each closure runs through `eval_metered` under the
@@ -1141,7 +1141,7 @@ that already tells an allowance refusal from a deny needs no second check.
 > with shared operands describes exponentially many operand nodes. Past either, the WHOLE
 > policy is refused (`sparq_policy::constraint_budget_refusal` names which), and every caller
 > here is fail-closed on that: the bridge materializes nothing and the server's ODRL lane
-> answers 400.
+> answers 400 for its own parser limits or malformed policies, and 503 when the shared request input ledger is exhausted.
 
 ## Trust-graph authorisation PoC — sq-pfae (issue #940, opt-in `trust-graph`)
 
@@ -1614,3 +1614,24 @@ principal model, sq-3jtd.6); workspace v0.1.0, opt-in (depends on nothing in
 the workspace), native-side. Conservative WAC/ACP sub-cases are noted in design §4.4; perf
 is measured by `cargo run -p sparq-solid --example bench` and NOT baked into docs. Code
 carries review markers pending re-review.)_
+
+## Sharing a request ledger with ingestion
+
+`AuthLedger::new(AuthBudget)` starts one request's input counters and deadline.
+Pass `ledger.core()` to `Graph::load_metered` (dataset) or
+`Graph::load_metered_with_base` (one document), then use
+`store.materialize_wac_in(&mut ledger)` or `store.materialize_acp_in(&mut ledger)`.
+The `_in` methods share the remaining input and closure allowances, including
+resource enumeration; they preserve normal view installation and context handling.
+Construct the ledger with the store's budget. `checkpoint()` checks its deadline;
+`input_refusal(Exceeded)` returns the usual tagged authorization refusal.
+`AuthAllowance::PolicyInput` identifies request policy-parser budget refusals.
+`store.group_docs()` borrows the lazily cached set of referenced group-document URLs.
+
+For a full HTTP dataset, use `ledger.with_dataset_bytes(|core| ...)` around metered
+loading and union projection. Its cumulative allowance is sixteen times the source
+cap. `with_policy_bytes` supplies the policy parser's separate byte account,
+bounded by thirty-two times the source cap;
+retain `default_policy_limits_for` inside it. The control/group-document input
+allowance remains unchanged. Source, facts, nodes, query rows and decision work
+remain shared across all these phases.

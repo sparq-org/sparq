@@ -24,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **sparq-server / sparq-mcp:** stateless authorization parsing and Solid group
+  writes use the request ledger; MCP message limits apply before JSON parsing.
+  The combined trust verify budget also counts public-key decoding and each
+  credential's canonicalize-and-commit before admission. Dataset and policy byte
+  accounts retain the control/group input budget's scope and the ODRL collection
+  evaluation boundary.
+
 - **sparq-lws-core:** metadata writes, resource deletes, containment removals and
   append/fold publication use fenced HTTP updates. Resource deletion detaches its
   parent edge in the same write.

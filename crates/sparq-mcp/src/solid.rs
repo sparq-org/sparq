@@ -221,6 +221,9 @@ pub struct SolidServerConfig {
     pub query_timeout_ms: Option<u64>,
     /// Row cap on any materialised query result (`None` = uncapped).
     pub max_rows: Option<usize>,
+    /// Maximum JSON-RPC message bytes, checked before parsing. Default: 16 MiB;
+    /// `None` disables the cap, as for [`crate::ServerConfig::max_request_bytes`].
+    pub max_request_bytes: Option<usize>,
     /// The server name reported in the `initialize` handshake.
     pub server_name: String,
 }
@@ -238,6 +241,7 @@ impl Default for SolidServerConfig {
             query_timeout_secs: Some(30),
             query_timeout_ms: None,
             max_rows: Some(1_000_000),
+            max_request_bytes: Some(crate::server::DEFAULT_MAX_REQUEST_BYTES),
             server_name: "sparq-mcp-solid".to_string(),
         }
     }
@@ -771,6 +775,11 @@ impl SolidMcpServer {
     /// (`Some(response)` for a request, `None` for a notification, and top-level
     /// JSON-RPC batch arrays accepted per JSON-RPC 2.0 §6).
     pub fn handle_message(&mut self, raw: &str) -> Option<String> {
+        if let Some(max) = self.config.max_request_bytes {
+            if raw.len() > max {
+                return Some(crate::server::oversized(max));
+            }
+        }
         handle_raw(raw, |req| self.dispatch(req))
     }
 
@@ -1577,8 +1586,25 @@ impl SolidMcpServer {
         self.gate_write(&url, Mode::Write)?;
 
         // PARSE FIRST — a malformed body is rejected before anything mutates.
-        let new_graph = Graph::load_str_with_base(&content, fmt, &url)
-            .map_err(|e| format!("content for <{url}> did not parse as {fmt}: {e}"))?;
+        let new_graph = if self.store.group_docs().contains(&url) {
+            let mut ledger = sparq_solid::AuthLedger::new(self.store.auth_budget());
+            Graph::load_metered_with_base(&content, fmt, &url, ledger.core()).map_err(|error| {
+                match error {
+                    sparq_core::meter::LoadError::Parse(error) => {
+                        format!("content for <{url}> did not parse as {fmt}: {error}")
+                    }
+                    sparq_core::meter::LoadError::Ledger(error) => {
+                        format!(
+                            "content for <{url}> was refused: {}",
+                            ledger.input_refusal(error)
+                        )
+                    }
+                }
+            })?
+        } else {
+            Graph::load_str_with_base(&content, fmt, &url)
+                .map_err(|e| format!("content for <{url}> did not parse as {fmt}: {e}"))?
+        };
         let triples = new_graph.len();
 
         // Swap the document slot (capturing the prior content for rollback).
@@ -1847,6 +1873,190 @@ mod unit {
 
     // Direct unit tests for the new public functions/consts (coverage-floor rule:
     // one direct test per new public fn), plus the private path helpers.
+
+    #[test]
+    fn oversized_messages_never_reach_json_parsing() {
+        let mut server = SolidMcpServer::with_config(
+            PodStore::new(Graph::default()),
+            SolidServerConfig {
+                max_request_bytes: Some(4),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        crate::server::RAW_PARSES.with(|count| count.set(0));
+        let response = server.handle_message("invalid JSON").unwrap();
+        assert_eq!(response, crate::server::oversized(4));
+        crate::server::RAW_PARSES.with(|count| assert_eq!(count.get(), 0));
+        server.config.max_request_bytes = None;
+        assert!(server
+            .handle_message(r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#)
+            .is_some());
+        crate::server::RAW_PARSES.with(|count| assert_eq!(count.get(), 1));
+    }
+
+    fn write_server() -> SolidMcpServer {
+        let dataset = concat!(
+            "<https://pod.ex/> <urn:p> <urn:o> <https://pod.ex/> .\n",
+            "<https://pod.ex/group> <urn:p> <urn:o> <https://pod.ex/group> .\n",
+            "<https://pod.ex/.acl#r> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <https://pod.ex/.acl> .\n",
+            "<https://pod.ex/.acl#r> <http://www.w3.org/ns/auth/acl#accessTo> <https://pod.ex/> <https://pod.ex/.acl> .\n",
+            "<https://pod.ex/.acl#r> <http://www.w3.org/ns/auth/acl#default> <https://pod.ex/> <https://pod.ex/.acl> .\n",
+            "<https://pod.ex/.acl#r> <http://www.w3.org/ns/auth/acl#agent> <https://alice.ex/card#me> <https://pod.ex/.acl> .\n",
+            "<https://pod.ex/.acl#r> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> <https://pod.ex/.acl> .\n",
+            "<https://pod.ex/.acl#r> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Write> <https://pod.ex/.acl> .\n",
+            "<https://pod.ex/.acl#r> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Control> <https://pod.ex/.acl> .\n",
+            "<https://pod.ex/.acl#g> <http://www.w3.org/ns/auth/acl#agentGroup> <https://pod.ex/group#members> <https://pod.ex/.acl> .\n",
+        );
+        SolidMcpServer::with_config(
+            PodStore::new(Graph::load_dataset(dataset, "nquads").unwrap()),
+            SolidServerConfig {
+                agent: Some("https://alice.ex/card#me".into()),
+                allow_update: true,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+    }
+
+    fn pod_bytes(server: &SolidMcpServer) -> Vec<u8> {
+        let graph = server.store.graph();
+        let mut text = format!(
+            "{:?}",
+            graph
+                .iter_ids()
+                .map(|row| row.map(|id| graph.dict().term(id)))
+                .collect::<Vec<_>>()
+        );
+        for (name, part) in graph.named() {
+            text.push_str(&format!(
+                "{name} {:?}",
+                part.iter_ids()
+                    .map(|row| row.map(|id| part.dict().term(id)))
+                    .collect::<Vec<_>>()
+            ));
+        }
+        text.into_bytes()
+    }
+
+    #[test]
+    fn refused_acl_put_keeps_the_pod_and_view() {
+        let mut server = write_server();
+        let before = pod_bytes(&server);
+        let generation = server.store.auth_generation();
+        let mut budget = server.store.auth_budget();
+        budget.max_input_facts = 0;
+        server.store.set_auth_budget(budget);
+        let error = server.tool_resource_put(&json!({"url":"https://pod.ex/.acl", "content":"<#r> <urn:p> <urn:o> .", "content_type":"text/turtle"})).unwrap_err();
+        assert!(
+            sparq_solid::auth_allowance_refusal(&error).is_some(),
+            "{error}"
+        );
+        assert_eq!(pod_bytes(&server), before);
+        assert_eq!(server.store.auth_generation(), generation);
+        assert!(server.allowed("https://pod.ex/group", Mode::Read));
+    }
+
+    #[test]
+    fn refused_acr_put_keeps_the_pod_and_view() {
+        let mut source =
+            String::from("<https://pod.ex/n1> <urn:p> <urn:o> <https://pod.ex/n1> .\n");
+        for (subject, predicate, object) in [
+            (
+                "https://pod.ex/n1.acr",
+                "accessControl",
+                "https://pod.ex/n1.acr#c",
+            ),
+            (
+                "https://pod.ex/n1.acr#c",
+                "apply",
+                "https://pod.ex/n1.acr#p",
+            ),
+            (
+                "https://pod.ex/n1.acr#p",
+                "allow",
+                "http://www.w3.org/ns/auth/acl#Control",
+            ),
+            (
+                "https://pod.ex/n1.acr#p",
+                "allow",
+                "http://www.w3.org/ns/auth/acl#Read",
+            ),
+            (
+                "https://pod.ex/n1.acr#p",
+                "anyOf",
+                "https://pod.ex/n1.acr#m",
+            ),
+            (
+                "https://pod.ex/n1.acr#m",
+                "agent",
+                "https://alice.ex/card#me",
+            ),
+        ] {
+            source.push_str(&format!("<{subject}> <http://www.w3.org/ns/solid/acp#{predicate}> <{object}> <https://pod.ex/n1.acr> .\n"));
+        }
+        let mut server = SolidMcpServer::with_config(
+            PodStore::new(Graph::load_dataset(&source, "nquads").unwrap()),
+            SolidServerConfig {
+                acp: true,
+                agent: Some("https://alice.ex/card#me".into()),
+                allow_update: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(server.allowed("https://pod.ex/n1", Mode::Control));
+        let before = pod_bytes(&server);
+        let generation = server.store.auth_generation();
+        let mut budget = server.store.auth_budget();
+        budget.max_input_facts = 0;
+        server.store.set_auth_budget(budget);
+        let error = server.tool_resource_put(&json!({"url":"https://pod.ex/n1.acr", "content":"<#r> <urn:p> <urn:o> .", "content_type":"text/turtle"})).unwrap_err();
+        assert!(
+            sparq_solid::auth_allowance_refusal(&error).is_some(),
+            "{error}"
+        );
+        assert_eq!(pod_bytes(&server), before);
+        assert_eq!(server.store.auth_generation(), generation);
+        assert!(server.allowed("https://pod.ex/n1", Mode::Read));
+    }
+
+    #[test]
+    fn refused_group_put_is_metered_before_the_slot_is_taken() {
+        let mut server = write_server();
+        assert!(server.store.group_docs().contains("https://pod.ex/group"));
+        let before = pod_bytes(&server);
+        let generation = server.store.auth_generation();
+        let mut budget = server.store.auth_budget();
+        budget.max_input_facts = 0;
+        server.store.set_auth_budget(budget);
+        let error = server.tool_resource_put(&json!({"url":"https://pod.ex/group", "content":"<urn:s> <urn:p> <urn:o> .\ninvalid", "content_type":"text/turtle"})).unwrap_err();
+        assert!(error.contains("facts"), "{error}");
+        assert_eq!(pod_bytes(&server), before);
+        assert_eq!(server.store.auth_generation(), generation);
+        assert!(server.allowed("https://pod.ex/group", Mode::Read));
+        let mut budget = sparq_solid::default_auth_budget();
+        budget.max_document_bytes = 1;
+        server.store.set_auth_budget(budget);
+        let error = server.tool_resource_put(&json!({"url":"https://pod.ex/group", "content":"<urn:s> <urn:p> <urn:o> .\ninvalid", "content_type":"text/turtle"})).unwrap_err();
+        assert_eq!(
+            sparq_solid::auth_allowance_refusal(&error),
+            Some(sparq_solid::AuthAllowance::InputBytes)
+        );
+        assert_eq!(pod_bytes(&server), before);
+        assert_eq!(server.store.auth_generation(), generation);
+        server
+            .store
+            .set_auth_budget(sparq_solid::default_auth_budget());
+        let syntax = Graph::load_str_with_base("invalid", "turtle", "https://pod.ex/group")
+            .err()
+            .unwrap();
+        let error = server.tool_resource_put(&json!({"url":"https://pod.ex/group", "content":"invalid", "content_type":"text/turtle"})).unwrap_err();
+        assert_eq!(
+            error,
+            format!("content for <https://pod.ex/group> did not parse as turtle: {syntax}")
+        );
+    }
 
     #[test]
     fn parent_iri_walks_slash_semantics_to_the_origin_root() {

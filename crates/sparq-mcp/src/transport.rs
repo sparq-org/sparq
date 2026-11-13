@@ -10,7 +10,8 @@
 
 use std::io::{self, BufRead, Write};
 
-use crate::jsonrpc::{Response, RpcError, INVALID_REQUEST};
+#[cfg(test)]
+use crate::jsonrpc::INVALID_REQUEST;
 use crate::server::McpServer;
 
 /// Serve the MCP protocol over an arbitrary reader/writer pair using the stdio
@@ -116,14 +117,7 @@ fn read_line_bounded<R: BufRead>(
 
 /// The error response for an over-cap line: nothing was parsed, so the id is null.
 fn oversized(max: usize) -> String {
-    let response = Response::err(
-        serde_json::Value::Null,
-        RpcError::new(
-            INVALID_REQUEST,
-            format!("invalid JSON-RPC request: exceeds the {max}-byte request size limit"),
-        ),
-    );
-    serde_json::to_string(&response).expect("a JSON-RPC response always serializes")
+    crate::server::oversized(max)
 }
 
 /// Serve the MCP protocol over this process's standard input and output — the

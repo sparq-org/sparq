@@ -79,7 +79,7 @@ pub use decide::{is_control_document_name, AclScope, AclStatus, EffectiveAcl, Wa
 // /report vocabulary is the shared `conformance::{Decision, Expect, ScenarioReport}`).
 pub use wac_conformance::{AclBuilder, AuthBuilder, WacScenario};
 pub use fixture::{acp_fixture, wac_fixture};
-pub use budget::{default_auth_budget, AuthBudget};
+pub use budget::{default_auth_budget, AuthBudget, AuthLedger};
 pub use materialize::{
     auth_allowance_refusal, default_auth_limits, is_auth_allowance_refusal, materialize_acp,
     materialize_acp_with, materialize_acp_with_credentials, materialize_wac, AuthAllowance,
@@ -621,6 +621,54 @@ impl PodStore {
     /// resources it governs get no grant from any source.
     pub fn materialize_wac(&mut self) -> Result<MaterializeStats, String> {
         self.materialize_wac_scoped(ReindexScope::Full)
+    }
+
+    /// Materialize WAC on the request ledger already used for ingestion.
+    /// Input enumeration and closure work consume its remaining allowances.
+    pub fn materialize_wac_in(
+        &mut self,
+        ledger: &mut AuthLedger,
+    ) -> Result<MaterializeStats, String> {
+        let resources = loader::resources(&self.graph, ledger)?;
+        let stats = materialize::materialize_wac_in(&mut self.graph, self.auth_limits, ledger)?;
+        let provenance = std::mem::take(&mut self.acp_context.0);
+        self.acp_context.0 = self.existing_provenance(&provenance, false, &resources);
+        self.record_static_coverage();
+        self.view_dropped = false;
+        self.acp_uses_provenance = false;
+        self.installed_acp = Some(false);
+        self.reconcile_bridged_after_static()?;
+        self.reindex_with(ReindexScope::Full);
+        Ok(stats)
+    }
+
+    /// Materialize ACP using its stored context and the request's remaining ledger.
+    pub fn materialize_acp_in(
+        &mut self,
+        ledger: &mut AuthLedger,
+    ) -> Result<MaterializeStats, String> {
+        self.usable_acp_context()?;
+        let (provenance, credentials) = self.acp_context.clone();
+        let resources = loader::resources(&self.graph, ledger)?;
+        let stats = materialize::materialize_acp_in(
+            &mut self.graph,
+            &provenance,
+            &credentials,
+            self.auth_limits,
+            ledger,
+        )?;
+        self.acp_context = (
+            self.existing_provenance(&provenance, false, &resources),
+            credentials,
+        );
+        self.acp_uses_provenance = loader::control_documents_name_provenance(&self.graph);
+        self.acp_context_stale = false;
+        self.installed_acp = Some(true);
+        self.record_static_coverage();
+        self.view_dropped = false;
+        self.reconcile_bridged_after_static()?;
+        self.reindex_with(ReindexScope::Full);
+        Ok(stats)
     }
 
     /// [`PodStore::materialize_wac`] re-materializing the whole WAC view but invalidating the
@@ -1202,9 +1250,9 @@ impl PodStore {
     /// The graphs the current access-control documents reference via `acl:agentGroup`,
     /// built lazily on the first update of a generation and reused across it
     /// (issue #55). `reindex` empties the cell, so this can never outlive an
-    /// ACL change. See [`loader::referenced_group_docs`] for why it is an
-    /// over-approximation and why that is the safe direction.
-    fn group_docs(&self) -> &FxHashSet<String> {
+    /// ACL change. The set includes references from incomplete grants too, so a
+    /// document can be included even when that reference contributes no grant.
+    pub fn group_docs(&self) -> &FxHashSet<String> {
         self.group_docs.get_or_init(|| loader::referenced_group_docs(&self.graph))
     }
 

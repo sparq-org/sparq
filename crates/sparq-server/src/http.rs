@@ -812,12 +812,13 @@ pub struct ServerConfig {
     /// `SPARQ_SOLID_AUTHZ_TRUST=1`.
     #[cfg(feature = "solid-authz-trust")]
     pub solid_authz_trust: bool,
-    /// Maximum combined signature-verification budget in a trust block.
+    /// Combined verify budget for one trust block.
     ///
-    /// Default: 4096. Counts certifications plus potential rule/credential pairs;
-    /// depth-one certifications each also count as one potential rule in those pairs.
-    /// `SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS` overrides it; zero permits neither certifications nor pairs.
-    /// Exceeding it refuses the whole block with 403 before signature verification.
+    /// Default: 4096. Counts certification signatures, potential rule/credential pairs,
+    /// one canonicalize-and-commit per presented credential, and public-key decodes
+    /// (one per direct rule, two per certification). Each depth-one certification also
+    /// counts as one potential rule. `SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS` overrides it;
+    /// zero permits none of this work. Excess returns 403 before key decoding or admission.
     #[cfg(feature = "solid-authz-trust")]
     pub solid_authz_trust_max_pairs: usize,
     /// Maximum certifications parsed from one trust block.

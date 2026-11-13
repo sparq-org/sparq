@@ -355,7 +355,15 @@ process's stdin/stdout. For an arbitrary reader/writer pair use `sparq_mcp::serv
 Each request line is capped by `ServerConfig::max_request_bytes` (default
 `DEFAULT_MAX_REQUEST_BYTES`, 16 MiB; `None` disables it): an over-cap line gets an
 `INVALID_REQUEST` error (id `null`) and is discarded as it streams, never buffered whole.
-An embedder calling `handle_message` from its own transport must cap requests itself.
+Both `McpServer::handle_message` and `SolidMcpServer::handle_message` apply the
+same byte check before JSON parsing, including batches and notifications.
+`SolidServerConfig::max_request_bytes` has the same default and `None` override.
+Embedders should also bound buffering at their transport boundary.
+
+Solid ACL/ACR puts use `PodStore` admission before replacing a slot. Writes to a
+referenced group document use metered parsing with the store's `AuthBudget`;
+a refusal leaves the stored document and authorization view unchanged.
+A later rebuild refusal restores the slot and rematerializes the previous view.
 
 ## Running the server binary
 

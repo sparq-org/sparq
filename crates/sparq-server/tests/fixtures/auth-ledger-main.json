@@ -1,0 +1,329 @@
+{
+  "responses": {
+    "acp/None/read/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/n1.acr>; rel=\\\"acl\\\"\",\"allow\":false,\"governingAcl\":\"https://pod.ex/n1.acr\",\"grantedModes\":[],\"scope\":\"http://www.w3.org/ns/auth/acl#accessTo\",\"status\":\"resolved\"}",
+      "status": 403
+    },
+    "acp/None/read/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[]}}",
+      "status": 200
+    },
+    "acp/None/read/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "acp/None/write/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/n1.acr>; rel=\\\"acl\\\"\",\"allow\":false,\"governingAcl\":\"https://pod.ex/n1.acr\",\"grantedModes\":[],\"scope\":\"http://www.w3.org/ns/auth/acl#accessTo\",\"status\":\"resolved\"}",
+      "status": 403
+    },
+    "acp/None/write/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[]}}",
+      "status": 200
+    },
+    "acp/None/write/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "acp/Some(\"https://alice.ex/card#me\")/read/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/n1.acr>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/n1.acr\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#accessTo\",\"status\":\"resolved\"}",
+      "status": 200
+    },
+    "acp/Some(\"https://alice.ex/card#me\")/read/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[{\"o\":{\"type\":\"literal\",\"value\":\"hello\"}}]}}",
+      "status": 200
+    },
+    "acp/Some(\"https://alice.ex/card#me\")/read/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"read\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "acp/Some(\"https://alice.ex/card#me\")/write/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/n1.acr>; rel=\\\"acl\\\"\",\"allow\":false,\"governingAcl\":\"https://pod.ex/n1.acr\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#accessTo\",\"status\":\"resolved\"}",
+      "status": 403
+    },
+    "acp/Some(\"https://alice.ex/card#me\")/write/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[]}}",
+      "status": 200
+    },
+    "acp/Some(\"https://alice.ex/card#me\")/write/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"read\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "acp/Some(\"https://bob.ex/card#me\")/read/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/n1.acr>; rel=\\\"acl\\\"\",\"allow\":false,\"governingAcl\":\"https://pod.ex/n1.acr\",\"grantedModes\":[],\"scope\":\"http://www.w3.org/ns/auth/acl#accessTo\",\"status\":\"resolved\"}",
+      "status": 403
+    },
+    "acp/Some(\"https://bob.ex/card#me\")/read/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[]}}",
+      "status": 200
+    },
+    "acp/Some(\"https://bob.ex/card#me\")/read/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "acp/Some(\"https://bob.ex/card#me\")/write/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/n1.acr>; rel=\\\"acl\\\"\",\"allow\":false,\"governingAcl\":\"https://pod.ex/n1.acr\",\"grantedModes\":[],\"scope\":\"http://www.w3.org/ns/auth/acl#accessTo\",\"status\":\"resolved\"}",
+      "status": 403
+    },
+    "acp/Some(\"https://bob.ex/card#me\")/write/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[]}}",
+      "status": 200
+    },
+    "acp/Some(\"https://bob.ex/card#me\")/write/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "empty/None/read/decide": {
+      "body": "{\"aclLink\":null,\"allow\":false,\"governingAcl\":null,\"grantedModes\":[],\"scope\":null,\"status\":\"noAcl\"}",
+      "status": 403
+    },
+    "empty/None/read/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[]}}",
+      "status": 200
+    },
+    "empty/None/read/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "empty/None/write/decide": {
+      "body": "{\"aclLink\":null,\"allow\":false,\"governingAcl\":null,\"grantedModes\":[],\"scope\":null,\"status\":\"noAcl\"}",
+      "status": 403
+    },
+    "empty/None/write/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[]}}",
+      "status": 200
+    },
+    "empty/None/write/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "empty/Some(\"https://alice.ex/card#me\")/read/decide": {
+      "body": "{\"aclLink\":null,\"allow\":false,\"governingAcl\":null,\"grantedModes\":[],\"scope\":null,\"status\":\"noAcl\"}",
+      "status": 403
+    },
+    "empty/Some(\"https://alice.ex/card#me\")/read/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[]}}",
+      "status": 200
+    },
+    "empty/Some(\"https://alice.ex/card#me\")/read/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "empty/Some(\"https://alice.ex/card#me\")/write/decide": {
+      "body": "{\"aclLink\":null,\"allow\":false,\"governingAcl\":null,\"grantedModes\":[],\"scope\":null,\"status\":\"noAcl\"}",
+      "status": 403
+    },
+    "empty/Some(\"https://alice.ex/card#me\")/write/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[]}}",
+      "status": 200
+    },
+    "empty/Some(\"https://alice.ex/card#me\")/write/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "empty/Some(\"https://bob.ex/card#me\")/read/decide": {
+      "body": "{\"aclLink\":null,\"allow\":false,\"governingAcl\":null,\"grantedModes\":[],\"scope\":null,\"status\":\"noAcl\"}",
+      "status": 403
+    },
+    "empty/Some(\"https://bob.ex/card#me\")/read/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[]}}",
+      "status": 200
+    },
+    "empty/Some(\"https://bob.ex/card#me\")/read/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "empty/Some(\"https://bob.ex/card#me\")/write/decide": {
+      "body": "{\"aclLink\":null,\"allow\":false,\"governingAcl\":null,\"grantedModes\":[],\"scope\":null,\"status\":\"noAcl\"}",
+      "status": 403
+    },
+    "empty/Some(\"https://bob.ex/card#me\")/write/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[]}}",
+      "status": 200
+    },
+    "empty/Some(\"https://bob.ex/card#me\")/write/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "invalid/None/read/decide": {
+      "body": "{\"error\":\"'dataset' is not valid N-Quads\"}",
+      "status": 400
+    },
+    "invalid/None/read/query": {
+      "body": "{\"error\":\"'dataset' is not valid N-Quads\"}",
+      "status": 400
+    },
+    "invalid/None/read/wac-allow": {
+      "body": "{\"error\":\"'dataset' is not valid N-Quads\"}",
+      "status": 400
+    },
+    "invalid/None/write/decide": {
+      "body": "{\"error\":\"'dataset' is not valid N-Quads\"}",
+      "status": 400
+    },
+    "invalid/None/write/query": {
+      "body": "{\"error\":\"'dataset' is not valid N-Quads\"}",
+      "status": 400
+    },
+    "invalid/None/write/wac-allow": {
+      "body": "{\"error\":\"'dataset' is not valid N-Quads\"}",
+      "status": 400
+    },
+    "invalid/Some(\"https://alice.ex/card#me\")/read/decide": {
+      "body": "{\"error\":\"'dataset' is not valid N-Quads\"}",
+      "status": 400
+    },
+    "invalid/Some(\"https://alice.ex/card#me\")/read/query": {
+      "body": "{\"error\":\"'dataset' is not valid N-Quads\"}",
+      "status": 400
+    },
+    "invalid/Some(\"https://alice.ex/card#me\")/read/wac-allow": {
+      "body": "{\"error\":\"'dataset' is not valid N-Quads\"}",
+      "status": 400
+    },
+    "invalid/Some(\"https://alice.ex/card#me\")/write/decide": {
+      "body": "{\"error\":\"'dataset' is not valid N-Quads\"}",
+      "status": 400
+    },
+    "invalid/Some(\"https://alice.ex/card#me\")/write/query": {
+      "body": "{\"error\":\"'dataset' is not valid N-Quads\"}",
+      "status": 400
+    },
+    "invalid/Some(\"https://alice.ex/card#me\")/write/wac-allow": {
+      "body": "{\"error\":\"'dataset' is not valid N-Quads\"}",
+      "status": 400
+    },
+    "invalid/Some(\"https://bob.ex/card#me\")/read/decide": {
+      "body": "{\"error\":\"'dataset' is not valid N-Quads\"}",
+      "status": 400
+    },
+    "invalid/Some(\"https://bob.ex/card#me\")/read/query": {
+      "body": "{\"error\":\"'dataset' is not valid N-Quads\"}",
+      "status": 400
+    },
+    "invalid/Some(\"https://bob.ex/card#me\")/read/wac-allow": {
+      "body": "{\"error\":\"'dataset' is not valid N-Quads\"}",
+      "status": 400
+    },
+    "invalid/Some(\"https://bob.ex/card#me\")/write/decide": {
+      "body": "{\"error\":\"'dataset' is not valid N-Quads\"}",
+      "status": 400
+    },
+    "invalid/Some(\"https://bob.ex/card#me\")/write/query": {
+      "body": "{\"error\":\"'dataset' is not valid N-Quads\"}",
+      "status": 400
+    },
+    "invalid/Some(\"https://bob.ex/card#me\")/write/wac-allow": {
+      "body": "{\"error\":\"'dataset' is not valid N-Quads\"}",
+      "status": 400
+    },
+    "permission/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 200
+    },
+    "permission/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[{\"o\":{\"type\":\"literal\",\"value\":\"hello\"}}]}}",
+      "status": 200
+    },
+    "permission/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"read\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "policy-depth-cap/decide": {
+      "body": "{\"error\":\"the dataset's ODRL policy did not parse (fail-closed)\"}",
+      "status": 400
+    },
+    "policy-depth-cap/query": {
+      "body": "{\"error\":\"the dataset's ODRL policy did not parse (fail-closed)\"}",
+      "status": 400
+    },
+    "policy-depth-cap/wac-allow": {
+      "body": "{\"error\":\"the dataset's ODRL policy did not parse (fail-closed)\"}",
+      "status": 400
+    },
+    "prohibition/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":false,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 403
+    },
+    "prohibition/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[]}}",
+      "status": 200
+    },
+    "prohibition/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "wac/None/read/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":false,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 403
+    },
+    "wac/None/read/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[]}}",
+      "status": 200
+    },
+    "wac/None/read/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "wac/None/write/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":false,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 403
+    },
+    "wac/None/write/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[]}}",
+      "status": 200
+    },
+    "wac/None/write/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "wac/Some(\"https://alice.ex/card#me\")/read/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":true,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 200
+    },
+    "wac/Some(\"https://alice.ex/card#me\")/read/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[{\"o\":{\"type\":\"literal\",\"value\":\"hello\"}}]}}",
+      "status": 200
+    },
+    "wac/Some(\"https://alice.ex/card#me\")/read/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"read\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "wac/Some(\"https://alice.ex/card#me\")/write/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":false,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[\"read\"],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 403
+    },
+    "wac/Some(\"https://alice.ex/card#me\")/write/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[]}}",
+      "status": 200
+    },
+    "wac/Some(\"https://alice.ex/card#me\")/write/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"read\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "wac/Some(\"https://bob.ex/card#me\")/read/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":false,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 403
+    },
+    "wac/Some(\"https://bob.ex/card#me\")/read/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[]}}",
+      "status": 200
+    },
+    "wac/Some(\"https://bob.ex/card#me\")/read/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"\\\",public=\\\"\\\"\"}",
+      "status": 200
+    },
+    "wac/Some(\"https://bob.ex/card#me\")/write/decide": {
+      "body": "{\"aclLink\":\"<https://pod.ex/.acl>; rel=\\\"acl\\\"\",\"allow\":false,\"governingAcl\":\"https://pod.ex/.acl\",\"grantedModes\":[],\"scope\":\"http://www.w3.org/ns/auth/acl#default\",\"status\":\"resolved\"}",
+      "status": 403
+    },
+    "wac/Some(\"https://bob.ex/card#me\")/write/query": {
+      "body": "{\"head\":{\"vars\":[\"o\"]},\"results\":{\"bindings\":[]}}",
+      "status": 200
+    },
+    "wac/Some(\"https://bob.ex/card#me\")/write/wac-allow": {
+      "body": "{\"wacAllow\":\"user=\\\"\\\",public=\\\"\\\"\"}",
+      "status": 200
+    }
+  },
+  "source": "77072da807ad658244c8702d24ec774fae3ae35b"
+}

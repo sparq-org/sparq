@@ -216,6 +216,11 @@ impl McpServer {
     /// batch — the JSON-RPC 2.0 §6 contract the MCP 2025-03-26 revision requires.
     /// gh #2497
     pub fn handle_message(&mut self, raw: &str) -> Option<String> {
+        if let Some(max) = self.config.max_request_bytes {
+            if raw.len() > max {
+                return Some(oversized(max));
+            }
+        }
         handle_raw(raw, |req| self.dispatch(req))
     }
 
@@ -859,6 +864,8 @@ pub(crate) fn handle_raw<F>(raw: &str, mut dispatch: F) -> Option<String>
 where
     F: FnMut(&Request) -> Result<Value, RpcError>,
 {
+    #[cfg(test)]
+    RAW_PARSES.with(|count| count.set(count.get() + 1));
     // A top-level JSON array can only begin with `[` once insignificant leading
     // whitespace is skipped, so this one-byte probe keeps the single-object path (the
     // overwhelmingly common one) on exactly the parse it always had: straight to
@@ -916,5 +923,38 @@ mod tests {
             None,
             "default unchanged"
         );
+    }
+}
+
+pub(crate) fn oversized(max: usize) -> String {
+    serialize(&Response::err(
+        Value::Null,
+        RpcError::new(
+            INVALID_REQUEST,
+            format!("invalid JSON-RPC request: exceeds the {max}-byte request size limit"),
+        ),
+    ))
+}
+
+#[cfg(test)]
+std::thread_local! {
+    pub(crate) static RAW_PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+mod request_size_tests {
+    use super::*;
+    #[test]
+    fn direct_dispatch_checks_the_cap_before_parsing() {
+        let mut server = McpServer::with_config(
+            Graph::default(),
+            ServerConfig {
+                max_request_bytes: Some(4),
+                ..Default::default()
+            },
+        );
+        RAW_PARSES.with(|count| count.set(0));
+        assert_eq!(server.handle_message("invalid JSON"), Some(oversized(4)));
+        RAW_PARSES.with(|count| assert_eq!(count.get(), 0));
     }
 }

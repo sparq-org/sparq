@@ -1487,6 +1487,11 @@ impl Dict {
         self.push(hash, Stored::Iri { prefix, suffix: suffix.into() })
     }
 
+    /// Release spare term slots after a bounded bulk load, retaining every id.
+    pub(crate) fn shrink_term_capacity(&mut self) {
+        self.terms.shrink_to_fit();
+    }
+
     /// Interns an IRI already split into (prefix, suffix) — used by the parallel-load
     /// merge, where the canonical split is already known (no re-split, no concat).
     #[inline]

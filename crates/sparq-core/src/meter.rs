@@ -192,6 +192,26 @@ impl<'a> From<&'a Term> for TermRef<'a> {
     }
 }
 
+/// A cumulative byte allowance for one class of work on a shared [`Ledger`].
+/// Other ledger dimensions remain shared while this account is active.
+#[derive(Clone, Debug)]
+pub struct ByteAccount {
+    limit: usize,
+    spent: usize,
+}
+
+impl ByteAccount {
+    /// Create a byte account with no work spent.
+    pub fn new(limit: usize) -> Self {
+        Self { limit, spent: 0 }
+    }
+
+    /// Bytes charged across every use of this account.
+    pub fn spent(&self) -> usize {
+        self.spent
+    }
+}
+
 /// Running work counters with atomic refusal of compound byte charges.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
@@ -245,6 +265,65 @@ impl Ledger {
             });
         }
         Ok(())
+    }
+
+    /// Run work against a separate cumulative byte account. Source, facts, nodes,
+    /// query rows and decision work still use this ledger's counters and limits.
+    /// The original byte account is restored on return or unwinding.
+    pub fn with_byte_account<T>(
+        &mut self,
+        account: &mut ByteAccount,
+        work: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        struct Scope<'a> {
+            ledger: &'a mut Ledger,
+            account: &'a mut ByteAccount,
+        }
+        impl Scope<'_> {
+            fn swap(&mut self) {
+                std::mem::swap(&mut self.ledger.limits.bytes, &mut self.account.limit);
+                std::mem::swap(
+                    &mut self.ledger.spent[Dim::Bytes as usize],
+                    &mut self.account.spent,
+                );
+            }
+        }
+        impl Drop for Scope<'_> {
+            fn drop(&mut self) {
+                self.swap();
+            }
+        }
+        let mut scope = Scope {
+            ledger: self,
+            account,
+        };
+        scope.swap();
+        work(&mut *scope.ledger)
+    }
+
+    /// Tighten remaining allowances for a later phase without resetting counters.
+    /// Each finite cap is relative to work already spent; existing total caps still
+    /// apply. Unbounded fields leave the corresponding limit unchanged.
+    pub fn cap_remaining(&mut self, limits: Limits) {
+        macro_rules! cap {
+            ($field:ident, $dim:ident) => {
+                self.limits.$field = self
+                    .limits
+                    .$field
+                    .min(self.spent(Dim::$dim).saturating_add(limits.$field));
+            };
+        }
+        cap!(source_bytes, SourceBytes);
+        cap!(bytes, Bytes);
+        cap!(generated_bytes, GeneratedBytes);
+        cap!(document_bytes, DocumentBytes);
+        cap!(term_bytes, TermBytes);
+        cap!(facts, Facts);
+        cap!(nodes, Nodes);
+        cap!(depth, Depth);
+        cap!(query_rows, QueryRows);
+        cap!(join_rows, JoinRows);
+        cap!(closure_facts, ClosureFacts);
     }
 
     /// Checks and then debits work, using saturating counters.
@@ -799,5 +878,101 @@ mod tests {
         l.leave();
         assert_eq!(l.spent(Dim::Depth), 0);
         l.enter().unwrap();
+    }
+}
+
+/// A metered RDF load distinguishes syntax errors from ledger refusals.
+#[derive(Debug)]
+pub enum LoadError {
+    /// Invalid RDF, format, or base IRI.
+    Parse(String),
+    /// Work refused before the corresponding allocation or index build.
+    Ledger(Exceeded),
+}
+
+impl fmt::Display for LoadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Parse(error) => f.write_str(error),
+            Self::Ledger(error) => error.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for LoadError {}
+
+impl From<Exceeded> for LoadError {
+    fn from(error: Exceeded) -> Self {
+        Self::Ledger(error)
+    }
+}
+
+#[cfg(test)]
+mod phase_limits_tests {
+    use super::*;
+    #[test]
+    fn phase_caps_keep_spent_work_and_the_stricter_total_limit() {
+        let mut ledger = Ledger::new(Limits {
+            facts: 5,
+            ..Limits::default()
+        });
+        ledger.charge(Dim::Facts, 3).unwrap();
+        let mut phase = Limits {
+            facts: 4,
+            query_rows: 1,
+            ..Limits::default()
+        };
+        ledger.cap_remaining(phase);
+        assert_eq!(ledger.spent(Dim::Facts), 3);
+        assert_eq!(ledger.remaining(Dim::Facts), 2);
+        ledger.charge(Dim::QueryRows, 1).unwrap();
+        assert_eq!(
+            ledger.charge(Dim::QueryRows, 1).unwrap_err().dim,
+            Dim::QueryRows
+        );
+        phase.facts = 1;
+        ledger.cap_remaining(phase);
+        assert_eq!(ledger.remaining(Dim::Facts), 1);
+        ledger.charge(Dim::Facts, 1).unwrap();
+        assert!(ledger.charge(Dim::Facts, 1).is_err());
+    }
+}
+
+#[cfg(test)]
+mod byte_account_tests {
+    use super::*;
+
+    #[test]
+    fn byte_accounts_accumulate_independently_and_share_other_work() {
+        let mut ledger = Ledger::new(Limits {
+            bytes: 3,
+            facts: 2,
+            ..Limits::default()
+        });
+        ledger.charge(Dim::Bytes, 2).unwrap();
+        let mut account = ByteAccount::new(5);
+        ledger.with_byte_account(&mut account, |ledger| {
+            ledger.charge(Dim::Bytes, 4).unwrap();
+            ledger.charge(Dim::Facts, 1).unwrap();
+        });
+        assert_eq!(account.spent(), 4);
+        assert_eq!(ledger.spent(Dim::Bytes), 2);
+        ledger.with_byte_account(&mut account, |ledger| {
+            assert_eq!(ledger.charge(Dim::Bytes, 2).unwrap_err().dim, Dim::Bytes);
+            ledger.charge(Dim::Facts, 1).unwrap();
+        });
+        assert_eq!(account.spent(), 4);
+        assert!(ledger.charge(Dim::Facts, 1).is_err());
+        assert_eq!(ledger.remaining(Dim::Bytes), 1);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ledger.with_byte_account(&mut account, |ledger| {
+                ledger.charge(Dim::Bytes, 1).unwrap();
+                panic!("account scope");
+            });
+        }));
+        assert!(result.is_err());
+        assert_eq!(account.spent(), 5);
+        assert_eq!(ledger.spent(Dim::Bytes), 2);
+        assert_eq!(ledger.remaining(Dim::Bytes), 1);
     }
 }

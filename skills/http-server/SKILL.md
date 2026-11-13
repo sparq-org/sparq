@@ -1462,7 +1462,24 @@ deny, never a grant. **Double opt-in**, OFF by default: compiled only with the `
 feature **and** served only when `--solid-authz` / `SPARQ_SOLID_AUTHZ=1` is set (mirrors `shacl` /
 `terse`); with the feature but not the flag, `/authz/*` is `404`. Read-gated by `--auth-token-read`.
 
-Trust count limits apply to the whole parsed block before certification derivation or
+The stateless lane uses one `sparq_solid::AuthLedger` for serial metered dataset
+loading, resource enumeration, WAC/ACP materialization and ODRL policy extraction.
+`default_auth_budget()` supplies its existing caps. Parsing accounts for every
+dataset row, including content graphs. Dataset retention and policy extraction
+have separate bounded byte accounts; the input allowance keeps its original scope
+of control/group documents and resource enumeration. Facts and work counters remain
+shared. The policy union is projected from admitted data without re-reading source. The transport body cap applies
+independently. Input beyond the byte, term or
+fact allowances returns the existing `503` materialization response before a view
+is built; syntax failures remain `400` with `"'dataset' is not valid N-Quads"`.
+Exhausting the shared input ledger during ODRL extraction also uses `503`; the
+policy parser's own limits and malformed policies retain `400`, and the
+existing evaluation bound remains in force. Potential ODRL rule/target evaluations
+also consume the request's remaining decision-work allowance before grants are
+written. Request-name refusals retain their
+`503` body and log the request lane.
+
+Trust count limits apply to the whole block before key decoding, certification derivation or
 credential admission, including potential derived rules even if an edge would fail verification.
 An over-limit block returns the existing `403` response with `allow: false` and `trustDenied: true`.
 They bound work counts rather than elapsed time; the body-size limit still applies independently.
@@ -1607,7 +1624,7 @@ env overrides the default.
 | `--shacl-shapes FILE` | `SPARQ_SHACL_SHAPES` | unset | (feature `shacl`) load the guard shapes graph once at startup; required when the guard is on |
 | `--solid-authz` | `SPARQ_SOLID_AUTHZ` | off | (feature `solid-authz`) serve the Solid WAC/ACP authorization endpoints `POST /authz/decide`+`/wac-allow`+`/query` — a fail-closed HTTP shell over `sparq-solid`; POST the pod dataset (or `"source":"server"` for the server's own loaded store, sq-snopa.8) + an already-resolved session, get the decision / `WAC-Allow` value / access-controlled query result; read-only — see "Solid WAC/ACP authorization endpoints" |
 | *(env only — no flag)* | `SPARQ_SOLID_AUTHZ_TRUST` | off | (feature `solid-authz-trust`, implies `solid-authz`) opt-in stateless trust-graph extension to `POST /authz/decide` — a request may carry an additional `"trust"` JSON block containing credentials, a trust policy, and signed certification edges; the server runs the cert-graph closure (`derive_effective_rules`) and the `sparq_trust::admit` gate over them, injects any admitted facts into the pod dataset, then runs the unchanged WAC/ACP decision; double-opt-in: the feature must be compiled AND this flag set AND the request must carry a `"trust"` block — see "Stateless trust-graph decision extension (sq-pfae.17)"; honest scope: anchored-not-proven clear-path only (no ZK/unlinkability claim; sq-qhy4 external audit PENDING) |
-| *(env only — no flag)* | `SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS` | `4096` | (feature `solid-authz-trust`) maximum combined signature-verification budget: `certifications + (direct rules + certifications) × presented credentials`; each depth-one certification can add at most one rule. Checked after parsing and before derivation/admission; excess → `403` trust deny, no grant. `0` permits neither certifications nor pairs. |
+| *(env only — no flag)* | `SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS` | `4096` | (feature `solid-authz-trust`) combined verify budget: `3 × certifications + direct rules + presented credentials + (direct rules + certifications) × presented credentials`. This includes key decodes and per-credential canonicalize-and-commit, even without a matching rule. Checked before key decoding and admission; excess → `403` with `trustDenyReason: "trust verify budget exceeded"`, retaining `trustDenied: true`. `0` permits none of this work. |
 | *(env only — no flag)* | `SPARQ_SOLID_AUTHZ_TRUST_MAX_CERTIFICATIONS` | `2048` | (feature `solid-authz-trust`) maximum certification edges per block, checked before any signature verification; excess → `403` trust deny. `0` permits no certifications. |
 | *(env only — no flag)* | `SPARQ_SOLID_AUTHZ_TRUST_MAX_VALIDATION_WORK` | `65536` | (feature `solid-authz-trust`) maximum potential rule/triple validations: `(direct rules + certifications) × sum(credential triple counts)`; checked before derivation/admission because a pair can carry many triples. Excess → `403` trust deny. `0` permits no validation work. |
 | *(env only — no flag)* | `SPARQ_SOLID_AUTHZ_BUILD_CONCURRENCY` | CPU count | (feature `solid-authz`) how many authorization-view BUILDS may run at once on the bounded blocking pool, across every `/authz/*` lane; `0` is read as `1` — see "Bounded authorization-build pool" |

@@ -42,6 +42,7 @@ pub mod extsort;
 pub mod iri;
 pub mod json;
 pub mod meter;
+mod metered;
 pub mod net;
 mod nt;
 pub mod percent;

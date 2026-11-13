@@ -509,6 +509,11 @@ const DERIVE_PLAN: &[&[(Perm, Perm)]] = &[&[(Perm::Spo, Perm::Osp)], &[(Perm::Os
 #[cfg(any(feature = "parallel", test))]
 const SERIAL_PERM_ROWS: usize = 3072;
 
+#[cfg(all(test, feature = "parallel"))]
+std::thread_local! {
+    static PERM_PATHS: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
+}
+
 impl TripleStore {
     /// Builds the [`BUILT`] permutation indexes from canonical s,p,o triples (all
     /// six by default; just SPO/POS/OSP under `compact-index`). SPO is sorted and
@@ -629,6 +634,11 @@ impl TripleStore {
         triples.shrink_to_fit();
 
         let serial = triples.len() < SERIAL_PERM_ROWS;
+        #[cfg(test)]
+        PERM_PATHS.with(|paths| {
+            let (small, large) = paths.get();
+            paths.set((small + usize::from(serial), large + usize::from(!serial)));
+        });
         let mut perms: [PermData; 6] = std::array::from_fn(|_| PermData::default());
         perms[Perm::Spo as usize] = PermData::Owned(triples);
         for wave in DERIVE_PLAN {
@@ -1334,6 +1344,17 @@ mod tests {
                 }
                 check(&rows);
             }
+        }
+    }
+
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn permutation_path_changes_at_serial_cutoff() {
+        PERM_PATHS.with(|paths| paths.set((0, 0)));
+        for (n, expected) in [(3071, (1, 0)), (3072, (1, 1))] {
+            let store = TripleStore::from_triples((0..n).map(|i| [i, 2, 3]).collect());
+            assert_eq!(store.len(), n as usize);
+            PERM_PATHS.with(|paths| assert_eq!(paths.get(), expected));
         }
     }
 
