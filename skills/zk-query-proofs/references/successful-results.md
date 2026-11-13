@@ -193,3 +193,41 @@ Exact gate measurements remain circuit-size evidence only. The planner's objecti
 still counts authentications and memberships, and the driver still regenerates
 canonical keys during verification; neither a tiny-first search policy nor a
 verification-key cache is provided by this expansion.
+
+## Node package and WebAssembly host
+
+[`@sparq-org/zk-result`](../../../js/zk-result/README.md) proves and verifies the
+method-bound successful-result relation from Node. Its tarball bundles the
+WebAssembly host, ACIR, canonical VKs, CRS and npm dependencies; installation and
+runtime require no native proving toolchain or network. It uses the same shared
+preparation and verifier reconstruction as Rust, with the ZK `noir-recursive`
+verifier target. A data-driven member registry joins each ACIR to its canonical
+VK; unsupported members reject.
+
+`prove({query, credentials, policy, nonce})` returns a presentation and released
+result. `verify({expectedQuery, presentation, policy, nonce, seenNonces})` first
+checks canonical keys, then reconstructs the expected statement, then verifies
+the proof. It consumes the caller-owned nonce only after successful proof
+verification. The caller must persist and coordinate the synchronous nonce store.
+The native verifier's existing behavior is unchanged.
+
+The Rust seam exposes `PreparedResult::member()`, `witness_inputs()`,
+`presentation_skeleton()` and `public_inputs()` for an external backend.
+`result::reconstruct_result_public_inputs` returns the canonical member, ordered
+public bytes and admitted mappings from the same expected-query checks used by
+`verify_result`; it does not verify a proof or grant acceptance on its own.
+
+The host crate exposes JSON `testIssuerKeygen`, `issue`, `prepare`,
+`reconstructPublicInputs` and `canonicalVkHash`. Issuance uses string-canonical
+commitments and method-bound presentation attestations. `prepare` returns the
+member, exact private ABI input map and public skeleton. Its private witness data
+must never be sent to the relying party. The native subprocess driver and
+file-backed nonce store are excluded from wasm32. Target-specific entropy
+features use the platform CSPRNG; test issuer seed generation is explicitly
+deterministic test tooling, not production key generation.
+
+Research grade and not externally audited: this proves selected support over
+sparq commitment-signed credentials, not standard VCs. It provides no answer or
+wallet completeness, absence or holder identity. Issuer identities, capacities
+and result size remain observable. See the
+[Node skill](../../zk-result-javascript/SKILL.md) for the application contract.
