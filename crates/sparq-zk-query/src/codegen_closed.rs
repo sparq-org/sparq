@@ -1,4 +1,7 @@
 //! Wiring for closed relations. All constraints live in library gadgets.
+#[path = "codegen_closed_path.rs"]
+mod path;
+
 use super::*;
 use crate::plan_closed::{ClosedOperator as C, Predicate};
 
@@ -35,6 +38,7 @@ pub(super) fn generate(
     let vars = &plan.nodes[i].output.variables;
     let cols = |id: NodeId| columns(schema(id), vars);
     match op {
+        C::Path(p) => path::generate(p, i, plan, ids, out)?,
         C::Union { left, right } => writeln!(
             out,
             "    core::ops_closed_union::union(t{left}, t{right}, {}, {}, t{i});",

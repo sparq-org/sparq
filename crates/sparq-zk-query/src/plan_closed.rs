@@ -15,6 +15,7 @@ pub enum Predicate {
 /// New closed operators extend this enum without changing core dispatch again.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ClosedOperator {
+    Path(crate::plan_closed_path::PathOperator),
     LeftJoin {
         left: NodeId,
         right: NodeId,
@@ -76,6 +77,7 @@ pub enum ClosedOperator {
 impl ClosedOperator {
     pub fn inputs(&self) -> Vec<NodeId> {
         match self {
+            Self::Path(p) => p.inputs(),
             Self::LeftJoin {
                 left,
                 right,
@@ -119,6 +121,7 @@ impl ClosedOperator {
     pub(crate) fn canonical_bytes(&self) -> Vec<u8> {
         let mut w = Writer(vec![]);
         match self {
+            Self::Path(p) => { w.byte(80); w.0.extend(p.canonical_bytes()); }
             Self::LeftJoin {
                 left,
                 right,

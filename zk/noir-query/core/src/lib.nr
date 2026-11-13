@@ -25,3 +25,5 @@ pub mod ops_closed_group;
 pub mod ops_closed_order;
 mod ops_closed_group_tests;
 mod ops_closed_order_tests;
+pub mod ops_closed_path;
+mod ops_closed_path_tests;

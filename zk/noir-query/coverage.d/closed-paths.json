@@ -1,0 +1,66 @@
+{
+  "features": [],
+  "functions": [],
+  "cases": [
+    {
+      "id": "path-sequence",
+      "status": "not_attempted"
+    },
+    {
+      "id": "path-alternative-duplicates",
+      "status": "not_attempted"
+    },
+    {
+      "id": "path-transitive-deduplicates",
+      "status": "not_attempted"
+    },
+    {
+      "id": "path-zero-length",
+      "status": "not_attempted"
+    },
+    {
+      "id": "path-zero-or-one",
+      "status": "not_attempted"
+    },
+    {
+      "id": "path-negated-set",
+      "status": "not_attempted"
+    },
+    {
+      "id": "reject-exists-nullable-path",
+      "status": "not_attempted"
+    },
+    {
+      "id": "reject-exists-residual-path",
+      "status": "not_attempted"
+    },
+    {
+      "id": "nullable-path-alternative-absent-constant",
+      "status": "not_attempted"
+    },
+    {
+      "id": "reject-nullable-path-lowered-sequence",
+      "status": "not_attempted"
+    },
+    {
+      "id": "reject-nullable-path-nested-quantifier",
+      "status": "not_attempted"
+    },
+    {
+      "id": "path-negated-duplicate-forward",
+      "status": "not_attempted"
+    },
+    {
+      "id": "path-negated-duplicate-reverse",
+      "status": "not_attempted"
+    },
+    {
+      "id": "path-negated-both-orientations",
+      "status": "not_attempted"
+    },
+    {
+      "id": "reject-query-blank-node",
+      "status": "not_attempted"
+    }
+  ]
+}

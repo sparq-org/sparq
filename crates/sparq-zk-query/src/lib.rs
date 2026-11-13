@@ -11,6 +11,7 @@ pub mod interp_closed_order;
 pub mod lower;
 pub mod plan;
 pub mod plan_closed;
+pub mod plan_closed_path;
 pub mod request;
 pub mod statement;
 pub mod witness;

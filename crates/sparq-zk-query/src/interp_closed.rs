@@ -1,5 +1,8 @@
 //! Exact closed relations over complete input tables.
 
+#[path = "interp_closed_path.rs"]
+mod path;
+
 use super::*;
 use crate::plan_closed::{ClosedOperator as C, Predicate};
 
@@ -39,6 +42,7 @@ pub(super) fn evaluate(
         (all, row)
     };
     Ok(match op {
+        C::Path(p) => path::evaluate(p, node, plan, tables, dataset, credentials, params)?,
         C::Union { left, right } => [*left, *right]
             .into_iter()
             .flat_map(|id| {

@@ -2,6 +2,7 @@
 
 mod n0;
 mod closed;
+mod closed_path;
 
 use crate::{capacity::Bounds, plan::*, Error};
 use spargebra::{algebra::GraphPattern, SparqlParser};

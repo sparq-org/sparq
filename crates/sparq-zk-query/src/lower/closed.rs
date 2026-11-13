@@ -12,6 +12,7 @@ use spargebra::algebra::{Expression, GraphPattern};
 pub(super) fn handles(pattern: &GraphPattern, outer: bool) -> bool {
     use GraphPattern as G;
     match pattern {
+        _ if super::closed_path::handles(pattern) => true,
         G::LeftJoin { .. }
         | G::Minus { .. }
         | G::Union { .. }
@@ -115,6 +116,7 @@ impl Builder {
     ) -> Result<NodeId, Error> {
         use GraphPattern as G;
         match pattern {
+            _ if super::closed_path::handles(pattern) => self.closed_path(pattern, context, graph),
             G::LeftJoin {
                 left,
                 right,

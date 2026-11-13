@@ -1,0 +1,14 @@
+live tests/closed_paths.rs::generated_paths_execute_and_reject_tables_results_depth_and_hidden_edges
+live tests/closed_paths.rs::authenticated_generated_path_uses_complete_suite_dataset
+live tests/closed_paths.rs::paths_compose_with_closed_operators_and_named_graph_selection
+live tests/closed_paths.rs::corpus_path_sequence
+live tests/closed_paths.rs::corpus_path_inverse
+live tests/closed_paths.rs::corpus_path_alternative_duplicates
+live tests/closed_paths.rs::corpus_path_transitive_deduplicates
+live tests/closed_paths.rs::corpus_path_zero_length
+live tests/closed_paths.rs::corpus_path_zero_or_one
+live tests/closed_paths.rs::corpus_path_negated_set
+live tests/closed_paths.rs::corpus_nullable_path_alternative_absent_constant
+live tests/closed_paths.rs::corpus_path_negated_duplicate_forward
+live tests/closed_paths.rs::corpus_path_negated_duplicate_reverse
+live tests/closed_paths.rs::corpus_path_negated_both_orientations
