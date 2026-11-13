@@ -29,7 +29,7 @@ callback-style `setTimeout` (not an awaited sleep). Validated by `support/no-sle
 
 ## Run it locally (Linux only)
 
-Requires the webview system libraries (`libwebkit2gtk-4.1-dev`, …), `webkit2gtk-driver`
+Requires the webview system libraries (`libwebkit2gtk-4.1-dev`, …), `webkitgtk-webdriver` (formerly `webkit2gtk-driver`)
 (provides `WebKitWebDriver`), and `xvfb`. Then:
 
 ```bash
@@ -62,7 +62,7 @@ The CI `upload-artifact` step collects these for 7 days so failures are diagnosa
 Wired as the `tauri-e2e` job in [`.github/workflows/gui.yml`](../../.github/workflows/gui.yml).
 
 - `tauri-driver` is pinned to **2.0.6** (`cargo install tauri-driver@2.0.6 --locked`).
-- `WebKitWebDriver` comes from the runner's `webkit2gtk-driver` apt package (matched to the
+- `WebKitWebDriver` comes from the runner's `webkitgtk-webdriver` (formerly `webkit2gtk-driver`) apt package (matched to the
   runner image's webkit2gtk; the version is logged in CI for drift detection).
 - `xvfb-run --auto-servernum` provides the headless display.
 - Single process (workers=1 by construction).
