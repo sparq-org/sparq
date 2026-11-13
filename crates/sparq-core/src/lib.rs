@@ -5,6 +5,8 @@
 
 pub mod accept;
 pub mod baseenc;
+#[cfg(feature = "mmap")]
+mod backing;
 pub mod civil;
 pub mod compress;
 pub mod dict;
@@ -2367,10 +2369,9 @@ impl Graph {
         self.store.decompress_to_ram();
     }
 
-    /// Opens a graph saved by [`save`](Self::save) with its permutation indexes AND
-    /// numeric-value cache MEMORY-MAPPED (paged in on demand) — so a large out-of-core
-    /// dataset opens near-instantly without re-parsing every term, and the cache stays
-    /// off the heap. The dictionary is loaded into RAM; the big indexes stay on disk.
+    /// Opens a graph saved by [`save`](Self::save), owning small dictionary, cache and
+    /// permutation files in memory and mapping larger files (paged in on demand).
+    /// Owned backing contributes to [`heap_bytes`](Self::heap_bytes).
     /// A missing or wrong-sized current cache is recomputed in memory. Legacy
     /// unversioned caches are ignored because they used older validation rules.
     /// Saving to a new directory persists current cache files without changing RDF.
@@ -2535,10 +2536,13 @@ impl Graph {
             Ok(f) if f.metadata()?.len() as usize
                 == NUMERICS_MAGIC.len() + dict.len() * std::mem::size_of::<f64>() =>
             {
-                // SAFETY: the file is owned by this graph for its lifetime and not mutated.
-                let m = unsafe { memmap2::Mmap::map(&f)? };
+                let m = backing::Backing::open_file(f, (NUMERICS_MAGIC.len() + dict.len() * std::mem::size_of::<f64>()) as u64)?;
                 if m[..NUMERICS_MAGIC.len()] == NUMERICS_MAGIC {
-                    NumData::Mapped(m, rustc_hash::FxHashMap::default())
+                    match m {
+                        backing::Backing::Owned(bytes) => NumData::Owned(bytes[NUMERICS_MAGIC.len()..]
+                            .chunks_exact(8).map(|b| f64::from_le_bytes(b.try_into().unwrap())).collect()),
+                        backing::Backing::Mapped(m) => NumData::Mapped(m, rustc_hash::FxHashMap::default()),
+                    }
                 } else {
                     NumData::Owned(numerics_of(&dict))
                 }
@@ -2548,8 +2552,15 @@ impl Graph {
         let tp = dir.join(TEMPORAL_CACHE_FILE);
         let temporals = match std::fs::File::open(&tp) {
             Ok(f) if f.metadata()?.len() as usize == dict.len() * 9 => {
-                // SAFETY: the file is owned by this graph for its lifetime and not mutated.
-                TempData::Mapped(unsafe { memmap2::Mmap::map(&f)? }, rustc_hash::FxHashMap::default())
+                let m = backing::Backing::open_file(f, (dict.len() * 9) as u64)?;
+                match m {
+                    backing::Backing::Owned(bytes) => {
+                        let n = bytes.len() / 9;
+                        TempData::Owned(bytes[..n * 8].chunks_exact(8).zip(&bytes[n * 8..])
+                            .map(|(b, &flag)| TempCell { instant: f64::from_le_bytes(b.try_into().unwrap()), flag }).collect())
+                    }
+                    backing::Backing::Mapped(m) => TempData::Mapped(m, rustc_hash::FxHashMap::default()),
+                }
             }
             // Absent or stale (a graph saved before this cache existed): recompute —
             // backward compatible, like the numerics cache.
@@ -12917,7 +12928,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("sparq_unversioned_numerics_{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         g.save(&dir).unwrap();
-        assert!(matches!(Graph::open(&dir).unwrap().numerics, NumData::Mapped(..)), "a current cache is mapped");
+        assert!(matches!(backing::with_threshold(0, || Graph::open(&dir)).unwrap().numerics, NumData::Mapped(..)), "a current cache is mapped when forced");
 
         // Rewrite the numerics cache exactly as the pre-header layout stored it: `n` native f64, the
         // float valued at the nearest f64 of its lexical (`0.1`, not `0.1f32`).
@@ -12934,7 +12945,7 @@ mod tests {
         let dir2 = dir.with_extension("resaved");
         std::fs::remove_dir_all(&dir2).ok();
         g2.save(&dir2).unwrap();
-        let g3 = Graph::open(&dir2).unwrap();
+        let g3 = backing::with_threshold(0, || Graph::open(&dir2)).unwrap();
         assert!(matches!(g3.numerics, NumData::Mapped(..)));
         assert_eq!(g3.numeric_value(fid), Some(f64::from(0.1f32)));
         drop((g2, g3));
@@ -13000,7 +13011,7 @@ mod tests {
         let g = Graph::load_str(&nt, "ntriples").unwrap();
         let dir = std::env::temp_dir().join(format!("sparq_mmap_test_{}", std::process::id()));
         g.save(&dir).unwrap();
-        let g2 = Graph::open(&dir).unwrap();
+        let g2 = backing::with_threshold(0, || Graph::open(&dir)).unwrap();
         assert_eq!(g.len(), g2.len());
         assert_eq!(g.dict.len(), g2.dict.len());
         let dump = |gg: &Graph| {
@@ -14765,7 +14776,7 @@ mod tests {
             .unwrap()
             .save(&dir)
             .unwrap();
-        let mut g = Graph::open(&dir).unwrap();
+        let mut g = backing::with_threshold(0, || Graph::open(&dir)).unwrap();
         assert!(matches!(&g.numerics, NumData::Mapped(..)));
         assert!(!g.has_high_precision_decimal());
         let d = g.dict.len();
@@ -15584,7 +15595,9 @@ mod tests {
         .unwrap()
         .save(&dir)
         .unwrap();
-        let mut parent = Graph::open(&dir).unwrap();
+        // Small files are read into owned memory and closed at open; force the mapped
+        // backing so the open files this scenario depends on stay open on Windows.
+        let mut parent = backing::with_threshold(0, || Graph::open(&dir)).unwrap();
         let (_, mut child) = parent.named.pop().expect("one named graph");
         let t = [term_iri(8, "s"), term_iri(8, "p"), term_iri(8, "o")];
         child

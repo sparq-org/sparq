@@ -2,6 +2,10 @@
 use crate::{CanonError, Digest};
 use oxrdf::{GraphName, NamedOrBlankNode, Quad, Term};
 use std::{collections::HashMap, fmt::Write};
+#[cfg(target_os = "zkvm")]
+use std::collections::BTreeMap as WorkMap;
+#[cfg(not(target_os = "zkvm"))]
+use std::collections::HashMap as WorkMap;
 
 /// Explicit resource limits for the standard RDFC-1.0 entry points.
 ///
@@ -49,6 +53,50 @@ pub fn issue_quads_bounded_with<D: Digest>(
     dataset: &[Quad],
     limits: &CanonicalizationLimits,
 ) -> Result<HashMap<String, String>, CanonError> {
+    #[cfg(not(target_os = "zkvm"))]
+    {
+        let quads = prepare(dataset, limits)?;
+        let issued = crate::rdfc::issue_quads_with::<D>(
+            &quads,
+            &crate::rdfc::CanonicalizationOptions {
+                hndq_call_limit: Some(limits.max_hndq_calls),
+            },
+        )
+        .map_err(|error| CanonError::Canonicalization(error.to_string()))?;
+        Ok(issued)
+    }
+    #[cfg(target_os = "zkvm")]
+    {
+        issue_bounded_guest::<D>(dataset, limits).map(|issued| issued.into_iter().collect())
+    }
+}
+
+/// Issues bounded RDFC-1.0 labels into an ordered map.
+///
+/// This has the same labels and limits as [`issue_quads_bounded_with`]. On the
+/// zkVM target it avoids constructing a randomly seeded return map.
+///
+/// # Errors
+/// Rejects RDF 1.2 terms, excessive input/output/work and library failures.
+pub fn issue_quads_bounded_ordered_with<D: Digest>(
+    dataset: &[Quad],
+    limits: &CanonicalizationLimits,
+) -> Result<std::collections::BTreeMap<String, String>, CanonError> {
+    #[cfg(not(target_os = "zkvm"))]
+    {
+        issue_quads_bounded_with::<D>(dataset, limits).map(|map| map.into_iter().collect())
+    }
+    #[cfg(target_os = "zkvm")]
+    {
+        issue_bounded_guest::<D>(dataset, limits)
+    }
+}
+
+#[cfg(target_os = "zkvm")]
+fn issue_bounded_guest<D: Digest>(
+    dataset: &[Quad],
+    limits: &CanonicalizationLimits,
+) -> Result<WorkMap<String, String>, CanonError> {
     let quads = prepare(dataset, limits)?;
     crate::rdfc::issue_quads_with::<D>(
         &quads,
@@ -89,7 +137,7 @@ fn prepare(
         text: String::new(),
         limit: limits.max_input_bytes,
     };
-    let mut related: HashMap<&str, usize> = HashMap::new();
+    let mut related: WorkMap<&str, usize> = WorkMap::new();
     let mut occurrences = 0_usize;
     for quad in dataset {
         if matches!(quad.object, Term::Triple(_)) {

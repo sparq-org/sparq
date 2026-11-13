@@ -176,4 +176,5 @@ proptest = "1"
 # this cfg itself when it model-checks; under a normal build the harness is stripped. Mirrors
 # crates/sparq-vectors/Cargo.toml, which registers the same cfg for its `.spqv` validator proof.
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }
+# Internal build-time backing selection for the complete storage test matrix.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)', 'cfg(sparq_backing, values("mapped", "owned"))'] }

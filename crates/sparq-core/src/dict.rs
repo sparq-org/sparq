@@ -742,13 +742,13 @@ fn hash_tabled(
     hash_stored_ref(&parse_stored_ref(&b[offs[i] as usize..]), prefixes, datatypes)
 }
 
-/// The mmap-backed term store + lookup index (out-of-core dictionary).
+/// The file-backed term store + lookup index; small sections are owned in memory.
 #[cfg(feature = "mmap")]
 struct MappedDict {
-    blob: memmap2::Mmap,    // concatenated term records (the format `save_mmap` writes)
-    offsets: memmap2::Mmap, // [u64; n] byte offset of each term record in `blob`
-    hashes: memmap2::Mmap,  // [u64; n] content hashes, SORTED (for lookup)
-    hashids: memmap2::Mmap, // [u32; n] term ids parallel to `hashes`
+    blob: crate::backing::Backing,    // concatenated term records (the format `save_mmap` writes)
+    offsets: crate::backing::Array<u64>, // [u64; n] byte offset of each term record in `blob`
+    hashes: crate::backing::Array<u64>,  // [u64; n] content hashes, SORTED (for lookup)
+    hashids: crate::backing::Array<u32>, // [u32; n] term ids parallel to `hashes`
     // The lock of the store directory these files are in, kept while the mapping (shared by
     // every clone and fork of the dictionary) lives.
     _pin: crate::dir_lock::Pin,
@@ -757,7 +757,11 @@ struct MappedDict {
 #[cfg(feature = "mmap")]
 impl MappedDict {
     #[inline]
-    fn slice_u64(m: &memmap2::Mmap) -> &[u64] {
+    fn slice_u64(array: &crate::backing::Array<u64>) -> &[u64] {
+        let m = match array {
+            crate::backing::Array::Owned(v) => return v,
+            crate::backing::Array::Mapped(m) => m,
+        };
         // SAFETY: `write_pod_slice` wrote these as raw NATIVE-endian u64 (little-endian on
         // every supported target — pinned by `DICT_ON_DISK_LE_GUARD`, sq-lvw8); mmap base is
         // page-aligned (>= 8). This pointer cast reads them back in the same native order.
@@ -773,10 +777,14 @@ impl MappedDict {
     }
     #[inline]
     fn hashids(&self) -> &[u32] {
+        let m = match &self.hashids {
+            crate::backing::Array::Owned(v) => return v,
+            crate::backing::Array::Mapped(m) => m,
+        };
         // SAFETY: `write_pod_slice` wrote these as raw NATIVE-endian u32 (little-endian on
         // every supported target — pinned by `DICT_ON_DISK_LE_GUARD`, sq-lvw8); mmap base is
         // page-aligned (>= 4). This pointer cast reads them back in the same native order.
-        unsafe { std::slice::from_raw_parts(self.hashids.as_ptr().cast::<u32>(), self.hashids.len() / 4) }
+        unsafe { std::slice::from_raw_parts(m.as_ptr().cast::<u32>(), m.len() / 4) }
     }
     /// The parsed term record for a 1-based id.
     ///
@@ -812,7 +820,7 @@ impl MappedDict {
     ///
     /// Any violation is a clean `InvalidData` error — never a panic, never UB.
     #[cfg(feature = "mmap")]
-    fn validate(&self, len: usize, prefixes: &[Box<str>], datatypes: &[NamedNode]) -> std::io::Result<()> {
+    fn validate(files: &[crate::backing::Backing; 4], len: usize, prefixes: &[Box<str>], datatypes: &[NamedNode]) -> std::io::Result<()> {
         // sq-ueuk — delegate to the mmap-free `&[u8]` seam below. The four
         // mmap'd files are passed as plain byte slices (a `memmap2::Mmap` derefs to `&[u8]`),
         // so ALL of the header/length/bounds/record/index logic lives in a pure function
@@ -827,7 +835,17 @@ impl MappedDict {
         // is enforced for the whole persistence format by `DICT_ON_DISK_LE_GUARD` (a build error
         // on a big-endian target), so on every platform this validator actually runs on, the
         // explicit-LE seam and the native-endian readers observe identical integers.
-        validate_dict_bytes(&self.blob, &self.offsets, &self.hashes, &self.hashids, len, prefixes, datatypes)
+        // Preserve direct mapped views for a wholly mapped dictionary. Mixed and
+        // owned sections pass through the same byte validator below.
+        if let [
+            crate::backing::Backing::Mapped(blob),
+            crate::backing::Backing::Mapped(offsets),
+            crate::backing::Backing::Mapped(hashes),
+            crate::backing::Backing::Mapped(hashids),
+        ] = files {
+            return validate_dict_bytes(blob, offsets, hashes, hashids, len, prefixes, datatypes);
+        }
+        validate_dict_bytes(&files[0], &files[1], &files[2], &files[3], len, prefixes, datatypes)
     }
 }
 
@@ -2261,23 +2279,22 @@ impl Dict {
         r.read_exact(&mut nbuf)?;
         let len = u64::from_le_bytes(nbuf) as usize;
 
-        let map = |name: &str| -> std::io::Result<memmap2::Mmap> {
-            let f = std::fs::File::open(dir.join(name))?;
-            // SAFETY: read-only mapping of a file owned by this dict for its lifetime.
-            unsafe { memmap2::Mmap::map(&f) }
-        };
+        let files = [
+            crate::backing::Backing::open(&dir.join("dict-terms.bin"))?,
+            crate::backing::Backing::open(&dir.join("dict-offs.bin"))?,
+            crate::backing::Backing::open(&dir.join("dict-hash.bin"))?,
+            crate::backing::Backing::open(&dir.join("dict-hid.bin"))?,
+        ];
+        // Validate the same byte regions before decoding owned arrays or casting maps.
+        MappedDict::validate(&files, len, &prefixes, &datatypes)?;
+        let [blob, offsets, hashes, hashids] = files;
         let mapped = MappedDict {
-            blob: map("dict-terms.bin")?,
-            offsets: map("dict-offs.bin")?,
-            hashes: map("dict-hash.bin")?,
-            hashids: map("dict-hid.bin")?,
+            blob,
+            offsets: offsets.decode(u64::from_le_bytes),
+            hashes: hashes.decode(u64::from_le_bytes),
+            hashids: hashids.decode(u32::from_le_bytes),
             _pin: pin,
         };
-        // sq-znld: the four data files above are attacker-controlled. Validate
-        // their sizes + every offset + every record (bounds + UTF-8 + table-index range)
-        // BEFORE handing back a Dict whose `term`/`lookup` paths would otherwise
-        // dereference them unchecked.
-        mapped.validate(len, &prefixes, &datatypes)?;
         Ok(Dict { prefixes, datatypes, mapped: Some(std::sync::Arc::new(mapped)), base: len, ..Default::default() })
     }
 
@@ -2443,8 +2460,8 @@ impl Dict {
     /// benchmarking). Counts the compact `terms` arena (slots + suffix/value/lang
     /// bytes), the shared prefix + datatype tables, and the hash table (bare ids).
     pub fn heap_bytes(&self) -> usize {
-        // A memory-mapped dictionary keeps only the small prefix/datatype tables resident;
-        // the term blob + offsets + lookup index are mmap'd (OS page cache, not the heap).
+        // Large file sections are mmap'd (OS page cache); small owned sections and
+        // the prefix/datatype tables contribute to the reachable heap footprint.
         // Appended (delta-overlay) terms live in the in-RAM arena in every mode.
         // A forked dict's Arc-shared frozen base counts in full (reachable footprint,
         // like the store's Arc-shared permutations) — after `compacted()` the ENTIRE
@@ -2453,11 +2470,13 @@ impl Dict {
         let appended: usize = self.terms.capacity() * std::mem::size_of::<Stored>()
             + self.terms.iter().map(stored_owned_bytes).sum::<usize>();
         #[cfg(feature = "mmap")]
-        if self.mapped.is_some() {
+        if let Some(mapped) = &self.mapped {
+            let backing = mapped.blob.heap_bytes() + mapped.offsets.heap_bytes()
+                + mapped.hashes.heap_bytes() + mapped.hashids.heap_bytes();
             let prefix_bytes: usize = self.prefixes.iter().map(|p| p.len() + std::mem::size_of::<Box<str>>()).sum();
             let dt_bytes: usize = self.datatypes.iter().map(|d| d.as_str().len() + 32).sum();
             let table = self.table.capacity() * (std::mem::size_of::<Id>() + 1);
-            return frozen_base + appended + table + prefix_bytes + dt_bytes;
+            return frozen_base + backing + appended + table + prefix_bytes + dt_bytes;
         }
         // Compacted (blob) mode: the term blob + u32 offsets + the kept hash table, plus
         // the small prefix/datatype tables — no per-`Stored` slot or per-`Box<str>` term.

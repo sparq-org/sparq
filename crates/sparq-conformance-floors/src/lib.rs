@@ -65,6 +65,11 @@ pub mod shacl {
 /// `tests/ogc_compliance_ratchet.rs` and `tests/ogc_query_rewrite_ratchet.rs`
 /// (CI job `geo-conformance`).
 pub mod geo {
+    /// Published community GeoSPARQL Benchmark query pass floor (not an OGC ETS).
+    /// Enforced by `sparq-geo/tests/geosparql_benchmark.rs` with RDFS, accessors
+    /// and query rewrite enabled at upstream revision 879e074.
+    pub const GEOSPARQL_BENCHMARK_FLOOR: usize = 124;
+
     /// Pass floor for the hand-derived DE-9IM / simple-features topology
     /// assertions. Enforced as `OGC_RATCHET_FLOOR` in
     /// `sparq-geo/tests/ogc_compliance_ratchet.rs`, which documents the raises.
@@ -143,6 +148,7 @@ mod tests {
             ("shacl::CORE_FLOOR", shacl::CORE_FLOOR),
             ("shacl::SPARQL_FLOOR", shacl::SPARQL_FLOOR),
             ("geo::OGC_TOPOLOGY_FLOOR", geo::OGC_TOPOLOGY_FLOOR),
+            ("geo::GEOSPARQL_BENCHMARK_FLOOR", geo::GEOSPARQL_BENCHMARK_FLOOR),
             ("geo::OGC_QUERY_REWRITE_FLOOR", geo::OGC_QUERY_REWRITE_FLOOR),
             ("solid::WAC_SCENARIO_FLOOR", solid::WAC_SCENARIO_FLOOR),
             ("solid::ACP_SCENARIO_FLOOR", solid::ACP_SCENARIO_FLOOR),

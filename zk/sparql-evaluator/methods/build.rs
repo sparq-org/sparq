@@ -47,6 +47,15 @@ const AUTHRDF_PHASES: Guest = Guest {
     features: "phase-cycles",
 };
 
+/// Canonicalisation regression image; never accepted as an evaluator image.
+const CANON_CHECK: Guest = Guest {
+    dir: "guest-canon",
+    package: "sparq-canon-check-guest",
+    constants: "SPARQ_CANON_CHECK_GUEST",
+    output: "canon_check_methods.rs",
+    features: "",
+};
+
 /// Repository-relative source inputs of the exact guest image.
 ///
 /// The root manifest supplies workspace inheritance to the path crates. The
@@ -117,6 +126,8 @@ fn main() {
     }
     if env::var_os("CARGO_FEATURE_PHASE_CYCLES").is_some() {
         build.guest(&AUTHRDF_PHASES);
+        build.guest(&CANON_CHECK);
+        sources.push("zk/sparql-evaluator/methods/guest-canon");
     }
     for source in sources {
         println!("cargo:rerun-if-changed={}", build.repo.join(source).display());

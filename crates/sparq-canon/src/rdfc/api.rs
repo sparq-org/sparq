@@ -7,11 +7,15 @@ use super::{
     CanonicalizationError,
 };
 use digest::Digest;
+use super::dataset::Dataset;
 use oxrdf02::{
-    BlankNode, BlankNodeRef, Dataset, GraphName, GraphNameRef, Quad, QuadRef, Subject, SubjectRef,
+    BlankNode, BlankNodeRef, GraphName, GraphNameRef, Quad, QuadRef, Subject, SubjectRef,
     Term, TermRef,
 };
 use sha2::Sha256;
+#[cfg(target_os = "zkvm")]
+use std::collections::BTreeMap as HashMap;
+#[cfg(not(target_os = "zkvm"))]
 use std::collections::HashMap;
 
 /// Returns the serialized canonical form of the canonicalized dataset,
