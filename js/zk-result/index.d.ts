@@ -2,7 +2,9 @@ export type ReleasedTerm = { kind: 'iri'; value: string } | {
   kind: 'literal'; value: string; datatype?: string; language?: string;
 };
 export type ReleasedRow = Record<string, ReleasedTerm>;
-export interface TestIssuer { seedHex: string; publicKey: string }
+/** Research-grade key. The caller must protect and store the secret; the package never persists it. */
+export interface Issuer { secretKeyHex: string; publicKey: string; seedHex?: never }
+export interface TestIssuer { seedHex: string; publicKey: string; secretKeyHex?: never }
 export interface StatusRef { status_list: string; version: number; index: number }
 export interface Credential {
   graphNQuads: string; salt: string; issuer: string; signature: string; statusRef: StatusRef;
@@ -20,8 +22,10 @@ export interface Presentation {
 export interface SeenNonces { has(nonce: string): boolean; add(nonce: string): unknown }
 /** Deterministic hexadecimal u64 seed; test issuance only. */
 export function testIssuerKeygen(seedHex: string): TestIssuer;
-/** Fresh platform CSPRNG salt and method-bound test issuer attestation. */
-export function issue(issuer: TestIssuer, graphNQuads: string, statusRef: StatusRef): Credential;
+/** Platform CSPRNG issuer key; research grade, not externally audited. Never persisted by the package. */
+export function issuerKeygen(): Issuer;
+/** Fresh platform CSPRNG salt and method-bound issuer attestation. Rejects mixed key formats. */
+export function issue(issuer: Issuer | TestIssuer, graphNQuads: string, statusRef: StatusRef): Credential;
 export function prove(input: { query: string; credentials: Credential[]; policy: Policy; nonce: string }):
   Promise<{ presentation: Presentation; result: ReleasedRow[] }>;
 export function verify(input: {
