@@ -8,7 +8,7 @@
 //! in `tests/jsonld_suite/{common,to_rdf,from_rdf,expand,compact,flatten,frame}.rs`
 //! as SUBMODULES of this one test binary (the CI invocation
 //! `cargo test -p sparq-conformance --features jsonld-suite --test jsonld_suite`
-//! and the compile cost are unchanged), and the six ratchet FLOORS live LIB-SIDE
+//! is unchanged), and the API and ingest ratchet FLOORS live LIB-SIDE
 //! in `sparq_conformance::floors::<lane>` so the runner's `assert!(pass >= FLOOR)`
 //! and `scoreboard::SUITES`' `ratchet_floor` read the SAME compile-time const (no
 //! textual drift — the #1463 floor-drift class is killed structurally). The
@@ -16,7 +16,9 @@
 //!
 //! ## What is gated (v1) — only what sparq runs TODAY
 //!
-//! * **toRdf** (JSON-LD → RDF) — see `jsonld_suite/to_rdf.rs`.
+//! * **toRdf** (native JSON-LD → RDF; legacy 1.0 compatibility via oxjsonld).
+//! * **toRdf-ingest** (Graph / oxjsonld over the same manifest, excluded from EARL).
+//!   Both use `jsonld_suite/to_rdf.rs`.
 //! * **fromRdf** (RDF → JSON-LD, round-trip) — see `jsonld_suite/from_rdf.rs`.
 //! * **compact** (native document-level `sparq_jsonld::compact::compact()` oracle
 //!   against the W3C expected document — sq-oy1f.27) — see
@@ -25,17 +27,15 @@
 //!   suite) — see `jsonld_suite/frame.rs`.
 //! * **expand** (native document-level `sparq_jsonld::expand()` oracle) — see
 //!   `jsonld_suite/expand.rs`.
-//! * **flatten** (RDF → flattened JSON-LD via the shipping writer) — see
+//! * **flatten** (native document-level flattened JSON-LD) — see
 //!   `jsonld_suite/flatten.rs`.
 //!
 //! Each submodule's own doc-comment carries its oracle, its honest SKIP buckets,
 //! and its measured-count caveat; the ratchet floor each asserts lives on the
 //! matching `sparq_conformance::floors::<lane>::FLOOR` const with its own
-//! documentation. `expand`, `flatten`, `html`, and `remote-doc` were the algorithm
-//! categories sparq did not gate historically; `expand`/`flatten` graduated,
-//! `html`/`remote-doc` remain the documented NOT-IMPLEMENTED buckets the runner
-//! reports separately in local runs. EARL includes those entries as failed, except
-//! entries with specVersion or processingMode json-ld-1.0 (not applicable).
+//! documentation. HTML and remote documents run through native document operations and
+//! manifest-driven local responses. EARL includes every entry except those with
+//! specVersion or processingMode json-ld-1.0 (not applicable); unexecuted entries fail.
 //!
 //! ## Feature gating (both states)
 //!
@@ -93,12 +93,15 @@ mod from_rdf;
 #[cfg(feature = "jsonld-suite")]
 #[path = "jsonld_suite/to_rdf.rs"]
 mod to_rdf;
+#[cfg(feature = "jsonld-suite")]
+#[path = "jsonld_suite/remote.rs"]
+mod remote;
 
 #[cfg(feature = "jsonld-suite")]
 mod gated {
     use crate::common::{
-        frame_suite_root, not_implemented_counts, suite_root, COMPACT_FLOOR, EXPAND_FLOOR,
-        FLATTEN_FLOOR, FRAME_FLOOR, FROMRDF_FLOOR, NOT_IMPLEMENTED_CATS, TORDF_FLOOR,
+        frame_suite_root, suite_root, COMPACT_FLOOR, EXPAND_FLOOR,
+        FLATTEN_FLOOR, FRAME_FLOOR, FROMRDF_FLOOR, TORDF_FLOOR,
     };
     use crate::{compact, expand, flatten, frame, from_rdf, to_rdf};
 
@@ -119,6 +122,8 @@ mod gated {
         }
 
         let tordf = to_rdf::run_tordf(&root);
+        // Deliberately excluded from common::report and therefore EARL.
+        let tordf_ingest = to_rdf::run_tordf_ingest(&root);
         let fromrdf = from_rdf::run_fromrdf(&root);
         let compact_scores = compact::run_compact(&root);
         let compact = compact_scores.semantic;
@@ -134,7 +139,16 @@ mod gated {
         // flatten::run_flatten_native() and the flatten floor doc for the old-vs-new
         // re-pin.
         let flatten = flatten::run_flatten_native(&root);
-        let not_impl = not_implemented_counts(&root);
+        let html = crate::remote::run(&root, "html");
+        let remote_doc = crate::remote::run(&root, "remote-doc");
+        for (cat, score, floor) in [
+            ("html", &html, sparq_conformance::floors::html::FLOOR),
+            ("remote-doc", &remote_doc, sparq_conformance::floors::remote_doc::FLOOR),
+        ] {
+            crate::common::report(&root, cat, score);
+            println!("TOTAL {cat} {} {} {} (floor {floor})", score.pass, score.fail, score.skip);
+            for (id, why) in &score.failures { println!("{cat} {id}: {why}"); }
+        }
 
         // sq-oy1f.19 — framing lives in the SEPARATE w3c/json-ld-framing
         // suite (scripts/fetch-jsonld-framing-tests.sh), which a checkout may have
@@ -153,9 +167,6 @@ mod gated {
             ("flatten", &flatten),
         ] {
             crate::common::report(&root, cat, score);
-        }
-        for (cat, _) in NOT_IMPLEMENTED_CATS {
-            crate::common::report(&root, cat, &crate::common::Score::default());
         }
         if let Some(score) = &frame {
             crate::common::report(&frame_root, "frame", score);
@@ -182,6 +193,14 @@ mod gated {
             "TOTAL toRdf {} {} {} (floor {})",
             tordf.pass, tordf.fail, tordf.skip, TORDF_FLOOR
         );
+        println!(
+            "TOTAL toRdf-ingest {} {} {} (floor {})",
+            tordf_ingest.pass, tordf_ingest.fail, tordf_ingest.skip,
+            sparq_conformance::floors::to_rdf_ingest::FLOOR
+        );
+        for (id, why) in &tordf_ingest.failures {
+            println!("toRdf-ingest {id}: {why}");
+        }
         println!(
             "TOTAL fromRdf {} {} {} (floor {})",
             fromrdf.pass, fromrdf.fail, fromrdf.skip, FROMRDF_FLOOR
@@ -224,16 +243,6 @@ mod gated {
                 FRAME_FLOOR
             );
         }
-        println!("\nknown-gap (NOT-IMPLEMENTED — not gated, grows the ratchet as they land):");
-        for (cat, why) in NOT_IMPLEMENTED_CATS {
-            println!(
-                "  {:<10} {:>4} tests — {}",
-                cat,
-                not_impl.get(cat).copied().unwrap_or(0),
-                why
-            );
-        }
-
         if !tordf.failures.is_empty() {
             println!("\ntoRdf failures (first 40):");
             for (id, why) in tordf.failures.iter().take(40) {
@@ -278,6 +287,24 @@ mod gated {
                 }
             }
         }
+
+        assert!(html.pass >= sparq_conformance::floors::html::FLOOR, "HTML pass count regressed");
+        assert!(html.fail <= sparq_conformance::floors::html::FAIL_CEILING, "HTML failure ceiling exceeded");
+        assert!(remote_doc.pass >= sparq_conformance::floors::remote_doc::FLOOR, "remote-document pass count regressed");
+        assert_eq!(remote_doc.fail, sparq_conformance::floors::remote_doc::FAIL_CEILING, "remote-document failure ceiling exceeded");
+
+        assert!(
+            tordf_ingest.pass >= sparq_conformance::floors::to_rdf_ingest::FLOOR,
+            "JSON-LD toRdf-ingest pass count regressed: {} < floor {}",
+            tordf_ingest.pass, sparq_conformance::floors::to_rdf_ingest::FLOOR
+        );
+        assert!(
+            tordf_ingest.fail <= sparq_conformance::floors::to_rdf_ingest::FAIL_CEILING,
+            "JSON-LD toRdf-ingest failure ceiling exceeded: {} > {}",
+            tordf_ingest.fail, sparq_conformance::floors::to_rdf_ingest::FAIL_CEILING
+        );
+
+        assert_eq!(tordf_ingest.skip, 0, "Graph ingest must execute every toRdf entry");
 
         // The ratchet: pass counts may only RISE. A regression below the pinned
         // floor fails the build.

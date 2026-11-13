@@ -44,19 +44,20 @@
 //!   including frame matching, value patterns, embedding, defaults, named graphs, and
 //!   framing-specific validation. Its pinned W3C framing lane passes all 92 cases.
 //!
-//! (`sq-ci15w`) Only [`to_rdf`] and [`api`] remain documented stubs. The
-//! implemented pipeline is `todo!()`-free; remote loading and HTML extraction remain
-//! separate, opt-in follow-on capabilities.
+//! (`sq-ci15w`) Only [`api`] remains a documented facade stub. [`to_rdf::to_rdf`] converts JSON-LD to RDF. The
+//! implemented pipeline is `todo!()`-free; remote input uses the supplied loader,
+//! and HTML/XHTML extraction is behind the default-off `html` feature.
 
 // Real, shipped surfaces.
 pub mod context;
 pub mod error;
 pub mod json;
 pub mod loader;
+#[cfg(feature = "html")]
+mod html;
 pub mod options;
 
-// Document-level algorithms. `to_rdf` and `api` retain their documented placeholder
-// surfaces; expansion, flattening, compaction, framing, and from-RDF are implemented.
+// Document-level algorithms. Only the high-level `api` facade remains a placeholder.
 pub mod api;
 pub mod compact;
 pub mod expand;

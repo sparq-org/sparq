@@ -77,10 +77,7 @@ pub(crate) fn update_events<'e>(
     }
     // An update that only adds to graphs already stored changes no resource; most do.
     let stored = |name: &str| {
-        graph
-            .named()
-            .iter()
-            .any(|(n, _)| matches!(n, Term::NamedNode(n) if n.as_str() == name))
+        graph.named_graph(&Term::NamedNode(oxrdf::NamedNode::new_unchecked(name))).is_some()
     };
     let changes = |e: &GraphEvent| match e {
         GraphEvent::Added(n) => !stored(n),
@@ -142,10 +139,7 @@ pub(crate) fn provenance_after(
         return Ok(None);
     }
     let stored = |name: &str| {
-        before
-            .named()
-            .iter()
-            .any(|(n, _)| matches!(n, Term::NamedNode(n) if n.as_str() == name))
+        before.named_graph(&Term::NamedNode(oxrdf::NamedNode::new_unchecked(name))).is_some()
     };
     replay(
         ResourceGraphs::of(before),

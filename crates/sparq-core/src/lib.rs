@@ -44,6 +44,9 @@ pub mod extsort;
 pub mod iri;
 pub mod json;
 pub mod meter;
+mod named_index;
+#[cfg(test)]
+mod named_index_tests;
 pub mod net;
 mod nt;
 pub mod percent;
@@ -155,6 +158,8 @@ pub struct Graph {
     /// [`set_named`](Self::set_named), [`remove_named`](Self::remove_named) and the like, which
     /// refuse a directory-backed graph on either side.
     named: Vec<(Term, Graph)>,
+    /// Exact term identity to Vec positions; independent of the prefix index and durable slots.
+    named_index: named_index::NamedIndex,
     /// (sq-zz8z, gh-51) Lazily-built sorted permutation of `named` indices, ordered by
     /// the UTF-8 bytes of each graph's IRI string, enabling a binary-search RANGE SCAN for a
     /// prefix-scoped `GRAPH ?g … FILTER(STRSTARTS(STR(?g), prefix))` instead of an O(graphs) full
@@ -1400,6 +1405,7 @@ impl Graph {
         }
         let mut g = g.unwrap_or_else(|| build_terms(&[]));
         g.named = named;
+        g.named_changed();
         Ok(g)
     }
 
@@ -1459,6 +1465,7 @@ impl Graph {
         }
         let mut g = main.unwrap_or_else(|| Self::build(Dict::new(), Vec::new()));
         g.named = named;
+        g.named_changed();
         Ok(g)
     }
 
@@ -1534,6 +1541,7 @@ impl Graph {
         }
         let mut g = main.unwrap_or_else(|| Self::build(Dict::new(), Vec::new()));
         g.named = named;
+        g.named_changed();
         Ok(g)
     }
 
@@ -1680,14 +1688,22 @@ impl Graph {
     ///
     /// It is the per-name companion to
     /// [`for_named_graphs_with_prefix`](Self::for_named_graphs_with_prefix) (which is
-    /// prefix-scoped). It is a linear scan over the `named` Vec (a dataset's distinct graphs are
-    /// typically few); for a prefix sweep use the indexed prefix method instead.
+    /// prefix-scoped). Exact names use a side index; duplicate names resolve to the first
+    /// entry, as with [`named_graph_index`](Self::named_graph_index).
     ///
     /// The DEFAULT graph is `self` itself — it is not part of `named` and is not returned here;
     /// pass `&graph` directly to scope introspect/sim/vectors to the default graph.
     #[inline]
     pub fn named_graph(&self, name: &Term) -> Option<&Graph> {
-        self.named.iter().find(|(n, _)| n == name).map(|(_, g)| g)
+        self.named_graph_index(name).map(|i| &self.named[i].1)
+    }
+
+    /// The first position of the exact name term in [`named`](Self::named), or `None`.
+    /// Uses an in-memory hash index. A position can change after removal; it is not a
+    /// durable slot id and must not be retained across changes to the named-graph list.
+    #[inline]
+    pub fn named_graph_index(&self, name: &Term) -> Option<usize> {
+        self.named_index.positions(&self.named, name).map(|p| p.first)
     }
 
     /// The named graphs, in their (positional) order: each a self-contained `Graph`, keyed by
@@ -1744,9 +1760,29 @@ impl Graph {
         Ok(())
     }
 
-    /// The named graphs changed: the prefix index is rebuilt on its next use.
-    fn named_changed(&self) {
+    /// Bulk membership changes rebuild exact positions and invalidate the prefix order.
+    fn named_changed(&mut self) {
+        self.named_index = named_index::NamedIndex::from_named(&self.named);
         *self.graph_prefix_index.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    fn push_named(&mut self, name: Term, graph: Graph) {
+        self.named.push((name, graph));
+        self.named_index.append(&self.named);
+        *self.graph_prefix_index.get_mut().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    fn remove_named_at(&mut self, i: usize) -> (Term, Graph) {
+        self.named_index.remove(&self.named, i);
+        let removed = self.named.remove(i);
+        *self.graph_prefix_index.get_mut().unwrap_or_else(|e| e.into_inner()) = None;
+        removed
+    }
+
+    #[cfg(all(test, feature = "mmap"))]
+    fn pop_named(&mut self) -> Option<(Term, Graph)> {
+        let i = self.named.len().checked_sub(1)?;
+        Some(self.remove_named_at(i))
     }
 
     /// Adds the in-memory graph `g` as a named graph called `name`, after the others (a second
@@ -1755,8 +1791,7 @@ impl Graph {
     /// inserts), and for a `g` that is directory-backed or refuses writes.
     pub fn add_named(&mut self, name: Term, g: Graph) -> Result<(), String> {
         self.check_named_insertable(&g)?;
-        self.named.push((name, g));
-        self.named_changed();
+        self.push_named(name, g);
         Ok(())
     }
 
@@ -1785,7 +1820,7 @@ impl Graph {
     /// and [`apply_delta_to_named`](Self::apply_delta_to_named) instead.
     pub fn set_named(&mut self, name: Term, g: Graph) -> Result<Option<Graph>, String> {
         self.check_named_insertable(&g)?;
-        let old = match self.named.iter().position(|(n, _)| *n == name) {
+        let old = match self.named_graph_index(&name) {
             Some(i) => {
                 if self.named[i].1.is_directory_backed() {
                     return Err(format!(
@@ -1796,11 +1831,10 @@ impl Graph {
                 Some(std::mem::replace(&mut self.named[i].1, g))
             }
             None => {
-                self.named.push((name, g));
+                self.push_named(name, g);
                 None
             }
         };
-        self.named_changed();
         Ok(old)
     }
 
@@ -1810,12 +1844,11 @@ impl Graph {
     /// [`drop_named_durable`](Self::drop_named_durable)), or this graph refuses writes.
     pub fn remove_named(&mut self, name: &Term) -> Result<Option<Graph>, String> {
         self.refuse_if_detached()?;
-        let Some(i) = self.named.iter().position(|(n, _)| n == name) else {
+        let Some(i) = self.named_graph_index(name) else {
             return Ok(None);
         };
         self.check_named_movable_from(i)?;
-        let removed = self.named.remove(i).1;
-        self.named_changed();
+        let removed = self.remove_named_at(i).1;
         Ok(Some(removed))
     }
 
@@ -1905,6 +1938,7 @@ impl Graph {
 
     fn replace_default_unchecked(&mut self, mut default: Graph) {
         default.named = std::mem::take(&mut self.named);
+        default.named_index = std::mem::take(&mut self.named_index);
         #[cfg(feature = "mmap")]
         if default.lock.is_none() {
             default.lock = self.lock.take();
@@ -2078,6 +2112,7 @@ impl Graph {
             high_precision_decimal: std::sync::atomic::AtomicU64::new(0),
             float_literal: std::sync::atomic::AtomicU8::new(0),
             named: Vec::new(),
+            named_index: named_index::NamedIndex::default(),
             graph_prefix_index: std::sync::Mutex::new(None),
             #[cfg(feature = "mmap")]
             wal: WriteState::Ephemeral,
@@ -2127,6 +2162,7 @@ impl Graph {
             high_precision_decimal: std::sync::atomic::AtomicU64::new(0),
             float_literal: std::sync::atomic::AtomicU8::new(0),
             named: self.named,
+            named_index: self.named_index,
             graph_prefix_index: std::sync::Mutex::new(None),
             #[cfg(feature = "mmap")]
             wal: self.wal,
@@ -2578,6 +2614,7 @@ impl Graph {
             exact_temporals: std::sync::OnceLock::new(),
             high_precision_decimal: std::sync::atomic::AtomicU64::new(0),
             float_literal: std::sync::atomic::AtomicU8::new(0),
+            named_index: named_index::NamedIndex::from_named(&named),
             named,
             graph_prefix_index: std::sync::Mutex::new(None),
             // Not writable yet: the log is attached below, after the replay.
@@ -2661,7 +2698,7 @@ impl Graph {
                 let idx = if insert {
                     Some(self.ensure_named(&name)?)
                 } else {
-                    self.named.iter().position(|(n, _)| *n == name)
+                    self.named_graph_index(&name)
                 };
                 if let Some(i) = idx {
                     if insert {
@@ -3544,9 +3581,10 @@ impl Graph {
     }
 
     /// A rough estimate of the graph's in-memory footprint in bytes (dictionary +
-    /// the six permutation indexes), for benchmarking.
+    /// the six permutation indexes and the exact named-graph index), for benchmarking.
     pub fn heap_bytes(&self) -> usize {
         self.dict.heap_bytes() + self.store.heap_bytes() + self.numerics.heap_bytes() + self.temporals.heap_bytes()
+            + self.named_index.heap_bytes()
             + self.exact_temporals.get().map_or(0, |cells| {
                 cells.capacity() * (std::mem::size_of::<Id>() + std::mem::size_of::<temporal::ExactCacheCell>())
             })
@@ -3680,10 +3718,21 @@ impl Graph {
     /// without a write-ahead log, sharing storage and any mapping locks with the base.
     /// Do not replace a complete dataset with this partial view.
     pub fn fork_scoped(&self, names: &[Term]) -> Graph {
-        self.fork_with_named(self.named.iter().filter(|(name, _)| names.contains(name)))
+        let mut selected: Vec<usize> = names.iter()
+            .filter_map(|name| self.named_index.positions(&self.named, name))
+            .flat_map(|p| std::iter::once(p.first).chain(p.duplicates.iter().copied()))
+            .collect();
+        selected.sort_unstable();
+        selected.dedup();
+        self.fork_with_named(selected.into_iter().map(|i| &self.named[i]))
     }
 
     fn fork_with_named<'a>(&self, named: impl Iterator<Item = &'a (Term, Graph)>) -> Graph {
+        let named: Vec<_> = named.map(|(name, g)| {
+            #[cfg(test)]
+            scoped_fork_cost::NAMED_FORKS.with(|count| count.set(count.get() + 1));
+            (name.clone(), g.fork())
+        }).collect();
         Graph {
             dict: self.dict.fork(),
             store: self.store.fork(),
@@ -3695,11 +3744,8 @@ impl Graph {
                 self.high_precision_decimal.load(std::sync::atomic::Ordering::Relaxed),
             ),
             float_literal: std::sync::atomic::AtomicU8::new(0),
-            named: named.map(|(name, g)| {
-                #[cfg(test)]
-                scoped_fork_cost::NAMED_FORKS.with(|count| count.set(count.get() + 1));
-                (name.clone(), g.fork())
-            }).collect(),
+            named_index: named_index::NamedIndex::from_named(&named),
+            named,
             // A fork is a fresh logical copy; rebuild the prefix index lazily on first use.
             graph_prefix_index: std::sync::Mutex::new(None),
             #[cfg(feature = "mmap")]
@@ -4154,7 +4200,7 @@ impl Graph {
         let tree = std::sync::Arc::clone(&self.tree);
         #[cfg(feature = "mmap")]
         let _permit = tree.write_permit();
-        match self.named.iter().position(|(n, _)| n == name) {
+        match self.named_graph_index(name) {
             Some(i) => {
                 self.refuse_while_txn_poisoned()?;
                 self.named[i].1.clear_default_durable()?;
@@ -4172,7 +4218,7 @@ impl Graph {
     /// Writable opens clean undeclared residue after validating the complete declared layout.
     /// Returns false when no attached graph matches. A stale handle is detached from memory only.
     pub fn drop_named_durable(&mut self, name: &Term) -> Result<bool, String> {
-        let Some(idx) = self.named.iter().position(|(n, _)| n == name) else {
+        let Some(idx) = self.named_graph_index(name) else {
             return Ok(false);
         };
         // Hold the reentrant tree permit through validation, logging and materialization.
@@ -4183,7 +4229,6 @@ impl Graph {
         // Refused while this graph, or any named graph under it, refuses writes (a frozen named
         // graph would be re-saved from its view) or keeps a failed journal commit for the reopen.
         self.refuse_while_txn_poisoned()?;
-        self.named_changed();
         // Directory-backed parent: durably remove the sub-dir + manifest entry. For an in-memory
         // parent (or a non-mmap build) fall through to the plain in-memory entry removal below.
         #[cfg(feature = "mmap")]
@@ -4192,7 +4237,7 @@ impl Graph {
         if let Some(dir) = self.wal.dir() {
             return self.drop_named_durable_dir(idx, &dir);
         }
-        self.named.remove(idx);
+        self.remove_named_at(idx);
         Ok(true)
     }
 
@@ -4213,7 +4258,7 @@ impl Graph {
             .dir()
             .is_some_and(|path| child.tree.replaced_since(&path, child.generation).is_some())
         {
-            self.named.remove(idx);
+            self.remove_named_at(idx);
             return Ok(true);
         }
         if self.tree.materializing() {
@@ -4221,7 +4266,7 @@ impl Graph {
             let named_dir = dir.join(NAMED_SUBDIR);
             let slot = child.named_slot_in(&named_dir).ok_or("named graph has no durable slot")?;
             self.tree.defer_drop(dir, slot, self.next_slot).map_err(|e| e.to_string())?;
-            self.named.remove(idx);
+            self.remove_named_at(idx);
             return Ok(true);
         }
         self.tree.checkpoint().map_err(|e| e.to_string())?;
@@ -4236,7 +4281,7 @@ impl Graph {
             })?),
         };
         let entries = self.named_slot_entries_skipping(&named_dir, Some(idx))?;
-        let (_, removed) = self.named.remove(idx);
+        let (_, removed) = self.remove_named_at(idx);
         drop(removed);
         let persisted = self.commit_named_drop(dir, slot, &entries);
         self.freeze_on_err(persisted, "dropping a named graph")?;
@@ -4293,7 +4338,6 @@ impl Graph {
             self.begin_durable_write()?;
         }
         self.refuse_while_txn_poisoned()?;
-        self.named_changed();
         #[cfg(feature = "mmap")]
         if self.tree.materializing() && self.wal.is_durable() {
             let names: Vec<_> = self.named.iter().map(|(n, _)| n.clone()).collect();
@@ -4303,6 +4347,7 @@ impl Graph {
         #[cfg(feature = "mmap")]
         self.tree.checkpoint().map_err(|e| e.to_string())?;
         self.named.clear();
+        self.named_changed();
         #[cfg(feature = "mmap")]
         if let Some(dir) = self.wal.dir() {
             let persisted = self.commit_drop_all_named(&dir);
@@ -4374,7 +4419,7 @@ impl Graph {
             match slot {
                 None => self.apply_delta(&ins, &del)?,
                 Some(name) => {
-                    if let Some(i) = self.named.iter().position(|(n, _)| *n == name) {
+                    if let Some(i) = self.named_graph_index(&name) {
                         self.named[i].1.apply_delta(&ins, &del)?;
                     } else if !ins.is_empty() {
                         let i = self.ensure_named(&name)?;
@@ -4515,11 +4560,10 @@ impl Graph {
     }
 
     pub fn ensure_named(&mut self, name: &Term) -> Result<usize, String> {
-        if let Some(i) = self.named.iter().position(|(n, _)| n == name) {
+        if let Some(i) = self.named_graph_index(name) {
             return Ok(i);
         }
         self.refuse_if_detached()?;
-        self.named_changed();
         #[cfg(feature = "mmap")]
         let tree = std::sync::Arc::clone(&self.tree);
         #[cfg(feature = "mmap")]
@@ -4542,7 +4586,7 @@ impl Graph {
                 g.lock = self.lock.clone();
                 let created = self.tree.defer_create(&dir, slot, name, self.next_slot);
                 self.freeze_on_err(created.map_err(|e| e.to_string()), "creating a named graph")?;
-                self.named.push((name.clone(), g));
+                self.push_named(name.clone(), g);
                 return Ok(self.named.len() - 1);
             }
             self.tree.checkpoint().map_err(|e| e.to_string())?;
@@ -4556,10 +4600,10 @@ impl Graph {
             let mut g = self.freeze_on_err(created, "creating a named graph")?;
             g.tree = std::sync::Arc::clone(&self.tree);
             g.share_tree();
-            self.named.push((name.clone(), g));
+            self.push_named(name.clone(), g);
             return Ok(self.named.len() - 1);
         }
-        self.named.push((name.clone(), Graph::from_parts(Dict::new(), Vec::new())));
+        self.push_named(name.clone(), Graph::from_parts(Dict::new(), Vec::new()));
         Ok(self.named.len() - 1)
     }
 
@@ -5033,17 +5077,18 @@ impl Graph {
                 TxnOp::Create(name) => (true, Some(name), None),
                 TxnOp::Drop(name) => {
                     self.named.retain(|(n, _)| *n != name);
+                    self.named_changed();
                     continue;
                 }
             };
             let target = match slot {
                 None => &mut *self,
-                Some(name) => match self.named.iter().position(|(n, _)| *n == name) {
+                Some(name) => match self.named_graph_index(&name) {
                     Some(i) => &mut self.named[i].1,
                     None if insert => {
                         let mut sub = Graph::new();
                         sub.detached = self.detached.clone();
-                        self.named.push((name, sub));
+                        self.push_named(name, sub);
                         &mut self.named.last_mut().expect("just pushed").1
                     }
                     None => continue,
@@ -5282,7 +5327,7 @@ impl Graph {
         // directory/WAL — the parent's `save` writes the whole `named/` sub-tree afresh).
         for (name, sub) in &self.named {
             let sub_fresh = sub.reintern_live()?;
-            fresh.named.push((name.clone(), sub_fresh));
+            fresh.push_named(name.clone(), sub_fresh);
         }
         Ok(fresh)
     }
@@ -15077,7 +15122,7 @@ mod tests {
         let mut g = Graph::load_str("", "ntriples").unwrap();
         assert!(!g.is_directory_backed());
         assert!(Graph::open(&dir).unwrap().is_directory_backed());
-        g.named.push((named("child"), Graph::open(&dir).unwrap()));
+        g.push_named(named("child"), Graph::open(&dir).unwrap());
         assert!(g.is_directory_backed(), "a durable named graph makes the dataset durable");
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -15559,7 +15604,7 @@ mod tests {
         .save(&dir)
         .unwrap();
         let mut parent = Graph::open(&dir).unwrap();
-        let (_, mut child) = parent.named.pop().expect("one named graph");
+        let (_, mut child) = parent.pop_named().expect("one named graph");
         let t = [term_iri(8, "s"), term_iri(8, "p"), term_iri(8, "o")];
         child
             .apply_delta(std::slice::from_ref(&t), &[])
@@ -15598,7 +15643,7 @@ mod tests {
         // Small files are read into owned memory and closed at open; force the mapped
         // backing so the open files this scenario depends on stay open on Windows.
         let mut parent = backing::with_threshold(0, || Graph::open(&dir)).unwrap();
-        let (_, mut child) = parent.named.pop().expect("one named graph");
+        let (_, mut child) = parent.pop_named().expect("one named graph");
         let t = [term_iri(8, "s"), term_iri(8, "p"), term_iri(8, "o")];
         child
             .apply_delta(std::slice::from_ref(&t), &[])
@@ -15921,8 +15966,7 @@ mod tests {
             .unwrap();
         let mut g = Graph::open(&dir).unwrap();
         // Construct an in-memory attachment and an invalid named container.
-        g.named
-            .push((named("mem"), Graph::from_parts(Dict::new(), Vec::new())));
+        g.push_named(named("mem"), Graph::from_parts(Dict::new(), Vec::new()));
         std::fs::write(dir.join(NAMED_SUBDIR), b"not a directory").unwrap();
         let e = g
             .drop_all_named_durable()
@@ -16032,7 +16076,7 @@ mod tests {
         .save(&dir)
         .unwrap();
         let mut parent = Graph::open(&dir).unwrap();
-        let (_, mut child) = parent.named.pop().expect("one named graph");
+        let (_, mut child) = parent.pop_named().expect("one named graph");
         let tree = std::sync::Arc::clone(&parent.tree);
         // Hold the permit, then start the writer: it blocks before its first check.
         let permit = tree.write_permit();
@@ -16514,10 +16558,10 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
         let mut g = Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
             .unwrap();
-        g.named.push((
+        g.push_named(
             Term::Literal(oxrdf::Literal::new_simple_literal("not a graph name")),
             Graph::load_str("<http://ex/a> <http://ex/b> <http://ex/c> .", "ntriples").unwrap(),
-        ));
+        );
         let e = g
             .save(&dir)
             .expect_err("a literal graph name must be refused");
@@ -18149,7 +18193,7 @@ mod tests {
         let dir = txn_tmp_dir("detached-sibling-drop");
         save_named_store(&dir, &["g0", "g1", "g2"]);
         let mut root = Graph::open(&dir).unwrap();
-        let (name, mut detached) = root.named.pop().unwrap();
+        let (name, mut detached) = root.pop_named().unwrap();
         root.drop_named_durable(&named("g0")).unwrap();
         detached.apply_delta(&[one_triple()], &[]).unwrap();
         drop(detached);
@@ -18170,7 +18214,7 @@ mod tests {
         let dir = txn_tmp_dir("detached-last-drop");
         save_named_store(&dir, &["g0", "g1"]);
         let mut root = Graph::open(&dir).unwrap();
-        let (name, mut detached) = root.named.pop().unwrap();
+        let (name, mut detached) = root.pop_named().unwrap();
         root.drop_named_durable(&named("g0")).unwrap();
         assert_eq!(declared_manifest_slots(&dir), vec![1]);
         assert!(dir.join(NAMED_SUBDIR).join("1").is_dir());
@@ -18193,7 +18237,7 @@ mod tests {
         let dir = txn_tmp_dir("detached-create");
         save_named_store(&dir, &["g0", "g1"]);
         let mut root = Graph::open(&dir).unwrap();
-        let (name, mut detached) = root.named.pop().unwrap();
+        let (name, mut detached) = root.pop_named().unwrap();
         root.ensure_named(&named("fresh")).unwrap();
         detached.apply_delta(&[one_triple()], &[]).unwrap();
         drop(detached);
@@ -18222,8 +18266,8 @@ mod tests {
         {
             let mut root = Graph::open(&dir).unwrap();
             let mut foreign = Graph::open(&other).unwrap();
-            let (_, foreign_child) = foreign.named.pop().expect("the other store's named graph");
-            root.named.push((named("foreign"), foreign_child));
+            let (_, foreign_child) = foreign.pop_named().expect("the other store's named graph");
+            root.push_named(named("foreign"), foreign_child);
             let err = root
                 .drop_named_durable(&named("foreign"))
                 .expect_err("a graph that is not in a slot of this store cannot be dropped by it");
@@ -18291,7 +18335,7 @@ mod tests {
                 None,
                 "a directory reached through `..` is not a slot of this store"
             );
-            root.named.push((named("escaped"), child));
+            root.push_named(named("escaped"), child);
             assert!(root
                 .drop_named_durable(&named("escaped"))
                 .expect_err("refused")
@@ -18316,7 +18360,7 @@ mod tests {
         save_named_store(&dir, &["g0"]);
         let mut root = Graph::open(&dir).unwrap();
         assert!(root.set_named(named("ram"), Graph::default()).is_err());
-        root.named.push((named("ram"), Graph::default()));
+        root.push_named(named("ram"), Graph::default());
         assert!(root.drop_named_durable(&named("ram")).is_err());
         assert_eq!(declared_manifest_slots(&dir), vec![0]);
         assert!(dir.join(NAMED_SUBDIR).join("0").is_dir());
@@ -18335,7 +18379,7 @@ mod tests {
         {
             let mut root = Graph::open(&dir).unwrap();
             let mut foreign = Graph::open(&other).unwrap();
-            let (_, foreign_child) = foreign.named.pop().expect("the other store's slot 1");
+            let (_, foreign_child) = foreign.pop_named().expect("the other store's slot 1");
             assert_eq!(
                 foreign_child.named_slot_in(&other.join(NAMED_SUBDIR)),
                 Some(1),
@@ -18346,7 +18390,7 @@ mod tests {
                 None,
                 "and no slot at all of this one"
             );
-            root.named.push((named("foreign"), foreign_child));
+            root.push_named(named("foreign"), foreign_child);
             let err = root
                 .ensure_named(&named("fresh"))
                 .expect_err("the set cannot be recorded in this store's manifest");
@@ -18508,7 +18552,7 @@ mod tests {
                     .unwrap();
             alias.tree = std::sync::Arc::clone(&root.tree);
             alias.generation = root.tree.generation();
-            root.named.push((named("alias"), alias));
+            root.push_named(named("alias"), alias);
             let err = root
                 .ensure_named(&named("fresh"))
                 .expect_err("a set that names one slot twice is not published");

@@ -1,8 +1,7 @@
 //! sq-oy1f.40 — shared machinery for the W3C JSON-LD 1.1 conformance
 //! lane submodules (`to_rdf`, `from_rdf`, `expand`, `compact`, `flatten`,
 //! `frame`). Split out of the former monolithic `tests/jsonld_suite.rs` — the
-//! manifest walker, the `Score` scoreboard, and the not-implemented bucket
-//! reporting live here; each per-lane runner lives in its own sibling submodule.
+//! manifest walker, the `Score` scoreboard, and EARL reporting live here; each per-lane runner lives in its own sibling submodule.
 //! Pure refactor: the CI invocation, the compiled test binary, and the pass
 //! counts are byte-identical to before the split.
 //!
@@ -19,7 +18,6 @@
 use oxrdf::Dataset;
 use serde_json::Value;
 use sparq_core::Graph;
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 // sq-hmd7l.15 — the document-level comparator, the AST bridge, and the
@@ -108,14 +106,16 @@ impl Score {
 
 /// One parsed manifest entry's salient fields.
 pub struct Entry {
+    pub types: Vec<String>,
+    pub options: Value,
     pub id: String,
     pub is_negative: bool,
     pub input: String,
     pub expect: Option<String>,
     pub base_override: Option<String>,
     /// An optional-feature requirement (`GeneralizedRdf` / `I18nDatatype` /
-    /// `CompoundLiteral`); sparq does not opt into these, so such entries are
-    /// SKIPPED (not failed) — they are out of the current gated surface.
+    /// `CompoundLiteral`). Supported requirements execute; unexecuted applicable
+    /// entries are failures in EARL.
     pub requires: Option<String>,
     /// sq-3uos5 — the `compact` manifest's top-level `context`
     /// member: a path (relative to the suite root) to the sibling
@@ -236,6 +236,8 @@ pub fn read_manifest(root: &Path, cat: &str) -> Result<Vec<Entry>, String> {
             .and_then(Value::as_bool);
         let ordered = opt.and_then(|o| o.get("ordered")).and_then(Value::as_bool);
         out.push(Entry {
+            types: types.iter().map(|s| s.to_string()).collect(),
+            options: opt.cloned().unwrap_or(Value::Null),
             id,
             is_negative,
             input,
@@ -286,33 +288,6 @@ pub fn parse_jsonld_dataset(text: &str, base: &str) -> Result<Dataset, String> {
     let _accepted = Graph::load_str_with_base(text, "jsonld", base)
         .or_else(|_| Graph::load_dataset(text, "jsonld"))?;
     jsonld_to_canonical_dataset(text, base)
-}
-
-/// The known-gap categories: present in the W3C suite but NOT a sparq-shipped
-/// gateable surface yet. Reported as not-implemented (never failed). The size
-/// is read from each manifest so the scoreboard shows the real backlog and
-/// shrinks honestly as categories light up.
-///
-/// sq-3uos5 — `compact` GRADUATED out of this bucket: it is now a
-/// gated category (`compact::run_compact`, `COMPACT_FLOOR`). sq-oy1f.19 —
-/// `frame` likewise GRADUATED. sq-oy1f — `expand` + `flatten` now
-/// GRADUATED too: each is a gated category (`flatten::run_expand_or_flatten` /
-/// `expand::run_expand_native`, `EXPAND_FLOOR` / `FLATTEN_FLOOR`).
-pub const NOT_IMPLEMENTED_CATS: &[(&str, &str)] = &[
-    ("html", "HTML script extraction not implemented"),
-    (
-        "remote-doc",
-        "remote @context loader not wired (oxjsonld needs a LoadDocumentCallback)",
-    ),
-];
-
-pub fn not_implemented_counts(root: &Path) -> BTreeMap<&'static str, usize> {
-    let mut m = BTreeMap::new();
-    for (cat, _why) in NOT_IMPLEMENTED_CATS {
-        let n = read_manifest(root, cat).map(|e| e.len()).unwrap_or(0);
-        m.insert(*cat, n);
-    }
-    m
 }
 
 // sq-hmd7l.15 — the `json_ld_equal` comparator unit tests moved to the
@@ -465,7 +440,7 @@ fn reports_every_jsonld_lane_even_when_ratchets_fail() {
             "https://w3c.github.io/json-ld-api/tests/"
         };
         for id in ["ok", "missing", "skip"] {
-            let passed = id == "ok" && !["html", "remote-doc"].contains(&cat);
+            let passed = id == "ok";
             expected.push((format!("{base}{cat}-manifest#{id}"), passed));
         }
     }
