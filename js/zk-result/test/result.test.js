@@ -2,7 +2,7 @@ import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { prove, verify, issue } from '../index.js';
-import { fixture } from './fixtures.js';
+import { fixture } from './helpers/fixtures.js';
 
 let one, two;
 before(async () => {

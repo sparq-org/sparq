@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { issue, testIssuerKeygen } from '../index.js';
+import { issue, testIssuerKeygen } from '../../index.js';
 
 export const query = `PREFIX ex: <https://example.org/>
 SELECT DISTINCT ?p ?age WHERE {
