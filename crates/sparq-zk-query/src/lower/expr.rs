@@ -359,9 +359,6 @@ pub fn from_spargebra(
             let _ = args;
             Err(refuse(&name, "outside the first expression group"))
         }
-        other => Err(refuse(
-            &other.to_string(),
-            "outside the first expression group",
-        )),
+        E::Exists(_) => Err(refuse("EXISTS", "outside the first expression group")),
     }
 }

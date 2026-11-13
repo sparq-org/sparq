@@ -101,6 +101,12 @@ fn lowering_types_parameters_and_named_refusals() {
             .function
             .contains("STRLEN")
     );
+    assert_eq!(
+        from_spargebra(&parsed("SELECT (EXISTS { ?s ?p ?o } AS ?v) {}"), &slots())
+            .unwrap_err()
+            .function,
+        "EXISTS"
+    );
 }
 
 fn engine(query: &str, data: &str) -> Vec<Vec<Option<Term>>> {
@@ -160,6 +166,8 @@ fn generated_expressions_against_engine() {
         "BOUND(?missing)",
         "2 IN ()",
         "2 NOT IN ()",
+        "?missing IN ()",
+        "?missing NOT IN ()",
         "2 IN (1/0,2)",
         "2 IN (3,1/0)",
         "2 NOT IN (1/0,2)",
