@@ -1,6 +1,6 @@
 // SPARQL 1.1 §17.2.2 distinguishes numeric EBV from arithmetic capacity.
 use sparq_core::Graph;
-use sparq_engine::{QueryBudget, ask_with_budget, query_with_budget};
+use sparq_engine::{ask_with_budget, query_with_budget, QueryBudget};
 
 const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
 
@@ -167,12 +167,12 @@ fn arithmetic_capacity_stays_sticky_through_ebv_and_error_handlers() {
 }
 
 #[test]
-fn interpreted_aggregate_arguments_enforce_arithmetic_and_comparison_capacity() {
+fn interpreted_aggregate_arguments_separate_arithmetic_and_comparison_capacity() {
     for (value, expression) in [
         ("1".to_owned(), "SUM(?n + 9223372036854775807)"),
         (
             literal(&format!("0.{}1", "0".repeat(324)), "decimal"),
-            "MAX(?n < 0)",
+            "SUM(?n + 1)",
         ),
     ] {
         let graph = Graph::load_str(
@@ -184,6 +184,20 @@ fn interpreted_aggregate_arguments_enforce_arithmetic_and_comparison_capacity() 
         let error = query_with_budget(&graph, &query, &budget(true)).unwrap_err();
         assert!(error.contains("numeric-representation"), "{query}: {error}");
     }
+    let tiny = literal(&format!("0.{}1", "0".repeat(324)), "decimal");
+    let graph = Graph::load_str(
+        &format!("<http://ex/s> <http://ex/p> {tiny} ."),
+        "n-triples",
+    )
+    .unwrap();
+    assert_eq!(
+        rows(
+            &graph,
+            "SELECT (MAX(?n<0) AS ?lt) (MIN(?n>0) AS ?gt) (MAX(?n=0) AS ?eq) {?s ?p ?n}",
+            true
+        ),
+        vec![vec![boolean(false), boolean(true), boolean(false)]]
+    );
     let graph = Graph::load_str("", "n-triples").unwrap();
     assert_eq!(
         rows(

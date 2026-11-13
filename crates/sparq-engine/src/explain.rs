@@ -69,7 +69,7 @@ pub fn explain_analyze(graph: &Graph, sparql: &str) -> Result<String, String> {
 /// [`explain_analyze`] under a cooperative [`QueryBudget`] (deadline / max rows).
 pub fn explain_analyze_with_budget(graph: &Graph, sparql: &str, budget: &QueryBudget) -> Result<String, String> {
     let prepared = crate::PreparedQuery::parse(sparql)?;
-    let q = prepared.query();
+    let q = prepared.query_for_budget(budget);
     let active = crate::active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = crate::view_scope(&active);

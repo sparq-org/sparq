@@ -36,6 +36,7 @@ use super::NodeExpr;
 use crate::model::{sh, ShapesModel};
 use crate::view::{dedup, GraphView};
 use oxrdf::{Literal, NamedNode, Term};
+use sparq_substrate::numeric::{cmp_plain_decimal, f64_exact_decimal, ArithOp, Dec, Num};
 
 /// `http://www.w3.org/ns/shacl-node-expr#` — the SHACL 1.2 node-expression
 /// vocabulary the W3C suite uses for the built-in operators.
@@ -389,7 +390,7 @@ impl Func {
             }
             Op::Sum(arg) => {
                 let vals = arg.eval(graph, view, model, focus, scope);
-                vec![sum_literal(&vals)]
+                sum_literal(&vals).into_iter().collect()
             }
             Op::MinMax { arg, max } => {
                 let vals = arg.eval(graph, view, model, focus, scope);
@@ -603,68 +604,16 @@ fn parse_bool(v: &str) -> Option<bool> {
     }
 }
 
-/// Numeric value of a literal as `f64`, if it is an XSD numeric type.
-fn numeric(t: &Term) -> Option<f64> {
-    match t {
-        Term::Literal(l) if is_numeric(l.datatype().as_str()) => l.value().trim().parse().ok(),
-        _ => None,
-    }
-}
-
-fn is_numeric(dt: &str) -> bool {
-    let Some(local) = dt.strip_prefix(XSD) else {
-        return false;
-    };
-    matches!(
-        local,
-        "integer"
-            | "decimal"
-            | "double"
-            | "float"
-            | "long"
-            | "int"
-            | "short"
-            | "byte"
-            | "nonNegativeInteger"
-            | "positiveInteger"
-            | "nonPositiveInteger"
-            | "negativeInteger"
-            | "unsignedLong"
-            | "unsignedInt"
-            | "unsignedShort"
-            | "unsignedByte"
-    )
-}
-
-/// True iff a numeric literal is integer-valued (no fractional part) — so a sum of
-/// integers stays `xsd:integer` rather than `xsd:decimal`.
-fn is_integer_typed(t: &Term) -> bool {
-    matches!(t, Term::Literal(l) if matches!(
-        l.datatype().as_str().strip_prefix(XSD),
-        Some("integer" | "long" | "int" | "short" | "byte"
-            | "nonNegativeInteger" | "positiveInteger" | "nonPositiveInteger"
-            | "negativeInteger" | "unsignedLong" | "unsignedInt"
-            | "unsignedShort" | "unsignedByte")
-    ))
+/// Whether a term is a well-formed XSD numeric, independent of arithmetic capacity.
+fn is_numeric(t: &Term) -> bool {
+    matches!(t, Term::Literal(l) if l.language().is_none()
+        && sparq_core::numeric_literal_valid(l.value(), l.datatype().as_str()))
 }
 
 fn int_literal(n: i128) -> Term {
     Term::Literal(Literal::new_typed_literal(
         n.to_string(),
         NamedNode::new_unchecked(format!("{XSD}integer")),
-    ))
-}
-
-fn decimal_literal(v: f64) -> Term {
-    // Render without an exponent and ALWAYS with a fractional part, so the lexical
-    // form is a canonical xsd:decimal: a whole-valued decimal must read `42.0`, not
-    // `42` (the W3C node-expr `sum-totalRevenue` sums decimals to a whole number
-    // and expects `42.0`^^xsd:decimal). (sq-mue75)
-    let s = format!("{v}");
-    let s = if s.contains('.') { s } else { format!("{s}.0") };
-    Term::Literal(Literal::new_typed_literal(
-        s,
-        NamedNode::new_unchecked(format!("{XSD}decimal")),
     ))
 }
 
@@ -675,44 +624,51 @@ fn bool_literal(b: bool) -> Term {
     ))
 }
 
-/// Sum of the numeric members; `xsd:integer` if every member is integer-typed,
-/// else `xsd:decimal`. Non-numeric members are ignored (empty ⇒ 0).
-fn sum_literal(vals: &[Term]) -> Term {
-    let mut total = 0.0_f64;
+/// Sum numeric members with exact decimal addition and XPath floating promotion.
+/// Non-numeric members are ignored (empty ⇒ integer zero). A valid operand beyond
+/// the arithmetic tower produces no result, like an engine arithmetic type error.
+fn sum_literal(vals: &[Term]) -> Option<Term> {
+    let mut total = Num::Dec(Dec { mant: 0, scale: 0 });
     let mut all_int = true;
-    for v in vals {
-        if let Some(n) = numeric(v) {
-            total += n;
-            all_int &= is_integer_typed(v);
+    for v in vals.iter().filter(|v| is_numeric(v)) {
+        let Term::Literal(l) = v else { unreachable!() };
+        all_int &= sparq_core::is_integer_datatype(l.datatype().as_str());
+        total = total.binop(Num::of_literal(l)?, ArithOp::Add)?;
+    }
+    if all_int {
+        if let Some(d) = total.to_dec() {
+            return Some(int_literal(d.mant));
         }
     }
-    if all_int && total.fract() == 0.0 {
-        int_literal(total as i128)
-    } else {
-        decimal_literal(total)
-    }
+    Some(Term::Literal(Literal::new_typed_literal(
+        total.canonical_lexical(),
+        total.datatype(),
+    )))
 }
 
 /// The numerically least (or greatest) member; `None` if no numeric member.
 fn min_max(vals: &[Term], max: bool) -> Option<Term> {
-    let mut best: Option<(f64, Term)> = None;
-    for v in vals {
-        let Some(n) = numeric(v) else { continue };
-        let take = match &best {
+    let mut best: Option<&Term> = None;
+    // NaN remains unordered for extrema; a tie retains the first member.
+    let nan = |t: &Term| matches!(t, Term::Literal(l) if l.value() == "NaN");
+    for v in vals.iter().filter(|v| is_numeric(v)) {
+        let take = match best {
             None => true,
-            Some((b, _)) => {
+            Some(b) if nan(v) || nan(b) => false,
+            Some(b) => {
+                let order = cmp_term(v, b);
                 if max {
-                    n > *b
+                    order.is_gt()
                 } else {
-                    n < *b
+                    order.is_lt()
                 }
             }
         };
         if take {
-            best = Some((n, v.clone()));
+            best = Some(v);
         }
     }
-    best.map(|(_, t)| t)
+    best.cloned()
 }
 
 /// Comparison of two sort keys (each a node set) for `orderBy`: compares the least
@@ -738,10 +694,43 @@ fn least(set: &[Term]) -> Option<&Term> {
 /// lexical form (stable, total order so the sort is deterministic).
 fn cmp_term(a: &Term, b: &Term) -> std::cmp::Ordering {
     use std::cmp::Ordering;
-    if let (Some(na), Some(nb)) = (numeric(a), numeric(b)) {
-        return na.partial_cmp(&nb).unwrap_or(Ordering::Equal);
+    if is_numeric(a) && is_numeric(b) {
+        let (Term::Literal(la), Term::Literal(lb)) = (a, b) else {
+            unreachable!()
+        };
+        let (na, nb) = (Num::of_literal(la), Num::of_literal(lb));
+        // The sort order refines floating ties by exact rational value, just as
+        // engine ORDER BY does. Promoted relational equality would tie two distinct
+        // exact values to the same float and make the sort comparator intransitive.
+        match (na, nb) {
+            (Some(x), Some(y)) if x.to_dec().is_none() || y.to_dec().is_none() => {
+                return x.cmp_total(y);
+            }
+            (None, Some(y)) if y.to_dec().is_none() => {
+                return cmp_exact_float(la.value(), y.f64());
+            }
+            (Some(x), None) if x.to_dec().is_none() => {
+                return cmp_exact_float(lb.value(), x.f64()).reverse();
+            }
+            _ => return crate::eval::cmp_terms(a, b).unwrap_or(Ordering::Equal),
+        }
     }
     lexical(a).cmp(&lexical(b))
+}
+
+/// A valid any-length exact lexical against a floating sort key. NaN sorts first;
+/// infinities bound every finite exact value, even when its floating image overflows.
+fn cmp_exact_float(exact: &str, float: f64) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    if float.is_nan() || float == f64::NEG_INFINITY {
+        return Ordering::Greater;
+    }
+    if float == f64::INFINITY {
+        return Ordering::Less;
+    }
+    f64_exact_decimal(float)
+        .and_then(|value| cmp_plain_decimal(exact, &value))
+        .unwrap_or(Ordering::Equal)
 }
 
 fn lexical(t: &Term) -> String {

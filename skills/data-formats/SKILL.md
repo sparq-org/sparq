@@ -35,6 +35,13 @@ whitespace. This includes the
 range of `xsd:byte` and unsigned integer types. It does not impose the evaluator's
 finite mantissa capacity. `numeric_cache_value` can return `None` for a valid large
 number; a missing cache value is not a datatype-validity result.
+`Graph::has_high_precision_decimal()` also flags uncached valid integer/decimal
+literals, so numeric FILTER pushdown defers to exact evaluation rather than
+excluding them. Cached high-precision decimals still set this graph-wide guard;
+ill-typed literals and floating NaN do not. Forks inherit the gate's memo and its
+scanned dictionary watermark. Appending terms to a graph proved safe checks only
+the new IDs; an unsafe verdict remains sticky because dictionary terms linger
+after deletion and compaction.
 
 `temporal::Timeline::parse_datetime`, `parse_date`, `parse_civil_date` and
 `parse_tz` reject raw boundary whitespace, malformed calendar/timezone values and timestamps outside their
@@ -425,6 +432,9 @@ let reader = flate2::read::MultiGzDecoder::new(std::fs::File::open("huge.nt.gz")
 sparq_core::Graph::build_external(reader, "ntriples", Path::new("/data/idx"), 16_000_000)?;
 let g = sparq_core::Graph::open(Path::new("/data/idx"))?;   // query with indexes memory-mapped
 ```
+
+On open, small persisted dictionary, cache and permutation files use owned memory;
+larger files remain mapped. This read choice leaves the stored format unchanged.
 
 `g.is_directory_backed()` is `true` for a graph opened this way, or one holding a named graph
 opened this way (updates are written through to the directory), and `false` for a wholly

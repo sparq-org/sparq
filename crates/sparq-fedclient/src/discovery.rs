@@ -1488,6 +1488,7 @@ _:c1 <http://rdfs.org/ns/void#entities> "100"^^<http://www.w3.org/2001/XMLSchema
         let timeout = ureq::unversioned::transport::NextTimeout {
             after: ureq::unversioned::transport::time::Duration::NotHappening,
             reason: ureq::Timeout::Global,
+            ..Default::default()
         };
         r.resolve(&uri, &config, timeout)
     }

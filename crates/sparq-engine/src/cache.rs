@@ -278,7 +278,7 @@ impl ResultCache {
         let semantics = query.resolve_ebv_semantics(budget.ebv_semantics)?;
         let mut resolved = budget.clone();
         resolved.ebv_semantics = Some(semantics);
-        self.get_or_eval(graph, query.query(), version, &resolved)
+        self.get_or_eval(graph, query.query_for_budget(&resolved), version, &resolved)
     }
 
     /// Drops every stored entry (keeps the configured capacity). A coarse alternative

@@ -124,6 +124,7 @@ fn store(acp: bool) -> PodStore {
     s
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn tmp(tag: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("sparq_solid_entry_{tag}_{}", std::process::id()));
     std::fs::remove_dir_all(&dir).ok();
@@ -142,6 +143,7 @@ fn graph_len(store: &PodStore, name: &str) -> usize {
 /// Review finding: a successful update replaced a directory-backed graph with an in-memory
 /// fork, so what it wrote was lost at the next open. Every entry point commits to the store.
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn every_entry_point_persists_what_it_writes() {
     for (i, (name, acp, entry)) in ENTRY_POINTS.iter().enumerate() {
         let dir = tmp(&format!("persist{i}"));
@@ -219,6 +221,7 @@ fn every_wac_entry_point_rebuilds_the_view_it_changes() {
 
 /// Rebuilding the authorization view preserves the root and every durable named slot.
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn authorization_materialization_uses_logged_named_slots() {
     for acp in [false, true] {
         let dir = tmp(if acp { "auth-acp" } else { "auth-wac" });
@@ -279,6 +282,7 @@ fn authorization_materialization_uses_logged_named_slots() {
 
 /// Slot-based ACL replacement returns a refusal on durable input without adding a view.
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn durable_acl_slot_replacement_returns_an_error() {
     let dir = tmp("acl-slot-refusal");
     Graph::load_dataset(&fixture(), "nquads")
