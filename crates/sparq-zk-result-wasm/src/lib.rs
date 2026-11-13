@@ -9,7 +9,9 @@ use sha2::{Digest, Sha256};
 use sparq_core::Graph;
 use sparq_zk::{
     commit::commit_graph_content,
-    field::{field_from_hash_bytes, field_from_hex_str_strict, field_to_hex},
+    field::{
+        field_from_hash_bytes, field_from_hex_str_strict, field_to_be_bytes_32, field_to_hex, Fr,
+    },
     sig::{self, SecretKey},
 };
 use sparq_zk_compose::{
@@ -54,6 +56,15 @@ struct StatusRef {
     index: u64,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TestIssueInput {
+    issuer: TestIssuer,
+    graph_n_quads: String,
+    status: StatusRef,
+    seed_hex: String,
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Credential {
@@ -96,14 +107,15 @@ fn nonce(s: &str) -> Result<VerifierNonce, String> {
         .map(VerifierNonce::from_field)
         .ok_or_else(|| "invalid nonce field".into())
 }
-fn test_issuer_key(seed: &str) -> Result<SecretKey, String> {
+fn test_seed(seed: &str) -> Result<u64, String> {
     let hex = seed.strip_prefix("0x").unwrap_or(seed);
     if hex.is_empty() || hex.len() > 16 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err("test issuer seed must be a hexadecimal u64".into());
     }
-    Ok(SecretKey::from_seed(
-        u64::from_str_radix(hex, 16).map_err(err)?,
-    ))
+    u64::from_str_radix(hex, 16).map_err(err)
+}
+fn test_issuer_key(seed: &str) -> Result<SecretKey, String> {
+    Ok(SecretKey::from_seed(test_seed(seed)?))
 }
 fn policy(s: &str) -> Result<ResultPolicy, String> {
     let p: Policy = parse(s)?;
@@ -187,6 +199,22 @@ pub fn issue(
     status_ref_json: &str,
 ) -> Result<String, String> {
     let issuer: Issuer = parse(issuer_json)?;
+    let (sk, pk) = issuer_key(issuer)?;
+    let status: StatusRef = parse(status_ref_json)?;
+    let graph = Graph::load_str(graph_n_quads, "nquads")?;
+    let mut entropy = [0u8; 32];
+    getrandom_latest::fill(&mut entropy).map_err(err)?;
+    issue_credential(
+        &sk,
+        pk,
+        graph_n_quads,
+        &graph,
+        status,
+        field_from_hash_bytes(&entropy),
+    )
+}
+
+fn issuer_key(issuer: Issuer) -> Result<(SecretKey, String), String> {
     let (sk, expected_pk, mismatch) = match issuer {
         Issuer::Production(issuer) => (
             SecretKey::from_hex(&issuer.secret_key_hex).ok_or("invalid issuer secret key")?,
@@ -203,12 +231,39 @@ pub fn issue(
     if pk != expected_pk {
         return Err(mismatch.into());
     }
-    let status: StatusRef = parse(status_ref_json)?;
-    let graph = Graph::load_str(graph_n_quads, "nquads")?;
-    let mut entropy = [0u8; 32];
-    getrandom_latest::fill(&mut entropy).map_err(err)?;
-    let salt = field_from_hash_bytes(&entropy);
-    let c = commit_graph_content(&graph, salt).map_err(err)?;
+    Ok((sk, pk))
+}
+
+// Exact UTF-8 graph bytes are length-prefixed; the key has fixed canonical width.
+fn test_salt(seed: u64, pk: &str, graph_n_quads: &str) -> Fr {
+    let mut hash = Sha256::new();
+    hash.update(b"sparq.zk-result.test-issue.v1\0");
+    hash.update(seed.to_be_bytes());
+    hash.update(pk.as_bytes());
+    hash.update((graph_n_quads.len() as u64).to_be_bytes());
+    hash.update(graph_n_quads.as_bytes());
+    field_from_hash_bytes(&hash.finalize().into())
+}
+
+/// Deterministic issuance for tests only. Production secret-key objects are refused.
+#[wasm_bindgen(js_name = testIssue)]
+pub fn test_issue(input_json: &str) -> Result<String, String> {
+    let input: TestIssueInput = parse(input_json)?;
+    let (sk, pk) = issuer_key(Issuer::Test(input.issuer))?;
+    let salt = test_salt(test_seed(&input.seed_hex)?, &pk, &input.graph_n_quads);
+    let graph = Graph::load_str(&input.graph_n_quads, "nquads")?;
+    issue_credential(&sk, pk, &input.graph_n_quads, &graph, input.status, salt)
+}
+
+fn issue_credential(
+    sk: &SecretKey,
+    pk: String,
+    graph_n_quads: &str,
+    graph: &Graph,
+    status: StatusRef,
+    salt: Fr,
+) -> Result<String, String> {
+    let c = commit_graph_content(graph, salt).map_err(err)?;
     let status_digest = sig::status_ref_digest(
         &sig::status_list_id_to_field(&status.status_list),
         status.index,
@@ -301,7 +356,8 @@ pub fn prepare(
     Ok(json!({"member":prepared.member(),"witnessInputs":noir_numbers(serde_json::to_value(prepared.witness_inputs()).map_err(err)?),"presentationSkeleton":prepared.presentation_skeleton()}).to_string())
 }
 
-/// Independently reconstructs the expected statement; it performs no proof check.
+/// Independently reconstructs the expected statement and candidate report.
+/// This performs no proof check or nonce consumption and grants no acceptance.
 #[wasm_bindgen(js_name = reconstructPublicInputs)]
 pub fn reconstruct_public_inputs(
     expected_query_text: &str,
@@ -310,14 +366,55 @@ pub fn reconstruct_public_inputs(
     nonce_hex: &str,
 ) -> Result<String, String> {
     let presentation: ResultPresentation = parse(presentation_json)?;
-    let reconstructed = result::reconstruct_result_public_inputs(
-        expected_query_text,
-        &presentation,
-        &policy(policy_json)?,
-        &nonce(nonce_hex)?,
-    )
-    .map_err(err)?;
-    Ok(json!({"member":reconstructed.member,"publicInputs":inputs(&reconstructed.public_inputs),"released":presentation.rows,"nonce":nonce(nonce_hex)?.as_field_hex().0}).to_string())
+    let p = policy(policy_json)?;
+    let n = nonce(nonce_hex)?;
+    let reconstructed =
+        result::reconstruct_result_public_inputs(expected_query_text, &presentation, &p, &n)
+            .map_err(err)?;
+    let report = reconstructed_report(expected_query_text, &reconstructed, &p, &n)?;
+    Ok(json!({"member":reconstructed.member,"publicInputs":inputs(&reconstructed.public_inputs),"released":presentation.rows,"nonce":n.as_field_hex().0,"report":report}).to_string())
+}
+
+// Candidate evidence only: the Node verifier publishes this after proof acceptance
+// and nonce consumption. Resolve keys from the actual rebuilt public coordinates,
+// never by copying presentation metadata or returning the entire trust list.
+fn reconstructed_report(
+    expected_query: &str,
+    reconstructed: &result::ReconstructedResult,
+    policy: &ResultPolicy,
+    nonce: &VerifierNonce,
+) -> Result<Value, String> {
+    let slots = match reconstructed.member.split('_').nth(2) {
+        Some("k1") => 1,
+        Some("k2") => 2,
+        _ => return Err("unsupported issuer report capacity".into()),
+    };
+    let coordinates = reconstructed
+        .public_inputs
+        .get(3 * 32..(3 + 2 * slots) * 32)
+        .ok_or("missing public issuer coordinates")?;
+    let issuers = coordinates
+        .chunks_exact(64)
+        .map(|pair| {
+            policy
+                .trusted_issuers
+                .iter()
+                .find_map(|key| {
+                    let (x, y) = key.coords()?;
+                    (pair[..32] == field_to_be_bytes_32(&x)
+                        && pair[32..] == field_to_be_bytes_32(&y))
+                    .then(|| sig::public_key_to_hex(key))
+                })
+                .ok_or_else(|| "public issuer coordinates outside trust policy".to_owned())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(json!({
+        "rule": {"query": expected_query, "member": reconstructed.member},
+        "issuers": issuers,
+        "subject": [],
+        "fresh": nonce.as_field_hex().0,
+        "complete": false,
+    }))
 }
 
 /// SHA-256 of the canonical member key embedded at build time from the shared registry.
@@ -346,6 +443,140 @@ mod tests {
         let policy=json!({"trustedIssuers":[key["publicKey"]],"snapshots":[{"status_list":"https://example.org/status","version":1,"bits":[0]}],"minVersion":1,"maxVersion":1}).to_string();
         let credential = issue(&issuer, GRAPH, STATUS).unwrap();
         (issuer, credential, policy)
+    }
+
+    #[test]
+    fn test_salt_has_a_stable_domain_separated_derivation() {
+        assert_eq!(
+            field_to_hex(&test_salt(42, &"0".repeat(64), "abc")),
+            "0x004c0958f624df17b2abae7a4d54a6d5a7e2bc4afeb625ee5e5a7ada11530597"
+        );
+        let (issuer, _, _) = fixture();
+        let mut input = json!({"issuer": parse::<Value>(&issuer).unwrap(), "graphNQuads": GRAPH,
+            "status": parse::<Value>(STATUS).unwrap(), "seedHex": "2a"});
+        let a = test_issue(&input.to_string()).unwrap();
+        assert_eq!(a, test_issue(&input.to_string()).unwrap());
+        input["seedHex"] = json!("0x002A");
+        assert_eq!(a, test_issue(&input.to_string()).unwrap());
+        let salt = parse::<Value>(&a).unwrap()["salt"].clone();
+        for (field, value) in [
+            ("seedHex", json!("2b")),
+            ("graphNQuads", json!(GRAPH.replace("alice", "bob"))),
+            (
+                "issuer",
+                parse::<Value>(&test_issuer_keygen("b2").unwrap()).unwrap(),
+            ),
+        ] {
+            let mut changed = input.clone();
+            changed[field] = value;
+            assert_ne!(
+                salt,
+                parse::<Value>(&test_issue(&changed.to_string()).unwrap()).unwrap()["salt"]
+            );
+        }
+        input["status"]["index"] = json!(1);
+        let changed: Value = parse(&test_issue(&input.to_string()).unwrap()).unwrap();
+        assert_eq!(salt, changed["salt"]);
+        assert_ne!(
+            parse::<Value>(&a).unwrap()["signature"],
+            changed["signature"]
+        );
+        let issued = credential(&a).unwrap();
+        let reference = sig::status_ref_digest(
+            &sig::status_list_id_to_field(&issued.status_list),
+            issued.status_index,
+            issued.status_version,
+        );
+        assert!(sig::verify(
+            &issued.issuer,
+            &sig::presentation_message_with_status_and_scheme(
+                &issued.graph.commitment,
+                &issued.graph.salt,
+                &reference,
+                &sig::scheme_iri_to_field(issued.graph.method_commitment().method.scheme_iri()),
+            ),
+            &issued.signature
+        ));
+    }
+
+    #[test]
+    fn deterministic_issuance_refuses_production_and_mixed_keys() {
+        let production: Value = parse(&issuer_keygen().unwrap()).unwrap();
+        let mut input = json!({"issuer": production, "graphNQuads": GRAPH,
+            "status": parse::<Value>(STATUS).unwrap(), "seedHex": "2a"});
+        assert!(test_issue(&input.to_string()).is_err());
+        input["issuer"]["seedHex"] = json!("a1");
+        assert!(test_issue(&input.to_string()).is_err());
+        input["issuer"] = parse(&test_issuer_keygen("a1").unwrap()).unwrap();
+        for bad in ["", "xyz", "10000000000000000"] {
+            input["seedHex"] = json!(bad);
+            assert!(test_issue(&input.to_string()).is_err());
+        }
+        input["seedHex"] = json!("2a");
+        input["issuer"]["publicKey"] = production["publicKey"].clone();
+        assert_eq!(
+            test_issue(&input.to_string()).unwrap_err(),
+            "issuer key differs from seed"
+        );
+    }
+
+    #[test]
+    fn issuer_report_follows_reconstructed_slots_including_repeats() {
+        let (_, c, p) = fixture();
+        let mut p = policy(&p).unwrap();
+        let other = test_issuer_key("b2").unwrap().public_key();
+        p.trusted_issuers.insert(0, other);
+        let n = nonce("0x1234").unwrap();
+        let c = credential(&c).unwrap();
+        let rows = vec![BTreeMap::from([(
+            "p".into(),
+            Term::NamedNode(oxrdf::NamedNode::new("https://example.org/alice").unwrap()),
+        )])];
+        for capacity in [CredentialCapacity::Smallest, CredentialCapacity::HideInTwo] {
+            let prepared = result::prepare_result_with_options(
+                QUERY,
+                std::slice::from_ref(&c),
+                &rows,
+                &p,
+                &n,
+                ResultOptions {
+                    credential_capacity: capacity,
+                    ..ResultOptions::default()
+                },
+            )
+            .unwrap();
+            let mut reconstructed = result::reconstruct_result_public_inputs(
+                QUERY,
+                prepared.presentation_skeleton(),
+                &p,
+                &n,
+            )
+            .unwrap();
+            let slots = if capacity == CredentialCapacity::Smallest {
+                1
+            } else {
+                2
+            };
+            let report = reconstructed_report(QUERY, &reconstructed, &p, &n).unwrap();
+            assert_eq!(
+                report,
+                json!({
+                    "rule": {"query": QUERY, "member": prepared.member()},
+                    "issuers": vec![sig::public_key_to_hex(&c.issuer); slots],
+                    "subject": [], "fresh": n.as_field_hex().0, "complete": false,
+                })
+            );
+            // The report follows public bytes even when another trusted key occupies
+            // the slot; this unit check grants no proof acceptance.
+            let (x, y) = other.coords().unwrap();
+            reconstructed.public_inputs[3 * 32..4 * 32].copy_from_slice(&field_to_be_bytes_32(&x));
+            reconstructed.public_inputs[4 * 32..5 * 32].copy_from_slice(&field_to_be_bytes_32(&y));
+            let report = reconstructed_report(QUERY, &reconstructed, &p, &n).unwrap();
+            assert_eq!(report["issuers"][0], sig::public_key_to_hex(&other));
+            p.trusted_issuers.remove(0);
+            assert!(reconstructed_report(QUERY, &reconstructed, &p, &n).is_err());
+            p.trusted_issuers.insert(0, other);
+        }
     }
 
     #[test]

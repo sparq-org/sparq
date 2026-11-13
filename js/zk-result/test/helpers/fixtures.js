@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { issue, testIssuerKeygen } from '../../index.js';
+import { testIssue, testIssuerKeygen } from '../../index.js';
 
 export const query = `PREFIX ex: <https://example.org/>
 SELECT DISTINCT ?p ?age WHERE {
@@ -15,6 +15,7 @@ export function fixture(two = false) {
   const age = '<https://example.org/alice> <https://example.org/age> "30"^^<http://www.w3.org/2001/XMLSchema#integer> .\n';
   const degree = '<https://example.org/alice> <https://example.org/degree> <https://example.org/BSc> .\n';
   const identity = '<https://example.org/alice> <https://example.org/identity.verified> "true"^^<http://www.w3.org/2001/XMLSchema#boolean> .\n';
+  const issue = (issuer, graphNQuads, status) => testIssue({ issuer, graphNQuads, status, seedHex: 'c3' });
   const credentials = two
     ? [issue(first, age, status), issue(second, degree + identity, { ...status, index: 1 })]
     : [issue(first, age + degree + identity, status)];

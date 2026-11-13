@@ -46,16 +46,47 @@ Use `issuerKeygen()` to obtain `{ secretKeyHex, publicKey }` from the platform
 CSPRNG. The caller must store and protect the secret; the package never persists
 it. The key and signature scheme remain research grade, not externally audited.
 `secretKeyHex` encodes the canonical little-endian scalar bytes as exactly
-64 lowercase, unprefixed hex digits. `issue(issuer, graphNQuads, statusRef)` imports
+64 lowercase, unprefixed hex digits. `issue({ issuer, graphNQuads, status })` imports
 that secret, rejects zero/out-of-range scalars and malformed encodings, and checks
 the matching public key. Caller-restored JSON keys can be passed directly to it.
 Exported strings and JavaScript memory are not automatically erased.
 
 `testIssuerKeygen(seedHex)` retains its deterministic `{ seedHex, publicKey }`
 format for tests only. Issuance accepts either key format and rejects mixed seed
-and secret fields. Random keys, issuance salts and proof randomness use the
+and secret fields. The older positional `issue(issuer, graphNQuads, statusRef)`
+remains accepted. Both forms always draw a fresh salt; there is no deterministic
+option to `issue`.
+
+Use `testIssue({ issuer, graphNQuads, status, seedHex })` only for repeatable tests.
+It accepts only the seed-based test issuer, refusing production `secretKeyHex`
+and mixed objects. A predictable salt lets anyone who can guess the graph test
+a guess against the commitment. The issuance seed, like the test key seed, is
+a hexadecimal unsigned `u64` (optional `0x`, leading zeros and hex case accepted).
+Rust derives the salt from a separate issuance domain, that seed's numeric value,
+the canonical issuer public key and exact graph UTF-8 bytes, including whitespace;
+status does not affect the salt but remains signature-bound. Identical inputs
+give byte-identical credentials that prove and verify through the ordinary path.
+The [package README](../../js/zk-result/README.md#reproducible-test-issuance)
+specifies the byte derivation. Random keys, ordinary issuance salts and proof randomness use the
 platform CSPRNG, including `crypto.getRandomValues` on wasm32; no stub source is
 registered. Keep credentials and witness maps private.
+
+Successful `verify` returns `report` alongside `verified` and `released`:
+`{ rule: { query, member }, issuers, subject: [], fresh, complete: false }`.
+`rule` contains the exact receiver-supplied query and independently selected
+member. `issuers` resolves the rebuilt public signature-slot coordinates to
+canonical compressed key hex, in lexicographic slot order, preserving repeats.
+Every slot authenticates a private credential and is in the receiver's trusted
+list; a slot can be padding or unused by the selected solutions. This is neither
+the whole trust list nor an attribution of facts to issuers, and it makes no
+distinct credential-count claim. `subject` is empty because this statement has
+no holder binding. `fresh` is the canonical nonce only after store consumption.
+`complete` is false because returned solutions have support, without proving
+that none is missing. Refusals, replay and store failures have no report. Raw
+reconstruction is candidate evidence only; it performs no proof check. See the
+[checked public-input layout](../../js/zk-result/README.md#rebuilt-public-input-layout)
+for each word's order, derivation and source party. Research grade, not externally
+audited.
 
 See the [package API and policy shapes](../../js/zk-result/README.md) and the
 [successful-result contract](../zk-query-proofs/references/successful-results.md).

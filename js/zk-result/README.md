@@ -90,19 +90,134 @@ Exported strings and JavaScript memory are not automatically erased.
 ```js
 import { issuerKeygen, issue } from '@sparq-org/zk-result';
 const issuer = issuerKeygen(); // Store issuer securely before issuing credentials.
-const credential = issue(issuer, graphNQuads, statusRef);
+const credential = issue({ issuer, graphNQuads, status });
 ```
 
-`testIssuerKeygen(seedHex)` retains its deterministic `{ seedHex, publicKey }`
-format and is exclusively a test helper. `issue(issuer, graphNQuads, statusRef)`
-accepts either key format and rejects objects mixing seed and secret fields.
+`issue({ issuer, graphNQuads, status })` is the documented form; the older
+`issue(issuer, graphNQuads, statusRef)` remains accepted. Both accept either key
+format and reject objects mixing seed and secret fields. No option to `issue`
+selects deterministic issuance.
 It signs a string-canonical graph using the method-bound presentation attestation
 and a fresh salt. Issuer identities, key custody and authenticated status
-acquisition belong to the application. Random keys, salts and proving secrets use
-platform CSPRNG entropy, including `crypto.getRandomValues` in Node; no stub entropy
+acquisition belong to the application. Ordinary key generation, `issue` salts and
+proving secrets use platform CSPRNG entropy, including `crypto.getRandomValues` in Node; no stub entropy
 is installed.
 Generate nonces with the application's CSPRNG and supply the same nonce to both
 parties.
+
+## Reproducible test issuance
+
+```js
+import { testIssuerKeygen, testIssue } from '@sparq-org/zk-result';
+const issuer = testIssuerKeygen('a1');
+const credential = testIssue({ issuer, graphNQuads, status, seedHex: 'c3' });
+```
+
+Both seeds are hexadecimal unsigned `u64` values (one to sixteen hex digits,
+optionally prefixed with `0x`); leading zeros and hex letter case do not change
+their values. `testIssue` accepts only the object form and a test issuer's
+`{ seedHex, publicKey }`, and refuses production `secretKeyHex` objects, including
+mixed formats. A predictable salt lets anyone who can guess the graph test a
+guess against the commitment.
+
+Rust derives the salt with SHA-256 over the concatenation of the UTF-8 domain
+`sparq.zk-result.test-issue.v1` followed by a zero byte, the issuance seed as
+eight big-endian bytes, the canonical lowercase unprefixed compressed issuer
+public-key hex as ASCII, the graph byte length as eight big-endian bytes, and
+the exact `graphNQuads` UTF-8 bytes. The existing `field_from_hash_bytes` helper
+maps the digest's low thirty-one bytes into the field. Thus the salt depends on
+the issuance seed, issuer public key and exact graph text, including whitespace;
+it does not depend on status. Status remains bound by the deterministic issuer
+signature. Identical inputs return byte-identical credential JSON on native and
+WebAssembly hosts. These credentials use the same proof relation as ordinary
+issuance. Keep this predictable path exclusively in tests; `issue` always uses
+fresh platform CSPRNG entropy.
+
+## Verification report
+
+Only successful `verify` calls return `report`:
+
+```ts
+{
+  rule: { query: string, member: string },
+  issuers: string[],
+  subject: [],
+  fresh: string,
+  complete: false
+}
+```
+
+`rule.query` is the receiver's exact `expectedQuery`; `rule.member` is the
+canonical member selected during reconstruction. `issuers` contains the public
+signature-slot keys from the rebuilt inputs accepted by the proof, in canonical
+lexicographic order, using the same compressed lowercase hex encoding as
+`Policy.trustedIssuers`. Every slot authenticates a private credential commitment
+and is checked against that trusted list. It reveals the actual slot keys, rather
+than reporting the entire trusted set. Repeated slots remain repeated; a slot
+may be padding or unused by the selected solutions. The list establishes neither
+distinct credential count nor which issuer signed which fact: the selected
+credential/leaf references are private. A consumer requiring issuer authority for
+individual predicates must not infer it from this report.
+
+`subject` is empty because this statement has no holder binding. `fresh` is the
+canonical nonce only after the caller's store has consumed it. `complete` is
+false because the statement proves that the returned solutions are solutions,
+not that none is missing. Failed checks, replay and store errors return no report
+and no released rows. Reconstruction alone yields candidate evidence and grants
+no acceptance; the package releases the report only after proof verification
+and successful synchronous nonce consumption. This remains research grade and
+not externally audited.
+
+## Rebuilt public-input layout
+
+The receiver supplies its stored query, policy and nonce. The holder supplies
+released rows, issuer slots and capacity/version metadata; the receiver validates
+these and selects the canonical member itself. No presentation-supplied public
+input vector is used. Each word is a BN254 scalar encoded as a fixed 32-byte
+big-endian word (or equivalently a `0x`-prefixed field hex string). Booleans are
+zero or one; unsigned integers retain their exact value. Arrays flatten in row
+order, with the last index varying fastest.
+
+In this table `K` is the member's signature-slot capacity and `F` its hidden
+comparison capacity. Rows with `F` words are omitted when `F = 0`. Positions are
+zero-based. Variables are sorted lexicographically, independently of projection
+or first-occurrence order; variable identifiers are one-based, with zero marking
+a pattern constant. There are three pattern slots, six variable slots and four
+result slots. Query/row encodings use the existing string-canonical term encoding
+with zero salt: `Poseidon2([tag, field_from_hash_bytes(BLAKE3(bytes))])`. The tag
+is one for an IRI and two for a literal. IRI bytes are the IRI's UTF-8 bytes
+without angle brackets; literal bytes are the native `Literal::to_string()` RDF
+token, including quotes and any rendered datatype or language suffix. The helper
+takes the digest's low thirty-one bytes. Public comparisons are checked
+independently against released terms and contribute no hidden-comparison fields.
+
+<!-- public-input-layout:start -->
+| Start | Field | Words | Source and derivation |
+|---|---|---|---|
+| 0 | `challenge` | 1 | Receiver nonce, normalized as a field; must match the presentation challenge. |
+| 1 | `version` | 1 | Contract version required by the independently selected member; holder version must agree. |
+| 2 | `accepted_root` | 1 | Receiver policy: Poseidon2 accepted-set root over authenticated freshness-accepted status snapshots, sorted by list IRI and version, policy depth four. Each leaf binds list digest, version and status root. |
+| 3 | `issuer_keys` | 2K | Holder's canonical ordered issuer slots, each checked against receiver trust policy; affine x then y for each compressed public key. |
+| 3+2K | `pattern_count` | 1 | Receiver query's number of triple patterns. |
+| 4+2K | `pattern_vars` | 9 | Receiver query: variable identifiers for subject, predicate and object of each pattern; unused patterns are zero. |
+| 13+2K | `pattern_constants` | 9 | Receiver query: encoded constants; variable positions and unused patterns are zero. |
+| 22+2K | `projection` | 6 | Receiver query: projected-variable booleans in sorted variable order; unused variables are false. |
+| 28+2K | `result_count` | 1 | Holder's released distinct mapping count, checked against projection and capacity. |
+| 29+2K | `results` | 24 | Holder's released terms encoded in sorted variable order; hidden variables, unused variables and unused rows are zero. |
+| 53+2K | `filter_count` | 1 | Receiver query's hidden comparison count. |
+| 54+2K | `filter_vars` | F | Receiver query: hidden comparison variable identifiers in query comparison order; unused comparison slots use identifier one. |
+| 54+2K+F | `filter_ops` | F | Receiver query: comparison codes: less-than zero, less-or-equal one, greater-than two, greater-or-equal three, equality four, inequality five; unused slots are zero. |
+| 54+2K+2F | `filter_bounds` | F | Receiver query: exact unsigned integer bound or Gregorian YYYYMMDD date key; unused slots are zero. |
+<!-- public-input-layout:end -->
+
+The total is `54+2K+3F` words. Public-predicate members have `F = 0`, date members
+have `F = 1`, and hidden integer members have `F = 2`. Either `K = 1` or `K = 2`;
+status depth changes the accepted root derivation and selected key, not this
+layout. A snapshot's status tree uses the selected depth, least-significant-bit
+first status bytes and revoked padding. Graph roots, salts, contents, signatures,
+status references and fact-to-credential attribution are private inputs.
+The offline layout test reads this table, compares it with each bundled ABI and
+checks every word against `reconstructPublicInputs` and the prepared inputs.
 
 The CRS comes from the official CDN documented by the pinned bb.js package,
 `https://crs.aztec-cdn.foundation/g1.dat` and its corresponding `g2.dat`.

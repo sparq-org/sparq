@@ -264,7 +264,7 @@ The Rust seam exposes `PreparedResult::member()`, `witness_inputs()`,
 public bytes and admitted mappings from the same expected-query checks used by
 `verify_result`; it does not verify a proof or grant acceptance on its own.
 
-The host crate exposes JSON `issuerKeygen`, `testIssuerKeygen`, `issue`, `prepare`,
+The host crate exposes JSON `issuerKeygen`, `testIssuerKeygen`, `issue`, `testIssue`, `prepare`,
 `reconstructPublicInputs` and `canonicalVkHash`. Issuance uses string-canonical
 commitments and method-bound presentation attestations. `prepare` returns the
 member, exact private ABI input map and public skeleton. Its private witness data
@@ -276,6 +276,34 @@ checks the matching public key. The caller must store and protect the secret;
 the package never persists it. Keys remain research grade, not externally audited.
 `testIssuerKeygen(seedHex)` retains its deterministic `{ seedHex, publicKey }`
 test-only format. Objects mixing secret and seed fields reject.
+
+The documented Node issuance form is `issue({ issuer, graphNQuads, status })`;
+the older positional call remains accepted. Both always use a CSPRNG salt.
+`testIssue({ issuer, graphNQuads, status, seedHex })` is an object-only,
+deterministic test helper that refuses production `secretKeyHex` and mixed
+issuer objects. A predictable salt lets anyone who can guess the graph test a
+guess against the commitment. Rust derives it from the hexadecimal unsigned
+`u64` issuance seed, the canonical issuer public key and exact graph UTF-8 bytes,
+under a separate domain; status does not affect the salt but remains
+signature-bound. Identical inputs produce byte-identical credentials for the
+ordinary proof relation. The [Node README](../../../js/zk-result/README.md)
+specifies the exact derivation and the public-input layout, whose order and count
+are checked against reconstruction and every bundled ABI by the offline suite.
+
+Successful Node verification also returns
+`report: { rule: { query, member }, issuers, subject: [], fresh, complete: false }`.
+Rust resolves the issuer keys from reconstructed public coordinates and receiver
+trust policy, never unchecked presentation metadata. Every public signature slot
+authenticates a private credential and must be trusted; the canonical ordered key
+list preserves duplicates. A slot may be padding or unused by selected solutions.
+It establishes neither distinct credential count nor which issuer signed which
+fact, because selected credential/leaf references stay private. `rule` records
+the exact expected query and independently selected member. `subject` is empty
+because there is no holder binding. `fresh` is the canonical nonce consumed by
+the caller's store. `complete` is false: this establishes support for returned
+solutions, not that none is missing. Refusals, replay and store errors omit the
+report; raw reconstruction grants no acceptance. This remains research grade and
+not externally audited, with no native verification behavior change.
 
 Research grade and not externally audited: this proves selected support over
 sparq commitment-signed credentials, not standard VCs. It provides no answer or

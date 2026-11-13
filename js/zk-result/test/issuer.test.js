@@ -1,11 +1,56 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import { issuerKeygen, testIssuerKeygen, issue, prove, verify } from '../index.js';
+import { issuerKeygen, testIssuerKeygen, issue, testIssue, prove, verify } from '../index.js';
 
 const graph = '<https://example.org/alice> <https://example.org/degree> <https://example.org/BSc> .';
 const query = 'SELECT DISTINCT ?p WHERE { ?p <https://example.org/degree> <https://example.org/BSc> }';
 const status = { status_list: 'https://example.org/status', version: 1, index: 0 };
+
+test('testIssue returns byte-identical credentials and normalizes seed spellings', () => {
+  const input = { issuer: testIssuerKeygen('a1'), graphNQuads: graph, status, seedHex: 'c3' };
+  const a = testIssue(input);
+  assert.equal(JSON.stringify(testIssue(input)), JSON.stringify(a));
+  assert.equal(JSON.stringify(testIssue({ ...input, seedHex: '0x00C3' })), JSON.stringify(a));
+  const changedStatus = testIssue({ ...input, status: { ...status, index: 1 } });
+  assert.equal(changedStatus.salt, a.salt);
+  assert.notEqual(changedStatus.signature, a.signature);
+});
+
+test('testIssue salts separate seeds, issuers and exact graph bytes', () => {
+  const input = { issuer: testIssuerKeygen('a1'), graphNQuads: graph, status, seedHex: 'c3' };
+  const salt = testIssue(input).salt;
+  for (const changes of [
+    { seedHex: 'c4' }, { issuer: testIssuerKeygen('b2') },
+    { graphNQuads: graph.replace('alice', 'bob') }, { graphNQuads: graph + '\n' },
+  ]) assert.notEqual(testIssue({ ...input, ...changes }).salt, salt);
+});
+
+test('testIssue refuses production keys, mixed keys and positional arguments', () => {
+  const production = issuerKeygen(), issuer = testIssuerKeygen('a1');
+  const input = { issuer, graphNQuads: graph, status, seedHex: 'c3' };
+  assert.throws(() => testIssue({ ...input, issuer: production }));
+  assert.throws(() => testIssue({ ...input, issuer: { ...production, seedHex: issuer.seedHex } }));
+  assert.throws(() => testIssue({ ...input, issuer: { ...issuer, secretKeyHex: production.secretKeyHex } }));
+  assert.throws(() => testIssue({ ...input, issuer: { ...issuer, publicKey: production.publicKey } }));
+  assert.throws(() => testIssue(issuer, graph, status, 'c3'), /one object argument/);
+  for (const seedHex of ['', 'xyz', '10000000000000000']) {
+    assert.throws(() => testIssue({ ...input, seedHex }));
+  }
+});
+
+test('both issue forms retain fresh salts and cannot select deterministic issuance', () => {
+  for (const issuer of [issuerKeygen(), testIssuerKeygen('a1')]) {
+    const input = { issuer, graphNQuads: graph, status };
+    const a = issue(input), b = issue(input), legacy = issue(issuer, graph, status);
+    assert.equal(a.issuer, issuer.publicKey);
+    assert.equal(legacy.issuer, issuer.publicKey);
+    assert.notEqual(a.salt, b.salt);
+    assert.notEqual(a.salt, legacy.salt);
+    assert.throws(() => issue({ ...input, seedHex: 'c3' }), /unknown issue option/);
+    assert.throws(() => testIssue({ ...input, seedHex: 'c3', status: { ...status, index: Number.MAX_SAFE_INTEGER + 1 } }), /safe nonnegative/);
+  }
+});
 
 test('production keys survive caller serialization and reject invalid or mixed key material', () => {
   const issuer = issuerKeygen();
