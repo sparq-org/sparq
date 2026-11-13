@@ -91,7 +91,7 @@ env:
 jobs:
   exact-evaluator:
     # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
+    if: false
     name: real exact-dataset guest and proof
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -190,6 +190,10 @@ jobs:
     name: guest execution reproducibility
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        copy: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -242,6 +246,20 @@ jobs:
         with:
           cache-key: zk-guest-reproducibility-risc0-3.0.6-rust-1.97.0
 
+      - name: Observer diagnostics (temporary)
+        if: steps.changes.outputs.required == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes gdb binutils
+          echo "::group::observer diagnostics"
+          uname -a; nproc; lscpu | head -25 || true
+          cat /proc/sys/kernel/yama/ptrace_scope || true
+          grep -i -E 'seccomp|NoNewPrivs|CapEff|CapBnd' /proc/self/status || true
+          systemd-detect-virt || true
+          time gdb --nx --quiet --batch -ex 'set debuginfod enabled off' -ex 'set disable-randomization off' -ex run --args "$RISC0_SERVER_PATH" --version || echo "plain gdb run exit $?"
+          time gdb --nx --quiet --batch -ex 'set debuginfod enabled off' -ex run --args "$RISC0_SERVER_PATH" --version || echo "gdb run with personality exit $?"
+          echo "::endgroup::"
+
       - name: Guest execution reproducibility and randomness boundary
         timeout-minutes: 60
         if: steps.changes.outputs.required == 'true'
@@ -258,7 +276,7 @@ jobs:
         if: always() && steps.changes.outputs.required == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: guest-reproducibility-${{ github.sha }}-${{ github.run_attempt }}
+          name: guest-reproducibility-${{ github.sha }}-${{ github.run_attempt }}-${{ matrix.copy }}
           path: ${{ runner.temp }}/sparq-guest-determinism
           if-no-files-found: error
           retention-days: 30

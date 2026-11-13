@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -372,8 +373,15 @@ def main():
     # Preserve the caller's writable mount path rather than resolving it to a
     # potentially read-only backing-store alias.
     output = args.output.absolute()
-    run(output, binary.resolve(), runtime)
-    canonical_differential(output, binary.resolve().with_name("canon_differential"), runtime)
+    try:
+        run(output, binary.resolve(), runtime)
+        canonical_differential(output, binary.resolve().with_name("canon_differential"), runtime)
+    except BaseException:
+        log = output / "debugger.log"
+        if log.exists():
+            print("--- debugger.log (tail) ---", file=sys.stderr)
+            print(log.read_text(errors="replace")[-8000:], file=sys.stderr)
+        raise
     summary_path = output / "summary.json"
     summary = json.loads(summary_path.read_text())
     summary.update(result="passed", canonical_differential="passed")
