@@ -1,0 +1,93 @@
+{
+  "schema": "sparq.zk-paper-executor-freeze-audit.v1",
+  "source_commit": "a46bc3ae7c9f348d4d52e9f63e688104bb0edc3a",
+  "freeze_commit_candidate": "a46bc3ae7c9f348d4d52e9f63e688104bb0edc3a",
+  "freeze_commit": null,
+  "freeze_status": "not established: same-input cycle-count reproducibility failed",
+  "baseline_commit": "ad457bf4b8abdc145607cdbc561debd21b1e0875",
+  "production_image_id": "bca6f036281819c63ef04b5a6ff91dffe2d2a62f9f898a4a58392fdae6a5d653",
+  "phase_measurement_image_id": "698921c240f4d51c2a0f14da3e2dbfb6b813b5a461d277f962db5ebd436a0df4",
+  "baseline_production_image_id": "fbf681f7998bf23dabcc54ab0084360de3de8344e7e39a9ab02475ea0e53fd68",
+  "baseline_phase_measurement_image_id": "458152dbe6877a4e3ee446cb3301d7bde07251f7380f69ae8e6b86040d3d7238",
+  "production_image_equal": false,
+  "phase_image_equal": false,
+  "guest_artifact_sha256": "1af14d20094471e95150520b8a7428c820ca54c62acf8ece8bd681eeca549246",
+  "phase_artifact_sha256": "414428a63049935e2c76af2fbb7a03a599e8f768c30635eb6823037f1d03919f",
+  "environment": {
+    "environment": "indicative",
+    "executor_only": true,
+    "machine": {
+      "cpu_model": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+      "available_cpus": 4,
+      "logical_cpus": 4,
+      "cpu_max": null,
+      "memory_max": null,
+      "os_release": "PRETTY_NAME=\"Ubuntu 24.04.5 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nVERSION=\"24.04.5 LTS (Noble Numbat)\"\nVERSION_CODENAME=noble\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=noble\nLOGO=ubuntu-logo",
+      "kernel": "6.18.44-fc-v445",
+      "host_visible_memory_bytes": 16867405824
+    },
+    "toolchain": {
+      "host_rust": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.97.1\nLLVM version: 22.1.6",
+      "guest_rust": "rustc 1.97.0-dev (e638c6cfe 2026-07-15)\nbinary: rustc\ncommit-hash: e638c6cfea1eff5fbbb24a27e60538e3760d21b8\ncommit-date: 2026-07-15\nhost: x86_64-unknown-linux-gnu\nrelease: 1.97.0-dev\nLLVM version: 22.1.6",
+      "r0vm": "risc0-r0vm 3.0.6",
+      "cargo_risczero": "cargo-risczero 3.0.6"
+    },
+    "binary_sha256": {
+      "r0vm": "751b9b188d341e8bec5e02060086b7b1dc3f7289e90f726c38589bb6735dd6d7",
+      "guest_rustc": "288ee1994dd8ec08184686e7a52b779c9b075498ffe73003884fefe60389c351"
+    },
+    "risc0_build_locked": "1",
+    "cargo_build_jobs": "2"
+  },
+  "executor_only": true,
+  "proofs": 0,
+  "sets": {
+    "main": {
+      "audit": "research/zk-paper-evidence/paper-executor-main-audit.json",
+      "records": 40,
+      "cases": 5,
+      "configurations": 8,
+      "admitted": 40,
+      "executed": 40,
+      "phase_records": 40,
+      "raw_output_sha256": "3650d4ed8bc13df31c4935ad729de691d3b9910c9eb9ae9796af98b6dc322cf3",
+      "repository_records_sha256": "13de089c1ecad066f9fa766578eda0762d2956faf5deea180a7198d779fa5b4a",
+      "archive_sha256": "5825abba47da955e2228be5bd60ec8763e2f6839fe3b167e18027f939ade2158",
+      "changed_record_count": 40,
+      "changed_field_count": 242,
+      "non_cycle_difference_count": 0
+    },
+    "sweep": {
+      "audit": "research/zk-paper-evidence/paper-executor-sweep-audit.json",
+      "records": 832,
+      "cases": 52,
+      "configurations": 16,
+      "admitted": 680,
+      "executed": 638,
+      "phase_records": 0,
+      "raw_output_sha256": "0cf12f640446eb52f96e6b92b7bfcfa9cc65a1a121e09fbfebe3465f77a7c291",
+      "repository_records_sha256": "57c0f6be4852f25e8430fec7d5c4f0d1396bfd5744cc734cfd272ad5186e5083",
+      "archive_sha256": "bc209cb364a0b88e5ab5dc846a3067ae5ea5b51c655303fce3ef481bdf6f115a",
+      "changed_record_count": 638,
+      "changed_field_count": 708,
+      "non_cycle_difference_count": 31
+    }
+  },
+  "raw_output_directory": "/mnt/project-files/zk/evidence-freeze/",
+  "comparison": "cycle-changes.json and guest-dependency-history.json in the raw output directory",
+  "per_commit_cycle_causality_established": false,
+  "count_reproducibility": {
+    "result": "failed",
+    "record": "count-reproducibility.json in the raw output directory",
+    "record_sha256": "b32a0759a86d8ea054d53a2d0b8faf6d1b5cb34d85a20ac719d65928d8a01b3a",
+    "raw_record_sha256": {
+      "identity-probe-1.jsonl": "fd0d3174d012a0d12c74e864f524252759ed77526d4e805f8871f55ec41da62f",
+      "identity-probe-2.jsonl": "3f6ffb9429b95976f0f49dca20b20e90af8db480d720976ce68d6450e7e5fa90"
+    },
+    "producer_sha256": "3c86a6a909a74017cb564a0402161a179a2741aa0408a4983b940efbc6801dc0",
+    "same_witness_artifact_and_journal_hashes": true,
+    "tested_configurations": 8,
+    "configurations_with_changed_counts": 8
+  },
+  "generation": "Existing paper_executor_audit.py over gzip records with wall-clock fields removed; see regenerate_freeze.py in the raw output directory."
+}

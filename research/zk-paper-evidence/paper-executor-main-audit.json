@@ -1,16 +1,16 @@
 {
   "schema": "sparq.zk-paper-executor-audit.v1",
-  "source": "ad457bf4b8abdc145607cdbc561debd21b1e0875",
-  "source_note": "Harness built from fix/zk-v5-answer-profile at ad457bf4 (PR #6792 stacked on #6791 and #6789); the same deltas were later rebuilt on main as efd8cc7f with byte-identical diffs. The harness and its fixtures land on main with #6791 and #6792.",
+  "source": "a46bc3ae7c9f348d4d52e9f63e688104bb0edc3a",
+  "source_note": "Executor-only diagnostic remeasurement from the candidate source commit after both rebuilt images differed from the October pins. NOT A VALIDATED FREEZE: repeated runs with identical witness, artifact and journal SHA-256 values produced different cycle counts in every tested main-body configuration. See count-reproducibility.json in the raw output directory. Raw output and comparison artifacts: /mnt/project-files/zk/evidence-freeze/. Machine, toolchain and image provenance: paper-executor-freeze-audit.json. The machine environment is indicative; these counts are observations, not established deterministic invariants. Repository record archives omit all wall-clock fields. Rejected sweep records record their guest outcome directly, so no rerun supplement is needed.",
   "harness": "zk/sparql-evaluator/host/examples/paper_sweep.rs",
   "generator": "zk/sparql-evaluator/scripts/paper_executor_audit.py",
   "set": "main",
-  "guest_image_id": "fbf681f7998bf23dabcc54ab0084360de3de8344e7e39a9ab02475ea0e53fd68",
-  "phase_measurement_image_id": "458152dbe6877a4e3ee446cb3301d7bde07251f7380f69ae8e6b86040d3d7238",
+  "guest_image_id": "bca6f036281819c63ef04b5a6ff91dffe2d2a62f9f898a4a58392fdae6a5d653",
+  "phase_measurement_image_id": "698921c240f4d51c2a0f14da3e2dbfb6b813b5a461d277f962db5ebd436a0df4",
   "r0vm": "risc0-r0vm 3.0.6",
   "executor_only": true,
   "proofs": 0,
-  "records_sha256": "8c7c0c5f2a2bbf21f59c1257c19e2b09f57991a469d70b2e86ad63c5b79496b8",
+  "records_sha256": "13de089c1ecad066f9fa766578eda0762d2956faf5deea180a7198d779fa5b4a",
   "records": 40,
   "session_limit_cycles": 33554432,
   "note": "RISC Zero executor runs of the accepted V5 image; user_cycles exclude padding, total_cycles are padded segment cycles. Phase cycles come from the separate phase measurement image and include its instrumentation. Wall-clock fields in the records are from a shared container and are not evidence.",
@@ -48,9 +48,9 @@
       "executed": 5,
       "over_session_limit": [],
       "user_cycles": {
-        "median": 7154300,
-        "min": 7091746,
-        "max": 7312474
+        "median": 7164558,
+        "min": 7108867,
+        "max": 7311608
       },
       "total_cycles": {
         "median": 8388608,
@@ -73,9 +73,9 @@
       "executed": 5,
       "over_session_limit": [],
       "user_cycles": {
-        "median": 24243733,
-        "min": 24139684,
-        "max": 25015601
+        "median": 24261905,
+        "min": 24149301,
+        "max": 24990920
       },
       "total_cycles": {
         "median": 27394048,
@@ -98,9 +98,9 @@
       "executed": 5,
       "over_session_limit": [],
       "user_cycles": {
-        "median": 3888213,
-        "min": 3833513,
-        "max": 4031118
+        "median": 3878439,
+        "min": 3838448,
+        "max": 4037180
       },
       "total_cycles": {
         "median": 5242880,
@@ -123,9 +123,9 @@
       "executed": 5,
       "over_session_limit": [],
       "user_cycles": {
-        "median": 11125709,
-        "min": 10976376,
-        "max": 11866828
+        "median": 11118374,
+        "min": 10993648,
+        "max": 11900162
       },
       "total_cycles": {
         "median": 13631488,
@@ -148,9 +148,9 @@
       "executed": 5,
       "over_session_limit": [],
       "user_cycles": {
-        "median": 6624007,
-        "min": 6568110,
-        "max": 6784232
+        "median": 6623406,
+        "min": 6569708,
+        "max": 6786279
       },
       "total_cycles": {
         "median": 7602176,
@@ -173,13 +173,13 @@
       "executed": 5,
       "over_session_limit": [],
       "user_cycles": {
-        "median": 21968326,
-        "min": 21867684,
-        "max": 22725778
+        "median": 21966838,
+        "min": 21859562,
+        "max": 22729952
       },
       "total_cycles": {
         "median": 24641536,
-        "min": 24379392,
+        "min": 24248320,
         "max": 25427968
       },
       "segments": {
@@ -198,9 +198,9 @@
       "executed": 5,
       "over_session_limit": [],
       "user_cycles": {
-        "median": 3305383,
-        "min": 3254139,
-        "max": 3466694
+        "median": 3308799,
+        "min": 3253415,
+        "max": 3466813
       },
       "total_cycles": {
         "median": 4194304,
@@ -223,9 +223,9 @@
       "executed": 5,
       "over_session_limit": [],
       "user_cycles": {
-        "median": 8799346,
-        "min": 8691196,
-        "max": 9550733
+        "median": 8796075,
+        "min": 8694922,
+        "max": 9540210
       },
       "total_cycles": {
         "median": 10485760,
@@ -245,11 +245,11 @@
       "signature_mode": "hidden",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 1395383,
-        "Journal": 573864,
-        "Mapping": 56481,
-        "ProofConfig": 461298,
-        "Query": 666356,
+        "Document": 1375887,
+        "Journal": 573957,
+        "Mapping": 56871,
+        "ProofConfig": 461932,
+        "Query": 666245,
         "Request": 591366,
         "Signature": 3282459,
         "input": 70679
@@ -261,11 +261,11 @@
       "signature_mode": "hidden",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 5493112,
-        "Journal": 573864,
-        "Mapping": 178172,
-        "ProofConfig": 1851199,
-        "Query": 1964560,
+        "Document": 5458805,
+        "Journal": 573957,
+        "Mapping": 179678,
+        "ProofConfig": 1850732,
+        "Query": 1964449,
         "Request": 693402,
         "Signature": 13173703,
         "input": 224711
@@ -277,11 +277,11 @@
       "signature_mode": "revealed",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 1387198,
-        "Journal": 574271,
-        "Mapping": 56693,
-        "ProofConfig": 460599,
-        "Query": 666472,
+        "Document": 1394293,
+        "Journal": 574364,
+        "Mapping": 57083,
+        "ProofConfig": 463171,
+        "Query": 666361,
         "Request": 591772,
         "input": 66148
       }
@@ -292,11 +292,11 @@
       "signature_mode": "revealed",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 5479424,
-        "Journal": 574271,
-        "Mapping": 179424,
-        "ProofConfig": 1848758,
-        "Query": 1964581,
+        "Document": 5466775,
+        "Journal": 574364,
+        "Mapping": 180930,
+        "ProofConfig": 1852731,
+        "Query": 1964470,
         "Request": 693805,
         "input": 206423
       }
@@ -307,11 +307,11 @@
       "signature_mode": "hidden",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 800695,
-        "Journal": 574493,
-        "Mapping": 56198,
-        "ProofConfig": 467533,
-        "Query": 666021,
+        "Document": 800714,
+        "Journal": 574586,
+        "Mapping": 56576,
+        "ProofConfig": 468868,
+        "Query": 665910,
         "Request": 592103,
         "Signature": 3327223,
         "input": 73003
@@ -323,11 +323,11 @@
       "signature_mode": "hidden",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 3149614,
-        "Journal": 574486,
-        "Mapping": 178469,
-        "ProofConfig": 1877520,
-        "Query": 1964400,
+        "Document": 3149690,
+        "Journal": 574579,
+        "Mapping": 179957,
+        "ProofConfig": 1880119,
+        "Query": 1964289,
         "Request": 694456,
         "Signature": 13185192,
         "input": 234025
@@ -339,11 +339,11 @@
       "signature_mode": "revealed",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 800695,
-        "Journal": 578506,
-        "Mapping": 56386,
-        "ProofConfig": 470488,
-        "Query": 666144,
+        "Document": 800714,
+        "Journal": 578599,
+        "Mapping": 56764,
+        "ProofConfig": 467355,
+        "Query": 666033,
         "Request": 596116,
         "input": 68501
       }
@@ -354,11 +354,11 @@
       "signature_mode": "revealed",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 3149778,
-        "Journal": 578506,
-        "Mapping": 179625,
-        "ProofConfig": 1877535,
-        "Query": 1964382,
+        "Document": 3149854,
+        "Journal": 578599,
+        "Mapping": 181113,
+        "ProofConfig": 1874414,
+        "Query": 1964271,
         "Request": 698476,
         "input": 215853
       }
@@ -369,11 +369,11 @@
       "signature_mode": "hidden",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 1395969,
-        "Journal": 573874,
-        "Mapping": 56481,
-        "ProofConfig": 461515,
-        "Query": 697151,
+        "Document": 1372219,
+        "Journal": 573967,
+        "Mapping": 56871,
+        "ProofConfig": 464324,
+        "Query": 697305,
         "Request": 591371,
         "Signature": 3282459,
         "input": 70755
@@ -385,11 +385,11 @@
       "signature_mode": "hidden",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 5466668,
-        "Journal": 573881,
-        "Mapping": 178172,
-        "ProofConfig": 1849625,
-        "Query": 2052773,
+        "Document": 5491745,
+        "Journal": 573974,
+        "Mapping": 179678,
+        "ProofConfig": 1849009,
+        "Query": 2053300,
         "Request": 693414,
         "Signature": 13173703,
         "input": 224794
@@ -401,11 +401,11 @@
       "signature_mode": "revealed",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 1395281,
-        "Journal": 574281,
-        "Mapping": 56693,
-        "ProofConfig": 464865,
-        "Query": 697257,
+        "Document": 1386709,
+        "Journal": 574374,
+        "Mapping": 57083,
+        "ProofConfig": 462723,
+        "Query": 697411,
         "Request": 591777,
         "input": 66224
       }
@@ -416,11 +416,11 @@
       "signature_mode": "revealed",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 5485337,
-        "Journal": 574281,
-        "Mapping": 179424,
-        "ProofConfig": 1851970,
-        "Query": 2052826,
+        "Document": 5463843,
+        "Journal": 574374,
+        "Mapping": 180930,
+        "ProofConfig": 1858214,
+        "Query": 2053353,
         "Request": 693810,
         "input": 206506
       }
@@ -431,11 +431,11 @@
       "signature_mode": "hidden",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 800695,
-        "Journal": 574496,
-        "Mapping": 56198,
-        "ProofConfig": 465938,
-        "Query": 696769,
+        "Document": 800714,
+        "Journal": 574589,
+        "Mapping": 56576,
+        "ProofConfig": 469501,
+        "Query": 696923,
         "Request": 592101,
         "Signature": 3327223,
         "input": 73078
@@ -447,11 +447,11 @@
       "signature_mode": "hidden",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 3149614,
-        "Journal": 574496,
-        "Mapping": 178469,
-        "ProofConfig": 1874373,
-        "Query": 2052728,
+        "Document": 3149690,
+        "Journal": 574589,
+        "Mapping": 179957,
+        "ProofConfig": 1872961,
+        "Query": 2053255,
         "Request": 694461,
         "Signature": 13185192,
         "input": 234108
@@ -463,11 +463,11 @@
       "signature_mode": "revealed",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 800695,
-        "Journal": 578516,
-        "Mapping": 56386,
-        "ProofConfig": 466386,
-        "Query": 696990,
+        "Document": 800714,
+        "Journal": 578609,
+        "Mapping": 56764,
+        "ProofConfig": 468990,
+        "Query": 697144,
         "Request": 596121,
         "input": 68576
       }
@@ -478,11 +478,11 @@
       "signature_mode": "revealed",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 3149778,
-        "Journal": 578516,
-        "Mapping": 179625,
-        "ProofConfig": 1878195,
-        "Query": 2052724,
+        "Document": 3149854,
+        "Journal": 578609,
+        "Mapping": 181113,
+        "ProofConfig": 1874309,
+        "Query": 2053251,
         "Request": 698481,
         "input": 215936
       }
@@ -493,11 +493,11 @@
       "signature_mode": "hidden",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 1388280,
-        "Journal": 578259,
-        "Mapping": 56481,
-        "ProofConfig": 461019,
-        "Query": 876379,
+        "Document": 1394165,
+        "Journal": 578352,
+        "Mapping": 56871,
+        "ProofConfig": 462739,
+        "Query": 873524,
         "Request": 591391,
         "Signature": 3282459,
         "input": 71112
@@ -509,11 +509,11 @@
       "signature_mode": "hidden",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 5484897,
-        "Journal": 578259,
-        "Mapping": 178172,
-        "ProofConfig": 1845603,
-        "Query": 2816208,
+        "Document": 5472063,
+        "Journal": 578352,
+        "Mapping": 179678,
+        "ProofConfig": 1847908,
+        "Query": 2814306,
         "Request": 693427,
         "Signature": 13173703,
         "input": 225272
@@ -525,11 +525,11 @@
       "signature_mode": "revealed",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 1386910,
-        "Journal": 578666,
-        "Mapping": 56693,
-        "ProofConfig": 462104,
-        "Query": 874432,
+        "Document": 1395892,
+        "Journal": 578759,
+        "Mapping": 57083,
+        "ProofConfig": 463731,
+        "Query": 874874,
         "Request": 591797,
         "input": 66581
       }
@@ -540,11 +540,11 @@
       "signature_mode": "revealed",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 5476123,
-        "Journal": 578666,
-        "Mapping": 179424,
-        "ProofConfig": 1851265,
-        "Query": 2812221,
+        "Document": 5429487,
+        "Journal": 578759,
+        "Mapping": 180930,
+        "ProofConfig": 1849281,
+        "Query": 2816972,
         "Request": 693830,
         "input": 206984
       }
@@ -555,11 +555,11 @@
       "signature_mode": "hidden",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 800695,
-        "Journal": 578881,
-        "Mapping": 56198,
-        "ProofConfig": 468088,
-        "Query": 875699,
+        "Document": 800714,
+        "Journal": 578974,
+        "Mapping": 56576,
+        "ProofConfig": 470421,
+        "Query": 873825,
         "Request": 592121,
         "Signature": 3327223,
         "input": 73436
@@ -571,11 +571,11 @@
       "signature_mode": "hidden",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 3149614,
-        "Journal": 578881,
-        "Mapping": 178469,
-        "ProofConfig": 1871369,
-        "Query": 2816827,
+        "Document": 3149690,
+        "Journal": 578974,
+        "Mapping": 179957,
+        "ProofConfig": 1876924,
+        "Query": 2819618,
         "Request": 694481,
         "Signature": 13185192,
         "input": 234586
@@ -587,11 +587,11 @@
       "signature_mode": "revealed",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 800695,
-        "Journal": 582901,
-        "Mapping": 56386,
-        "ProofConfig": 465814,
-        "Query": 875139,
+        "Document": 800714,
+        "Journal": 582994,
+        "Mapping": 56764,
+        "ProofConfig": 469883,
+        "Query": 874644,
         "Request": 596141,
         "input": 68934
       }
@@ -602,11 +602,11 @@
       "signature_mode": "revealed",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 3149778,
-        "Journal": 582901,
-        "Mapping": 179625,
-        "ProofConfig": 1875631,
-        "Query": 2807464,
+        "Document": 3149854,
+        "Journal": 582994,
+        "Mapping": 181113,
+        "ProofConfig": 1879107,
+        "Query": 2822285,
         "Request": 698501,
         "input": 216414
       }
@@ -617,11 +617,11 @@
       "signature_mode": "hidden",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 1391385,
-        "Journal": 573877,
-        "Mapping": 56481,
-        "ProofConfig": 461477,
-        "Query": 718417,
+        "Document": 1396761,
+        "Journal": 573970,
+        "Mapping": 56871,
+        "ProofConfig": 463191,
+        "Query": 718361,
         "Request": 591372,
         "Signature": 3282459,
         "input": 70793
@@ -633,11 +633,11 @@
       "signature_mode": "hidden",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 5469279,
-        "Journal": 573877,
-        "Mapping": 178172,
-        "ProofConfig": 1844349,
-        "Query": 2150878,
+        "Document": 5476705,
+        "Journal": 573970,
+        "Mapping": 179678,
+        "ProofConfig": 1849109,
+        "Query": 2150648,
         "Request": 693408,
         "Signature": 13173703,
         "input": 224850
@@ -649,11 +649,11 @@
       "signature_mode": "revealed",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 1400617,
-        "Journal": 574284,
-        "Mapping": 56693,
-        "ProofConfig": 459480,
-        "Query": 718620,
+        "Document": 1384471,
+        "Journal": 574377,
+        "Mapping": 57083,
+        "ProofConfig": 462816,
+        "Query": 718564,
         "Request": 591778,
         "input": 66262
       }
@@ -664,11 +664,11 @@
       "signature_mode": "revealed",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 5474163,
-        "Journal": 574284,
-        "Mapping": 179424,
-        "ProofConfig": 1850970,
-        "Query": 2150910,
+        "Document": 5447483,
+        "Journal": 574377,
+        "Mapping": 180930,
+        "ProofConfig": 1855139,
+        "Query": 2150680,
         "Request": 693811,
         "input": 206562
       }
@@ -679,11 +679,11 @@
       "signature_mode": "hidden",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 800695,
-        "Journal": 574499,
-        "Mapping": 56198,
-        "ProofConfig": 467762,
-        "Query": 718073,
+        "Document": 800714,
+        "Journal": 574592,
+        "Mapping": 56576,
+        "ProofConfig": 469845,
+        "Query": 718017,
         "Request": 592102,
         "Signature": 3327223,
         "input": 73116
@@ -695,11 +695,11 @@
       "signature_mode": "hidden",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 3149614,
-        "Journal": 574499,
-        "Mapping": 178469,
-        "ProofConfig": 1876441,
-        "Query": 2150124,
+        "Document": 3149690,
+        "Journal": 574592,
+        "Mapping": 179957,
+        "ProofConfig": 1878156,
+        "Query": 2149894,
         "Request": 694462,
         "Signature": 13185192,
         "input": 234164
@@ -711,11 +711,11 @@
       "signature_mode": "revealed",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 800695,
-        "Journal": 578519,
-        "Mapping": 56386,
-        "ProofConfig": 467789,
-        "Query": 718326,
+        "Document": 800714,
+        "Journal": 578612,
+        "Mapping": 56764,
+        "ProofConfig": 469627,
+        "Query": 718270,
         "Request": 596122,
         "input": 68614
       }
@@ -726,11 +726,11 @@
       "signature_mode": "revealed",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 3149778,
-        "Journal": 578519,
-        "Mapping": 179625,
-        "ProofConfig": 1871758,
-        "Query": 2150116,
+        "Document": 3149854,
+        "Journal": 578612,
+        "Mapping": 181113,
+        "ProofConfig": 1879813,
+        "Query": 2149886,
         "Request": 698482,
         "input": 215992
       }
@@ -741,11 +741,11 @@
       "signature_mode": "hidden",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 1379097,
-        "Journal": 578263,
-        "Mapping": 56481,
-        "ProofConfig": 463768,
-        "Query": 728684,
+        "Document": 1382176,
+        "Journal": 578356,
+        "Mapping": 56871,
+        "ProofConfig": 463382,
+        "Query": 728680,
         "Request": 591403,
         "Signature": 3282459,
         "input": 71403
@@ -757,11 +757,11 @@
       "signature_mode": "hidden",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 5514967,
-        "Journal": 578263,
-        "Mapping": 178172,
-        "ProofConfig": 1847506,
-        "Query": 2059372,
+        "Document": 5474565,
+        "Journal": 578356,
+        "Mapping": 179678,
+        "ProofConfig": 1858158,
+        "Query": 2059332,
         "Request": 693439,
         "Signature": 13173703,
         "input": 225643
@@ -773,11 +773,11 @@
       "signature_mode": "revealed",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 1393387,
-        "Journal": 578670,
-        "Mapping": 56693,
-        "ProofConfig": 460336,
-        "Query": 728887,
+        "Document": 1390966,
+        "Journal": 578763,
+        "Mapping": 57083,
+        "ProofConfig": 460328,
+        "Query": 728883,
         "Request": 591809,
         "input": 66872
       }
@@ -788,11 +788,11 @@
       "signature_mode": "revealed",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 5511784,
-        "Journal": 578670,
-        "Mapping": 179424,
-        "ProofConfig": 1853437,
-        "Query": 2059364,
+        "Document": 5473304,
+        "Journal": 578763,
+        "Mapping": 180930,
+        "ProofConfig": 1849834,
+        "Query": 2059324,
         "Request": 693842,
         "input": 207355
       }
@@ -803,11 +803,11 @@
       "signature_mode": "hidden",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 800695,
-        "Journal": 578885,
-        "Mapping": 56198,
-        "ProofConfig": 467945,
-        "Query": 728340,
+        "Document": 800714,
+        "Journal": 578978,
+        "Mapping": 56576,
+        "ProofConfig": 469926,
+        "Query": 728336,
         "Request": 592133,
         "Signature": 3327223,
         "input": 73716
@@ -819,11 +819,11 @@
       "signature_mode": "hidden",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 3149614,
-        "Journal": 578885,
-        "Mapping": 178469,
-        "ProofConfig": 1871948,
-        "Query": 2059246,
+        "Document": 3149690,
+        "Journal": 578978,
+        "Mapping": 179957,
+        "ProofConfig": 1875941,
+        "Query": 2059206,
         "Request": 694493,
         "Signature": 13185192,
         "input": 234957
@@ -835,11 +835,11 @@
       "signature_mode": "revealed",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 800695,
-        "Journal": 582905,
-        "Mapping": 56386,
-        "ProofConfig": 468148,
-        "Query": 728500,
+        "Document": 800714,
+        "Journal": 582998,
+        "Mapping": 56764,
+        "ProofConfig": 466331,
+        "Query": 728496,
         "Request": 596153,
         "input": 69214
       }
@@ -850,11 +850,11 @@
       "signature_mode": "revealed",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 3149778,
-        "Journal": 582905,
-        "Mapping": 179625,
-        "ProofConfig": 1872585,
-        "Query": 2059208,
+        "Document": 3149854,
+        "Journal": 582998,
+        "Mapping": 181113,
+        "ProofConfig": 1878737,
+        "Query": 2059168,
         "Request": 698513,
         "input": 216743
       }
