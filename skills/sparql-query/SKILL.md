@@ -1268,7 +1268,10 @@ SPARQL Update `USING` identity behavior.
   Prepared parameter binding retains both plans; `with_query` evaluates its replacement algebra
   as supplied. The prepared result cache keys and evaluates the plan selected for those limits;
   text EXPLAIN ANALYZE uses that plan too. Template rendering retains the original operands for
-  subsequent execution under capacity limits.
+  subsequent execution under capacity limits. Preparation uses
+  `rewrite::rewrite_query_ref(&Query) -> Option<Query>`: passes report changes through `Some`,
+  while `None` leaves the input in place without cloning algebra or comparing complete queries.
+  The owning `rewrite::rewrite_query(Query) -> Query` remains available as a convenience wrapper.
   When off, zero rewrite code compiles, the
   default native + wasm builds are byte-identical, and no new dependencies are added (no `unsafe`).
 - **Equality-FILTER → value join** is the non-default `value-join` cargo feature (bead
