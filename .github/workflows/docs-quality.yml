@@ -926,6 +926,8 @@ jobs:
         run: python3 scripts/tests/test_mergequeue_cache_posture.py
       - name: Heavy workflow label-event posture
         run: python3 scripts/tests/test_heavy_workflow_labels.py
+      - name: Paper timing dispatch and evidence contracts
+        run: python3 scripts/tests/test_zk_paper_timing_hosted.py
       # Hosted PR previews: the publisher extracts PR-built archives into a public site, so
       # its archive confinement (atomic, budgeted) and build selection are pinned by tests.
       - name: Site-preview publisher (archive confinement + build selection)
