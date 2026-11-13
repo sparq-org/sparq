@@ -50,3 +50,7 @@ required-features = ["authenticated-rdf"]
 [[example]]
 name = "paper_sweep"
 required-features = ["authenticated-rdf"]
+
+[[example]]
+name = "canon_differential"
+required-features = ["phase-cycles"]

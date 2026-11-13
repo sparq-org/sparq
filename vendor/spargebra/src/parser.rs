@@ -14,6 +14,14 @@ use rand::random;
 #[cfg(feature = "standard-unicode-escaping")]
 use std::borrow::Cow;
 use std::char;
+#[cfg(target_os = "zkvm")]
+use std::collections::BTreeMap as HashMap;
+#[cfg(target_os = "zkvm")]
+#[path = "deterministic_collections.rs"]
+mod deterministic_collections;
+#[cfg(target_os = "zkvm")]
+use deterministic_collections::HashSet;
+#[cfg(not(target_os = "zkvm"))]
 use std::collections::{HashMap, HashSet};
 use std::mem::take;
 #[cfg(feature = "standard-unicode-escaping")]

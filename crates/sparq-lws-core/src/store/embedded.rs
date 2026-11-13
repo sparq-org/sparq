@@ -13,10 +13,9 @@
 //! `research/lws-design-records.md` §3 (RSS `decisions/0001-embed-sparq-in-process.md`).
 //!
 //! ## Why this is a net simplification over the HTTP path
-//! - **Same queries, different transport.** Every query/update is built by the SAME injection-safe
-//!   builders in [`super::sparql`] that the HTTP client uses — VERBATIM, no new query strings. So the
-//!   conformance-equivalence to the HTTP/in-memory impls is trivial: identical SPARQL, identical
-//!   named-graph model, only the execution path differs (in-process engine call vs an HTTP POST).
+//! - **Shared query builders.** Queries and updates use the injection-safe builders in
+//!   [`super::sparql`]. Read plans use balanced constant-graph branches for short walks
+//!   and the VALUES plan for longer walks, using the same builder as the HTTP plan.
 //! - **Named-graph isolation is REAL here (fixes the HTTP path's DEVIATION-1).** The engine's
 //!   `query`/`update_in_place` fully support `GRAPH <g> { … }` over a single [`Graph`] that holds the
 //!   default graph PLUS named graphs (graph IRI == resource IRI, the WAC-design model). The live
@@ -181,6 +180,8 @@ struct ActorGraph {
     stop_reason: Option<String>,
     #[cfg(test)]
     apply_failure: Option<sparq_engine::ApplyError>,
+    #[cfg(test)]
+    read_plan_query: Option<String>,
 }
 
 impl std::ops::Deref for ActorGraph {
@@ -338,6 +339,8 @@ fn actor_loop(graph: Graph, mut rx: mpsc::UnboundedReceiver<Job>) {
         stop_reason: None,
         #[cfg(test)]
         apply_failure: None,
+        #[cfg(test)]
+        read_plan_query: None,
     };
     let mut pending = None;
     while let Some(first) = pending.take().or_else(|| rx.blocking_recv()) {
@@ -682,6 +685,10 @@ mod history_ops;
 #[cfg(test)]
 #[path = "embedded_journal_tests.rs"]
 mod journal_tests;
+
+#[cfg(test)]
+#[path = "embedded_read_plan_tests.rs"]
+mod read_plan_tests;
 
 /// Extract the lexical string of a SELECT cell ([`oxrdf::Term`]): a literal's value, or an IRI's
 /// string. The data-path SELECTs bind either plain literals (the metadata fields) or IRIs (a
@@ -1332,30 +1339,24 @@ impl SparqClient for EmbeddedSparqClient {
         .await
     }
 
-    /// ONE combined read-plan lookup in a SINGLE engine round-trip — the embedded analogue of the
-    /// HTTP client's one combined SELECT (`super::http::HttpSparqClient::read_plan`), replacing the
-    /// trait DEFAULT's `1 + N` sequential `get_meta` dispatches with ONE.
-    ///
-    /// It executes the SAME injection-safe [`sparql::select_read_plan`] query the HTTP client uses,
-    /// VERBATIM — `VALUES ?g { <target> <cand₁> … } GRAPH ?g { <record> … }` — against the in-process
-    /// engine as ONE actor job (one `Self::dispatch`). The engine JOINs the `VALUES` graph list
-    /// with the per-graph record pattern, so the returned rows are EXACTLY the target + present
-    /// candidates keyed by graph IRI — semantically identical to probing each IRI with
-    /// [`sparql::select_meta`] in turn (the default loop), only in one pass. Every IRI flows through
-    /// the fallible `iri` builder inside `select_read_plan`, so an IRIREF-invalid value REJECTS the
-    /// whole build (fail-closed) BEFORE any dispatch — never string-concatenated. Fail-closed on
-    /// execution too: any engine/parse error fails the WHOLE plan (no per-candidate partial degrade —
-    /// trait invariant 4).
+    /// Read the target and ACL candidates in one indivisible actor job. Short walks
+    /// use balanced constant GRAPH branches; longer walks use VALUES. Every IRI is
+    /// validated before dispatch; any build, execution or row error fails the whole plan.
+    /// All records come from the same graph state, with the caller's candidate order and
+    /// duplicate roles retained when assembling the result.
     async fn read_plan(
         &self,
         target: &str,
         acl_candidates: &[String],
     ) -> Result<ReadPlan, SparqError> {
-        // Build the combined SELECT (fail-closed on any invalid IRI — never reaches the engine).
         let q = sparql::select_read_plan(target, acl_candidates)?;
         let target = target.to_string();
         let candidates: Vec<String> = acl_candidates.to_vec();
         self.dispatch(move |graph| {
+            #[cfg(test)]
+            {
+                graph.read_plan_query = Some(q.clone());
+            }
             let result =
                 sparq_engine::query(graph, &q).map_err(|e| engine_err("select_read_plan", e))?;
             // Resolve the result columns once (a row missing a REQUIRED binding is a malformed
@@ -2071,7 +2072,7 @@ mod tests {
     }
 
     /// A `.acl` target (the "two roles" case): the RAW target IS a candidate's IRI. The combined
-    /// query DEDUPES it in the `VALUES` list, and the plan still resolves both roles correctly in
+    /// query evaluates its record once, and the plan still resolves both roles correctly in
     /// ONE round-trip.
     #[test]
     fn read_plan_handles_acl_target_that_is_its_own_candidate() {

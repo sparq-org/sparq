@@ -2,7 +2,8 @@
 use oxrdf::{BlankNode, GraphName, NamedNode, Quad, Term};
 use sha2::Sha256;
 use sparq_canon::{
-    canonicalize_quads_bounded_with, issue_quads_bounded_with, CanonicalizationLimits,
+    canonicalize_quads_bounded_with, issue_quads_bounded_ordered_with, issue_quads_bounded_with,
+    CanonicalizationLimits,
 };
 
 fn limits() -> CanonicalizationLimits {
@@ -38,6 +39,13 @@ fn bounded_canonicalization_and_issuer_match_standard_output_under_relabeling() 
             issue_quads_bounded_with::<Sha256>(&input, &limits()).unwrap(),
             sparq_canon::issue_quads_with::<Sha256>(&input).unwrap()
         );
+        assert_eq!(
+            issue_quads_bounded_ordered_with::<Sha256>(&input, &limits()).unwrap(),
+            sparq_canon::issue_quads_with::<Sha256>(&input)
+                .unwrap()
+                .into_iter()
+                .collect()
+        );
     }
 }
 
@@ -62,6 +70,7 @@ fn each_capacity_rejects_and_hndq_limit_reaches_the_library() {
             .to_string()
             .contains(expected));
         assert!(issue_quads_bounded_with::<Sha256>(&graph, &cap).is_err());
+        assert!(issue_quads_bounded_ordered_with::<Sha256>(&graph, &cap).is_err());
     }
     let mut cap = limits();
     cap.max_hndq_calls = 0;
@@ -83,6 +92,13 @@ fn high_degree_with_unique_first_degree_hashes_needs_no_permutations() {
         issue_quads_bounded_with::<Sha256>(&graph, &cap).unwrap(),
         sparq_canon::issue_quads_with::<Sha256>(&graph).unwrap()
     );
+    assert_eq!(
+        issue_quads_bounded_ordered_with::<Sha256>(&graph, &cap).unwrap(),
+        sparq_canon::issue_quads_with::<Sha256>(&graph)
+            .unwrap()
+            .into_iter()
+            .collect()
+    );
 }
 
 #[test]
@@ -100,6 +116,7 @@ fn permutation_budget_is_shared_across_calls_and_counts_skipped_candidates() {
     for result in [
         canonicalize_quads_bounded_with::<Sha256>(&graph, &cap).map(|_| ()),
         issue_quads_bounded_with::<Sha256>(&graph, &cap).map(|_| ()),
+        issue_quads_bounded_ordered_with::<Sha256>(&graph, &cap).map(|_| ()),
     ] {
         assert!(result
             .unwrap_err()
@@ -111,6 +128,58 @@ fn permutation_budget_is_shared_across_calls_and_counts_skipped_candidates() {
         canonicalize_quads_bounded_with::<Sha256>(&graph, &cap).unwrap(),
         sparq_canon::canonicalize_quads_with::<Sha256>(&graph).unwrap()
     );
+    let labels = issue_quads_bounded_ordered_with::<Sha256>(&graph, &cap).unwrap();
+    assert_eq!(
+        labels.keys().cloned().collect::<Vec<_>>(),
+        ["n0", "n1", "n2", "n3", "n4"]
+    );
+    // Every bijection gives the same canonical form for this complete graph.
+    let mut issued: Vec<_> = labels.values().cloned().collect();
+    issued.sort();
+    assert_eq!(issued, ["c14n0", "c14n1", "c14n2", "c14n3", "c14n4"]);
+}
+
+#[test]
+fn repeated_related_occurrences_are_counted_before_permutations() {
+    let repeated: Vec<_> = (0..8).map(|i| edge("a", &format!("p{i}"), "b")).collect();
+    let repeated_positions: Vec<_> = (0..4)
+        .map(|i| {
+            Quad::new(
+                BlankNode::new("a").unwrap(),
+                NamedNode::new(format!("http://ex/p{i}")).unwrap(),
+                BlankNode::new("a").unwrap(),
+                BlankNode::new("b").unwrap(),
+            )
+        })
+        .collect();
+    let mut many = limits();
+    many.max_hndq_calls = usize::MAX;
+    let high_degree: Vec<_> = (0..30).map(|i| edge("a", &format!("p{i}"), "b")).collect();
+    let mut large = many;
+    large.max_hndq_calls = 1;
+    large.max_permutation_steps = usize::MAX;
+    // Repeated positions affect input/output accounting, while the work budget
+    // counts candidates actually visited after first-degree hashing.
+    for (graph, cap) in [
+        (repeated, limits()),
+        (repeated_positions, limits()),
+        (vec![edge("a", "p", "b")], many),
+        (high_degree, large),
+    ] {
+        assert_eq!(
+            canonicalize_quads_bounded_with::<Sha256>(&graph, &cap).unwrap(),
+            sparq_canon::canonicalize_quads_with::<Sha256>(&graph).unwrap()
+        );
+        let labels = sparq_canon::issue_quads_with::<Sha256>(&graph).unwrap();
+        assert_eq!(
+            issue_quads_bounded_with::<Sha256>(&graph, &cap).unwrap(),
+            labels
+        );
+        assert_eq!(
+            issue_quads_bounded_ordered_with::<Sha256>(&graph, &cap).unwrap(),
+            labels.into_iter().collect()
+        );
+    }
 }
 
 #[test]

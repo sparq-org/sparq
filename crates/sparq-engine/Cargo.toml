@@ -462,10 +462,17 @@ sparq-engine-serialize = { path = "../sparq-engine-serialize", version = "0.1.8"
 # `service` feature), so the default + wasm builds never compile it or its ureq/serde/serde_json/
 # quick-xml stack — the byte-identical feature-off contract is preserved. `default-features = false`.
 sparq-engine-service = { path = "../sparq-engine-service", version = "0.1.8", optional = true, default-features = false }
-regex = { version = "1", optional = true }
 md-5 = { version = "0.11", optional = true }
 sha1 = { version = "0.11", optional = true }
 sha2 = { version = "0.11", optional = true }
+
+# The regex backend already uses ordered maps without its std feature. Retain
+# the same pattern and acceleration features in guests, without hash seeding.
+[target.'cfg(target_os = "zkvm")'.dependencies]
+regex = { version = "1", optional = true, default-features = false, features = ["perf", "unicode"] }
+
+[target.'cfg(not(target_os = "zkvm"))'.dependencies]
+regex = { version = "1", optional = true }
 
 # UUID()/STRUUID() need an OS RNG; depending on uuid from the wasm build would drag
 # getrandom into the browser dependency graph, so the functions are native-only.
