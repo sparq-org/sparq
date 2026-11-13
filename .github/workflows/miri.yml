@@ -287,3 +287,8 @@ jobs:
         run: cargo +nightly-2026-06-11 miri setup
       - name: cargo miri test --doc
         run: cargo +nightly-2026-06-11 miri test -p sparq-core --doc
+      - name: Owned store-file open under Miri
+        run: >-
+          cargo +nightly-2026-06-11 miri test -p sparq-core
+          --no-default-features --features mmap --lib
+          backing::tests::owned_open_miri -- --exact
