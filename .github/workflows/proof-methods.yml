@@ -45,6 +45,7 @@ jobs:
         run: |
           rustup show active-toolchain
           rustup component add clippy rustfmt
+          rustup target add wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
@@ -53,7 +54,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Format
-        run: cargo fmt --manifest-path proof-methods/Cargo.toml -p sparq-vcq-disclosed -p sparq-vcq-tee --check
+        run: cargo fmt --manifest-path proof-methods/Cargo.toml -p sparq-vcq-disclosed -p sparq-vcq-tee -p sparq-verifiable-aggregate --check
 
       - name: Tests
         run: cargo test --locked --release --manifest-path proof-methods/Cargo.toml --all-features
@@ -73,3 +74,23 @@ jobs:
 
       - name: Measurement example runs
         run: cargo run --locked --release --manifest-path proof-methods/Cargo.toml -p sparq-vcq-disclosed --example measure --features fixtures -- 3
+
+      - name: Aggregate wasm build and clippy
+        run: |
+          cargo build --locked --release --manifest-path proof-methods/Cargo.toml -p sparq-verifiable-aggregate --target wasm32-unknown-unknown --features wasm
+          cargo clippy --locked --manifest-path proof-methods/Cargo.toml -p sparq-verifiable-aggregate --target wasm32-unknown-unknown --features wasm -- -D warnings
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Aggregate Node smoke
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("proof-methods/aggregate/Cargo.toml", "rb"))["dependencies"]["wasm-bindgen"]["version"].removeprefix("="))')
+          cargo install wasm-bindgen-cli --version "$version" --locked
+          python3 proof-methods/aggregate/tests/test_license_notices.py
+          proof-methods/aggregate/build-node.sh "$RUNNER_TEMP/aggregate-node"
+          mkdir "$RUNNER_TEMP/aggregate-dist"
+          npm pack "$RUNNER_TEMP/aggregate-node" --offline --ignore-scripts --pack-destination "$RUNNER_TEMP/aggregate-dist"
+          npm install --prefix "$RUNNER_TEMP/aggregate-install" --offline --ignore-scripts --no-audit --no-fund "$RUNNER_TEMP"/aggregate-dist/*.tgz
+          AGGREGATE_PACKAGE="$RUNNER_TEMP/aggregate-install/node_modules/sparq-verifiable-aggregate" node --test proof-methods/aggregate/tests/node-smoke.cjs

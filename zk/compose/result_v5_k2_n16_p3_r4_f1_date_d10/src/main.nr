@@ -1,0 +1,52 @@
+// Method-bound hidden date predicates; research-stage, not externally audited.
+// PUBLIC: challenge, query/result layout, issuer slots, accepted status-policy root.
+// PRIVATE: graph roots/contents/sizes/salts, selected rows, signatures and status references.
+// Declaration order is the Rust public-input reconstruction contract.
+use sparq_zk_compose_core::result::{N, P, R, V, POLICY_DEPTH};
+use sparq_zk_compose_core::result_m5::result_check_m5;
+use sparq_zk_compose_core::result_date::DateLiteral;
+global K: u32 = 2;
+global STATUS_DEPTH: u32 = 10;
+global F: u32 = 1;
+
+fn main(
+    challenge: pub Field, // fresh verifier challenge
+    version: pub Field,
+    accepted_root: pub Field,
+    issuer_keys: pub [[Field; 2]; K],
+    pattern_count: pub u32,
+    pattern_vars: pub [[u32; 3]; P],
+    pattern_constants: pub [[Field; 3]; P],
+    projection: pub [bool; V],
+    result_count: pub u32,
+    results: pub [[Field; V]; R],
+    filter_count: pub u32,
+    filter_vars: pub [u32; F],
+    filter_ops: pub [u32; F],
+    filter_bounds: pub [u64; F],
+    counts: [u32; K],
+    salts: [Field; K],
+    enc: [[[Field; 3]; N]; K],
+    status_lists: [Field; K],
+    status_versions: [u64; K],
+    status_indices: [Field; K],
+    status_roots: [Field; K],
+    status_siblings: [[Field; STATUS_DEPTH]; K],
+    policy_indices: [Field; K],
+    policy_siblings: [[Field; POLICY_DEPTH]; K],
+    signatures: [[Field; 5]; K],
+    selected_graphs: [[u32; P]; R],
+    selected_leaves: [[u32; P]; R],
+    values: [[Field; V]; R],
+    selected_types: [[[u32; 3]; P]; R],
+    selected_hashes: [[[Field; 3]; P]; R],
+    filter_values: [[u64; F]; R],
+    date_literals: [[[u8; 53]; F]; R],
+) {
+    let _ = challenge;
+    let mut dates = [[DateLiteral { token: [0; 53], key: 0 }; F]; R];
+    for r in 0..R {
+        for f in 0..F { dates[r][f] = DateLiteral { token: date_literals[r][f], key: filter_values[r][f] }; }
+    }
+    result_check_m5::<DateLiteral, K, F, STATUS_DEPTH, 64, 5>(version, accepted_root, issuer_keys, pattern_count, pattern_vars, pattern_constants, projection, result_count, results, filter_count, filter_vars, filter_ops, filter_bounds, counts, salts, enc, status_lists, status_versions, status_indices, status_roots, status_siblings, policy_indices, policy_siblings, signatures, selected_graphs, selected_leaves, values, selected_types, selected_hashes, dates);
+}

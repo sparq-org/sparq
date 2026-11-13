@@ -17,6 +17,7 @@
 
 use crate::fx::{FxMap, FxSet};
 use crate::json::Json;
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 /// A blank-node identifier issuer (§7.4 *Generate Blank Node Identifier*). Maps an input
@@ -159,6 +160,7 @@ impl GraphMap {
 /// preserving first-insertion order of graph names.
 #[derive(Default)]
 pub struct NodeMap {
+    error: Option<crate::JsonLdErrorCode>,
     graphs: Vec<(String, GraphMap)>,
     /// graph name → its position in `graphs`.
     index: FxMap<String, usize>,
@@ -223,6 +225,15 @@ pub fn generate_node_map(element: &Json) -> NodeMap {
         &mut issuer,
     );
     node_map
+}
+
+/// Generate a node map, rejecting conflicting `@index` values for the same node.
+pub fn try_generate_node_map(element: &Json) -> Result<NodeMap, crate::JsonLdError> {
+    let map = generate_node_map(element);
+    if let Some(code) = map.error {
+        return Err(crate::JsonLdError::new(code));
+    }
+    Ok(map)
 }
 
 /// The recursive core (§7.2 steps). `active_graph` is the graph currently being built;
@@ -298,6 +309,10 @@ fn node_map_gen(
             }
 
             // Otherwise `element` is a node object (step 5). Determine/mint its @id.
+            if element.get("@id").is_some_and(Json::is_null) {
+                append_value(node_map, active_graph, active_subject, active_property, list, element.clone());
+                return None;
+            }
             let id = node_identifier(members, issuer);
 
             // Add a reference `{ "@id": id }` to the active subject's property (or list)
@@ -389,6 +404,7 @@ fn process_node_members(
                     let reference =
                         Json::Obj(vec![("@id".to_string(), Json::Str(id.to_string()))]);
                     for (property, values) in reverse_map {
+                        let property = relabel_property(property, issuer);
                         for v in as_array(values) {
                             // Recurse as a top-level node (no active subject/property): this
                             // mints the reverse object's id and folds its own members in.
@@ -405,7 +421,7 @@ fn process_node_members(
                                     node_map,
                                     active_graph,
                                     &sub,
-                                    property,
+                                    &property,
                                     reference.clone(),
                                 );
                             }
@@ -425,19 +441,29 @@ fn process_node_members(
             // step 5.9: an ordinary property. Ensure it exists (even if empty), then recurse
             // its values as being under (active_graph, id, key).
             _ => {
-                ensure_property(node_map, active_graph, id, key);
+                let property = relabel_property(key, issuer);
+                ensure_property(node_map, active_graph, id, &property);
                 let mut no_list = None;
                 node_map_gen(
                     value,
                     node_map,
                     active_graph,
                     Some(id),
-                    Some(key),
+                    Some(&property),
                     &mut no_list,
                     issuer,
                 );
             }
         }
+    }
+}
+
+/// Property labels and node identifiers share one blank-node namespace.
+fn relabel_property<'a>(property: &'a str, issuer: &mut BlankNodeIssuer) -> Cow<'a, str> {
+    if property.starts_with("_:") {
+        Cow::Owned(issuer.issue(Some(property)))
+    } else {
+        Cow::Borrowed(property)
     }
 }
 
@@ -504,6 +530,11 @@ fn set_scalar_member(
     key: &str,
     value: Json,
 ) {
+    if node_map.graph(active_graph).and_then(|g| g.get(subject)).and_then(|n| n.get(key))
+        .is_some_and(|existing| *existing != value) {
+        node_map.error = Some(crate::JsonLdErrorCode::ConflictingIndexes);
+        return;
+    }
     node_map
         .graph_mut(active_graph)
         .ensure(subject)

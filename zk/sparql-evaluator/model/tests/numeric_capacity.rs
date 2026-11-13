@@ -29,21 +29,31 @@ fn witness(case: &serde_json::Value) -> Witness {
 }
 
 #[test]
-fn numeric_capacity_is_rejected_by_the_evaluation_relation() {
+fn numeric_results_and_capacity_match_the_evaluation_relation() {
     let corpus: serde_json::Value = serde_json::from_str(include_str!(
         "../../fixtures/conformance/numeric-capacity.json"
     ))
     .unwrap();
-    assert_eq!(corpus["cases"].as_array().unwrap().len(), 21);
+    assert_eq!(corpus["cases"].as_array().unwrap().len(), 28);
     for case in corpus["cases"].as_array().unwrap() {
         let input = witness(case);
         admit(&input.request).unwrap_or_else(|e| panic!("{}: admission {e:?}", case["id"]));
-        let error = evaluate(&input).unwrap_err();
-        assert_eq!(
-            error.0, "query evaluation or resource budget rejected",
-            "{}",
-            case["id"]
-        );
+        let result = evaluate(&input);
+        if case["expectation_kind"] == "implementation_capacity" {
+            assert_eq!(
+                result.unwrap_err().0,
+                "query evaluation or resource budget rejected",
+                "{}",
+                case["id"]
+            );
+        } else {
+            assert_eq!(
+                serde_json::json!(result.unwrap().result),
+                case["expected_result"],
+                "{}",
+                case["id"]
+            );
+        }
     }
 }
 
@@ -115,21 +125,31 @@ mod v2_checks {
     }
 
     #[test]
-    fn v2_numeric_capacity_is_rejected_by_the_evaluation_relation() {
+    fn v2_numeric_results_and_capacity_match_the_evaluation_relation() {
         let corpus: serde_json::Value = serde_json::from_str(include_str!(
             "../../fixtures/conformance/numeric-capacity.json"
         ))
         .unwrap();
-        assert_eq!(corpus["cases"].as_array().unwrap().len(), 21);
+        assert_eq!(corpus["cases"].as_array().unwrap().len(), 28);
         for case in corpus["cases"].as_array().unwrap() {
             let input = v2_witness(case);
             admit(&input.request).unwrap_or_else(|e| panic!("{}: admission {e:?}", case["id"]));
-            let error = evaluate(&input).unwrap_err();
-            assert_eq!(
-                error.0, "query evaluation or resource budget rejected",
-                "{}",
-                case["id"]
-            );
+            let result = evaluate(&input);
+            if case["expectation_kind"] == "implementation_capacity" {
+                assert_eq!(
+                    result.unwrap_err().0,
+                    "query evaluation or resource budget rejected",
+                    "{}",
+                    case["id"]
+                );
+            } else {
+                assert_eq!(
+                    serde_json::json!(result.unwrap().result),
+                    case["expected_result"],
+                    "{}",
+                    case["id"]
+                );
+            }
         }
     }
 

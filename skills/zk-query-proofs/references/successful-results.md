@@ -3,14 +3,16 @@
 Enable `successful-results` for `result::{prepare_result, verify_result}`.
 This research-stage addition is **not externally audited** and leaves the legacy
 complete-scan verifier intact. It accepts nonempty `SELECT DISTINCT` answers for
-positive BGPs with canonical nonnegative integer FILTERs. The verifier takes its
+positive BGPs with canonical nonnegative integer or timezone-free date FILTERs.
+The verifier takes its
 expected query, trusted issuer keys, authoritative status snapshots and fresh nonce
 independently. It returns released mappings after checking the canonical circuit
 key, public-input reconstruction and the proof. It does not assert answer
 completeness, wallet completeness, absence or holder identity.
 
 The circuit family admits one or two credential slots, sixteen triples per credential, three
-patterns, four released rows, six variables and two private predicates.
+patterns, four released rows and six variables. Hidden integer members admit two
+private predicates; dedicated date members admit a single private predicate.
 `prepare_result` chooses the smallest credential bucket. This removes a signature
 check for one-credential answers and reveals the smaller supporting capacity.
 `prepare_result_with_options` with `CredentialCapacity::HideInTwo` keeps two
@@ -19,7 +21,7 @@ two distinct credentials. Private canonical nonnegative integers cover the compl
 `u64` range (`MAX_PRIVATE_INTEGER`); public
 predicates use the shared planner semantics. Selected blank nodes are rejected
 in-circuit. Public predicates choose the `f0` member without numeric circuitry;
-the `f2` member binds private numeric values back to canonical literal encodings.
+the hidden-predicate members bind private comparison keys back to canonical literal encodings.
 Measured member costs live in the [gate snapshot](../../../crates/sparq-zk-compose/tests/gate_count_snapshot.json); expanded-profile measurement scope, source hashes and ACIR hashes are in [result capacity evidence](../../../bench/zk-compose/result_capacity_gates.json).
 
 The presentation contains only version, query, released RDF terms, challenge, one or two
@@ -47,13 +49,16 @@ relation folds the method-unbound `ZKSIG_C3` commitment message, their compiled
 bytes did not move, and proofs already issued against them keep verifying.
 `ResultPolicy::admit_unbound_legacy` is the explicit opt-in that acts on
 method-unbound material and issues through those members; by default they are
-refused with a named error. It has the same shape and the same written-down
+refused with a named error identifying the method-unbound legacy presentation and
+`ResultPolicy::admit_unbound_legacy`. It has the same shape and the same written-down
 meaning as `MethodPolicy::admit_unbound`: under it the commitment method rests on
 trusted-issuer honesty instead of an issuer attestation the circuit recomputes.
-Method-bound members exist at one or two credentials, no private predicate and
-status depth 10; every other unsigned capacity bucket, and the signed and
-public-pattern families, have none yet and are refused by name unless the opt-in
-is written down. Each selected credential is witnessed under the message the
+Method-bound hidden-integer members use the full unsigned range at every admitted
+status depth, in both credential-capacity shapes. This keeps the exact decimal
+length private and covers `HideInU64` without a separate small-range family.
+The predicate-free method-bound family retains its existing status capacity.
+The signed and public-pattern families still require the legacy opt-in. Each
+selected credential is witnessed under the message the
 SELECTED member's relation folds, so a method-bound attestation is never
 witnessed into a legacy member nor the reverse; an incoherent pairing is refused.
 `crates/sparq-zk-compose/tests/result_scheme_pin.rs` pins the circuit literal to
@@ -141,9 +146,10 @@ bounds retain their complete `u64` public field encoding. Witness TOML represent
 values above `i64::MAX` as decimal strings accepted by Noir.
 
 `ResultOptions::integer_capacity` defaults to
-`IntegerCapacityPolicy::Smallest`: selected private values through 99 use
-`PrivateIntegerCapacity::TwoDigits`, and larger canonical values select
-`FullU64`. `HideInU64` uses the full-width member for any private predicate,
+`IntegerCapacityPolicy::Smallest`: legacy opt-in issuance chooses its existing
+small or full-width range bucket; method-bound hidden-integer issuance always
+selects `PrivateIntegerCapacity::FullU64`. `HideInU64` uses the full-width member
+for any private predicate,
 including small values. Public predicates still select `f0`. The public capacity
 choice reveals a range bucket; the full-width relation keeps the exact decimal
 length private. No public digit-count field is introduced. The joint planner
@@ -171,9 +177,9 @@ its own status depth, rejecting a version mismatch. The presentation carries no
 prover-supplied key or status-depth override. Member suffix `i64` denotes the
 unsigned integer width in bits, not signed `i64` support. With the pinned
 Noir/bb toolchain, all original version-one members retain the foundation
-circuit, ABI and verification-key bytes; the version-five members are additions
-beside them, carrying the version-one public ABI unchanged while folding a
-different signed message. The [compatibility evidence](../../../bench/zk-compose/result_v1_compatibility.json)
+circuit, ABI and verification-key bytes. The method-bound integer members retain
+the matching legacy integer member's public ABI while folding a different signed
+message; dedicated date members use their own predicate and token-witness layout. The [compatibility evidence](../../../bench/zk-compose/result_v1_compatibility.json)
 records actual comparisons against the baseline archive. The required ZK toolchain
 lane, triggered by ZK paths, runs the ignored key test explicitly and compares each
 regenerated legacy key with those baseline bytes. It also independently fetches
@@ -193,3 +199,35 @@ Exact gate measurements remain circuit-size evidence only. The planner's objecti
 still counts authentications and memberships, and the driver still regenerates
 canonical keys during verification; neither a tiny-first search policy nor a
 verification-key cache is provided by this expansion.
+
+Canonical `xsd:date` comparisons use the order-preserving `YYYYMMDD` key for
+exact `YYYY-MM-DD` lexical forms, from the first positive Gregorian year through
+the last four-digit year. Query admission refuses timezone suffixes and other
+date spellings with `xsd:date requires valid YYYY-MM-DD without timezone`, and
+refuses date-time comparisons with `xsd:dateTime FILTER`. It validates month
+lengths and the Gregorian leap-year rule. The planner's `IntegerFilter` carries
+`PredicateDatatype::{Integer, Date}` so a numeric value equal to a date key
+cannot satisfy a date predicate, or conversely.
+
+A single hidden date comparison selects a dedicated method-bound date member
+in either credential-capacity shape, using the existing shallow status profile.
+Mixed hidden date/integer predicates and multiple hidden date predicates are
+refused by name. Public date comparisons run independently in the verifier.
+The circuit checks the complete literal token: quotes, every digit, separators,
+calendar bounds and the exact datatype IRI. It derives the key from those same
+bytes, checks the witnessed key, and opens their string-canonical term encoding.
+Date members have a private `date_literals` token array beside `filter_values`;
+all public filter fields are reconstructed from the query. The integer and
+date members retain distinct keys. These additions remain research-stage and
+not externally audited.
+
+The date members were selected after measuring a public datatype selector over
+the hidden-integer family with `bb gates`. Dedicated members require fewer
+constraints in both credential-capacity shapes and keep date parsing out of the
+integer relation. Canonical method-bound key pins are generated and checked by
+`bench/zk-compose/scripts/result_method_keys.py`; they use the same backend target
+and key-generation command as the native driver. Existing result evidence can be
+refreshed from an uncommitted candidate with the measurement tool's
+`apply --working-tree` mode (off by default): both independent source snapshots
+must match every current Noir source hash, and the base commit is explicitly labelled as the
+candidate's base rather than its complete source identity.

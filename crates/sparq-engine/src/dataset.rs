@@ -57,10 +57,7 @@ pub(crate) fn empty_graph() -> Graph {
 
 /// The store's named graph called `name`, if it holds one.
 fn find_named<'a>(graph: &'a Graph, name: &NamedNode) -> Option<&'a Graph> {
-    graph.named().iter().find_map(|(g, sub)| match g {
-        Term::NamedNode(n) if n == name => Some(sub),
-        _ => None,
-    })
+    graph.named_graph(&Term::NamedNode(name.clone()))
 }
 
 /// The ACTIVE dataset of a query that carries a dataset clause: the default
