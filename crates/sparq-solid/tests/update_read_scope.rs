@@ -291,6 +291,7 @@ fn variable_write_targets_are_authorized_as_written() {
 }
 
 /// A directory-backed copy of [`store`], and the directory.
+#[cfg(not(target_arch = "wasm32"))]
 fn durable_store(tag: &str) -> (PodStore, std::path::PathBuf) {
     let dir = std::env::temp_dir().join(format!("sparq_update_scope_{tag}_{}", std::process::id()));
     std::fs::remove_dir_all(&dir).ok();
@@ -301,6 +302,7 @@ fn durable_store(tag: &str) -> (PodStore, std::path::PathBuf) {
     (reopen(&dir), dir)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn reopen(dir: &std::path::Path) -> PodStore {
     let mut s = PodStore::new(Graph::open(dir).expect("opens"));
     s.materialize_wac().expect("wac");
@@ -311,6 +313,7 @@ fn reopen(dir: &std::path::Path) -> PodStore {
 /// store a multi-operation request that includes one is refused and changes neither memory
 /// nor disk, while a multi-operation request with static targets still runs.
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn variable_target_updates_stay_durable() {
     let (mut s, dir) = durable_store("ok");
     s.update_as(
@@ -437,6 +440,7 @@ fn in_memory_multi_operation_requests_are_all_or_nothing() {
 /// logged in its own store, under its own lock): the dataset is left as it was, and so is the
 /// disk.
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn a_durable_graph_cannot_join_an_in_memory_dataset() {
     let dir = std::env::temp_dir().join(format!("sparq_update_scope_mixed_{}", std::process::id()));
     std::fs::remove_dir_all(&dir).ok();
