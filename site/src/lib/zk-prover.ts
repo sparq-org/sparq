@@ -61,7 +61,7 @@ export const AGE_THRESHOLD = 25;
  * devices/browsers where live PROVING (the expensive part) is too heavy: verify is
  * cheap, and the bundled proof bytes are a real UltraHonk transcript (a tamper of any
  * byte makes verify reject). It is NOT a fresh proof — it replays one captured proof
- * and checks it live. The hidden age is not among the captured public inputs.
+ * and checks it live. This demo path is not designed to keep the compared age confidential.
  *
  * The manifest carries a `subProofs` ARRAY (the fuller car-hire manifest may bundle
  * several native per-circuit sub-proofs). The in-tab fallback verifies the age-gate
@@ -101,7 +101,7 @@ export interface VerifyResult {
 export interface ProofResult {
   /** The disclosed eligibility verdict (the only age-derived bit revealed). */
   eligible: boolean;
-  /** The proof bytes — opaque to the verifier; reveals nothing about the age. */
+  /** The proof bytes. This demo path does not keep the compared age confidential. */
   proofByteLength: number;
   /** The public inputs the verifier sees (NOT the age). */
   publicInputs: string[];

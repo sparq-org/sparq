@@ -12,9 +12,9 @@ import { ZkCarHire } from "@/components/zk-car-hire";
 // <details>. The research-grade / NOT-externally-audited qualifier stays VISIBLE in the header
 // badge (privacy-claims gate); the soundness/linkability detail relocates into the disclosure.
 export const metadata: Metadata = {
-  title: "ZK car-hire — prove eligibility, reveal nothing",
+  title: "ZK car-hire — a live zero-knowledge proof demo",
   description:
-    "Research-grade (not externally audited): a real zero-knowledge proof — age ≥ 25 over hidden credential data — generated in your browser via Noir + Barretenberg UltraHonk. The exact age is never disclosed in-circuit; the v1 verifier carries no production soundness guarantee.",
+    "Research-grade (not externally audited): a real zero-knowledge proof — age ≥ 25 over hidden credential data — generated in your browser via Noir + Barretenberg UltraHonk. This demo path is not designed to keep the compared age confidential; the v1 verifier carries no production soundness guarantee.",
 };
 
 const REPO_URL = "https://github.com/sparq-org/sparq";
@@ -36,7 +36,7 @@ export default function ZkCarHirePage() {
           <span className="text-[var(--warning)]" aria-hidden>
             ★
           </span>
-          Prove you may hire a car — reveal nothing
+          Prove you may hire a car with a zero-knowledge proof
         </h1>
         <div className="flex flex-wrap gap-2">
           <Badge variant="success">Live via bb.js — real proof in your tab</Badge>

@@ -103,7 +103,7 @@ export const FLAGSHIPS: Surface[] = [
     href: "/showcase/zk-car-hire",
     title: "ZK cross-credential car-hire",
     blurb:
-      "Prove you may hire a car — age ≥ 25, valid non-revoked licence, same holder across two credentials — without revealing your documents.",
+      "Prove you may hire a car — age ≥ 25, valid non-revoked licence, same holder across two credentials — a research demo of a live proof.",
     tier: "live-bbjs",
     icon: ShieldCheck,
     built: true,

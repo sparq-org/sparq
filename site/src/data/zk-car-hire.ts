@@ -154,7 +154,7 @@ export const COMPOSITION_MEMBERS: CompositionMember[] = [
     key: "filter-age",
     label: "Filter · age ≥ 25",
     snapshot: "filter_int_d2",
-    proves: "the hidden age satisfies ≥ 25 — the only age fact disclosed (proven live here)",
+    proves: "the age satisfies ≥ 25 (proven live here; this demo path does not keep the age confidential)",
     live: true,
   },
   {

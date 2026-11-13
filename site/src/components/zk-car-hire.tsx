@@ -666,7 +666,7 @@ function VerifyVerdictPanel({ phase }: { phase: VerifyPhase }) {
           <strong>real</strong> UltraHonk transcript, and the verify you just ran is a
           genuine in-tab <code className="font-mono">bb.js verifyProof</code>. A single
           tampered byte would make it reject. It proves the same age-gate relation
-          (<em>{r.relation}</em>); the hidden age is not among the captured public inputs.
+          (<em>{r.relation}</em>). This demo path is not designed to keep the compared age confidential.
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
           <Stat label="Verified in your tab" value={r.verified ? "yes" : "no"} />
