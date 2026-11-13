@@ -52,6 +52,9 @@
 #[cfg(feature = "jsonld-suite")]
 #[path = "support/earl.rs"]
 mod earl;
+#[cfg(feature = "jsonld-suite")]
+#[path = "support/earl_fixture.rs"]
+mod earl_fixture;
 
 // When the lane feature is OFF this test binary contains only a self-SKIP test.
 // The RDF writers are enabled independently for syntax C14N and Eval.

@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "api/*.rs": {"runtime": "vercel-rust@4.0.9"}
+  },
+  "rewrites": [
+    {"source": "/credentials/issue", "destination": "/api/issue"},
+    {"source": "/credentials/verify", "destination": "/api/verify"},
+    {"source": "/did.json", "destination": "/api/did"}
+  ]
+}

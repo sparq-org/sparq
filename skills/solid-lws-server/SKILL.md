@@ -1617,6 +1617,8 @@ Both Touchstone and the Solid CTH driver accept `PSS_SPARQ_BACKEND=durable` to t
 an ephemeral `SOLID_SERVER_DATA_DIR` across graceful and idle hard-kill restarts.
 See the [conformance harness guide](../../crates/sparq-lws-core/conformance/README.md#durable-restart-checks)
 for the storage dependencies, byte/ETag checks and unchanged suite ratchets.
+The same guide documents `run.sh --keep-earl` for native CTH reports with source
+revisions, and `ldp.sh` for the archived W3C LDP suite's Basic and Direct probe runs.
 
 ## Native LWS request mapping
 

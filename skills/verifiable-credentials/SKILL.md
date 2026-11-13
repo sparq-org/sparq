@@ -192,3 +192,10 @@ expect, nor credential status. Check those yourself on `VerifiedProof::config`.
 - [`zk-query-proofs`](../zk-query-proofs/SKILL.md) — the zero-knowledge / selective-disclosure complement (in-circuit, `nargo`/`bb`).
 - [`rdf-canon`](../rdf-canon/SKILL.md) — the RDFC-1.0 canonical unit the proof binds to.
 - [`prov-lineage`](../prov-lineage/SKILL.md) — W3C PROV-O lineage for derived graphs.
+
+## Credential HTTP test service
+
+For JSON-LD credential issue/verify endpoints, enable the default-off `vc-api`
+feature and follow [vc-api](../vc-api/SKILL.md). It provides an axum router and
+native runner with an offline context cache; its issuer key is test-only.
+The RDF library defaults remain unchanged.

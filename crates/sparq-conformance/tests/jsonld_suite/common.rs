@@ -365,7 +365,7 @@ fn outcomes_cover_skips_and_distinguish_manifest_iris() {
     // Omit 1.0-only entries even when a compatibility path happened to pass them.
     score.pass("#ten-spec");
     score.pass("#ten-mode");
-    let fixture = crate::earl::Fixture::new();
+    let fixture = crate::earl_fixture::Fixture::new();
     for cat in [
         "toRdf",
         "fromRdf",
@@ -407,7 +407,7 @@ fn outcomes_cover_skips_and_distinguish_manifest_iris() {
 
 #[test]
 fn reports_every_jsonld_lane_even_when_ratchets_fail() {
-    let fixture = crate::earl::Fixture::new();
+    let fixture = crate::earl_fixture::Fixture::new();
     fixture.write("empty.jsonld", "[]");
     fixture.write("empty.nq", "");
     fixture.write(
@@ -482,7 +482,7 @@ fn reports_every_jsonld_lane_even_when_ratchets_fail() {
 
 #[test]
 fn explicitly_missing_jsonld_roots_fail_without_earl() {
-    let fixture = crate::earl::Fixture::new();
+    let fixture = crate::earl_fixture::Fixture::new();
     for cat in [
         "toRdf",
         "fromRdf",
