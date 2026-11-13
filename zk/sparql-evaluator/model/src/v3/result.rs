@@ -4,8 +4,12 @@ use crate::{Rejected, RowOrder};
 use oxrdf::{BlankNode, GraphName, Literal, NamedNode, Quad, Term, Triple};
 use sha2::Sha256;
 use sparq_canon::{
-    CanonicalizationLimits, canonicalize_quads_bounded_with, issue_quads_bounded_with,
+    CanonicalizationLimits, canonicalize_quads_bounded_with,
 };
+#[cfg(target_os = "zkvm")]
+use sparq_canon::issue_quads_bounded_ordered_with as issue_quads_bounded_with;
+#[cfg(not(target_os = "zkvm"))]
+use sparq_canon::issue_quads_bounded_with;
 use sparq_engine::QueryResult;
 use std::{collections::BTreeMap, fmt::Write};
 

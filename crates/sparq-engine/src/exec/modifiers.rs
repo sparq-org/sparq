@@ -14,7 +14,7 @@ pub(super) fn project_bindings(b: Bindings, vars: &[Variable]) -> Bindings {
 }
 
 pub(super) fn distinct_bindings(b: &mut Bindings) {
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = WorkSet::new();
     b.rows.retain(|r| seen.insert(r.clone()));
 }
 

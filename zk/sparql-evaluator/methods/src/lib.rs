@@ -8,3 +8,7 @@ include!(concat!(env!("OUT_DIR"), "/authrdf_methods.rs"));
 // Measurement-only V5 image with per-phase cycle reporting.
 #[cfg(feature = "phase-cycles")]
 include!(concat!(env!("OUT_DIR"), "/authrdf_phases_methods.rs"));
+
+// Canonicalisation regression image; never a production evaluator.
+#[cfg(feature = "phase-cycles")]
+include!(concat!(env!("OUT_DIR"), "/canon_check_methods.rs"));

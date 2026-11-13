@@ -63,6 +63,13 @@ output while adding `CanonicalizationLimits`. Set every field explicitly:
 size bound are checked before the library is called; input quads/bytes also
 bound encoding, first-degree hashing and sorting. No new default feature is needed.
 
+`issue_quads_bounded_ordered_with::<sha2::Sha256>(&quads, &limits)` returns the
+same labels as a `BTreeMap<String, String>`. Use it in a zkVM guest to avoid
+constructing a randomly seeded return map. On `target_os = "zkvm"`, the standard
+canonicalizer also uses ordered work maps and a lexical dataset adapter. Native
+builds retain their existing collections and dataset adapter; the existing
+`HashMap`-returning APIs keep their signatures on every target.
+
 The underlying library's default HNDQ limit is 4000 calls. That counter counts
 recursive function entries, not permutation candidates skipped within an entry.
 The bounded APIs additionally compute `calls × d × d!`, where `d` is the largest
