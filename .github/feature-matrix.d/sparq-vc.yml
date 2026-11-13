@@ -35,3 +35,9 @@
   crate: "sparq-vc"
   features: "did-web"
   test: true
+
+# Socket-free VC-API handler tests and the native runner compilation.
+- name: "sparq-vc (vc-api — offline credential HTTP handlers)"
+  crate: "sparq-vc"
+  features: "vc-api"
+  test: true

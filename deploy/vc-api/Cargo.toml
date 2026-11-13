@@ -1,0 +1,28 @@
+[package]
+name = "sparq-vc-vercel"
+version = "0.0.0"
+edition = "2021"
+publish = false
+build = "build.rs"
+
+# Separate deployment workspace: the runtime never enters default/wasm builds.
+[workspace]
+
+[dependencies]
+sparq-vc = { path = "../../crates/sparq-vc", features = ["vc-api"] }
+vercel_runtime = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+axum = { version = "0.8", default-features = false }
+tower = { version = "0.5", features = ["util"] }
+
+[[bin]]
+name = "issue"
+path = "api/issue.rs"
+
+[[bin]]
+name = "verify"
+path = "api/verify.rs"
+
+[[bin]]
+name = "did"
+path = "api/did.rs"

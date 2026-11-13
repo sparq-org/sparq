@@ -64,6 +64,10 @@ use ed25519_dalek::{Signature, Signer, SigningKey as DalekSigningKey, Verifier};
 use crate::did::{DidError, DidResolver, did_key_for};
 use crate::proof_options::{self, CheckedProofConfig, ProofOptionError};
 
+#[cfg(feature = "vc-api")]
+#[path = "api/mod.rs"]
+pub mod api;
+
 /// The `type` of a W3C Data Integrity proof.
 pub const PROOF_TYPE: &str = "DataIntegrityProof";
 

@@ -195,7 +195,8 @@ standard it implements.
 - **Interfaces** — a [CLI](skills/cli/SKILL.md), a
   [SPARQL 1.1 Protocol](https://www.w3.org/TR/sparql11-protocol/) +
   [Graph Store HTTP Protocol](https://www.w3.org/TR/sparql11-http-rdf-update/)
-  [HTTP server](skills/http-server/SKILL.md), a WebAssembly /
+  [HTTP server](skills/http-server/SKILL.md),
+  [VC-API test endpoint](skills/vc-api/SKILL.md), a WebAssembly /
   [JavaScript build](skills/javascript-wasm/SKILL.md), and a
   [Python package](skills/python/SKILL.md), plus a
   [Kubernetes Helm deployment](skills/helm-deploy/SKILL.md). <!-- [GPT-5.6] -->

@@ -55,6 +55,14 @@ sha2 = "0.10"
 # OPTIONAL — the `did-web` feature only. Parses a fetched did:web DID document (JSON).
 # The default build (did:key + verify/sign over RDF) needs NO JSON parser.
 serde_json = { version = "1", optional = true }
+# Native VC-API adapter; all dependencies remain default-off.
+sparq-jsonld = { path = "../sparq-jsonld", version = "0.1.8", optional = true }
+oxjsonld = { workspace = true, optional = true }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json"], optional = true }
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros", "net"], optional = true }
+tower = { version = "0.5", features = ["util"], optional = true }
+chrono = { version = "0.4", default-features = false, features = ["clock"], optional = true }
+base64 = { version = "0.22", optional = true }
 
 [features]
 # Lean default: did:key (offline self-certifying), eddsa-rdfc-2022 verify + sign over RDF.
@@ -63,6 +71,12 @@ default = []
 # document; the HTTP fetch itself is a PLUGGABLE `DidDocumentFetcher` seam (this crate
 # ships NO HTTP client, so it forces no reqwest/ureq onto anyone and stays offline-testable).
 did-web = ["dep:serde_json"]
+vc-api = ["dep:serde_json", "dep:sparq-jsonld", "dep:oxjsonld", "dep:axum", "dep:tokio", "dep:tower", "dep:chrono", "dep:base64"]
+
+[[bin]]
+name = "sparq-vc-api"
+path = "src/bin/vc_api.rs"
+required-features = ["vc-api"]
 
 [dev-dependencies]
 # Sign-then-verify round-trip tests parse N-Triples fixtures.
