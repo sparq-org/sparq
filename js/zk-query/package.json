@@ -1,0 +1,42 @@
+{
+  "name": "@sparq-org/zk-query",
+  "version": "0.1.8",
+  "type": "module",
+  "description": "Research-grade authenticated query proofs; not externally audited",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js"
+    }
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "assets",
+    "wasm",
+    "internal",
+    "README.md",
+    "scripts/offline.py",
+    "native.mjs",
+    "wasm-prover.mjs"
+  ],
+  "scripts": {
+    "test": "node --test --test-concurrency=1 test/*.test.js"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "@noir-lang/noir_js": "1.0.0-beta.21",
+    "@noir-lang/noir_wasm": "1.0.0-beta.21",
+    "@aztec/bb.js": "5.0.0-nightly.20260324"
+  },
+  "bundleDependencies": [
+    "@noir-lang/noir_js",
+    "@noir-lang/noir_wasm",
+    "@aztec/bb.js"
+  ],
+  "license": "MIT"
+}

@@ -50,3 +50,7 @@ matching binding generator, downloads the CRS and checks committed length and
 SHA-256 pins. It does not invoke the circuit toolchain. Member regeneration is a
 separate `node js/zk-result/scripts/build-circuits.mjs` step; rerun the host build
 afterward. Consumer tarballs already contain all generated runtime files.
+
+Shared support comes from `js/zk-shared` and is copied into each package by its
+maintainer build. Keep the generated copy aligned before running offline checks
+or packing a tarball. The package remains research grade, not externally audited.

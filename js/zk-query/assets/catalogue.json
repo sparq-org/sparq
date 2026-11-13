@@ -1,0 +1,31 @@
+{
+  "profile": "authenticated-query",
+  "compilerAgreement": {
+    "operator": "required",
+    "authenticated": {
+      "status": "skipped-by-design",
+      "reason": "The measured authenticated compiler exhausted the WebAssembly allocation limit; authenticated catalogue programs are compiled natively."
+    }
+  },
+  "entries": [
+    {
+      "planHash": "e3d9b31f843a0f143dd75bc71f65b3871625ee545c1c4b45be1fbc3ce9fbc9ff",
+      "packageName": "query_e3d9b31f843a0f143dd75bc71f65b3871625ee545c1c4b45be1fbc3ce9fbc9ff",
+      "acir": "e3d9b31f843a0f143dd75bc71f65b3871625ee545c1c4b45be1fbc3ce9fbc9ff.json",
+      "vk": "e3d9b31f843a0f143dd75bc71f65b3871625ee545c1c4b45be1fbc3ce9fbc9ff.vk.hex",
+      "acirSha256": "b6b8cc18f394b3fa6164bca3f7e82ac4ca2436f25246ac9fb34cde5969263ecc",
+      "vkSha256": "eb64c092c45ef6159a43d734a17e7857afb47c2124f679525a36727adce07e8c",
+      "wasmProving": false,
+      "example": {
+        "query": "ASK {}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 1,
+          "rowsPerTable": 1
+        }
+      }
+    }
+  ],
+  "sourceBundleSha256": "8cbe00427430da78bf991f765cffbe379f80e6157847eff70a585573929e03eb",
+  "crsPinsSha256": "a922ad3a4057b6ed69156c7d6a0cacf5c614555e05f290af749096990100ea29"
+}
