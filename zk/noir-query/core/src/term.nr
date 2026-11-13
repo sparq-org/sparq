@@ -42,7 +42,7 @@ pub fn padding() -> TermCell {
 pub fn hash_bytes<let L: u32>(domain: Field, bytes: BoundedVec<u8, L>) -> Field {
     check_bytes(bytes);
     let mut packed: BytePacker<L> = BytePacker::new(domain, bytes.len());
-    for i in 0..L { packed.push_if(bytes.get_unchecked(i), i < bytes.len()); }
+    packed.extend(bytes);
     packed.finish()
 }
 
@@ -184,3 +184,26 @@ pub fn iri_status_index() -> TermCell { fixed_iri(crate::suite_constants::IRI_ST
 pub fn iri_status_purpose() -> TermCell { fixed_iri(crate::suite_constants::IRI_STATUS_PURPOSE) }
 pub fn iri_status_size() -> TermCell { fixed_iri(crate::suite_constants::IRI_STATUS_SIZE) }
 pub fn iri_assertion_method() -> TermCell { fixed_iri(crate::suite_constants::IRI_ASSERTION_METHOD) }
+
+/// Credential-only constructor for positions whose RDF role excludes literals.
+/// All raw metadata and backing padding are still checked before minting a cell.
+pub(crate) fn open_nonliteral_term<let L: u32, let D: u32, let G: u32, let P: u32>(
+    kind: u8, lexical: BoundedVec<u8, L>, datatype: BoundedVec<u8, D>,
+    language: BoundedVec<u8, G>, key: [u8; 31], credential: u32,
+) -> TermCell {
+    std::static_assert((P == 0) | (P == 1) | (P == 3), "nonliteral RDF position");
+    assert(kind < KIND_LITERAL, "nonliteral position");
+    if P != 3 { assert(kind > KIND_DEFAULT_GRAPH, "subject kind"); }
+    assert((datatype.len() == 0) & (language.len() == 0) & (key == [0; 31]), "non-literal metadata");
+    check_bytes(lexical); check_bytes(datatype); check_bytes(language);
+    let default_graph = (P == 3) & (kind == KIND_DEFAULT_GRAPH);
+    let length = 1 + if default_graph { 0 } else { 4 + lexical.len() };
+    let mut encoded: BytePacker<L + 5> = BytePacker::new(TERM_DOMAIN, length);
+    encoded.push(kind);
+    if default_graph { assert(lexical.len() == 0, "default graph lexical"); }
+    else { encoded.framed(lexical); }
+    let enc = if default_graph { DEFAULT_GRAPH_ENC }
+        else { Poseidon2::hash([kind as Field, encoded.finish(), 0], 3) };
+    TermCell { bound: true, kind, enc, key_class: 0, key: 0, dt: 0, lang: 0,
+        credential: if kind == KIND_BLANK_NODE { credential } else { 0 } }
+}

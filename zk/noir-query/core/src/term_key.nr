@@ -66,9 +66,11 @@ pub(crate) fn recompute<let L: u32>(text: BoundedVec<u8, L>, dt: Field) -> (u8, 
 }
 
 pub(crate) fn equals<let L: u32, let N: u32>(text: BoundedVec<u8, L>, expected: [u8; N]) -> bool {
+    // A matching length makes every compared position active. Static backing
+    // access avoids rebuilding bounded-vector reads for each identifier byte.
     let mut same = text.len() == N;
-    for i in 0..N { same = same & (at(text, i) == expected[i]); }
-    same
+    for i in 0..N { if i < L { same = same & (text.get_unchecked(i) == expected[i]); } }
+    same & (N <= L)
 }
 
 fn decimal<let L: u32>(text: BoundedVec<u8, L>, dt: Field, integer: bool) -> (u8, Field) {
