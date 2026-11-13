@@ -35,6 +35,7 @@
 //! substitution, and it re-checks every well-formedness condition before firing.
 
 use oxrdf::{NamedNode, Variable};
+use rustc_hash::FxHashSet;
 use spargebra::algebra::{AggregateExpression, Expression, GraphPattern, OrderExpression, PropertyPathExpression};
 use spargebra::term::{NamedNodePattern, TermPattern, TriplePattern};
 use spargebra::Query;
@@ -252,13 +253,10 @@ fn antijoin_ok(v: &Variable, left: &GraphPattern, right: &GraphPattern) -> bool 
     if pattern_contains_var(left, v) {
         return false;
     }
-    let left_certain = certain_vars(left);
-    let mut shared = false;
-    left.on_in_scope_variable(|w| {
-        // Probe the right first so disjoint variables never rescan the left.
-        shared = shared || (right_certain.contains(w) && left_certain.contains(w));
-    });
-    shared
+    // Past the lazy guards, index one certain set and visit the other once.
+    // No membership probe may rescan either graph pattern per variable.
+    let left_certain = certain_vars(left).collect();
+    right_certain.any(&mut |w| left_certain.contains(w))
 }
 
 /// Eligible IRI substitutions in conjunct order. A declined pass returns an
@@ -585,10 +583,10 @@ fn certain_vars(p: &GraphPattern) -> CertainVars<'_> {
     CertainVars(p)
 }
 
-/// A borrowed set view keeps declined anti-join checks allocation-free.
+/// A borrowed set view keeps the initial anti-join guards allocation-free.
 struct CertainVars<'a>(&'a GraphPattern);
 
-impl CertainVars<'_> {
+impl<'a> CertainVars<'a> {
     fn contains(&self, var: &Variable) -> bool {
         match self.0 {
             GraphPattern::Bgp { patterns } => patterns.iter().any(|t| triple_has_var(t, var)),
@@ -628,6 +626,75 @@ impl CertainVars<'_> {
             GraphPattern::Service { inner, silent, .. } => {
                 !silent && certain_vars(inner).contains(var)
             }
+        }
+    }
+
+    /// Materializes certainty without a tree traversal per candidate variable.
+    /// Scope boundaries combine child sets, matching the lazy membership rules.
+    fn collect(&self) -> FxHashSet<&'a Variable> {
+        match self.0 {
+            GraphPattern::Union { left, right } => {
+                let left = certain_vars(left).collect();
+                let right = certain_vars(right).collect();
+                left.intersection(&right).copied().collect()
+            }
+            GraphPattern::Project { inner, variables }
+            | GraphPattern::Group {
+                inner, variables, ..
+            } => {
+                let inner = certain_vars(inner).collect();
+                variables.iter().filter(|v| inner.contains(v)).collect()
+            }
+            _ => {
+                let mut out = FxHashSet::default();
+                self.any(&mut |v| {
+                    out.insert(v);
+                    false
+                });
+                out
+            }
+        }
+    }
+
+    /// Probes certain variables until the predicate succeeds. UNION,
+    /// projection and grouping need scoped sets; other nodes stream their vars.
+    /// Neither branch uses lazy membership probes during enumeration.
+    fn any(&self, test: &mut impl FnMut(&'a Variable) -> bool) -> bool {
+        match self.0 {
+            GraphPattern::Bgp { .. } | GraphPattern::Path { .. } => {
+                let mut found = false;
+                self.0.on_in_scope_variable(|v| found = found || test(v));
+                found
+            }
+            GraphPattern::Join { left, right } | GraphPattern::Lateral { left, right } => {
+                certain_vars(left).any(test) || certain_vars(right).any(test)
+            }
+            GraphPattern::LeftJoin { left, .. } | GraphPattern::Minus { left, .. } => {
+                certain_vars(left).any(test)
+            }
+            GraphPattern::Filter { inner, .. }
+            | GraphPattern::Distinct { inner }
+            | GraphPattern::Reduced { inner }
+            | GraphPattern::Slice { inner, .. }
+            | GraphPattern::OrderBy { inner, .. }
+            | GraphPattern::Extend { inner, .. } => certain_vars(inner).any(test),
+            GraphPattern::Graph { name, inner } => {
+                matches!(name, NamedNodePattern::Variable(v) if test(v))
+                    || certain_vars(inner).any(test)
+            }
+            GraphPattern::Values {
+                variables,
+                bindings,
+            } => variables.iter().enumerate().any(|(i, v)| {
+                bindings
+                    .iter()
+                    .all(|row| row.get(i).is_some_and(|cell| cell.is_some()))
+                    && test(v)
+            }),
+            GraphPattern::Service { inner, silent, .. } => !silent && certain_vars(inner).any(test),
+            GraphPattern::Union { .. }
+            | GraphPattern::Project { .. }
+            | GraphPattern::Group { .. } => self.collect().into_iter().any(test),
         }
     }
 }
@@ -817,6 +884,144 @@ mod tests {
         };
         assert!(rewrite_query_ref(&raw).is_none());
         assert_eq!(rewrite_query(raw.clone()), raw);
+    }
+
+    fn large_bgp(prefix: &str) -> GraphPattern {
+        GraphPattern::Bgp {
+            patterns: (0..1000)
+                .map(|i| TriplePattern {
+                    subject: TermPattern::Variable(
+                        Variable::new(format!("{prefix}_s{i}")).unwrap(),
+                    ),
+                    predicate: NamedNodePattern::NamedNode(NamedNode::new("http://ex/p").unwrap()),
+                    object: TermPattern::Variable(Variable::new(format!("{prefix}_o{i}")).unwrap()),
+                })
+                .collect(),
+        }
+    }
+
+    fn assert_antijoin_declined(left: GraphPattern, right: GraphPattern, missing: Variable) {
+        assert!(certain_vars(&right).contains(&missing));
+        assert!(!pattern_contains_var(&left, &missing));
+        assert!(!antijoin_ok(&missing, &left, &right));
+        let raw = Query::Ask {
+            dataset: None,
+            pattern: GraphPattern::Filter {
+                expr: Expression::Not(Box::new(Expression::Bound(missing))),
+                inner: Box::new(GraphPattern::LeftJoin {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                    expression: None,
+                }),
+            },
+            base_iri: None,
+        };
+        assert!(rewrite_query_ref(&raw).is_none());
+        assert_eq!(rewrite_query(raw.clone()), raw);
+    }
+
+    #[test]
+    fn large_disjoint_antijoin_with_large_right_stays_declined() {
+        assert_antijoin_declined(
+            large_bgp("left"),
+            large_bgp("right"),
+            Variable::new("right_o0").unwrap(),
+        );
+    }
+
+    #[test]
+    fn antijoin_declines_when_shared_vars_are_not_certain_on_left() {
+        let base = large_bgp("base");
+        let shared = large_bgp("shared");
+        let missing = Variable::new("missing").unwrap();
+        let right = GraphPattern::Join {
+            left: Box::new(shared.clone()),
+            right: Box::new(GraphPattern::Bgp {
+                patterns: vec![TriplePattern {
+                    subject: TermPattern::NamedNode(NamedNode::new("http://ex/right").unwrap()),
+                    predicate: NamedNodePattern::NamedNode(NamedNode::new("http://ex/q").unwrap()),
+                    object: TermPattern::Variable(missing.clone()),
+                }],
+            }),
+        };
+        for left in [
+            GraphPattern::LeftJoin {
+                left: Box::new(base.clone()),
+                right: Box::new(shared.clone()),
+                expression: None,
+            },
+            GraphPattern::Union {
+                left: Box::new(base),
+                right: Box::new(shared),
+            },
+        ] {
+            let variable = Variable::new("shared_o999").unwrap();
+            assert!(pattern_contains_var(&left, &variable));
+            assert!(!certain_vars(&left).contains(&variable));
+            assert!(certain_vars(&right).contains(&variable));
+            assert_antijoin_declined(left, right.clone(), missing.clone());
+        }
+    }
+
+    #[test]
+    fn certain_set_and_visit_match_lazy_membership() {
+        for body in [
+            "?s ?p ?o",
+            "?s ex:p+ ?o",
+            "?s ex:p ?o OPTIONAL { ?s ex:q ?v }",
+            "{ ?s ex:p ?o } UNION { ?s ex:q ?v }",
+            "?s ex:p ?o MINUS { ?s ex:q ?v }",
+            "GRAPH ?g { ?s ex:p ?o }",
+            "?s ex:p ?o BIND(STR(?o) AS ?v)",
+            "VALUES (?s ?o) { (ex:a ex:b) (ex:c UNDEF) }",
+            "SERVICE <http://ex/endpoint> { ?s ex:p ?o }",
+            "SERVICE SILENT <http://ex/endpoint> { ?s ex:p ?o }",
+            "{ SELECT ?s (SUM(?o) AS ?total) WHERE { ?s ex:p ?o } GROUP BY ?s }",
+            "{ SELECT DISTINCT ?s WHERE { ?s ex:p ?o } ORDER BY ?s LIMIT 2 OFFSET 1 }",
+            "{ SELECT REDUCED ?s WHERE { ?s ex:p ?o } }",
+            "?s ex:p ?o . { ?s ex:q ?v } UNION { ?s ex:r ?g }",
+        ] {
+            let query = parse(&format!("{PFX} ASK {{ {body} }}"));
+            let view = certain_vars(pattern_of(&query));
+            let collected = view.collect();
+            let mut visited = FxHashSet::default();
+            assert!(!view.any(&mut |v| {
+                visited.insert(v);
+                false
+            }));
+            assert_eq!(collected, visited, "{body}");
+            for name in ["s", "p", "o", "v", "g", "total", "missing"] {
+                let variable = Variable::new(name).unwrap();
+                assert_eq!(
+                    collected.contains(&variable),
+                    view.contains(&variable),
+                    "{body}: {name}"
+                );
+                assert_eq!(
+                    view.any(&mut |v| v == &variable),
+                    view.contains(&variable),
+                    "{body}: {name}"
+                );
+            }
+        }
+
+        let lateral = GraphPattern::Lateral {
+            left: Box::new(large_bgp("left")),
+            right: Box::new(large_bgp("right")),
+        };
+        let view = certain_vars(&lateral);
+        let collected = view.collect();
+        for name in ["left_s0", "left_o999", "right_s0", "right_o999", "missing"] {
+            let variable = Variable::new(name).unwrap();
+            assert_eq!(collected.contains(&variable), view.contains(&variable));
+            assert_eq!(view.any(&mut |v| v == &variable), view.contains(&variable));
+        }
+        let mut probes = 0;
+        assert!(view.any(&mut |_| {
+            probes += 1;
+            true
+        }));
+        assert_eq!(probes, 1, "stop probing after the first match");
     }
 
     // ---- REGRESSION (soundness, PR #1735 review finding #2): `certain_vars`'
