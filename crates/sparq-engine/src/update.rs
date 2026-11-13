@@ -1289,44 +1289,32 @@ fn resolve_effect_ops(graph: &Graph, effects: &[UpdateEffect]) -> Vec<TxnOp> {
     //
     // Set semantics: the redo journal replays records in append order via set-semantic `apply_delta`
     // (re-inserting a present triple / deleting an absent one is a no-op), so the running view need
-    // only track membership. We model each slot as a `TripleSet` and emit retractions for exactly
+    // only track membership. A materialised slot uses a `TripleSet` to emit retractions for exactly
     // the members present at the point the CLEAR/DROP runs. Slot insertion order is preserved so a
     // CLEAR NAMED / DROP ALL visits slots in a stable order.
     //
-    // (sq-aalh, review #189) PERF: the running view is decoded LAZILY, per slot, ONLY when
-    // an op actually touches that slot — `decode_triples` is the expensive part (a full scan of the
-    // slot's store), and the common path is delta-only updates that never CLEAR/DROP. The previous
-    // version eagerly decoded the default slot AND every named slot up-front, forcing a full-dataset
-    // scan on every multi-op body even when no slot's pre-body contents are ever read. With lazy
-    // seeding a delta-only body decodes nothing (a Delta seeds its slot then never reads pre-body
-    // members back out for journalling); only CLEAR/DROP/Delta of a slot pays for that slot's decode.
-    // CLEAR/DROP NAMED ALL still visits EVERY existing named graph (via `graph.named`) plus any slot
-    // created intra-body — the same retraction set as before — but each is decoded on demand.
-    let mut running: Vec<(GraphSlot, TripleSet)> = Vec::new();
+    // Delta-only slots retain borrowed batches without reading their pre-body contents.
+    // CLEAR/DROP materialises a slot once, replaying pending batches in capture order;
+    // subsequent effects update that set, including after a clear or drop.
+    #[derive(Default)]
+    struct SlotView<'e> {
+        triples: Option<TripleSet>,
+        deltas: Vec<(&'e [TripleTerms], &'e [TripleTerms])>,
+    }
+    let mut running: Vec<(GraphSlot, SlotView<'_>)> = Vec::new();
 
-    // Find the running view of a slot, SEEDING it on first access from the slot's CURRENT (pre-body)
-    // decoded contents so a later CLEAR/DROP retracts pre-body triples too — not just intra-body
-    // inserts. Decoding happens at most once per slot, the first time it is touched.
-    fn slot_mut<'a>(
-        graph: &Graph,
-        running: &'a mut Vec<(GraphSlot, TripleSet)>,
+    fn slot_mut<'r, 'e>(
+        running: &'r mut Vec<(GraphSlot, SlotView<'e>)>,
         slot: &GraphSlot,
-    ) -> &'a mut TripleSet {
-        match running.iter().position(|(s, _)| s == slot) {
-            Some(i) => &mut running[i].1,
+    ) -> &'r mut SlotView<'e> {
+        let i = match running.iter().position(|(s, _)| s == slot) {
+            Some(i) => i,
             None => {
-                let seed = match slot {
-                    None => decode_triples(graph),
-                    Some(name) => graph
-                        .named_graph(name)
-                        .map(decode_triples)
-                        .unwrap_or_default(),
-                };
-                running.push((slot.clone(), seed));
-                let i = running.len() - 1;
-                &mut running[i].1
+                running.push((slot.clone(), SlotView::default()));
+                running.len() - 1
             }
-        }
+        };
+        &mut running[i].1
     }
 
     // Retract every triple currently in the running view of `slot`, then empty it — so a later op
@@ -1334,11 +1322,26 @@ fn resolve_effect_ops(graph: &Graph, effects: &[UpdateEffect]) -> Vec<TxnOp> {
     fn clear_slot(
         graph: &Graph,
         records: &mut Vec<TxnOp>,
-        running: &mut Vec<(GraphSlot, TripleSet)>,
+        running: &mut Vec<(GraphSlot, SlotView<'_>)>,
         slot: &GraphSlot,
     ) {
-        let view = slot_mut(graph, running, slot);
-        for t in view.drain() {
+        let view = slot_mut(running, slot);
+        let triples = view.triples.get_or_insert_with(|| {
+            let mut triples = match slot {
+                None => decode_triples(graph),
+                Some(name) => graph.named_graph(name).map(decode_triples).unwrap_or_default(),
+            };
+            for (inserts, deletes) in view.deltas.drain(..) {
+                for t in deletes {
+                    triples.remove(t);
+                }
+                for t in inserts {
+                    triples.insert(t.clone());
+                }
+            }
+            triples
+        });
+        for t in triples.drain() {
             records.push(TxnOp::Delete {
                 slot: slot.clone(),
                 triple: t,
@@ -1350,7 +1353,7 @@ fn resolve_effect_ops(graph: &Graph, effects: &[UpdateEffect]) -> Vec<TxnOp> {
     fn drop_slot(
         graph: &Graph,
         records: &mut Vec<TxnOp>,
-        running: &mut Vec<(GraphSlot, TripleSet)>,
+        running: &mut Vec<(GraphSlot, SlotView<'_>)>,
         slot: &GraphSlot,
     ) {
         clear_slot(graph, records, running, slot);
@@ -1363,7 +1366,7 @@ fn resolve_effect_ops(graph: &Graph, effects: &[UpdateEffect]) -> Vec<TxnOp> {
     // exists pre-body, UNION every named slot already created/touched intra-body, in a stable order
     // (pre-body graphs first, then any new intra-body slots in touch order). Decoding stays lazy —
     // this only collects the slot NAMES; `clear_slot` decodes each as it visits it.
-    fn named_slots(graph: &Graph, running: &[(GraphSlot, TripleSet)]) -> Vec<GraphSlot> {
+    fn named_slots(graph: &Graph, running: &[(GraphSlot, SlotView<'_>)]) -> Vec<GraphSlot> {
         let mut names: Vec<GraphSlot> =
             graph.named().iter().map(|(n, _)| Some(n.clone())).collect();
         for (slot, _) in running {
@@ -1377,20 +1380,27 @@ fn resolve_effect_ops(graph: &Graph, effects: &[UpdateEffect]) -> Vec<TxnOp> {
     for effect in effects {
         match effect {
             UpdateEffect::Delta { slot, inserts, deletes } => {
-                let view = slot_mut(graph, &mut running, slot);
+                let view = slot_mut(&mut running, slot);
+                if view.triples.is_none() {
+                    view.deltas.push((inserts, deletes));
+                }
                 for t in deletes {
                     records.push(TxnOp::Delete {
                         slot: slot.clone(),
                         triple: t.clone(),
                     });
-                    view.remove(t);
+                    if let Some(triples) = &mut view.triples {
+                        triples.remove(t);
+                    }
                 }
                 for t in inserts {
                     records.push(TxnOp::Insert {
                         slot: slot.clone(),
                         triple: t.clone(),
                     });
-                    view.insert(t.clone());
+                    if let Some(triples) = &mut view.triples {
+                        triples.insert(t.clone());
+                    }
                 }
             }
             // CLEAR and DROP retract the SAME data set (every triple present in the target WHEN
@@ -1439,13 +1449,17 @@ fn resolve_effect_ops(graph: &Graph, effects: &[UpdateEffect]) -> Vec<TxnOp> {
             // frame carries an existence record. It also makes the slot exist in the running view,
             // so a later CLEAR NAMED / DROP ALL in the same body sees it (as an empty target).
             UpdateEffect::Create(name) => {
-                slot_mut(graph, &mut running, &Some(name.clone()));
+                slot_mut(&mut running, &Some(name.clone()));
                 records.push(TxnOp::Create(name.clone()));
             }
         }
     }
     records
 }
+
+#[cfg(test)]
+#[path = "update_effect_tests.rs"]
+mod effect_tests;
 
 /// (review 1593) DURABLY empties the default graph, preserving the named graphs
 /// AND (crucially) a directory-backed graph's WAL/directory association — so a CLEAR/DROP of

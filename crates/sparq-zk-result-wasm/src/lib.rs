@@ -33,6 +33,20 @@ struct TestIssuer {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProductionIssuer {
+    secret_key_hex: String,
+    public_key: String,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Issuer {
+    Production(ProductionIssuer),
+    Test(TestIssuer),
+}
+
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StatusRef {
     status_list: String,
@@ -82,7 +96,7 @@ fn nonce(s: &str) -> Result<VerifierNonce, String> {
         .map(VerifierNonce::from_field)
         .ok_or_else(|| "invalid nonce field".into())
 }
-fn issuer_key(seed: &str) -> Result<SecretKey, String> {
+fn test_issuer_key(seed: &str) -> Result<SecretKey, String> {
     let hex = seed.strip_prefix("0x").unwrap_or(seed);
     if hex.is_empty() || hex.len() > 16 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err("test issuer seed must be a hexadecimal u64".into());
@@ -145,9 +159,21 @@ fn noir_numbers(value: Value) -> Value {
 /// Deterministic issuer convenience for tests only; never production key generation.
 #[wasm_bindgen(js_name = testIssuerKeygen)]
 pub fn test_issuer_keygen(seed_hex: &str) -> Result<String, String> {
-    let sk = issuer_key(seed_hex)?;
+    let sk = test_issuer_key(seed_hex)?;
     serde_json::to_string(&TestIssuer {
         seed_hex: seed_hex.into(),
+        public_key: sig::public_key_to_hex(&sk.public_key()),
+    })
+    .map_err(err)
+}
+
+/// Generate a research-grade issuer key using the platform CSPRNG.
+/// The returned secret is never persisted; the caller must store it securely.
+#[wasm_bindgen(js_name = issuerKeygen)]
+pub fn issuer_keygen() -> Result<String, String> {
+    let sk = SecretKey::generate().map_err(err)?;
+    serde_json::to_string(&ProductionIssuer {
+        secret_key_hex: sk.to_hex(),
         public_key: sig::public_key_to_hex(&sk.public_key()),
     })
     .map_err(err)
@@ -160,11 +186,22 @@ pub fn issue(
     graph_n_quads: &str,
     status_ref_json: &str,
 ) -> Result<String, String> {
-    let issuer: TestIssuer = parse(issuer_json)?;
-    let sk = issuer_key(&issuer.seed_hex)?;
+    let issuer: Issuer = parse(issuer_json)?;
+    let (sk, expected_pk, mismatch) = match issuer {
+        Issuer::Production(issuer) => (
+            SecretKey::from_hex(&issuer.secret_key_hex).ok_or("invalid issuer secret key")?,
+            issuer.public_key,
+            "issuer key differs from secret",
+        ),
+        Issuer::Test(issuer) => (
+            test_issuer_key(&issuer.seed_hex)?,
+            issuer.public_key,
+            "issuer key differs from seed",
+        ),
+    };
     let pk = sig::public_key_to_hex(&sk.public_key());
-    if pk != issuer.public_key {
-        return Err("issuer key differs from seed".into());
+    if pk != expected_pk {
+        return Err(mismatch.into());
     }
     let status: StatusRef = parse(status_ref_json)?;
     let graph = Graph::load_str(graph_n_quads, "nquads")?;
@@ -309,6 +346,57 @@ mod tests {
         let policy=json!({"trustedIssuers":[key["publicKey"]],"snapshots":[{"status_list":"https://example.org/status","version":1,"bits":[0]}],"minVersion":1,"maxVersion":1}).to_string();
         let credential = issue(&issuer, GRAPH, STATUS).unwrap();
         (issuer, credential, policy)
+    }
+
+    #[test]
+    fn production_issuance_imports_secret_and_rejects_mixed_or_mismatched_keys() {
+        let encoded = issuer_keygen().unwrap();
+        let issuer: Value = parse(&encoded).unwrap();
+        assert_eq!(issuer.as_object().unwrap().len(), 2);
+        assert!(issuer.get("seedHex").is_none());
+        let sk = SecretKey::from_hex(issuer["secretKeyHex"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            issuer["publicKey"],
+            sig::public_key_to_hex(&sk.public_key())
+        );
+        let issued = credential(&issue(&encoded, GRAPH, STATUS).unwrap()).unwrap();
+        let status = sig::status_ref_digest(
+            &sig::status_list_id_to_field(&issued.status_list),
+            issued.status_index,
+            issued.status_version,
+        );
+        let message = sig::presentation_message_with_status_and_scheme(
+            &issued.graph.commitment,
+            &issued.graph.salt,
+            &status,
+            &sig::scheme_iri_to_field(issued.graph.method_commitment().method.scheme_iri()),
+        );
+        assert!(sig::verify(&sk.public_key(), &message, &issued.signature));
+
+        let mut bad = issuer.clone();
+        bad["publicKey"] = json!(sig::public_key_to_hex(
+            &SecretKey::from_seed(99).public_key()
+        ));
+        assert_eq!(
+            issue(&bad.to_string(), GRAPH, STATUS).unwrap_err(),
+            "issuer key differs from secret"
+        );
+        for secret in ["00".repeat(32), "ff".repeat(32), "invalid".into()] {
+            bad = issuer.clone();
+            bad["secretKeyHex"] = json!(secret);
+            assert_eq!(
+                issue(&bad.to_string(), GRAPH, STATUS).unwrap_err(),
+                "invalid issuer secret key"
+            );
+        }
+        bad = issuer;
+        bad["seedHex"] = json!("a1");
+        assert!(issue(&bad.to_string(), GRAPH, STATUS).is_err());
+        let legacy = test_issuer_keygen("a1").unwrap();
+        let test: Value = parse(&legacy).unwrap();
+        assert!(test.get("secretKeyHex").is_none());
+        assert_eq!(test["seedHex"], "a1");
+        assert!(issue(&legacy, GRAPH, STATUS).is_ok());
     }
 
     #[test]

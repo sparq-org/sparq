@@ -60,6 +60,10 @@ async function backend() {
   }
 }
 
+export function issuerKeygen() {
+  return parse(host.issuerKeygen());
+}
+
 export function testIssuerKeygen(seedHex) {
   return parse(host.testIssuerKeygen(seedHex));
 }

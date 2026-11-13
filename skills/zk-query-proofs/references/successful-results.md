@@ -264,17 +264,35 @@ The Rust seam exposes `PreparedResult::member()`, `witness_inputs()`,
 public bytes and admitted mappings from the same expected-query checks used by
 `verify_result`; it does not verify a proof or grant acceptance on its own.
 
-The host crate exposes JSON `testIssuerKeygen`, `issue`, `prepare`,
+The host crate exposes JSON `issuerKeygen`, `testIssuerKeygen`, `issue`, `prepare`,
 `reconstructPublicInputs` and `canonicalVkHash`. Issuance uses string-canonical
 commitments and method-bound presentation attestations. `prepare` returns the
 member, exact private ABI input map and public skeleton. Its private witness data
 must never be sent to the relying party. The native subprocess driver and
 file-backed nonce store are excluded from wasm32. Target-specific entropy
-features use the platform CSPRNG; test issuer seed generation is explicitly
-deterministic test tooling, not production key generation.
+features use the platform CSPRNG. `issuerKeygen()` returns
+`{ secretKeyHex, publicKey }`; `issue` imports the canonical secret scalar and
+checks the matching public key. The caller must store and protect the secret;
+the package never persists it. Keys remain research grade, not externally audited.
+`testIssuerKeygen(seedHex)` retains its deterministic `{ seedHex, publicKey }`
+test-only format. Objects mixing secret and seed fields reject.
 
 Research grade and not externally audited: this proves selected support over
 sparq commitment-signed credentials, not standard VCs. It provides no answer or
 wallet completeness, absence or holder identity. Issuer identities, capacities
 and result size remain observable. See the
 [Node skill](../../zk-result-javascript/SKILL.md) for the application contract.
+
+### Issuer key generation and storage
+
+`sig::SecretKey::generate() -> Result<SecretKey, getrandom::Error>` uses the
+platform CSPRNG and returns entropy errors without a deterministic fallback.
+`to_bytes()` / `from_bytes(&[u8]) -> Option<SecretKey>` export/import exactly
+32 canonical little-endian scalar bytes; `to_hex()` / `from_hex(&str)` use
+exactly 64 lowercase, unprefixed hex digits. Import rejects zero, wrong lengths
+and integers at or above the Baby-JubJub scalar modulus, without modular reduction.
+`from_seed(u64)` remains a deterministic test-only helper. Debug output is
+redacted and the Rust key zeroizes on drop. The caller must protect, store and
+erase exported secrets; exported bytes/strings are not automatically scrubbed.
+These keys remain research grade, not externally audited, and generation does
+not change the signing path's constant-time caveats.

@@ -148,6 +148,10 @@ reduction as `fragment_filters`, without parsing the query again.
 
 ## Issuance
 
+Use `sig::SecretKey::generate()` for platform CSPRNG keys and its canonical
+byte/hex export and import for caller-owned storage. See the
+[key format, validation and custody contract](references/successful-results.md#issuer-key-generation-and-storage).
+
 Issuance hardening: a typed attestation API that always binds the commitment method for dual-leaf and value-only commitments.
 Use `sig::SecretKey::attest(&MethodCommitment, &salt, &status_ref, holder_pk_digest)`
 for every non-string-canonical issuance. `None` selects the presentation message

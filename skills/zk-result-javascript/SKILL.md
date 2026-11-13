@@ -42,11 +42,20 @@ package ships dependencies and proof artifacts, uses only the
 WASM proving backend and bundled CRS, and needs no network or native toolchain to
 install its tarball or prove and verify.
 
-`testIssuerKeygen(seedHex)` and `issue(issuer, graphNQuads, statusRef)` are test
-issuance helpers. The seed helper is deterministic and unsuitable for production
-key generation. Issuance salts and proof randomness use the platform CSPRNG;
-no deterministic or stub source is registered. Keep credentials and witness maps
-private.
+Use `issuerKeygen()` to obtain `{ secretKeyHex, publicKey }` from the platform
+CSPRNG. The caller must store and protect the secret; the package never persists
+it. The key and signature scheme remain research grade, not externally audited.
+`secretKeyHex` encodes the canonical little-endian scalar bytes as exactly
+64 lowercase, unprefixed hex digits. `issue(issuer, graphNQuads, statusRef)` imports
+that secret, rejects zero/out-of-range scalars and malformed encodings, and checks
+the matching public key. Caller-restored JSON keys can be passed directly to it.
+Exported strings and JavaScript memory are not automatically erased.
+
+`testIssuerKeygen(seedHex)` retains its deterministic `{ seedHex, publicKey }`
+format for tests only. Issuance accepts either key format and rejects mixed seed
+and secret fields. Random keys, issuance salts and proof randomness use the
+platform CSPRNG, including `crypto.getRandomValues` on wasm32; no stub source is
+registered. Keep credentials and witness maps private.
 
 See the [package API and policy shapes](../../js/zk-result/README.md) and the
 [successful-result contract](../zk-query-proofs/references/successful-results.md).
