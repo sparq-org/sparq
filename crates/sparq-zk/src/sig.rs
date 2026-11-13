@@ -440,6 +440,63 @@ pub struct Signature {
 }
 
 impl SecretKey {
+    /// Generate a nonzero secret scalar by rejection sampling platform CSPRNG bytes.
+    /// Entropy failure is returned without a deterministic fallback. Research grade,
+    /// not externally audited; the signing path's constant-time caveats still apply.
+    pub fn generate() -> Result<Self, getrandom::Error> {
+        let mut bytes = zeroize::Zeroizing::new([0u8; 32]);
+        loop {
+            getrandom::fill(bytes.as_mut())?;
+            if let Some(key) = Self::from_bytes(bytes.as_ref()) {
+                return Ok(key);
+            }
+        }
+    }
+
+    /// Export the scalar as exactly 32 canonical little-endian bytes.
+    /// The caller owns protection and erasure of the exported secret.
+    pub fn to_bytes(&self) -> [u8; 32] {
+        let mut bytes = [0u8; 32];
+        self.0
+            .serialize_compressed(&mut bytes[..])
+            .expect("scalar serializes");
+        bytes
+    }
+
+    /// Import exactly 32 little-endian bytes. Rejects zero and integers at or
+    /// above the Baby-JubJub scalar modulus; input is never reduced modulo it.
+    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() != 32 {
+            return None;
+        }
+        let key = Self(JjScalar::deserialize_compressed(bytes).ok()?);
+        if key.0.is_zero() {
+            return None;
+        }
+        Some(key)
+    }
+
+    /// Export canonical little-endian scalar bytes as lowercase, unprefixed hex.
+    /// The caller must store this secret securely; exported strings are not scrubbed.
+    pub fn to_hex(&self) -> String {
+        let bytes = zeroize::Zeroizing::new(self.to_bytes());
+        to_hex(bytes.as_ref())
+    }
+
+    /// Import exactly 64 lowercase, unprefixed hex digits using [`Self::from_bytes`].
+    /// Malformed, zero and non-canonical scalar encodings return `None`.
+    pub fn from_hex(s: &str) -> Option<Self> {
+        if s.len() != 64
+            || !s
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return None;
+        }
+        let bytes = zeroize::Zeroizing::new(from_hex(s)?);
+        Self::from_bytes(&bytes)
+    }
+
     /// Derive the public key `pk = sk·G`.
     // sq-j3b9: `sk` is the long-term secret, so the multiplication goes
     // through the scalar-independent ladder (`crate::ct::mul_ct`) rather than
@@ -450,10 +507,8 @@ impl SecretKey {
         PublicKey(crate::ct::mul_ct(&g, &self.0).into_affine())
     }
 
-    /// A deterministic secret key from a `u64` seed — issuance-tooling / test
-    /// convenience so callers in crates without an `ark` dependency can mint a
-    /// key without touching the curve types. NOT for production key generation
-    /// (use OS entropy). Distinct seeds give distinct keys.
+    /// A deterministic secret key from a `u64` seed, for tests only.
+    /// NOT for production key generation; use [`Self::generate`] for OS entropy.
     // audit #3 test/tooling helper.
     pub fn from_seed(seed: u64) -> Self {
         use ark_std::rand::SeedableRng;
@@ -1755,6 +1810,102 @@ fn from_hex(s: &str) -> Option<Vec<u8>> {
 mod tests {
     use super::*;
     use ark_std::rand::SeedableRng;
+
+    #[test]
+    fn secret_key_export_import_preserves_attestation() {
+        let mut one = [0u8; 32];
+        one[0] = 1;
+        let key = SecretKey::from_bytes(&one).unwrap();
+        assert_eq!(key.0, JjScalar::from(1u64));
+        assert_eq!(key.to_bytes(), one);
+        assert_eq!(key.to_hex(), format!("01{}", "00".repeat(31)));
+
+        let original = SecretKey::from_seed(77);
+        let imported = SecretKey::from_hex(&original.to_hex()).unwrap();
+        assert!(bool::from(original.ct_eq(&imported)));
+        assert_eq!(imported.to_bytes(), original.to_bytes());
+        assert_eq!(imported.public_key(), original.public_key());
+        let commitment = MethodCommitment {
+            method: CommitmentMethod::StringCanonicalV1,
+            commitment: Fr::from(123u64),
+        };
+        let salt = Fr::from(456u64);
+        let status = Fr::from(789u64);
+        let signature =
+            signature_from_hex(&imported.attest(&commitment, &salt, &status, None)).unwrap();
+        let message = presentation_message_with_status_and_scheme(
+            &commitment.commitment,
+            &salt,
+            &status,
+            &scheme_iri_to_field(commitment.method.scheme_iri()),
+        );
+        assert!(verify(&original.public_key(), &message, &signature));
+        assert!(!verify(
+            &SecretKey::from_seed(78).public_key(),
+            &message,
+            &signature
+        ));
+        assert_eq!(format!("{imported:?}"), "SecretKey(\"<redacted>\")");
+    }
+
+    #[test]
+    fn secret_key_import_rejects_malformed_encodings() {
+        let valid = SecretKey::from_seed(77).to_hex();
+        for malformed in [
+            String::new(),
+            valid[..valid.len() - 1].into(),
+            valid[..valid.len() - 2].into(),
+            format!("{valid}00"),
+            format!("0x{valid}"),
+            format!("g{}", &valid[1..]),
+            format!("é{}", &valid[2..]),
+            "AB".repeat(32),
+        ] {
+            assert!(SecretKey::from_hex(&malformed).is_none());
+        }
+        for len in [0, 31, 33, 64] {
+            let mut bytes = vec![0u8; len];
+            if let Some(first) = bytes.first_mut() {
+                *first = 1;
+            }
+            assert!(SecretKey::from_bytes(&bytes).is_none());
+        }
+    }
+
+    #[test]
+    fn secret_key_import_rejects_zero_scalar() {
+        assert!(SecretKey::from_bytes(&[0u8; 32]).is_none());
+        assert!(SecretKey::from_hex(&"00".repeat(32)).is_none());
+    }
+
+    #[test]
+    fn secret_key_import_rejects_noncanonical_scalars() {
+        let modulus = JjScalar::MODULUS;
+        let mut above = modulus;
+        above.as_mut()[0] += 1;
+        for bytes in [modulus.to_bytes_le(), above.to_bytes_le(), vec![0xff; 32]] {
+            assert!(SecretKey::from_bytes(&bytes).is_none());
+            assert!(SecretKey::from_hex(&to_hex(&bytes)).is_none());
+        }
+        let mut below = modulus;
+        below.as_mut()[0] -= 1;
+        let bytes = below.to_bytes_le();
+        let key = SecretKey::from_bytes(&bytes).unwrap();
+        assert_eq!(key.to_bytes().as_slice(), bytes);
+    }
+
+    #[test]
+    fn secret_key_generation_uses_fresh_entropy() {
+        let a = SecretKey::generate().unwrap();
+        let b = SecretKey::generate().unwrap();
+        assert!(!bool::from(a.ct_eq(&b)));
+        assert_ne!(a.public_key(), b.public_key());
+        for key in [a, b] {
+            assert!(key.public_key().is_prime_order());
+            let imported = SecretKey::from_hex(&key.to_hex()).unwrap();
+            assert!(bool::from(key.ct_eq(&imported)));
+        }
+    }
 
     /// The `ZKSIG_M4` message is pinned to its WIRE DEFINITION, recomputed here
     /// from the ASCII tag bytes rather than from the implementation's constant:
