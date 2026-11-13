@@ -17,6 +17,11 @@
   INFERENCE step (they produce triples), not part of the existing `validate(..)`
   path. Use `FactDomain::AssertedPlusInferred` when constraints should see the rule
   closure without expanding manually.
+- **SHACL 1.2 inference rules also require `shacl-af`.** The separate `rules12`
+  module implements their scheduling semantics. Declared `sh:RulesEntailment`
+  and `sh:RuleSet` regimes execute before validation; without the feature these
+  regimes are unsupported. See [Advanced Features](advanced-features.md) for
+  selection, scheduling and failure behavior.
 - **The SHACL Compact Syntax parser is OPT-IN behind the `scs` cargo feature.**
   With it off the `scs` module and the `parse_scs` / `parse_scs_to_graph` / `ScsError`
   / `DEFAULT_BASE` symbols are absent (zero parser code compiled in). It adds no new
@@ -108,8 +113,9 @@
   channel is `validate_strict` (SHACL 1.2) or `validate_strict_shacl10` (SHACL 1.0).
 - **W3C conformance:** at suite pin `04ecbb4` (2026-11-12), full SHACL 1.2
   Core passes 162 entries and SHACL-SPARQL passes 98, in both feature states.
-  With `shacl-af`, node-expression constraints pass eight entries and evaluation
-  passes 123 with nine mismatches and 144 unsupported forms. The eight validation
+  Node-expression evaluation passes 272 entries in both feature states, with four
+  failures comparing decimal lexical forms and no unsupported evaluation entries.
+  With `shacl-af`, node-expression constraints pass eight entries. The eight validation
   entries are excluded from evaluation's EARL assertions. See
   [`research/shacl12-conformance-gap.md`](../../../research/shacl12-conformance-gap.md)
   for the exact gap map and ratchets.

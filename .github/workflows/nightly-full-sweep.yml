@@ -603,7 +603,7 @@ jobs:
             libappindicator3-dev \
             librsvg2-dev \
             patchelf \
-            webkit2gtk-driver \
+            webkitgtk-webdriver \
             dbus-x11 \
             xvfb
       # Drift tripwire + regression guard (bead sq-t6492 / issue #1740). The lane's persistent red

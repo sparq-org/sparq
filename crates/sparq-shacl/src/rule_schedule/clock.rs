@@ -4,7 +4,8 @@ use spargebra::{
     Query,
 };
 
-pub(super) fn needed(query: &Query) -> bool {
+#[cfg(feature = "shacl-af")]
+pub(crate) fn needed(query: &Query) -> bool {
     let mut probe = query.clone();
     freeze(
         &mut probe,
@@ -12,10 +13,14 @@ pub(super) fn needed(query: &Query) -> bool {
     );
     &probe != query
 }
-pub(super) fn freeze(query: &mut Query, now: &oxrdf::Literal) {
-    if let Query::Construct { pattern, .. } = query {
-        crate::sparql::walk_pattern(pattern, &mut Freeze(now));
-    }
+pub(crate) fn freeze(query: &mut Query, now: &oxrdf::Literal) {
+    let pattern = match query {
+        Query::Construct { pattern, .. }
+        | Query::Select { pattern, .. }
+        | Query::Ask { pattern, .. }
+        | Query::Describe { pattern, .. } => pattern,
+    };
+    crate::sparql::walk_pattern(pattern, &mut Freeze(now));
 }
 struct Freeze<'a>(&'a oxrdf::Literal);
 

@@ -240,12 +240,8 @@ impl<'g> ControlWrites<'g> {
         if !reads_as_control(doc, suffix) {
             return Ok(());
         }
-        if let Some((iri, graph)) = self
-            .graph
-            .named()
-            .iter()
-            .find_map(|(n, g)| graph_iri(n).filter(|iri| *iri == doc).map(|iri| (iri, g)))
-        {
+        if let Some(graph) = self.graph.named_graph(&Term::NamedNode(NamedNode::new_unchecked(doc))) {
+            let iri = doc;
             if !self.admitted.borrow().contains(&std::ptr::from_ref(graph)) {
                 ledger.open()?;
                 let scan = graph.store().scan(&[None, None, None]);
