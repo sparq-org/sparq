@@ -11,11 +11,18 @@ publish = false
 sparq-zk-compose = { path = "../sparq-zk-compose" }
 sparq-zk = { path = "../sparq-zk" }
 blake3 = "1"
+sha2 = "0.10"
+serde_json = "1"
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+tempfile = "3"
+sparq-canon = { path = "../sparq-canon", default-features = false }
 oxrdf = { workspace = true }
 spargebra = { workspace = true }
 sparq-query-protocol = { path = "../sparq-query-protocol" }
 
 [dev-dependencies]
+serde_json = { version = "1", features = ["preserve_order"] }
+oxttl = { workspace = true }
 sparq-core = { path = "../sparq-core" }
 sparq-engine = { path = "../sparq-engine" }
-serde_json = "1"

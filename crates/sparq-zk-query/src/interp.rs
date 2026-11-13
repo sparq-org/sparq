@@ -105,8 +105,8 @@ pub fn evaluate(
         .map(|p| match p {
             Parameter::Term(t) => encoder.encode(t).and_then(|c| {
                 c.validate()?;
-                if !c.bound {
-                    return Err(Error::Invalid("unbound constant".into()));
+                if !c.bound || c.scope != 0 {
+                    return Err(Error::Invalid("public constant".into()));
                 }
                 Ok(Some(c))
             }),
@@ -300,7 +300,7 @@ fn release_rows(mut rows: Vec<Row>) -> Vec<Row> {
     rows
 }
 
-fn row_key(row: &[Cell]) -> Vec<(bool, Word, u32)> {
+pub(crate) fn row_key(row: &[Cell]) -> Vec<(bool, Word, u32)> {
     row.iter().map(|c| c.identity()).collect()
 }
 fn lookup(schema: &[Var], row: &[Cell], v: Var) -> Cell {
@@ -371,6 +371,16 @@ fn compare(op: Compare, a: Value, b: Value) -> Result<Value, Error> {
         return Err(Error::Unsupported("floating-point comparison".into()));
     }
     if a.kind == 3 && b.kind == 3 {
+        if matches!(a.key_class, 3 | 4) && matches!(b.key_class, 3 | 4) && a.dt != b.dt {
+            return Err(Error::Unsupported("mixed temporal datatypes".into()));
+        }
+        if op != Compare::Equal
+            && matches!(a.key_class, 6 | 7)
+            && matches!(b.key_class, 6 | 7)
+            && (a.lang != [0; 32] || b.lang != [0; 32])
+        {
+            return Err(Error::Unsupported("language-tagged string ordering".into()));
+        }
         if matches!(a.key_class, 3 | 4)
             && matches!(b.key_class, 3 | 4)
             && a.key_class != b.key_class

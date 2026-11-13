@@ -4697,6 +4697,8 @@ version = "1.0.154"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6"
 dependencies = [
+ "foldhash 0.2.0",
+ "indexmap",
  "itoa",
  "memchr",
  "serde",
@@ -6178,15 +6180,21 @@ dependencies = [
 name = "sparq-zk-query"
 version = "0.1.8"
 dependencies = [
+ "base64 0.22.1",
  "blake3",
+ "chrono",
  "oxrdf 0.3.3",
+ "oxttl 0.2.3",
  "serde_json",
+ "sha2 0.10.9",
+ "sparq-canon",
  "sparq-core",
  "sparq-engine",
  "sparq-query-protocol",
  "sparq-spargebra",
  "sparq-zk",
  "sparq-zk-compose",
+ "tempfile",
 ]
 
 [[package]]

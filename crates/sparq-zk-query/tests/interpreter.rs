@@ -1,11 +1,12 @@
-mod support;
+#[path = "support/mod.rs"]
+mod fixture_support;
+use fixture_support::*;
 use sparq_zk_query::{
     capacity::Bounds,
     interp::{evaluate, Cell, CredentialCells, EncodeTerm, ResultValue},
     lower::lower,
     Error,
 };
-use support::*;
 
 const BOUNDS: Bounds = Bounds {
     credentials: 2,
@@ -233,88 +234,12 @@ fn seeded_differential_against_engine() {
     }
 }
 
-fn differential(mut seed: u64) {
-    let original = seed;
-    let mut random = || {
-        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
-        (seed >> 32) % 5
-    };
-    let mut rdf = String::new();
-    let mut data = vec![CredentialCells { quads: vec![] }];
-    for i in 0..4 {
-        let n = random() as i64 - 2;
-        rdf.push_str(&format!(
-            "<urn:s{i}> <urn:p> {n} .\n<urn:s{i}> <urn:q> <urn:group{}> .\n",
-            random() % 2
-        ));
-        data[0]
-            .quads
-            .push(quad(&iri(&format!("urn:s{i}")), &iri("urn:p"), &integer(n)));
-        // Use the graph parser to supply the independent engine dataset below.
-    }
-    let graph = sparq_core::Graph::load_str(&rdf, "turtle").unwrap();
-    // The generated queries read the numeric predicate only; unrelated quads stay present.
-    for line in rdf.lines().filter(|l| l.contains("<urn:q>")) {
-        let words: Vec<_> = line.split_whitespace().collect();
-        data[0].quads.push(quad(
-            &iri(words[0].trim_matches(['<', '>'])),
-            &iri("urn:q"),
-            &iri(words[2].trim_matches(['<', '>'])),
-        ));
-    }
-    for q in [
-        "SELECT ?s ?x WHERE {?s <urn:p> ?x}",
-        "SELECT ?x WHERE {?s <urn:p> ?x}",
-        "SELECT DISTINCT ?x WHERE {?s <urn:p> ?x}",
-        "SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x >= -1 && ?x < 2)}",
-        "SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x IN (-2,0,2))}",
-        "SELECT ?s WHERE {?s <urn:p> ?x VALUES ?x {-1 1 UNDEF}}",
-        "SELECT ?s WHERE {?s <urn:p> ?x . ?s <urn:q> ?y}",
-        "SELECT ?s WHERE {?s <urn:p> ?x . ?s <urn:p> ?x}",
-        "ASK {?s <urn:p> ?x FILTER(?x > 5)}",
-        "ASK {?s <urn:p> ?x}",
-        "ASK {?s <urn:p> ?s}",
-        "SELECT ?s WHERE {?s <urn:p> ?x} LIMIT 0",
-    ] {
+fn differential(seed: u64) {
+    let (rdf, data, _) = fixture_support::generated_dataset(seed);
+    for q in fixture_support::DIFFERENTIAL_QUERIES {
         let result = evaluate(&lower(q, BOUNDS).unwrap(), &data, &FixtureEncoder)
             .unwrap()
             .result;
-        let expected: serde_json::Value =
-            serde_json::from_str(&sparq_engine::query_json(&graph, q).unwrap()).unwrap();
-        match result {
-            ResultValue::Ask(v) => assert_eq!(
-                Some(v),
-                expected["boolean"].as_bool(),
-                "seed={original}, {q}"
-            ),
-            ResultValue::Select { variables, rows } => {
-                let mut expected_rows = vec![];
-                for r in expected["results"]["bindings"].as_array().unwrap() {
-                    let mut row = vec![];
-                    for v in &variables {
-                        let binding = &r[v];
-                        let term = if binding["type"] == "uri" {
-                            iri(binding["value"].as_str().unwrap())
-                        } else {
-                            oxrdf::Literal::new_typed_literal(
-                                binding["value"].as_str().unwrap(),
-                                oxrdf::NamedNode::new(binding["datatype"].as_str().unwrap())
-                                    .unwrap(),
-                            )
-                            .into()
-                        };
-                        row.push(FixtureEncoder.encode(&term).unwrap().enc);
-                    }
-                    expected_rows.push(row);
-                }
-                let mut actual: Vec<Vec<_>> = rows
-                    .iter()
-                    .map(|r| r.iter().map(|c| c.enc).collect())
-                    .collect();
-                actual.sort();
-                expected_rows.sort();
-                assert_eq!(actual, expected_rows, "seed={original}, {q}");
-            }
-        }
+        fixture_support::assert_engine(q, &rdf, &result);
     }
 }

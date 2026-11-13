@@ -94,7 +94,7 @@ fn public_bounds_select_buckets_and_private_counts_only_refuse() {
             ..BOUNDS
         },
         Bounds {
-            rows_per_table: 65,
+            rows_per_table: 33,
             ..BOUNDS
         },
         Bounds {
@@ -150,4 +150,39 @@ fn exclusions_and_stage_refusals_are_named() {
         assert!(e.to_string().contains(name));
     }
     assert!(matches!(lower("SELECT", BOUNDS), Err(Error::Parse(_))));
+}
+
+#[test]
+fn rdf12_terms_are_refused_in_values_patterns_and_expressions() {
+    for query in [
+        "SELECT ?x WHERE {VALUES ?x {<<( <urn:s> <urn:p> <urn:o> )>>}}",
+        "SELECT * WHERE {<urn:s> <urn:p> <<( <urn:a> <urn:b> <urn:c> )>>}",
+        "SELECT * WHERE {{} MINUS {VALUES ?x {<<( <urn:s> <urn:p> <urn:o> )>>}}}",
+        "SELECT * WHERE {{} MINUS {<urn:s> <urn:p> <<( <urn:a> <urn:b> <urn:c> )>>}}",
+    ] {
+        assert_eq!(
+            lower(query, BOUNDS).unwrap_err(),
+            Error::Excluded("triple term".into()),
+            "{query}"
+        );
+    }
+    assert_eq!(
+        lower(
+            "SELECT (TRIPLE(<urn:s>,<urn:p>,<urn:o>) AS ?x) WHERE {}",
+            BOUNDS
+        )
+        .unwrap_err(),
+        Error::Excluded("TRIPLE".into())
+    );
+    for query in [
+        "SELECT ?x WHERE {VALUES ?x {\"abc\"@en--ltr}}",
+        "ASK {FILTER(\"abc\"@en--rtl)}",
+        "SELECT * WHERE {?s <urn:p> \"abc\"@en--ltr}",
+    ] {
+        assert_eq!(
+            lower(query, BOUNDS).unwrap_err(),
+            Error::Unsupported("directional literal".into()),
+            "{query}"
+        );
+    }
 }

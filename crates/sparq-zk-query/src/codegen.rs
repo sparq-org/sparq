@@ -18,7 +18,7 @@ pub fn generate(plan: &Plan) -> Result<Package, Error> {
     let mut source = String::from(
         "// Research query program; credential opening is a stand-in pending suite integration.\n\
          use core::table::{TermCell, Table, unbound};\n\
-         use core::{ops_core, ops_core_expr};\n\nfn main(\n",
+         use core::{ops_core, ops_core_expr, ops_core_statement};\n\nfn main(\n",
     );
     let term_ids: Vec<_> = plan
         .parameters
@@ -51,37 +51,42 @@ pub fn generate(plan: &Plan) -> Result<Package, Error> {
         )
     };
     let cap = plan.capacity;
-    let result_type = match plan.form {
-        ResultForm::Ask => "bool".to_owned(),
-        ResultForm::Select => format!(
-            "Table<{}, {}>",
-            cap.rows_per_table,
-            plan.result_schema().variables.len()
-        ),
-    };
-    // The ABI order is shared with public-input reconstruction, not presentation metadata.
-    writeln!(source,"    request_digest: pub [u8; 32],\n    bounds: pub [u32; 3],\n    parameters: pub [TermCell; {}],\n    indices: pub [u32; {}],\n    result: pub {result_type},",term_ids.len(),index_ids.len()).unwrap();
-    writeln!(source,"    credentials: [[[TermCell; 4]; {}]; {}],\n    counts: [u32; {}],\n    credential_count: u32,",cap.quads_per_credential,cap.credentials,cap.credentials).unwrap();
+    let layout = crate::statement::Layout::new(plan);
+    source.push_str(&layout.declarations());
+    writeln!(source,"    credentials: [[[TermCell; 4]; {}]; {}],\n    counts: [u32; {}],\n    credential_count: u32,\n    presentation_salt: [u8; 32],",cap.quads_per_credential,cap.credentials,cap.credentials).unwrap();
     for (i, node) in plan.nodes.iter().enumerate() {
         writeln!(
             source,
             "    t{i}: Table<{}, {}>,",
             node.output.capacity,
-            node.output.variables.len()
+            node.output.abi_width()
         )
         .unwrap();
     }
-    source.push_str(") -> pub Field {\n    ops_core::check_parameters(parameters);\n");
-    writeln!(source,"    let dataset = ops_core::open_dataset::<{}, {}, {}>(credentials, counts, credential_count, bounds);",cap.credentials,cap.quads_per_credential,cap.credentials*cap.quads_per_credential).unwrap();
+    writeln!(source,") {{\n    ops_core::check_parameters(parameters, {});\n    ops_core::check_indices(indices, {});",term_ids.len(),index_ids.len()).unwrap();
+    let dataset_name = if plan
+        .nodes
+        .iter()
+        .any(|n| matches!(n.operator, Operator::Scan(_)))
+    {
+        "dataset"
+    } else {
+        "_dataset"
+    };
+    writeln!(source,"    let {dataset_name} = ops_core::open_dataset::<{}, {}, {}>(credentials, counts, credential_count, bounds);",cap.credentials,cap.quads_per_credential,cap.credentials*cap.quads_per_credential).unwrap();
+    source.push_str("    ops_core_statement::check_dataset(credentials, counts, credential_count, presentation_salt, input_commitment, signature_mode);\n");
     for (i, node) in plan.nodes.iter().enumerate() {
         let schema = &node.output.variables;
         let columns = |id: NodeId| -> String {
             let input = &plan.nodes[id as usize].output.variables;
+            if schema.is_empty() {
+                return format!("[{}]", input.len().max(1));
+            }
             array(schema.iter().map(|v| {
                 input
                     .iter()
                     .position(|a| a == v)
-                    .unwrap_or(input.len())
+                    .unwrap_or(input.len().max(1))
                     .to_string()
             }))
         };
@@ -95,7 +100,7 @@ pub fn generate(plan: &Plan) -> Result<Package, Error> {
                             .position(|a| a == v)
                             .expect("scan schema")
                             .to_string(),
-                        Slot::Parameter(_) => schema.len().to_string(),
+                        Slot::Parameter(_) => node.output.abi_width().to_string(),
                     }
                 }));
                 let constants = array(slots.iter().map(|slot| match slot {
@@ -152,6 +157,9 @@ pub fn generate(plan: &Plan) -> Result<Package, Error> {
                 source,
                 "    ops_core::values({}, t{i});",
                 array(rows.iter().map(|r| {
+                    if r.is_empty() {
+                        return "[unbound()]".into();
+                    }
                     array(
                         r.iter()
                             .map(|p| p.map(&term).unwrap_or_else(|| "unbound()".into())),
@@ -167,10 +175,14 @@ pub fn generate(plan: &Plan) -> Result<Package, Error> {
         ResultForm::Ask => writeln!(source, "    ops_core::ask(t{result}, result);").unwrap(),
         ResultForm::Select => writeln!(source, "    ops_core::select(t{result}, result);").unwrap(),
     }
-    source.push_str("    ops_core::request_binding(request_digest)\n}\n");
+    let binder = match plan.form {
+        ResultForm::Ask => "bind_ask",
+        ResultForm::Select => "bind_select",
+    };
+    writeln!(source, "    ops_core_statement::{binder}(request_digest, input_commitment, signature_mode, bounds, parameters, indices, result, statement_binding);\n}}\n").unwrap();
     let files=BTreeMap::from([
         ("Nargo.toml".into(),format!("[workspace]\nmembers = [\"{name}\"]\n")),
-        (format!("{name}/Nargo.toml"),format!("[package]\nname = \"{name}\"\ntype = \"bin\"\nauthors = [\"sparq\"]\ncompiler_version = \"=1.0.0-beta.21\"\n\n[dependencies]\ncore = {{ path = \"../core\" }}\n")),
+        (format!("{name}/Nargo.toml"),format!("[package]\nname = \"{name}\"\ntype = \"bin\"\nauthors = [\"sparq\"]\ncompiler_version = \">=1.0.0\"\n\n[dependencies]\ncore = {{ path = \"../zk/noir-query/core\" }}\n")),
         (format!("{name}/src/main.nr"),source),
     ]);
     Ok(Package { name, files })

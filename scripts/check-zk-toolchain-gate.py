@@ -305,6 +305,8 @@ SCAN_DIRS: list[tuple[str, str]] = [
     ("sparq-zk", "crates/sparq-zk/tests/support"),
     ("sparq-zk-compose", "crates/sparq-zk-compose/tests"),
     ("sparq-zk-compose", "crates/sparq-zk-compose/tests/support"),
+    ("sparq-zk-query", "crates/sparq-zk-query/tests"),
+    ("sparq-zk-query", "crates/sparq-zk-query/tests/support"),
 ]
 # `src` trees: live tests also live in the crates' own `#[cfg(test)]` code, which the
 # lib test target runs. Only the test-only REGIONS of these files are linted and
@@ -312,6 +314,7 @@ SCAN_DIRS: list[tuple[str, str]] = [
 SRC_DIRS: list[tuple[str, str]] = [
     ("sparq-zk", "crates/sparq-zk/src"),
     ("sparq-zk-compose", "crates/sparq-zk-compose/src"),
+    ("sparq-zk-query", "crates/sparq-zk-query/src"),
 ]
 # The ONE permitted way for a crate's `src` tests to reach the gate: the SAME FILE,
 # compiled in with `#[path]`. A second copy could drift; this cannot.
@@ -321,6 +324,7 @@ SRC_GATE_DECL = (
 LIB_ROOTS: dict[str, str] = {
     "sparq-zk": "crates/sparq-zk/src/lib.rs",
     "sparq-zk-compose": "crates/sparq-zk-compose/src/lib.rs",
+    "sparq-zk-query": "crates/sparq-zk-query/src/lib.rs",
 }
 HELPER_MODULES: list[str] = [
     "crates/sparq-zk/tests/support/mod.rs",
@@ -329,6 +333,7 @@ HELPER_MODULES: list[str] = [
 CARGO_TOMLS: dict[str, str] = {
     "sparq-zk": "crates/sparq-zk/Cargo.toml",
     "sparq-zk-compose": "crates/sparq-zk-compose/Cargo.toml",
+    "sparq-zk-query": "crates/sparq-zk-query/Cargo.toml",
 }
 
 LIVE_TOOLS = ("nargo", "bb")
@@ -346,6 +351,7 @@ LAUNCHERS = ("env", "xargs", "nice", "nohup", "timeout", "stdbuf", "time", "sets
 DECLARED_REL: dict[str, str] = {
     "sparq-zk": "crates/sparq-zk/tests/live-tests.txt",
     "sparq-zk-compose": "crates/sparq-zk-compose/tests/live-tests.txt",
+    "sparq-zk-query": "crates/sparq-zk-query/tests/live-tests.txt",
 }
 DECLARED_KINDS = ("live", "structural")
 
@@ -394,7 +400,7 @@ NEW_RE = re.compile(
 )
 NOTFOUND_RE = re.compile(r"\bNotFound\b")
 CMD_MACRO_RE = re.compile(r"\bcmd!\s*\(")
-DRIVER_REF_RE = re.compile(r"CircuitProver|driver::|live_tool\s*\(|DriverError::Spawn")
+DRIVER_REF_RE = re.compile(r"CircuitProver|ProgramProver|Compiler::|driver::|live_tool\s*\(|DriverError::Spawn")
 # A result arm that ACCEPTS an unnamed error. In a file that reaches the driver
 # without the gate, such an arm is what lets a missing-tool spawn failure be read as
 # the rejection the test was looking for. An arm that names a specific variant
@@ -2554,6 +2560,7 @@ _FIXTURE_KEYS = [
 
 
 _DECLARED = {
+    "sparq-zk-query": "",
     "sparq-zk": "live tests/plain.rs::plain_case\nlive src/thing.rs::src_live_case\n",
     "sparq-zk-compose": (
         "# the clean fixture's live and structural tests\n"
@@ -2579,6 +2586,10 @@ def _write_fixture(root: Path) -> None:
     for _pkg, rel in SCAN_DIRS:
         (root / rel).mkdir(parents=True, exist_ok=True)
     for pkg, lib_rel in LIB_ROOTS.items():
+        if pkg == "sparq-zk-query":
+            (root / lib_rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / lib_rel).write_text("//! Query compiler fixture.\n", encoding="utf-8")
+            continue
         (root / lib_rel).parent.mkdir(parents=True, exist_ok=True)
         (root / lib_rel).write_text(_SRC_LIB, encoding="utf-8")
         (root / lib_rel).parent.joinpath("thing.rs").write_text(
@@ -2757,7 +2768,11 @@ def self_test() -> int:
         return root
 
     def expect_clean(root: Path, label: str) -> None:
+        before = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
         findings, _ = static_findings(root)
+        after = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+        if before != after:
+            failures.append(f"{label}: validation changed fixture files")
         if findings:
             failures.append(f"{label} must be clean, got: " + "; ".join(map(str, findings)))
 
