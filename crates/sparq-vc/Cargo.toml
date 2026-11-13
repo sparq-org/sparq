@@ -14,6 +14,8 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
+# Standalone Vercel tooling has its own workspace and is not a library artifact.
+exclude = ["vercel/**"]
 # Research/interop crate (issue #908, bead sq-ylbrq). The vetted, STANDARDS-INTEROP
 # complement to the deliberately non-interop ZK estate (sparq-zk): authenticity +
 # integrity + non-repudiation over RDF, NOT confidentiality and NOT zero-knowledge.

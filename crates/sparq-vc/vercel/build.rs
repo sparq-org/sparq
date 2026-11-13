@@ -35,7 +35,7 @@ fn main() {
         let path = manifest.join("contexts").join(file);
         assert!(
             path.is_file(),
-            "run python3 deploy/vc-api/prepare-contexts.py before building"
+            "run python3 crates/sparq-vc/vercel/prepare-contexts.py before building"
         );
         println!("cargo:rerun-if-changed={}", path.display());
         generated.push_str(&format!(

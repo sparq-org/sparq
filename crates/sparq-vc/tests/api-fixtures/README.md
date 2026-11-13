@@ -14,3 +14,9 @@ Copyright 2022–2024 Digital Bazaar, Inc. Distributed under the
 covering these credential and proof fields. They are not downloaded snapshots
 of the official contexts. The service's external W3C runner prepares official
 context documents separately before starting the service.
+
+`reference-credential.json` is a local public credential signed independently
+with Python's `cryptography` Ed25519 implementation and `hashlib` SHA-256 over
+explicit canonical N-Quads, proof-configuration hash first. Its ephemeral private
+key was discarded. This fixture detects shared hash-order drift in the HTTP
+verifier even when the RDF and JSON-LD paths use the same cryptosuite helpers.

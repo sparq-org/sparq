@@ -10,14 +10,14 @@ Enable `sparq-vc`'s default-off `vc-api` feature explicitly. Existing RDF
 sign/verify users can continue using `verifiable-credentials` without it.
 
 ```sh
-python3 deploy/vc-api/prepare-contexts.py
+python3 crates/sparq-vc/vercel/prepare-contexts.py
 export SPARQ_VC_TEST_SEED="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
 cargo run -p sparq-vc --features vc-api --bin sparq-vc-api
 ```
 
 The issuer key is test-only; never reuse it. `SPARQ_VC_TEST_SEED` is required
 and contains exactly 64 hexadecimal digits. `SPARQ_VC_CONTEXT_DIR` defaults to
-`deploy/vc-api/contexts` and is read once at startup. `SPARQ_VC_BIND` defaults
+`crates/sparq-vc/vercel/contexts` and is read once at startup. `SPARQ_VC_BIND` defaults
 to `127.0.0.1:3000`. Prepare official contexts before startup; requests never
 retrieve remote contexts or resources.
 
@@ -51,11 +51,11 @@ Run both W3C suites outside restricted environments:
 ```sh
 VC_SUITE_ROOT="$HOME/tmp/sparq-vc-suites" \
 VC_REPORT_DIR="$HOME/tmp/sparq-vc-reports" \
-  bash deploy/vc-api/run-w3c-suites.sh
+  bash crates/sparq-vc/vercel/run-w3c-suites.sh
 ```
 
 The runner prepares local configurations with `vc2.0` and `eddsa-rdfc-2022`
 tags and writes `counts.json`. Suite pass/fail counts remain pending until
-that run. See [the deployment runbook](../../deploy/vc-api/README.md) for exact
+that run. See [the deployment runbook](../../crates/sparq-vc/vercel/README.md) for exact
 requirements, status codes, data-model scope, cache preparation, and the
 separate Vercel packaging workspace.

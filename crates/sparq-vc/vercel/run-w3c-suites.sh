@@ -2,7 +2,8 @@
 # Run outside the restricted container. Requires Node >=24, npm, Rust, Python,
 # curl, git, internet access for preparation, and a loopback TCP listener.
 set -euo pipefail
-repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
+vc_package_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+repo_dir=$(git -C "$vc_package_dir" rev-parse --show-toplevel)
 vc_suite_root=${VC_SUITE_ROOT:-"${TMPDIR:-/tmp}/sparq-vc-suites"}
 vc_report_dir=${VC_REPORT_DIR:-"${TMPDIR:-/tmp}/sparq-vc-reports"}
 mkdir -p "$vc_suite_root" "$vc_report_dir"
@@ -33,8 +34,8 @@ for entry in \
     exit 1
   }
 done
-python3 "$repo_dir/deploy/vc-api/prepare-contexts.py"
-export SPARQ_VC_CONTEXT_DIR="$repo_dir/deploy/vc-api/contexts"
+python3 "$vc_package_dir/prepare-contexts.py"
+export SPARQ_VC_CONTEXT_DIR="$vc_package_dir/contexts"
 # Fresh test key, held only in the environment. Supply an existing test seed to
 # repeat a run with the same public DID. No seed is printed or written to disk.
 if [[ -z ${SPARQ_VC_TEST_SEED:-} ]]; then

@@ -8,8 +8,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location(
-    'vc_context_preparation', Path(__file__).resolve().parents[1] / 'prepare-contexts.py')
+    'vc_context_preparation', PACKAGE_ROOT / 'prepare-contexts.py')
 PREPARE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PREPARE)
 
@@ -62,6 +63,17 @@ class PreparationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(ValueError, 'not a JSON-LD context'):
                 self.run_main(directory)
+
+    def test_default_cache_follows_the_script_location(self):
+        self.urlopen.side_effect = lambda *_args, **_kwargs: Response(b'{"@context":{}}')
+        with tempfile.TemporaryDirectory() as directory:
+            script = Path(directory) / 'relocated-package' / 'prepare-contexts.py'
+            with patch.object(PREPARE, '__file__', str(script)):
+                with patch.object(PREPARE.sys, 'argv', [str(script)]):
+                    with patch('sys.stdout', new_callable=io.StringIO):
+                        PREPARE.main()
+            for filename in PREPARE.CONTEXTS:
+                self.assertTrue((script.parent / 'contexts' / filename).is_file())
 
 
 if __name__ == '__main__':

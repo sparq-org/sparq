@@ -151,6 +151,23 @@ async fn issue_verify_round_trip_and_tamper_detection() {
 }
 
 #[tokio::test]
+async fn verifies_reference_credential_with_independent_hash_order() {
+    // This fixed public fixture was signed independently of sparq's helpers.
+    // Unlike a shared-helper round trip, it detects hash-order drift.
+    let credential: Value =
+        serde_json::from_str(include_str!("api-fixtures/reference-credential.json")).unwrap();
+    let (status, body) = post(
+        &app(),
+        "/credentials/verify",
+        json!({"verifiableCredential": credential}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["verified"], true);
+    assert_eq!(body["errors"], json!([]));
+}
+
+#[tokio::test]
 async fn jsonld_hashing_matches_the_existing_rdf_cryptosuite() {
     use oxrdf::{Literal, NamedNode, Term, Triple};
     use sparq_vc::{did::DidKeyResolver, DataIntegrityProof, ProofConfig};

@@ -21,7 +21,7 @@ The service reads the cache once at startup; request handling uses memory only.
 Uncached context URLs, imports, and related resources return an error.
 
 ```sh
-python3 deploy/vc-api/prepare-contexts.py
+python3 crates/sparq-vc/vercel/prepare-contexts.py
 export SPARQ_VC_TEST_SEED="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
 cargo run -p sparq-vc --features vc-api --bin sparq-vc-api
 ```
@@ -29,7 +29,7 @@ cargo run -p sparq-vc --features vc-api --bin sparq-vc-api
 | Environment variable | Default | Effect |
 | --- | --- | --- |
 | `SPARQ_VC_TEST_SEED` | Required | Ed25519 test seed, exactly 64 hexadecimal digits; never printed or stored by the service |
-| `SPARQ_VC_CONTEXT_DIR` | `deploy/vc-api/contexts` | Trusted context directory loaded by the native runner at startup |
+| `SPARQ_VC_CONTEXT_DIR` | `crates/sparq-vc/vercel/contexts` | Trusted context directory loaded by the native runner at startup |
 | `SPARQ_VC_BIND` | `127.0.0.1:3000` | Native HTTP listener address |
 
 ## HTTP contract
@@ -73,7 +73,7 @@ for preparation, and permission to bind `127.0.0.1:3000`. Run from this checkout
 ```sh
 VC_SUITE_ROOT="$HOME/tmp/sparq-vc-suites" \
 VC_REPORT_DIR="$HOME/tmp/sparq-vc-reports" \
-  bash deploy/vc-api/run-w3c-suites.sh
+  bash crates/sparq-vc/vercel/run-w3c-suites.sh
 ```
 
 The script uses the inspected source revisions, prepares the context cache,
@@ -100,7 +100,9 @@ as observed instead of treating credential coverage as full suite conformance.
 
 ## Vercel packaging (no deployment performed)
 
-This directory is a standalone, `publish = false` deployment workspace. Its
+This directory is a standalone, `publish = false` deployment workspace under
+`sparq-vc` so the CI selector attributes its changes to that crate. It is
+excluded from the parent crate package and is not a root workspace member. Its
 `vercel_runtime` handlers share the same axum router through `tower::oneshot`.
 Each route has its own `[[bin]]`; `vercel.json` maps the public paths. The build
 script embeds the prepared contexts, so the deployed handlers require no context
@@ -109,18 +111,19 @@ filesystem or network access. Only `SPARQ_VC_TEST_SEED` is read at runtime.
 On a network-enabled host, prepare the cache as above, then compile the adapter:
 
 ```sh
-cargo check --manifest-path deploy/vc-api/Cargo.toml --bins
+cargo check --manifest-path crates/sparq-vc/vercel/Cargo.toml --bins
 ```
 
-For deployment review, use `deploy/vc-api` as the Vercel project root and retain
+For deployment review, use `crates/sparq-vc/vercel` as the Vercel project root and retain
 the repository checkout so the Rust path dependencies resolve. Prepare the cache
 before `vercel build`; set `SPARQ_VC_TEST_SEED` using Vercel's environment settings.
 The runtime package and Vercel build require external validation. Deployment is
 a separate maintainer action after review.
 
-## Local Rust checks
+## Local checks
 
 ```sh
+python3 -B -m unittest discover -s crates/sparq-vc/vercel/tests -v
 cargo test -p sparq-vc --features vc-api
 cargo clippy -p sparq-vc --features vc-api --all-targets -- -D warnings
 ```

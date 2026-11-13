@@ -1,6 +1,6 @@
 //! Opt-in VC-API credential handlers for offline interoperability testing.
 //!
-//! See `deploy/vc-api/README.md` for cache preparation, environment variables,
+//! See `crates/sparq-vc/vercel/README.md` for cache preparation, environment variables,
 //! local suite execution, and the separate Vercel adapter. Issuer keys are test-only.
 
 mod cache;
@@ -18,7 +18,7 @@ use axum::{
 use chrono::{SecondsFormat, Utc};
 use ed25519_dalek::{Signer as _, Verifier as _};
 use serde_json::{json, Value};
-use sha2::{Digest as _, Sha256};
+use sha2::Sha256;
 use sparq_jsonld::{Json as LdJson, JsonLdOptions};
 
 use crate::{
@@ -75,10 +75,10 @@ impl Service {
     }
 
     /// Read `SPARQ_VC_TEST_SEED` (64 hex digits) and `SPARQ_VC_CONTEXT_DIR`
-    /// (default `deploy/vc-api/contexts`). Missing or malformed seeds are errors.
+    /// (default `crates/sparq-vc/vercel/contexts`). Missing or malformed seeds are errors.
     pub fn from_env() -> Result<Self, ApiError> {
         let directory = std::env::var_os("SPARQ_VC_CONTEXT_DIR")
-            .unwrap_or_else(|| "deploy/vc-api/contexts".into());
+            .unwrap_or_else(|| "crates/sparq-vc/vercel/contexts".into());
         Self::from_env_with_contexts(OfflineContexts::from_directory(std::path::Path::new(
             &directory,
         ))?)
@@ -158,8 +158,7 @@ impl Service {
         validate_proof(&proof)?;
         let hash_data = self.hash_data(&vc, &proof)?;
         let signature = self.key.inner.sign(&hash_data);
-        proof["proofValue"] =
-            format!("z{}", bs58::encode(signature.to_bytes()).into_string()).into();
+        proof["proofValue"] = super::encode_proof_value(&signature).into();
         vc["proof"] = proof;
         Ok(json!({"verifiableCredential": vc}))
     }
@@ -227,9 +226,10 @@ impl Service {
         config["@context"] = vc["@context"].clone();
         let proof_nquads = self.canonicalize(&config)?;
         let document_nquads = self.canonicalize(vc)?;
-        let mut hash_data = Sha256::digest(proof_nquads.as_bytes()).to_vec();
-        hash_data.extend_from_slice(&Sha256::digest(document_nquads.as_bytes()));
-        Ok(hash_data)
+        Ok(super::hash_data_from_canonical(
+            &proof_nquads,
+            &document_nquads,
+        ))
     }
 
     fn canonicalize(&self, value: &Value) -> Result<String, ApiError> {

@@ -359,8 +359,7 @@ fn sign_checked(
 ) -> Result<DataIntegrityProof, VcError> {
     let hash_data = hash_data(triples, checked)?;
     let sig: Signature = key.inner.sign(&hash_data);
-    // proofValue: multibase z-base58btc over the 64-byte signature.
-    let proof_value = format!("z{}", bs58::encode(sig.to_bytes()).into_string());
+    let proof_value = encode_proof_value(&sig);
     Ok(DataIntegrityProof {
         proof_type: PROOF_TYPE.to_string(),
         cryptosuite: CRYPTOSUITE.to_string(),
@@ -466,13 +465,22 @@ fn hash_data(triples: &[Triple], checked: &CheckedProofConfig<'_>) -> Result<Vec
     let cfg_triples = proof_config_triples(checked);
     let cfg_canon = sparq_canon::canonicalize_triples(&cfg_triples)?;
 
-    let doc_hash = Sha256::digest(doc_canon.to_nquads().as_bytes());
-    let cfg_hash = Sha256::digest(cfg_canon.to_nquads().as_bytes());
+    Ok(hash_data_from_canonical(
+        &cfg_canon.to_nquads(),
+        &doc_canon.to_nquads(),
+    ))
+}
+
+/// Hash the canonical proof configuration first, followed by the document, for
+/// both RDF and JSON-LD callers of the `eddsa-rdfc-2022` cryptosuite.
+fn hash_data_from_canonical(proof_config_nquads: &str, document_nquads: &str) -> Vec<u8> {
+    let cfg_hash = Sha256::digest(proof_config_nquads.as_bytes());
+    let doc_hash = Sha256::digest(document_nquads.as_bytes());
 
     let mut out = Vec::with_capacity(64);
     out.extend_from_slice(&cfg_hash); // proof config hash first
     out.extend_from_slice(&doc_hash);
-    Ok(out)
+    out
 }
 
 /// Build the RDF triples representing the proof configuration, over a single fixed
@@ -548,6 +556,11 @@ fn proof_config_triples(checked: &CheckedProofConfig<'_>) -> Vec<Triple> {
         ));
     }
     t
+}
+
+/// Encode a 64-byte Ed25519 signature as a multibase `z`-base58btc `proofValue`.
+fn encode_proof_value(signature: &Signature) -> String {
+    format!("z{}", bs58::encode(signature.to_bytes()).into_string())
 }
 
 /// Decode a multibase `z`-base58btc `proofValue` into a 64-byte Ed25519 signature.

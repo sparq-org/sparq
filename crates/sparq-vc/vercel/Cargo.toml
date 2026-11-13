@@ -9,7 +9,7 @@ build = "build.rs"
 [workspace]
 
 [dependencies]
-sparq-vc = { path = "../../crates/sparq-vc", features = ["vc-api"] }
+sparq-vc = { path = "..", features = ["vc-api"] }
 vercel_runtime = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 axum = { version = "0.8", default-features = false }

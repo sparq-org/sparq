@@ -36,6 +36,6 @@ MIT.
 The default-off `vc-api` feature adds `sparq-vc-api`, a credential issue/verify
 HTTP runner, and `sparq_vc::api` for in-process hosts. Its issuer key is test-only
 and comes from `SPARQ_VC_TEST_SEED`; JSON-LD contexts are prepared before startup.
-See [the runbook](../../deploy/vc-api/README.md) and
+See [the runbook](vercel/README.md) and
 [usage skill](../../skills/vc-api/SKILL.md) for configuration, W3C suite runs,
 and the separate Vercel adapter.
