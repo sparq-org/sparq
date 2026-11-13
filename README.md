@@ -7,11 +7,13 @@ Each file name carries the sparq commit it was built from. Check every download 
 |---|---|---|
 | sparq-verifiable-aggregate-c832012a.tgz | proof-methods/aggregate from main at c832012a (PR #7400, merged) | current |
 | sparq-verifiable-aggregate-61989f5.tgz | proof-methods/aggregate (PR #7389, merged) | superseded |
-| sparq-zk-result-7a56f943.tgz | js/zk-result from main at 7a56f943 (PR #7392, merged) | current |
+| sparq-zk-result-271502ae.tgz | js/zk-result from main at 271502ae (PRs #7396, #7397, #7399 merged) | current |
+| sparq-zk-result-7a56f943.tgz | js/zk-result from main at 7a56f943 (PR #7392, merged) | superseded |
 | sparq-zk-result-fb601bc16e1e4a92c3693558ca9367fa9405449f.tgz | js/zk-result, pre-merge build | superseded |
 
-sparq-zk-result-7a56f943.tgz bundles the two public-predicate members and test-only issuer keys.
-Issuer key generation and the hidden date and integer filter members arrive in a later build.
+sparq-zk-result-271502ae.tgz adds issuerKeygen() from OS entropy, hidden xsd:date and unsigned integer comparisons,
+testIssue (test-only, salt reproducible from a seed), the verify report and the public-input layout in its README.
+The issuer-scoped GRAPH form (single issuer per proof) arrives in a later build.
 
 sparq-verifiable-aggregate-c832012a.tgz: only parties that commit inputs count toward `min_contributors` (compute-only roles never count);
 a missing or malformed signature field reports the attestation error; adds an ESM entry (`import` and `require` both work).
