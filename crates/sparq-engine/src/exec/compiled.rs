@@ -207,11 +207,11 @@ pub(super) fn compiled_expr_has_arith(e: &CompiledExpr) -> bool {
 // since the substrate must not know about the engine's `Value`/`Term`. Everything else is
 // the substrate's `Num` verbatim, so behaviour is unchanged.
 
-/// The numeric value as a TERM in strict canonical form (see [`Num::canonical_lexical`]).
-/// Engine-side because it constructs the engine's `Value`; the value/lexical logic lives in
-/// the shared substrate.
+/// A numeric aggregate result as a term. Decimal fractions use the shared trim;
+/// floating tiers retain the conventions of [`Num::canonical_lexical`].
 pub(super) fn num_canonical_term(n: Num) -> Value {
-    Value::Term(Term::Literal(Literal::new_typed_literal(n.canonical_lexical(), n.datatype())))
+    Value::Term(Term::Literal(Literal::new_typed_literal(
+        if matches!(n, Num::Dec(_)) { numeric_lexical(n) } else { n.canonical_lexical() }, n.datatype())))
 }
 
 pub(super) fn effective_boolean(v: &Value, semantics: crate::EbvSemantics) -> bool {
@@ -1575,7 +1575,7 @@ pub(super) fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
         F::Str => match ev(0)? {
             Value::Term(Term::NamedNode(n)) => simple(n.as_str().to_string()),
             Value::Term(Term::Literal(l)) => simple(l.value().to_string()),
-            Value::Num(n) => simple(n.lexical()),
+            Value::Num(n) => simple(numeric_lexical(n)),
             Value::Bool(b) => simple(b.to_string()),
             _ => Value::Error,
         },
@@ -2337,19 +2337,74 @@ pub(super) fn plain_min1(f: f64) -> String {
     }
 }
 
-/// A decimal lexical with trailing fraction zeros trimmed but AT LEAST one fraction
-/// digit kept ("33.3300" -> "33.33", "0" -> "0.0") — the xsd:decimal cast convention.
+/// Trim computed decimal fractional zeros beyond the first fractional digit.
+/// Spellings without a fractional part stay unchanged, following the approved
+/// W3C SPARQL results. Cast results retain their separate source-type conventions.
+fn trim_decimal_fraction(mut lexical: String) -> String {
+    if let Some(point) = lexical.find('.') {
+        let end = lexical.trim_end_matches('0').len().max(point + 2);
+        lexical.truncate(end);
+    }
+    lexical
+}
+
+#[cfg(test)]
+mod decimal_fraction_tests {
+    use super::trim_decimal_fraction;
+
+    #[test]
+    fn trim_only_fractional_zeros_beyond_the_first_digit() {
+        for (lexical, expected) in [
+            ("6.561680", "6.56168"),
+            ("2.50", "2.5"),
+            ("2.0", "2.0"),
+            ("0.000", "0.0"),
+            ("6", "6"),
+            ("-3", "-3"),
+            ("0", "0"),
+            ("-2.2500", "-2.25"),
+            ("-0.00", "-0.0"),
+            ("+001.5000", "+001.5"),
+            (
+                "100000000000000000000000000000.000",
+                "100000000000000000000000000000.0",
+            ),
+            (
+                "0.0000000000000000000000000000010",
+                "0.000000000000000000000000000001",
+            ),
+        ] {
+            assert_eq!(
+                trim_decimal_fraction(lexical.to_string()),
+                expected,
+                "{lexical}"
+            );
+            assert_eq!(
+                trim_decimal_fraction(expected.to_string()),
+                expected,
+                "idempotence"
+            );
+        }
+    }
+}
+
+/// Numeric result spelling: trim decimal fractions while preserving scale-zero
+/// and floating-tier spellings from the approved W3C SPARQL results.
+pub(super) fn numeric_lexical(n: Num) -> String {
+    match n {
+        Num::Dec(d) => trim_decimal_fraction(d.lexical()),
+        _ => n.lexical(),
+    }
+}
+
+/// String-to-decimal casts keep at least one fractional digit, as the approved
+/// W3C SPARQL results require.
 pub(super) fn dec_trim_min1(d: Dec) -> String {
-    let mut d = d;
-    while d.scale > 1 && d.mant % 10 == 0 {
-        d.mant /= 10;
-        d.scale -= 1;
-    }
+    let mut lexical = d.lexical();
     if d.scale == 0 {
-        // Adding a lexical fraction digit must not overflow the numeric mantissa.
-        return format!("{}.0", d.mant);
+        lexical.push_str(".0");
     }
-    d.lexical()
+    trim_decimal_fraction(lexical)
 }
 
 /// Trim ALL trailing fraction zeros ("0.0" -> "0", "2.50" -> "2.5") — the xsd:string
@@ -2828,10 +2883,9 @@ pub(super) fn datetime_field(v: &Value, idx: usize) -> Value {
                     // Preserve every validated fractional digit without f64/i128 rounding.
                     let (whole, fraction) = lex.split_once('.').unwrap_or((lex, ""));
                     let whole = whole.trim_start_matches('0');
-                    let fraction = fraction.trim_end_matches('0');
                     Value::Term(Term::Literal(Literal::new_typed_literal(
-                        format!("{}.{}", if whole.is_empty() { "0" } else { whole },
-                            if fraction.is_empty() { "0" } else { fraction }),
+                        trim_decimal_fraction(format!("{}.{}", if whole.is_empty() { "0" } else { whole },
+                            if fraction.is_empty() { "0" } else { fraction })),
                         xsd::DECIMAL,
                     )))
                 }
@@ -2889,7 +2943,7 @@ pub(super) fn value_str(v: &Value) -> Option<String> {
         Value::Term(Term::NamedNode(n)) => Some(n.as_str().to_string()),
         Value::Term(Term::BlankNode(b)) => Some(b.as_str().to_string()),
         Value::Bool(b) => Some(b.to_string()),
-        Value::Num(n) => Some(n.lexical()),
+        Value::Num(n) => Some(numeric_lexical(*n)),
         Value::Unbound | Value::Error => None,
         Value::Term(_) => None,
     }
@@ -2907,7 +2961,7 @@ pub(super) fn num_to_id(graph: &Graph, n: Num) -> Result<Id, String> {
             return Ok(id);
         }
     }
-    let lex = n.lexical();
+    let lex = numeric_lexical(n);
     match graph.dict().lookup_lit(&lex, n.datatype().as_str(), None) {
         NO_ID => Err(lex),
         id => Ok(id),
@@ -2961,7 +3015,7 @@ pub(super) fn value_as_term(v: &Value) -> Option<Term> {
     Some(match v {
         Value::Unbound | Value::Error => return None,
         Value::Bool(b) => Term::Literal(Literal::new_typed_literal(b.to_string(), xsd::BOOLEAN)),
-        Value::Num(n) => Term::Literal(Literal::new_typed_literal(n.lexical(), n.datatype())),
+        Value::Num(n) => Term::Literal(Literal::new_typed_literal(numeric_lexical(*n), n.datatype())),
         Value::Term(t) => t.clone(),
     })
 }
