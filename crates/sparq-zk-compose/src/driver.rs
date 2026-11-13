@@ -201,6 +201,7 @@ pub struct CircuitProver {
     compose_dir: PathBuf,
     /// bb verifier target (Noir circuits use `noir-recursive`).
     target: String,
+    crs_path: Option<PathBuf>,
     metrics: Option<Collector>,
 }
 
@@ -210,7 +211,20 @@ impl CircuitProver {
         CircuitProver {
             compose_dir: compose_dir.into(),
             target: "noir-recursive".to_string(),
+            crs_path: None,
             metrics: None,
+        }
+    }
+
+    /// Use a caller-configured CRS cache; absent, bb uses its default directory.
+    pub fn with_crs_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.crs_path = Some(path.into());
+        self
+    }
+
+    fn configure_crs(&self, command: &mut Command) {
+        if let Some(path) = &self.crs_path {
+            command.arg("--crs_path").arg(path);
         }
     }
 
@@ -260,6 +274,9 @@ impl CircuitProver {
         tool: &str,
         cmd: &mut Command,
     ) -> Result<(), DriverError> {
+        if tool == "bb" {
+            self.configure_crs(cmd);
+        }
         #[cfg(test)]
         test_command_environment::apply(self, cmd);
         let timer = self.timer(stage);
@@ -728,6 +745,7 @@ impl CircuitProver {
             .arg(&vk_p)
             .arg("-t")
             .arg(&self.target);
+        self.configure_crs(&mut command);
         #[cfg(test)]
         test_command_environment::apply(self, &mut command);
         let out = command.output()
@@ -767,6 +785,11 @@ pub struct ProgramProver {
 }
 
 impl ProgramProver {
+    /// Use an explicitly configured CRS cache for all native key/proof operations.
+    pub fn with_crs_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.driver = self.driver.with_crs_path(path);
+        self
+    }
     /// Select a generated package using a single identifier, never a path.
     pub fn new(workspace: impl Into<PathBuf>, package: &str) -> Result<Self, DriverError> {
         validate_witness_tag(package)?;

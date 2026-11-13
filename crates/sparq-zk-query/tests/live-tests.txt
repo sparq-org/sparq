@@ -1,0 +1,9 @@
+# Native query tests use the shared toolchain gate and runtime ledger.
+live tests/coverage.rs::corpus_cases_execute_with_engine_expected_result_and_altered_witness_controls
+live tests/execution.rs::generated_n0_shapes_execute_with_exact_table_controls
+live tests/execution.rs::generated_program_executes_trace_and_refuses_changed_rows_and_results
+live tests/execution.rs::seeded_engine_interpreter_and_circuit_differential
+live tests/proofs.rs::native_proof_reconstructs_inputs_and_consumes_only_after_acceptance
+live tests/proofs.rs::n0_native_proofs_match_the_engine_and_refuse_altered_answers
+structural tests/execution.rs::generated_driver_refuses_path_packages_before_io
+live tests/proofs.rs::shape_cache_reuses_constants_and_invalidates_library_revisions

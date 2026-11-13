@@ -14,11 +14,35 @@ pub fn prover_toml(
     encoder: &impl EncodeTerm,
     trace: &Trace,
     request_digest: [u8; 32],
+    presentation_salt: [u8; 32],
 ) -> Result<String, Error> {
     if trace.tables.len() != plan.nodes().len() {
         return Err(Error::Invalid("trace node count".into()));
     }
+    let input_commitment = crate::statement::dataset_commitment(credentials, presentation_salt)?;
+    let statement = crate::statement::Statement {
+        request_digest,
+        input_commitment,
+        signature_mode: 0,
+        result: trace.result.clone(),
+    };
+    let words = crate::statement::Layout::new(plan).reconstruct(plan, &statement, encoder)?;
+    let statement_binding = words.last().expect("statement binding");
     let mut out = String::new();
+    writeln!(
+        out,
+        "input_commitment = {}",
+        array(input_commitment.iter().map(u8::to_string))
+    )
+    .unwrap();
+    writeln!(out, "signature_mode = 0").unwrap();
+    writeln!(out, "statement_binding = {}", field(*statement_binding)).unwrap();
+    writeln!(
+        out,
+        "presentation_salt = {}",
+        array(presentation_salt.iter().map(u8::to_string))
+    )
+    .unwrap();
     writeln!(
         out,
         "request_digest = {}",
@@ -32,7 +56,7 @@ pub fn prover_toml(
         bounds.credentials, bounds.quads_per_credential, bounds.rows_per_table
     )
     .unwrap();
-    let parameters = plan
+    let mut parameters = plan
         .parameters()
         .iter()
         .filter_map(|p| {
@@ -43,21 +67,25 @@ pub fn prover_toml(
             }
         })
         .collect::<Result<Vec<_>, _>>()?;
+    if parameters.is_empty() {
+        parameters.push(cell(Cell::default()));
+    }
     writeln!(out, "parameters = {}", array(parameters)).unwrap();
-    writeln!(
-        out,
-        "indices = {}",
-        array(
-            plan.parameters()
-                .iter()
-                .filter_map(|p| if let Parameter::Index(n) = p {
-                    Some(n.to_string())
-                } else {
-                    None
-                })
-        )
-    )
-    .unwrap();
+    let mut indices: Vec<_> = plan
+        .parameters()
+        .iter()
+        .filter_map(|p| {
+            if let Parameter::Index(n) = p {
+                Some(n.to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+    if indices.is_empty() {
+        indices.push("0".into());
+    }
+    writeln!(out, "indices = {}", array(indices)).unwrap();
     let result = match (plan.form(), &trace.result) {
         (ResultForm::Ask, ResultValue::Ask(v)) => v.to_string(),
         (ResultForm::Select, ResultValue::Select { rows, variables }) => {
@@ -136,13 +164,19 @@ fn table(rows: &[Vec<Cell>], schema: &Schema) -> Result<String, Error> {
     }
     let mut padded: Vec<_> = rows
         .iter()
-        .map(|r| array(r.iter().copied().map(cell)))
+        .map(|r| {
+            if r.is_empty() {
+                array([cell(Cell::default())])
+            } else {
+                array(r.iter().copied().map(cell))
+            }
+        })
         .collect();
     padded.resize(
         schema.capacity as usize,
         array(std::iter::repeat_n(
             cell(Cell::default()),
-            schema.variables.len(),
+            schema.abi_width(),
         )),
     );
     Ok(format!(

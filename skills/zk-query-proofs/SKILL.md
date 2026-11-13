@@ -170,6 +170,16 @@ Nargo workspace and a checked package identifier. Its `compile`, `execute`,
 private witness lifecycle and exact pinned-version matcher. `execute` discards
 its private witness after checking the relation. The caller derives its package,
 key and public inputs independently of the presentation.
+`CircuitProver::with_crs_path` and `ProgramProver::with_crs_path` select an existing
+local CRS cache directory; absent this setting, the native tool uses its default cache.
+The query compiler exposes the same explicit path setting. Its draft
+`method::Compiler::{prepare, prove, verify}` primitive lives in `driver.rs`;
+`request::Request` owns the stored protocol request, bounds and expected key.
+The primitive supports the explicitly marked supplied-cell profile pending suite
+integration. Verification derives its plan, constants and result encoding from
+the stored request and RDF answer, and consumes the shared original challenge
+last. It does not advertise credential authentication or envelope enforcement. Toolchain pins and the
+verifier target are independent of the cache location.
 
 ## Prerequisites
 

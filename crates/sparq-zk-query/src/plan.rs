@@ -56,6 +56,13 @@ pub struct Schema {
     pub order: CanonicalOrder,
 }
 
+impl Schema {
+    /// Noir entry points use a canonical unbound column for an empty schema.
+    pub fn abi_width(&self) -> usize {
+        self.variables.len().max(1)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operator {
     Unit,

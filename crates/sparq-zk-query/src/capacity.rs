@@ -36,11 +36,7 @@ impl Bounds {
                 &[4, 16, 64, 256],
                 "quads per credential",
             )?,
-            rows_per_table: bucket(
-                self.rows_per_table,
-                &[2, 4, 8, 16, 32, 64],
-                "rows per table",
-            )?,
+            rows_per_table: bucket(self.rows_per_table, &[2, 4, 8, 16, 32], "rows per table")?,
         })
     }
 

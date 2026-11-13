@@ -34,26 +34,25 @@ pub fn check_bound<let R: u32, let V: u32>(table: Table<R, V>, bound: u32) {
     assert(table.len <= bound, "row request capacity");
 }
 
-pub fn check_parameters<let P: u32>(parameters: [TermCell; P]) {
+pub fn check_parameters<let P: u32>(parameters: [TermCell; P], used: u32) {
+    assert(used <= P, "parameter shape");
     for p in 0..P {
         crate::table::check_cell(parameters[p]);
-        assert(parameters[p].bound & (parameters[p].scope == 0), "public constant");
+        if p < used {
+            assert(parameters[p].bound & (parameters[p].scope == 0), "public constant");
+        } else {
+            assert(crate::table::equal_cell(parameters[p], unbound()), "parameter padding");
+        }
     }
 }
 
-/// Bind the request's digest through a public output of the generated program.
-pub fn request_binding(request_digest: [u8; 32]) -> Field {
-    let mut high: Field = 0;
-    let mut low: Field = 0;
-    for i in 0..16 {
-        high = high * 256 + request_digest[i] as Field;
-        low = low * 256 + request_digest[i + 16] as Field;
-    }
-    compose_core::hashes::h3(0x4e51524551, high, low)
+pub fn check_indices<let I: u32>(indices: [u32; I], used: u32) {
+    assert(used <= I, "index shape");
+    for i in 0..I { assert((i < used) | (indices[i] == 0), "index padding"); }
 }
 
-pub fn unit<let R: u32>(out: Table<R, 0>) {
-    assert_table(append(empty(), [], true), out);
+pub fn unit<let R: u32, let V: u32>(out: Table<R, V>) {
+    assert_table(append(empty(), [unbound(); V], true), out);
 }
 
 pub fn values<let P: u32, let R: u32, let V: u32>(cells: [[TermCell; V]; P], out: Table<R, V>) {

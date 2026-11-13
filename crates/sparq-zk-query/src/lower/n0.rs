@@ -123,6 +123,16 @@ fn check_expression(e: &Expression) -> Result<(), Error> {
         E::FunctionCall(f, args) => {
             if matches!(
                 f,
+                Function::Triple
+                    | Function::Subject
+                    | Function::Predicate
+                    | Function::Object
+                    | Function::IsTriple
+            ) {
+                return Err(Error::Excluded(f.to_string()));
+            }
+            if matches!(
+                f,
                 Function::Now | Function::Rand | Function::Uuid | Function::StrUuid
             ) || matches!(f, Function::BNode) && args.is_empty()
             {
@@ -165,9 +175,28 @@ fn check_expression(e: &Expression) -> Result<(), Error> {
         }
         E::UnaryPlus(a) | E::UnaryMinus(a) | E::Not(a) => check_expression(a)?,
         E::Exists(g) => check_exclusions(g)?,
-        E::NamedNode(_) | E::Literal(_) | E::Variable(_) | E::Bound(_) => {}
+        E::Literal(literal) => check_term(&literal.clone().into())?,
+        E::NamedNode(_) | E::Variable(_) | E::Bound(_) => {}
     }
     Ok(())
+}
+
+fn check_term(term: &oxrdf::Term) -> Result<(), Error> {
+    match term {
+        oxrdf::Term::Triple(_) => Err(Error::Excluded("triple term".into())),
+        oxrdf::Term::Literal(literal) if literal.direction().is_some() => {
+            Err(Error::Unsupported("directional literal".into()))
+        }
+        _ => Ok(()),
+    }
+}
+
+fn check_pattern_term(term: &TermPattern) -> Result<(), Error> {
+    match term {
+        TermPattern::Triple(_) => Err(Error::Excluded("triple term".into())),
+        TermPattern::Literal(literal) => check_term(&literal.clone().into()),
+        _ => Ok(()),
+    }
 }
 
 pub(super) fn check_exclusions(g: &GraphPattern) -> Result<(), Error> {
@@ -223,7 +252,23 @@ pub(super) fn check_exclusions(g: &GraphPattern) -> Result<(), Error> {
         | G::Distinct { inner }
         | G::Reduced { inner }
         | G::Slice { inner, .. } => check_exclusions(inner)?,
-        G::Bgp { .. } | G::Path { .. } | G::Values { .. } => {}
+        G::Bgp { patterns } => {
+            for pattern in patterns {
+                check_pattern_term(&pattern.subject)?;
+                check_pattern_term(&pattern.object)?;
+            }
+        }
+        G::Path {
+            subject, object, ..
+        } => {
+            check_pattern_term(subject)?;
+            check_pattern_term(object)?;
+        }
+        G::Values { bindings, .. } => {
+            for term in bindings.iter().flatten().flatten() {
+                check_term(&term.clone().into())?;
+            }
+        }
     }
     Ok(())
 }

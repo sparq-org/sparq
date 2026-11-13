@@ -29,7 +29,6 @@ fn generation_is_byte_identical_and_constants_are_inputs() {
         "distinct",
         "slice",
         "select",
-        "request_binding",
     ] {
         assert!(
             source.contains(&format!("ops_core::{op}("))
@@ -37,6 +36,7 @@ fn generation_is_byte_identical_and_constants_are_inputs() {
             "{op}"
         );
     }
+    assert!(source.contains("ops_core_statement::bind_select("));
     assert!(!source.contains("urn:p"));
     assert!(!source.contains("assert("));
     assert!(!source.contains("for "));

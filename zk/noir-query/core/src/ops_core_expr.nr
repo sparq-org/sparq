@@ -55,10 +55,12 @@ fn compare(op: u8, a: Value, b: Value) -> Value {
                 assert((a.term.key_class != 2) & (b.term.key_class != 2), "floating-point comparison not yet supported");
                 let temporal_a = (a.term.key_class == 3) | (a.term.key_class == 4);
                 let temporal_b = (b.term.key_class == 3) | (b.term.key_class == 4);
+                assert(!(temporal_a & temporal_b) | (a.term.dt == b.term.dt), "mixed temporal datatypes not yet supported");
                 assert(!(temporal_a & temporal_b) | (a.term.key_class == b.term.key_class), "mixed timezone comparison not yet supported");
                 assert((op != 0) | ((a.term.key_class != 0) & (b.term.key_class != 0)), "literal equality without a supported value key");
                 let strings = ((a.term.key_class == 6) | (a.term.key_class == 7))
                     & ((b.term.key_class == 6) | (b.term.key_class == 7));
+                assert((op == 0) | !strings | ((a.term.lang == 0) & (b.term.lang == 0)), "language-tagged string ordering not yet supported");
                 assert(((op == 0) & strings) | ((a.term.key_class != 7) & (b.term.key_class != 7)), "string comparison capacity");
             }
             let class = a.term.key_class;
