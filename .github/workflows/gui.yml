@@ -606,7 +606,7 @@ jobs:
   #
   # STABILIZATION (research/web-gui-test-program.md §5.3):
   #   * tauri-driver PINNED to 2.0.6 (compatible with Tauri 2.11.x on this workspace).
-  #   * WebKitWebDriver: installed from the runner's webkit2gtk-driver apt package (intentionally
+  #   * WebKitWebDriver: installed from the runner's webkitgtk-webdriver apt package, formerly webkit2gtk-driver (intentionally
   #     matched to the runner image's webkit2gtk; its version is logged in CI for debugging).
   #   * xvfb-run --auto-servernum (already present; a virtual display is mandatory on Linux).
   #   * workers=1: the smoke is a single-process script (no parallelism; inherent).
@@ -637,7 +637,7 @@ jobs:
       - name: Install Tauri system dependencies (+ WebKitWebDriver, xvfb)
         run: |
           sudo apt-get update
-          # webkit2gtk-driver provides WebKitWebDriver, the WebDriver server tauri-driver
+          # webkitgtk-webdriver (formerly webkit2gtk-driver) provides WebKitWebDriver, the WebDriver server tauri-driver
           # proxies on Linux. The version is intentionally matched to the runner image's
           # webkit2gtk (pinned by the runner; see version-check step below).
           # xvfb gives the headless runner a virtual display for the webview.
@@ -649,7 +649,7 @@ jobs:
             libappindicator3-dev \
             librsvg2-dev \
             patchelf \
-            webkit2gtk-driver \
+            webkitgtk-webdriver \
             dbus-x11 \
             xvfb
 
@@ -804,7 +804,7 @@ jobs:
             libappindicator3-dev \
             librsvg2-dev \
             patchelf \
-            webkit2gtk-driver \
+            webkitgtk-webdriver \
             dbus-x11 \
             xvfb
 

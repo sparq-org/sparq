@@ -186,6 +186,9 @@ standard it implements.
 - **Federated MPC** *(research scaffold — no security guarantee yet)* — model evaluating SPARQL
   across parties with multi-party computation ([guide](skills/mpc/SKILL.md)); honest-majority
   semi-honest, **not** maliciously secure ([SECURITY.md](SECURITY.md)). <!-- privacy-claims-allow: negative caveat ("not maliciously secure"); sq-toze.35 -->
+- **Verifiable joint aggregates** *(research-grade, not externally audited)* — signed
+  commitments and verifiable count/sum releases, threshold verdicts or refusals in a detached crate
+  ([guide](skills/verifiable-aggregate/SKILL.md)).
 <!-- sq-g4h0c: the `interfaces` anchor is the SINGLE SOURCE for the docs guide's
      "Interfaces" line (book/src/getting-started/capabilities.md {{#include}}s it). Repo-
      relative `skills/<x>/SKILL.md` links are kept for the lychee gate and rewritten to

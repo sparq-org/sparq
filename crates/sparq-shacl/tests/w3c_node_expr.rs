@@ -1,53 +1,13 @@
-//! (sq-1m0n) Manifest-driven runner for the W3C SHACL **node
-//! expression** test suite (`sht:EvalNodeExpr` entries in
-//! `w3c/data-shapes`, `shacl12-test-suite/tests/node-expr/...`).
+//! Manifest-driven W3C SHACL 1.2 node-expression evaluation in both feature states.
 //!
-//! These tests directly evaluate a node expression against a focus node and
-//! compare the resulting node set to `mf:result`. They are the W3C conformance
-//! surface for the SHACL-AF node-expression algebra implemented in
-//! `sparq-shacl`'s `shacl-af` feature.
+//! Drives the production fallible evaluator. Explicit `sht:Failure` results
+//! require an error, distinct from a successful empty output list. Output order
+//! and duplicates matter unless the entry requests `sht:ignoreOrder true`, in
+//! which case the runner compares multisets. Unsupported expressions count as
+//! failures rather than skipped evaluation entries.
 //!
-//! ## Drives the REAL crate evaluation (sq-mue75)
-//!
-//! (sq-mue75) This runner drives the crate's own node-expression
-//! parse + evaluation through the public, feature-gated
-//! [`sparq_shacl::eval_node_expression`] seam — it does NOT re-implement the
-//! algebra in the harness. The crate parser now accepts both the SHACL 1.2
-//! `shnex:` and the SHACL-AF `sh:` spellings of the shared algebra (path-values /
-//! nodes / filter-shape / intersection / union), so the suite's `shnex:`-spelled
-//! expressions exercise the production code path. A previous version of this file
-//! inlined a second copy of the algebra and compared order-blind; that was a
-//! fidelity gap (it could pass while the real code was wrong), now closed.
-//!
-//! ## Order-aware comparison
-//!
-//! `mf:result` is an `rdf:list`, an ORDERED sequence, and the suite README makes
-//! order significant: the output must equal `mf:result` as a sequence (order and
-//! duplicates) unless the action sets `sht:ignoreOrder true`, in which case any
-//! order with the same cardinalities passes. A result with the right nodes in the
-//! wrong order, on an entry without `sht:ignoreOrder`, is a FAIL.
-//!
-//! ## Two gates, both opt-in
-//!
-//!   * **Feature gate** — the whole runner is `#[cfg(feature = "shacl-af")]`; with
-//!     the feature off the file compiles to nothing (the node-expression public
-//!     API it drives is itself feature-gated).
-//!   * **Suite gate** — the suite is fetched by `./fetch-shacl-tests.sh` into
-//!     `tests/shacl/` (gitignored). When absent the test SKIPS itself so
-//!     `cargo test --workspace` stays green on a fresh checkout.
-//!
-//! ## Scope (honest)
-//!
-//! The runner covers the **implemented algebra** end-to-end. (sq-u5rxj)
-//! The suite's `shnex:var "<name>"` entries that resolve a `sht:scope-<name>`
-//! action binding are now driven through the crate's real evaluation: the harness
-//! builds a [`sparq_shacl::Scope`] from those bindings and passes it to
-//! [`sparq_shacl::eval_node_expression_with_scope`], so `var-bound` PASSES (the
-//! previous `XFAIL_VAR_SCOPE` divergence is closed). Any entry whose form the
-//! crate cannot parse is a SKIP here and a failure in the EARL report. The gate
-//! is an honest floor over exactly what the production path evaluates.
-
-#![cfg(feature = "shacl-af")]
+//! Validation entries belong to the separate constraint runner. Missing suite
+//! checkouts skip the runner; every fetched evaluation entry is attempted.
 
 mod support;
 
@@ -55,7 +15,7 @@ use support::Outcome;
 
 use oxrdf::Term;
 use sparq_core::Graph;
-use sparq_shacl::eval_node_expression_with_scope;
+use sparq_shacl::eval_node_expression_result;
 use sparq_shacl::view::GraphView;
 use std::collections::BTreeMap;
 use std::path::{Path as FsPath, PathBuf};
@@ -70,10 +30,10 @@ const SHT: &str = "http://www.w3.org/ns/shacl-test#";
 /// multiset when the entry sets `sht:ignoreOrder true`. A regression below this
 /// floor fails the build; raising it is a deliberate bump.
 ///
-/// Measured at 04ecbb4 (2026-11-12). Evaluation gaps are tracked separately
-/// from unsupported forms (skips); EARL reports both as failed assertions.
-const BASELINE_PASS: usize = 123;
-const BASELINE_FAIL: usize = 9;
+/// Measured at 04ecbb4 (2026-11-12) in both feature states. Four decimal
+/// lexical-form differences retain their failing EARL assertions.
+const BASELINE_PASS: usize = 272;
+const BASELINE_FAIL: usize = 4;
 
 fn suite_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -249,17 +209,23 @@ fn run_entry(g: &Graph, view: &GraphView, entry: &Term) -> Outcome {
     // the crate's real evaluation, rather than being recorded as a divergence.
     let scope = harness_scope(view, &action);
 
-    // Drive the crate's REAL parse + evaluation. The test graph is both the data
+    // Drive the crate's parse + fallible evaluation. The test graph is both the data
     // and the shapes graph (the suite declares filter shapes inline).
-    let actual = match eval_node_expression_with_scope(g, g, &expr, &focus, &scope) {
-        Some(v) => v,
-        None => return Outcome::Skip("crate could not parse the node expression".into()),
+    let actual = eval_node_expression_result(g, g, &expr, &focus, &scope);
+    let Some(expected_term) = view.object(entry, &format!("{MF}result")) else {
+        return Outcome::Fail("no mf:result".into());
     };
-
-    let expected = match view.object(entry, &format!("{MF}result")) {
-        Some(list) => view.list(&list),
-        None => return Outcome::Skip("no mf:result".into()),
+    if expected_term == iri(&format!("{SHT}Failure")) {
+        return match actual {
+            Err(_) => Outcome::Pass,
+            Ok(nodes) => Outcome::Fail(format!("expected evaluation failure, got {nodes:?}")),
+        };
+    }
+    let actual = match actual {
+        Ok(nodes) => nodes,
+        Err(error) => return Outcome::Fail(format!("evaluation failure: {error}")),
     };
+    let expected = view.list(&expected_term);
     // The suite README: output order must match `mf:result` exactly unless the
     // action sets `sht:ignoreOrder true`, which allows any order with the same
     // cardinalities.
