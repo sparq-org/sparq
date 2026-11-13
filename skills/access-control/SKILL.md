@@ -1116,7 +1116,7 @@ over-cap name after lowering its budget. A refused addition leaves the installed
 place and grants nothing to the refused resource.
 
 **The whole decision.** Because `ClosureLimits` is per closure, an ACP view's three strata and
-a bridged ODRL policy's five strata could each spend the full allowance. One crate-internal
+a bridged ODRL policy's five strata could each spend the full allowance. One
 `AuthLedger` wraps `sparq_core::meter::Ledger` and the store's `AuthBudget`.
 WAC and ACP share it between input assembly and every stratum of one materialization;
 the ODRL bridge shares it across its strata. Each closure runs through `eval_metered` under the
@@ -1141,7 +1141,7 @@ that already tells an allowance refusal from a deny needs no second check.
 > with shared operands describes exponentially many operand nodes. Past either, the WHOLE
 > policy is refused (`sparq_policy::constraint_budget_refusal` names which), and every caller
 > here is fail-closed on that: the bridge materializes nothing and the server's ODRL lane
-> answers 400.
+> answers 400 for its own parser limits or malformed policies, and 503 when the shared request input ledger is exhausted.
 
 ## Trust-graph authorisation PoC — sq-pfae (issue #940, opt-in `trust-graph`)
 
@@ -1614,3 +1614,32 @@ principal model, sq-3jtd.6); workspace v0.1.0, opt-in (depends on nothing in
 the workspace), native-side. Conservative WAC/ACP sub-cases are noted in design §4.4; perf
 is measured by `cargo run -p sparq-solid --example bench` and NOT baked into docs. Code
 carries review markers pending re-review.)_
+
+## Sharing a request ledger with ingestion
+
+`AuthLedger::new(AuthBudget)` starts input counters and the request deadline.
+Use `AuthLedger::with_source_limit(budget, transport_bytes)` for an HTTP dataset,
+then `with_dataset_bytes` around `Graph::load_metered` and `union_metered`.
+Dataset rows have a separate source-sized fact account; projection does not charge
+facts again. `max_input_facts` continues to bound assembled materializer input.
+`load_document(text, format, iri)` parses one authorization document;
+`document_refusal(error, iri)` names that document in its tagged refusal.
+`core()` is crate-private. `spent(dim)` permits read-only inspection.
+
+Pass this ledger to `store.materialize_wac_in` or `materialize_acp_in`, using the
+store's budget. Input assembly enumerates resources once against its input
+allowance; provenance pruning has a separate allowance with the same deadline.
+`checkpoint()` checks that deadline. `input_refusal(Exceeded)` returns the usual
+tagged request refusal. `AuthAllowance::PolicyInput` identifies policy budgets.
+`group_docs()` is the conservative set used for update invalidation;
+`input_group_docs()` borrows the generation-cached set selected using the loader's
+full WAC rejection analysis. Reindexing invalidates it alongside `group_docs()`.
+ACP views return an empty set because they do not consume WAC group documents.
+
+Dataset terms use the dataset retention ceiling; the materializer keeps its
+control/group term-size cap. Dataset byte retention is bounded by 64 times the transport source cap;
+`with_policy_bytes` has a separate cumulative ceiling of thirty-two times that cap.
+Trusted callers of these scoped methods must retain the parser's tighter phase
+limits via `with_phase_limits(default_policy_limits_for(...), ...)`. Each policy
+parse and membership phase gets its own graph-sized allowance. ODRL evaluations
+retain their independent lane bound, separate from earlier closure work.

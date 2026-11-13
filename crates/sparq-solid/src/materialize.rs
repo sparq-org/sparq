@@ -80,6 +80,8 @@ pub enum AuthAllowance {
     /// `max_materialize_time`: the native wall-clock allowance for the entire
     /// materialization. Never emitted on wasm32.
     Deadline,
+    /// The request policy parser reached its shared input budget.
+    PolicyInput,
     /// An allowance this crate does not name individually (a newer reasoner cut).
     Unspecified,
 }
@@ -100,6 +102,7 @@ impl AuthAllowance {
             AuthAllowance::ResourceIri => "max_resource_iri_bytes/max_resource_path_depth",
             AuthAllowance::DecisionWork => "max_decision_join_rows/max_decision_facts",
             AuthAllowance::Deadline => "max_materialize_time",
+            AuthAllowance::PolicyInput => "policy_input",
             AuthAllowance::Unspecified => "an unnamed limit",
         }
     }
@@ -118,6 +121,7 @@ impl AuthAllowance {
             AuthAllowance::ResourceIri => "resource-iri",
             AuthAllowance::DecisionWork => "decision-work",
             AuthAllowance::Deadline => "deadline",
+            AuthAllowance::PolicyInput => "policy-input",
             AuthAllowance::Unspecified => "unspecified",
         }
     }
@@ -137,6 +141,7 @@ impl AuthAllowance {
             AuthAllowance::ResourceIri,
             AuthAllowance::DecisionWork,
             AuthAllowance::Deadline,
+            AuthAllowance::PolicyInput,
         ] {
             if kind.tag() == tag {
                 return kind;
@@ -544,6 +549,29 @@ fn materialize_wac_rules<'rules>(
     deadline: MaterializeDeadline,
     rules: impl FnOnce() -> Result<&'rules CompiledRuleSet, String>,
 ) -> Result<MaterializeStats, String> {
+    materialize_wac_rules_in(
+        graph,
+        limits,
+        &mut AuthLedger::with_deadline(budget, deadline),
+        rules,
+    )
+}
+
+pub(crate) fn materialize_wac_in(
+    graph: &mut Graph,
+    limits: ClosureLimits,
+    work: &mut AuthLedger,
+) -> Result<MaterializeStats, String> {
+    materialize_wac_rules_in(graph, limits, work, wac_rules)
+}
+
+fn materialize_wac_rules_in<'rules>(
+    graph: &mut Graph,
+    limits: ClosureLimits,
+    work: &mut AuthLedger,
+    rules: impl FnOnce() -> Result<&'rules CompiledRuleSet, String>,
+) -> Result<MaterializeStats, String> {
+    let deadline = work.materialize_deadline();
     #[cfg(not(target_arch = "wasm32"))]
     let t0 = Instant::now();
     // Every fallible step runs BEFORE the first mutation of `graph`, so an `Err` leaves
@@ -554,16 +582,15 @@ fn materialize_wac_rules<'rules>(
     let rules = rules()?;
     let mut dict = Dict::new();
     // WAC has no creator/owner vocabulary; provenance is ignored (the loader skips it).
-    let mut work = AuthLedger::with_deadline(budget, deadline);
     let facts = assemble_input_ids(
         &mut dict,
         graph,
         System::Wac,
         &AccessProvenance::new(),
         &VerifiedCredentials::new(),
-        &mut work,
+        work,
     )?;
-    let closure = auth_eval(&mut dict, &facts, rules, limits, &mut work)?;
+    let closure = auth_eval(&mut dict, &facts, rules, limits, work)?;
     let mut stats = install_auth_view(graph, &dict, &closure, deadline)?;
     stats.strata_facts = vec![closure.len()];
     stats.millis = elapsed_millis(
@@ -707,28 +734,37 @@ pub(crate) fn materialize_acp_with_deadline(
     budget: AuthBudget,
     deadline: MaterializeDeadline,
 ) -> Result<MaterializeStats, String> {
+    materialize_acp_in(
+        graph,
+        provenance,
+        credentials,
+        limits,
+        &mut AuthLedger::with_deadline(budget, deadline),
+    )
+}
+
+pub(crate) fn materialize_acp_in(
+    graph: &mut Graph,
+    provenance: &AccessProvenance,
+    credentials: &VerifiedCredentials,
+    limits: ClosureLimits,
+    work: &mut AuthLedger,
+) -> Result<MaterializeStats, String> {
+    let deadline = work.materialize_deadline();
     #[cfg(not(target_arch = "wasm32"))]
     let t0 = Instant::now();
     // Fallible work first, mutation last — see [`materialize_wac`].
     crate::loader::require_writable(graph)?;
     let rules = acp_rules()?;
     let mut dict = Dict::new();
-    let mut work = AuthLedger::with_deadline(budget, deadline);
-    let facts = assemble_input_ids(
-        &mut dict,
-        graph,
-        System::Acp,
-        provenance,
-        credentials,
-        &mut work,
-    )?;
+    let facts = assemble_input_ids(&mut dict, graph, System::Acp, provenance, credentials, work)?;
     // Chain the three strata entirely at the id level, in ONE dictionary: each stratum's
     // closure is the next one's fact set, so a negated predicate is complete before the
     // stratum that negates it runs (design doc §3.5) and nothing round-trips through text.
     let mut closure = facts;
     let mut strata_facts = Vec::with_capacity(rules.len());
     for stratum in rules {
-        closure = auth_eval(&mut dict, &closure, stratum, limits, &mut work)?;
+        closure = auth_eval(&mut dict, &closure, stratum, limits, work)?;
         strata_facts.push(closure.len());
     }
 

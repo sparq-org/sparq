@@ -68,7 +68,8 @@ pub struct AuthBudget {
     pub max_resource_path_depth: usize,
     /// Binding rows and rule firings summed over ALL closures of one authorization
     /// materialization (`ClosureLimits::max_total_join_rows` bounds one closure, and a
-    /// materialization runs several).
+    /// materialization runs several). Stateless ODRL rule/target evaluations have
+    /// their own lane bound, independent of prior materialization work.
     pub max_decision_join_rows: usize,
     /// Facts summed over the fixpoints of all closures of one authorization
     /// materialization (`ClosureLimits::max_facts` bounds one closure).
@@ -233,19 +234,24 @@ impl MaterializeDeadline {
 }
 
 /// One ledger for input assembly and every closure of a materialization.
-pub(crate) struct AuthLedger {
+pub struct AuthLedger {
     budget: AuthBudget,
     deadline: MaterializeDeadline,
     core: Ledger,
+    dataset_bytes: sparq_core::meter::ByteAccount,
+    dataset_facts: sparq_core::meter::FactAccount,
+    policy_bytes: sparq_core::meter::ByteAccount,
 }
 
 impl AuthLedger {
-    pub(crate) fn new(budget: AuthBudget) -> Self {
+    /// Start one request ledger using this input and decision budget.
+    pub fn new(budget: AuthBudget) -> Self {
         Self::with_deadline(budget, MaterializeDeadline::new(budget))
     }
 
     pub(crate) fn with_deadline(budget: AuthBudget, deadline: MaterializeDeadline) -> Self {
         let mut limits = Limits::default();
+        limits.source_bytes = budget.max_input_bytes;
         limits.document_bytes = budget.max_document_bytes;
         limits.bytes = budget.max_input_bytes;
         limits.generated_bytes = budget.max_generated_bytes;
@@ -257,18 +263,95 @@ impl AuthLedger {
             budget,
             deadline,
             core: Ledger::new(limits),
+            dataset_bytes: sparq_core::meter::ByteAccount::new(
+                budget.max_input_bytes.saturating_mul(64),
+            ),
+            dataset_facts: sparq_core::meter::FactAccount::new(budget.max_input_bytes),
+            policy_bytes: sparq_core::meter::ByteAccount::new(
+                budget.max_input_bytes.saturating_mul(32),
+            ),
         }
     }
 
+    /// Internal counters for materializer input and closure work.
     pub(crate) fn core(&mut self) -> &mut Ledger {
         &mut self.core
+    }
+
+    /// Account for dataset ingestion and its union projection without spending
+    /// the control-document byte allowance. A cumulative allowance of 64 times
+    /// the source cap covers fixed term-node costs in compact N-Quads, ingestion
+    /// and the retained union projection.
+    /// Dataset facts have a source-sized account; materializer facts keep their own
+    /// allowance. Source bytes and closure work remain cumulative; the original
+    /// term-size ceiling is restored before materializer input assembly.
+    pub fn with_dataset_bytes<T>(&mut self, work: impl FnOnce(&mut Ledger) -> T) -> T {
+        self.core.close_document();
+        self.core
+            .with_fact_account(&mut self.dataset_facts, |core| {
+                core.with_byte_account(&mut self.dataset_bytes, |core| {
+                    core.with_term_limit(core.limits().bytes, work)
+                })
+            })
+    }
+
+    /// Account for policy extraction separately from control-document bytes.
+    /// Its ceiling is thirty-two times the source cap. Callers must retain the
+    /// policy parser's tighter graph-sized allowance within this account.
+    pub fn with_policy_bytes<T>(&mut self, work: impl FnOnce(&mut Ledger) -> T) -> T {
+        self.core.close_document();
+        self.core.with_byte_account(&mut self.policy_bytes, work)
+    }
+
+    /// Start a request with a source allowance matching its transport limit.
+    /// Dataset retention accounts scale with that limit; materializer input does not.
+    pub fn with_source_limit(budget: AuthBudget, source_bytes: usize) -> Self {
+        let mut ledger = Self::new(budget);
+        let mut limits = *ledger.core.limits();
+        limits.source_bytes = source_bytes;
+        ledger.core = Ledger::new(limits);
+        ledger.dataset_facts = sparq_core::meter::FactAccount::new(source_bytes);
+        ledger.dataset_bytes = sparq_core::meter::ByteAccount::new(source_bytes.saturating_mul(64));
+        ledger.policy_bytes = sparq_core::meter::ByteAccount::new(source_bytes.saturating_mul(32));
+        ledger
+    }
+
+    /// Parse one authorization document with its own document window.
+    pub fn load_document(
+        &mut self,
+        text: &str,
+        format: &str,
+        iri: &str,
+    ) -> Result<sparq_core::Graph, sparq_core::meter::LoadError> {
+        self.core.open_document();
+        sparq_core::Graph::load_metered_with_base(text, format, iri, &mut self.core)
+    }
+
+    /// Attribute a document-ingestion refusal to its document IRI.
+    pub fn document_refusal(&self, error: Exceeded, iri: &str) -> String {
+        self.refusal(error, Dim::Bytes, iri)
+    }
+
+    /// Inspect cumulative materializer input or decision work without changing limits.
+    pub fn spent(&self, dim: Dim) -> usize {
+        self.core.spent(dim)
+    }
+
+    /// Map an ingestion refusal to the existing authorization allowance family.
+    pub fn input_refusal(&self, error: Exceeded) -> String {
+        self.refusal(error, Dim::Bytes, "request input")
+    }
+
+    pub(crate) fn materialize_deadline(&self) -> MaterializeDeadline {
+        self.deadline
     }
 
     pub(crate) fn deadline(&self) -> Option<std::time::Instant> {
         self.deadline.instant()
     }
 
-    pub(crate) fn checkpoint(&self) -> Result<(), String> {
+    /// Refuse if the request materialization deadline has elapsed.
+    pub fn checkpoint(&self) -> Result<(), String> {
         self.deadline.check()
     }
 

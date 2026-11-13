@@ -355,7 +355,16 @@ process's stdin/stdout. For an arbitrary reader/writer pair use `sparq_mcp::serv
 Each request line is capped by `ServerConfig::max_request_bytes` (default
 `DEFAULT_MAX_REQUEST_BYTES`, 16 MiB; `None` disables it): an over-cap line gets an
 `INVALID_REQUEST` error (id `null`) and is discarded as it streams, never buffered whole.
-An embedder calling `handle_message` from its own transport must cap requests itself.
+Both `McpServer::handle_message` and `SolidMcpServer::handle_message` apply the
+same byte check before JSON parsing, including batches and notifications.
+`SolidMcpServer::set_max_request_bytes(Some(bytes))` changes the same default cap;
+passing `None` disables it. `SolidServerConfig` retains its existing struct fields.
+Embedders should also bound buffering at their transport boundary.
+
+Solid ACL/ACR puts use `PodStore` admission before replacing a slot. Writes to a
+referenced group document use metered parsing with the store's `AuthBudget`;
+a refusal leaves the stored document and authorization view unchanged.
+A later rebuild refusal restores the slot and rematerializes the previous view.
 
 ## Running the server binary
 
@@ -419,3 +428,12 @@ not mutate the graph).
 - **MCP spec** — <https://modelcontextprotocol.io>.
 - **NL→SPARQL & schema grounding** — [`genai-retrieval`](../genai-retrieval/SKILL.md).
 - **Underlying query API** — [`sparql-query`](../sparql-query/SKILL.md).
+
+Solid resource writes meter group documents only when the installed model is WAC
+and an accepted control document references the URL. ACP references and rejected
+controls do not make ordinary content a group input. Refusals name the written
+URL and preserve its previous slot and authorization generation.
+
+The accepted group-input set is cached per authorization generation and invalidated
+with the view. Selection uses the loader's model-specific rejection analysis;
+ACP dependency rejections do not turn WAC group references into ACP inputs.

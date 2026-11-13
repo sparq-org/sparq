@@ -1129,3 +1129,57 @@ Rules that follow:
 - `fused-decompress-parse` — choosing gzip vs zstd vs bzip2 and fusing decode with parse (measured numbers).
 - `rust-parallel-parsing` — how the chunk-parallel N-Triples/Turtle scanners work, and when NOT to parallelize.
 - `hdt-format` — the HDT binary layout internals and the `hdt`-crate wrapping/decode performance.
+
+## Explicitly metered loads
+
+`Graph::load_metered(text, format, &mut meter::Ledger)` preserves named graphs like
+`load_dataset`, using streaming admission for small or tightly limited inputs
+and source-prepaid parallel admission for eligible larger N-Quads. `load_metered_with_base(text, format, base,
+&mut ledger)` resolves document-relative IRIs and folds named graphs like
+`load_str_with_base`. Supported formats and aliases follow those existing loaders.
+The dataset loader closes the per-document window for the aggregate parse; the
+base-aware document loader respects the current window. Use `open_document()`
+between separately metered documents.
+Source bytes are charged before parsing, then term bytes and facts before retaining
+each row or building indexes. Charges remain on failure, so reuse the ledger only
+when that matches the caller's request accounting.
+`Ledger::cap_remaining(Limits)` tightens later-phase allowances relative to work
+already spent, preserving stricter total caps and counters.
+`meter::LoadError::Parse(String)` distinguishes syntax/format errors from
+`LoadError::Ledger(Exceeded)`. Existing loaders retain their behavior.
+
+`meter::ByteAccount` and `Ledger::with_byte_account` retain cumulative bytes for
+one class of work while sharing source, facts and work counters. The caller's
+original byte account is restored even on unwinding. `Graph::union_metered`
+projects admitted graphs without charging source bytes or facts again; retained
+terms and buffers are checked before retention.
+
+`Graph::union_metered` projects already admitted rows and charges retained terms
+and buffers without charging source bytes or facts again.
+`Graph::load_metered_precharged` is for trusted ingestion that has already charged
+external source bytes before appending separately bounded generated facts; all
+term, fact and buffer checks still run. Ordinary callers use `load_metered`.
+`FactAccount` with `Ledger::with_fact_account` separates cumulative fact classes,
+restoring the original account on return or unwind. `with_phase_limits` restores
+limits while preserving counters, so consecutive phases each receive their cap.
+
+`Ledger::with_term_limit` scopes a class-specific term-size ceiling and restores it
+on unwind. Dataset ingestion derives that ceiling from its aggregate retention
+allowance; control/group documents retain their materializer term cap.
+
+For a folded document, `Graph::load_metered_with_base` charges term bytes and
+facts once per distinct stored triple. Repeated source rows still contribute
+source bytes. Dataset ingestion retains its per-source-row accounting in the
+separate dataset account.
+
+For larger bounded N-Quads, `Graph::load_metered` uses the ordinary parallel
+loader after source admission, then charges the parsed rows and retained terms in
+bulk before returning the graph. Smaller inputs keep streaming admission. Tight
+allowances retain streaming admission. Parallel reports preserve raw source
+occurrences before deduplication, so duplicate rows need no second parse. Native
+syntax errors resume streaming at the incomplete statement, preserving the prior
+charges and original diagnostic locations. Bulk refusals restore the checkpoint
+and retain streaming refusal order. Native-only version directives stay on a
+single streaming pass to preserve their existing refusal. The existing store cutoff is
+shared by the path-selection regression. The source limit must be finite when
+using this path for request ingestion.

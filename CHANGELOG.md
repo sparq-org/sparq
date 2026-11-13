@@ -24,6 +24,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **sparq-core:** bounded parallel dataset ingestion retains source-occurrence
+  accounting for duplicate rows and resumes syntax diagnostics at the incomplete
+  statement, preserving earlier charges without parsing the accepted prefix again.
+
+- **sparq-server:** trust budget finalization applies to code-built configurations
+  as well as environment loading, and preserves explicit combined limits.
+
+- **sparq-server / sparq-mcp:** eligible larger bounded datasets retain the ordinary
+  parallel loader before bulk admission. Accepted group inputs share the
+  loader's rejection analysis and generation cache. Generated trust text is
+  charged before each retained fragment.
+
+- **sparq-server / sparq-mcp:** stateless authorization parsing and Solid group
+  writes use the request ledger; MCP message limits apply before JSON parsing.
+  Dataset ingestion, assembled authorization input and policy phases retain
+  separate accounting scopes. Resource pruning preserves the request deadline
+  without spending the input enumeration allowance again. Group writes meter
+  only documents read by accepted WAC controls.
+
 - **sparq-lws-core:** embedded and HTTP read plans bound query depth for long
   paths. Short walks use balanced constant-graph branches; longer walks retain
   the VALUES plan. Embedded reads retain one actor snapshot; both clients retain
@@ -50,6 +69,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The builtin LWS.net ratchet checks exact expected failure names and requires their removal when they pass.
 
 ### Changed
+
+- **sparq-server:** `ServerConfig::solid_authz_trust_auto_budget` records automatic
+  or explicit combined-budget selection. The default infers it from the existing
+  limit and transport settings; embedders can also choose it explicitly.
+
+- **sparq-server:** a sole trust-limit environment override retains the legacy
+  signature/pair ceiling and derives its companion verification allowance from
+  the transport limit. Explicit paired overrides remain independent.
+
+- **sparq-server:** combined trust pricing includes public-key decoding and each
+  credential's canonicalize-and-commit before admission. Its default allowance
+  accommodates the existing rule/credential and certification boundaries, while
+  the original pairing allowance remains independently enforced.
 
 - **sparq-lws-core:** insert-only LDP PATCH without Read stores inserts beside a
   Turtle, N-Triples or N-Quads document and returns `204` with no Location or ETag

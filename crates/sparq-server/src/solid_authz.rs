@@ -105,7 +105,7 @@ use axum::{
     response::Response,
 };
 
-use sparq_solid::{AclStatus, AuthAllowance, Mode, PodStore, Session, WacDecision};
+use sparq_solid::{AclStatus, AuthAllowance, AuthLedger, Mode, PodStore, Session, WacDecision};
 
 use crate::http::{auth_gate, json_error, AppState, Operation};
 
@@ -469,6 +469,8 @@ enum ServerViewError {
     /// log; the message itself (which quotes document IRIs) is not logged and never reaches the
     /// client.
     Materialize(Option<AuthAllowance>),
+    /// A request name exceeded its input allowance before discovery.
+    RequestName,
     /// A failed or unpublished build: transient, never cached.
     Unavailable,
     /// The bounded build pool could not admit the build within its wait allowance.
@@ -740,7 +742,7 @@ fn parse_request(body: &Bytes) -> Result<AuthzRequest, Response> {
 // `Response` is large; same `result_large_err` allow as `parse_request` / the crate's
 // other handler helpers. Only the trust lane and the tests take a whole request; the
 // stateless lane owns the fields instead ([`with_store_work`]).
-#[cfg(any(test, feature = "solid-authz-trust"))]
+#[cfg(test)]
 #[allow(clippy::result_large_err)]
 fn build_store(req: &AuthzRequest) -> Result<PodStore, Response> {
     build_store_from(&req.dataset, req.view)
@@ -749,20 +751,69 @@ fn build_store(req: &AuthzRequest) -> Result<PodStore, Response> {
 /// [`build_store`] over the two fields it reads, so the blocking-pool lane
 /// ([`with_store_work`]) can own them for the task rather than borrow the request.
 // `Response` is large; same `result_large_err` allow as the rest of this module.
+#[cfg(test)]
 #[allow(clippy::result_large_err)]
 fn build_store_from(dataset: &str, requested_view: Option<AuthView>) -> Result<PodStore, Response> {
-    let graph = sparq_core::Graph::load_dataset(dataset, "nquads").map_err(|_| {
-        // The parser's detail is withheld from the client (info-leak posture); the class is enough.
-        json_error(
-            StatusCode::BAD_REQUEST,
-            "'dataset' is not valid N-Quads",
-        )
-    })?;
-    let view = requested_view.unwrap_or_else(|| infer_view(dataset));
+    build_store_from_in(
+        dataset,
+        requested_view,
+        &mut AuthLedger::new(sparq_solid::default_auth_budget()),
+    )
+}
+
+#[allow(clippy::result_large_err)]
+fn body_budget_response(kind: Option<AuthAllowance>) -> Response {
+    log_materialize_refusal("body", kind);
+    json_error(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "could not materialise the authorization view",
+    )
+}
+
+#[cfg(test)]
+#[allow(clippy::result_large_err)]
+fn build_store_from_in(
+    dataset: &str,
+    requested_view: Option<AuthView>,
+    ledger: &mut AuthLedger,
+) -> Result<PodStore, Response> {
+    let graph = load_body_graph_in(dataset, ledger)?;
+    materialize_body_graph_in(
+        graph,
+        requested_view.unwrap_or_else(|| infer_view(dataset)),
+        ledger,
+    )
+}
+
+#[allow(clippy::result_large_err)]
+fn load_body_graph_in(
+    dataset: &str,
+    ledger: &mut AuthLedger,
+) -> Result<sparq_core::Graph, Response> {
+    ledger
+        .with_dataset_bytes(|core| sparq_core::Graph::load_metered(dataset, "nquads", core))
+        .map_err(|error| match error {
+            sparq_core::meter::LoadError::Parse(_) => {
+                json_error(StatusCode::BAD_REQUEST, "'dataset' is not valid N-Quads")
+            }
+            sparq_core::meter::LoadError::Ledger(error) => {
+                body_budget_response(materialize_refusal_kind(&ledger.input_refusal(error)))
+            }
+        })
+}
+
+#[allow(clippy::result_large_err)]
+fn materialize_body_graph_in(
+    graph: sparq_core::Graph,
+    view: AuthView,
+    ledger: &mut AuthLedger,
+) -> Result<PodStore, Response> {
     let mut store = PodStore::new(graph);
+    #[cfg(test)]
+    BODY_VIEWS.with(|count| count.set(count.get() + 1));
     let materialized = match view {
-        AuthView::Wac => store.materialize_wac(),
-        AuthView::Acp => store.materialize_acp(),
+        AuthView::Wac => store.materialize_wac_in(ledger),
+        AuthView::Acp => store.materialize_acp_in(ledger),
     };
     materialized.map_err(|e| {
         // Materialisation failed (e.g. a reserved-encoding collision / reasoner error, or the
@@ -900,6 +951,13 @@ fn server_view_error_response(err: ServerViewError) -> Response {
             StatusCode::SERVICE_UNAVAILABLE,
             "could not materialise the authorization view; retry",
         ),
+        ServerViewError::RequestName => {
+            tracing::warn!(target: "sparq_server::solid_authz", lane = "request", limit = refusal_limit_field(Some(AuthAllowance::ResourceIri)), "request name refused");
+            json_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "could not materialise the authorization view",
+            )
+        }
         ServerViewError::Materialize(kind) => {
             log_materialize_refusal("server", kind);
             json_error(
@@ -1314,13 +1372,42 @@ where
     F: FnOnce(&PodStore, &AuthzRequest) -> T + Send + 'static,
 {
     let owned = req.clone();
+    let source_limit = state.config().max_body_bytes;
     on_build_pool(state, move || {
-        let store = build_store_from(&owned.dataset, owned.view)?;
+        let mut ledger =
+            AuthLedger::with_source_limit(sparq_solid::default_auth_budget(), source_limit);
+        #[cfg(feature = "odrl-authz")]
+        if owned.carries_odrl {
+            odrl_request_context(&owned, mode)?;
+        }
+        let graph = load_body_graph_in(&owned.dataset, &mut ledger)?;
+        #[cfg(feature = "odrl-authz")]
+        let policy_graph = if owned.carries_odrl {
+            Some(
+                ledger
+                    .with_dataset_bytes(|core| graph.union_metered(core))
+                    .map_err(|error| match error {
+                        sparq_core::meter::LoadError::Ledger(error) => body_budget_response(
+                            materialize_refusal_kind(&ledger.input_refusal(error)),
+                        ),
+                        sparq_core::meter::LoadError::Parse(_) => {
+                            json_error(StatusCode::BAD_REQUEST, "'dataset' is not valid N-Quads")
+                        }
+                    })?,
+            )
+        } else {
+            None
+        };
+        let store = materialize_body_graph_in(
+            graph,
+            owned.view.unwrap_or_else(|| infer_view(&owned.dataset)),
+            &mut ledger,
+        )?;
         #[cfg(feature = "odrl-authz")]
         {
             let mut store = store;
-            if owned.carries_odrl {
-                apply_odrl_lane(&mut store, &owned, mode)?;
+            if let Some(policy_graph) = policy_graph {
+                apply_odrl_graph_in(&mut store, &owned, mode, &policy_graph, &mut ledger)?;
             }
             Ok(work(&store, &owned))
         }
@@ -1381,7 +1468,7 @@ fn validate_request_resource(store: &PodStore, resource: &str) -> Result<(), Ser
     store
         .auth_budget()
         .validate_resource_iri(resource)
-        .map_err(|error| ServerViewError::Materialize(materialize_refusal_kind(&error)))
+        .map_err(|_| ServerViewError::RequestName)
 }
 
 /// `POST /authz/decide` — the per-request WAC/ACP decision (FR-1/FR-4). Body:
@@ -1975,6 +2062,38 @@ fn trust_authz_decide_blocking(
             );
         }
     };
+    let certs_val = trust_obj
+        .get("certifications")
+        .and_then(|v| v.as_array())
+        .map(|a| a.as_slice())
+        .unwrap_or(&[]);
+    let credentials_count = trust_obj
+        .get("credentials")
+        .and_then(|v| v.as_array())
+        .map_or(0, Vec::len);
+    // Reserve the combined work before decoding keys or entering admission.
+    let rules_bound = rules_val.len().saturating_add(certs_val.len());
+    let pairs = rules_bound.saturating_mul(credentials_count);
+    let verifies = certs_val
+        .len()
+        .saturating_add(pairs)
+        .saturating_add(credentials_count)
+        .saturating_add(rules_val.len())
+        .saturating_add(certs_val.len().saturating_mul(2));
+    if verifies > config.solid_authz_trust_max_pairs
+        || certs_val.len().saturating_add(pairs) > config.solid_authz_trust_max_pair_checks
+    {
+        return json_response(
+            StatusCode::FORBIDDEN,
+            trust_deny_json("trust verify budget exceeded"),
+        );
+    }
+    if certs_val.len() > config.solid_authz_trust_max_certifications {
+        return json_response(
+            StatusCode::FORBIDDEN,
+            trust_deny_json("trust certification limit exceeded"),
+        );
+    }
     let mut direct_rules: Vec<TrustRule> = Vec::new();
     for (idx, rule_v) in rules_val.iter().enumerate() {
         let obj = match rule_v.as_object() {
@@ -2033,11 +2152,6 @@ fn trust_authz_decide_blocking(
     }
 
     // ── 4. Parse certifications ──────────────────────────────────────────────
-    let certs_val = trust_obj
-        .get("certifications")
-        .and_then(|v| v.as_array())
-        .map(|a| a.as_slice())
-        .unwrap_or(&[]);
     let mut certifications: Vec<Certification> = Vec::new();
     for (idx, cert_v) in certs_val.iter().enumerate() {
         let obj = match cert_v.as_object() {
@@ -2130,7 +2244,7 @@ fn trust_authz_decide_blocking(
             return json_response(
                 StatusCode::FORBIDDEN,
                 trust_deny_json("trust block missing 'credentials' array"),
-            );
+            )
         }
     };
     let resource_node = match NamedNode::new(resource) {
@@ -2203,28 +2317,10 @@ fn trust_authz_decide_blocking(
         credentials.push(cred);
     }
 
-    // A depth-one certification produces at most one additional rule. Price the upper
-    // bound before deriving any edge or verifying any credential, including empty graphs.
-    // Certification signatures and rule/credential signatures share the same verify budget.
-    let rules_bound = direct_rules.len().saturating_add(certifications.len());
-    let pairs = rules_bound.saturating_mul(creds_val.len());
     let triples = credentials
         .iter()
         .fold(0usize, |n, c| n.saturating_add(c.graph.len()));
     let validation_work = rules_bound.saturating_mul(triples);
-    let verifies = certifications.len().saturating_add(pairs);
-    if verifies > config.solid_authz_trust_max_pairs {
-        return json_response(
-            StatusCode::FORBIDDEN,
-            trust_deny_json("trust rule/credential pair limit exceeded"),
-        );
-    }
-    if certifications.len() > config.solid_authz_trust_max_certifications {
-        return json_response(
-            StatusCode::FORBIDDEN,
-            trust_deny_json("trust certification limit exceeded"),
-        );
-    }
     if validation_work > config.solid_authz_trust_max_validation_work {
         return json_response(
             StatusCode::FORBIDDEN,
@@ -2259,7 +2355,7 @@ fn trust_authz_decide_blocking(
     // Build the store over the original dataset with admitted facts injected.
     let admitted_count = all_admitted.len();
     let admitted_source = all_admitted.first().map(|f| f.issuer.as_str().to_owned());
-    let store = match build_store_with_admitted(req, &all_admitted) {
+    let store = match build_store_with_admitted_limit(req, &all_admitted, config.max_body_bytes) {
         Ok(store) => store,
         Err(response) => return response,
     };
@@ -2318,57 +2414,121 @@ fn trust_authz_decide_blocking(
 /// HONEST SCOPE: this is a PoC injection path (anchored-not-proven; sq-qhy4 pending external
 /// audit). A production wiring would use `trust:admitted`-named-graph tagging and epoch-based
 /// cache invalidation (design `research/solid-trust-graph-authz-design.md`).
-#[cfg(feature = "solid-authz-trust")]
+#[cfg(all(test, feature = "solid-authz-trust"))]
 #[allow(clippy::result_large_err)]
 fn build_store_with_admitted(
     req: &AuthzRequest,
     admitted: &[sparq_trust::AdmittedFact],
 ) -> Result<sparq_solid::PodStore, Response> {
-    use std::fmt::Write as _;
-    // POSITIONAL format args throughout (CodeQL rust/unused-variable guard).
-    let mut augmented = req.dataset.clone();
-    for fact in admitted {
-        // Named-graph position: the document of the fact's subject (a group IRI's group
-        // document, which may itself be an `.acl`), the only document whose statements about
-        // that node the loader keeps. The loader applies the same confinement to it as to the
-        // rest of that document.
-        if let oxrdf::NamedOrBlankNode::NamedNode(group) = &fact.triple.subject {
-            let doc = group.as_str().split('#').next().unwrap_or(group.as_str());
-            let _ = writeln!(
-                &mut augmented,
-                "{} {} {} <{}> .",
-                fact.triple.subject,
-                fact.triple.predicate,
-                fact.triple.object,
-                doc,
-            );
+    build_store_with_admitted_limit(
+        req,
+        admitted,
+        crate::http::ServerConfig::default().max_body_bytes,
+    )
+}
+
+#[cfg(feature = "solid-authz-trust")]
+struct MeteredAdmittedText<'a> {
+    core: &'a mut sparq_core::meter::Ledger,
+    text: String,
+    error: Option<sparq_core::meter::Exceeded>,
+}
+
+#[cfg(feature = "solid-authz-trust")]
+impl std::fmt::Write for MeteredAdmittedText<'_> {
+    fn write_str(&mut self, text: &str) -> std::fmt::Result {
+        if self.error.is_some() {
+            return Err(std::fmt::Error);
         }
-        // Default-graph position: reachable via SPARQL query on the full dataset.
-        let _ = writeln!(
-            &mut augmented,
-            "{} {} {} .",
-            fact.triple.subject,
-            fact.triple.predicate,
-            fact.triple.object,
-        );
+        if let Err(error) = self
+            .core
+            .charge(sparq_core::meter::Dim::GeneratedBytes, text.len())
+        {
+            self.error = Some(error);
+            return Err(std::fmt::Error);
+        }
+        if self.text.try_reserve(text.len()).is_err() {
+            self.error = Some(sparq_core::meter::Exceeded::new(
+                sparq_core::meter::Dim::Alloc,
+                usize::MAX,
+                text.len(),
+            ));
+            return Err(std::fmt::Error);
+        }
+        self.text.push_str(text);
+        Ok(())
     }
-    // Delegate to the unchanged build_store path (WAC/ACP inference + materialisation).
-    let augmented_req = AuthzRequest {
-        // sq-snopa.8 — the trust lane decides over THIS augmented body dataset; the
-        // stateful lane is refused before `trust_authz_decide` is ever reached.
-        source: AuthzSource::Body,
-        #[cfg(feature = "odrl-authz")]
-        carries_odrl: false,
-        dataset: augmented,
-        agent: req.agent.clone(),
-        client: req.client.clone(),
-        issuer: req.issuer.clone(),
-        now: req.now.clone(),
-        // The model is the request's own: inferred from its dataset before any fact is added,
-        // so an admitted fact never switches it.
-        view: Some(req.view.unwrap_or_else(|| infer_view(&req.dataset))),
-    };
-    build_store(&augmented_req)
+}
+
+#[cfg(feature = "solid-authz-trust")]
+#[allow(clippy::result_large_err)]
+fn build_store_with_admitted_limit(
+    req: &AuthzRequest,
+    admitted: &[sparq_trust::AdmittedFact],
+    source_limit: usize,
+) -> Result<PodStore, Response> {
+    use std::fmt::Write as _;
+    let mut ledger =
+        AuthLedger::with_source_limit(sparq_solid::default_auth_budget(), source_limit);
+    ledger
+        .with_dataset_bytes(|core| {
+            core.charge(sparq_core::meter::Dim::SourceBytes, req.dataset.len())
+        })
+        .map_err(|error| {
+            body_budget_response(materialize_refusal_kind(&ledger.input_refusal(error)))
+        })?;
+    let graph = ledger
+        .with_dataset_bytes(|core| {
+            let mut augmented = MeteredAdmittedText {
+                core,
+                text: req.dataset.clone(),
+                error: None,
+            };
+            for fact in admitted {
+                // Named-graph position: the document of the fact's subject (a group IRI's group
+                // document, which may itself be an `.acl`), the only document whose statements about
+                // that node the loader keeps. The loader applies the same confinement to it as to the
+                // rest of that document.
+                if let oxrdf::NamedOrBlankNode::NamedNode(group) = &fact.triple.subject {
+                    let doc = group.as_str().split('#').next().unwrap_or(group.as_str());
+                    let _ = writeln!(
+                        &mut augmented,
+                        "{} {} {} <{}> .",
+                        fact.triple.subject, fact.triple.predicate, fact.triple.object, doc,
+                    );
+                    if augmented.error.is_some() {
+                        break;
+                    }
+                }
+                // Default-graph position: reachable via SPARQL query on the full dataset.
+                let _ = writeln!(
+                    &mut augmented,
+                    "{} {} {} .",
+                    fact.triple.subject, fact.triple.predicate, fact.triple.object,
+                );
+                if augmented.error.is_some() {
+                    break;
+                }
+            }
+            if let Some(error) = augmented.error {
+                return Err(sparq_core::meter::LoadError::Ledger(error));
+            }
+            let augmented = augmented.text;
+            sparq_core::Graph::load_metered_precharged(&augmented, "nquads", core)
+        })
+        .map_err(|error| match error {
+            sparq_core::meter::LoadError::Parse(_) => {
+                json_error(StatusCode::BAD_REQUEST, "'dataset' is not valid N-Quads")
+            }
+            sparq_core::meter::LoadError::Ledger(error) => {
+                body_budget_response(materialize_refusal_kind(&ledger.input_refusal(error)))
+            }
+        })?;
+    materialize_body_graph_in(
+        graph,
+        req.view.unwrap_or_else(|| infer_view(&req.dataset)),
+        &mut ledger,
+    )
 }
 
 /// (sq-pfae.17) Serialise a 403 trust-deny JSON body. The reason string is NEVER
@@ -2552,17 +2712,23 @@ pub(crate) fn read_scoped_wac_allow(value: &str) -> String {
 /// (fail-OPEN); the union projection makes it visible. Blank-node labels are
 /// document-scoped in N-Quads, so the projection preserves node identity across graph
 /// boundaries. Directly unit-tested. sq-lrtc3.1.
-#[cfg(feature = "odrl-authz")]
+#[cfg(all(test, feature = "odrl-authz"))]
+fn union_policy_graph_in(
+    dataset: &str,
+    ledger: &mut AuthLedger,
+) -> Result<sparq_core::Graph, sparq_core::meter::LoadError> {
+    ledger.with_dataset_bytes(|core| {
+        sparq_core::Graph::load_metered_with_base(dataset, "nquads", "urn:sparq:policy", core)
+    })
+}
+
+#[cfg(all(test, feature = "odrl-authz"))]
 fn union_policy_graph(dataset: &str) -> Result<sparq_core::Graph, String> {
-    use std::fmt::Write as _;
-    let mut nt = String::new();
-    for quad in oxttl::NQuadsParser::new().for_slice(dataset.as_bytes()) {
-        let quad = quad.map_err(|e| e.to_string())?;
-        // oxrdf Display emits canonical N-Triples term syntax (no re-wrapping — the
-        // sq-zza2h double-wrap lesson); the graph name is deliberately dropped.
-        let _ = writeln!(&mut nt, "{} {} {} .", quad.subject, quad.predicate, quad.object);
-    }
-    sparq_core::Graph::load_str(&nt, "ntriples")
+    union_policy_graph_in(
+        dataset,
+        &mut AuthLedger::new(sparq_solid::default_auth_budget()),
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// The most (rule, evaluated target) pairs one ODRL lane request may evaluate, where the
@@ -2587,9 +2753,37 @@ pub(crate) const MAX_ODRL_EVALUATIONS: usize = 10_000;
 /// stateful budgets are sq-snopa.8 territory) or an undischarged duty never grants
 /// (the evaluator is fail-closed on missing evidence); it is never silently widened.
 // `Response` is large; same `result_large_err` allow as the crate's other handler helpers.
-#[cfg(feature = "odrl-authz")]
+#[cfg(all(test, feature = "odrl-authz"))]
 #[allow(clippy::result_large_err)]
 fn apply_odrl_lane(store: &mut PodStore, req: &AuthzRequest, mode: Mode) -> Result<(), Response> {
+    let mut ledger = AuthLedger::new(store.auth_budget());
+    apply_odrl_lane_in(store, req, mode, &mut ledger)
+}
+
+#[cfg(all(test, feature = "odrl-authz"))]
+#[allow(clippy::result_large_err)]
+fn apply_odrl_lane_in(
+    store: &mut PodStore,
+    req: &AuthzRequest,
+    mode: Mode,
+    ledger: &mut AuthLedger,
+) -> Result<(), Response> {
+    odrl_request_context(req, mode)?;
+    let policy_graph =
+        union_policy_graph_in(&req.dataset, ledger).map_err(|error| match error {
+            sparq_core::meter::LoadError::Parse(_) => {
+                json_error(StatusCode::BAD_REQUEST, "'dataset' is not valid N-Quads")
+            }
+            sparq_core::meter::LoadError::Ledger(error) => {
+                body_budget_response(materialize_refusal_kind(&ledger.input_refusal(error)))
+            }
+        })?;
+    apply_odrl_graph_in(store, req, mode, &policy_graph, ledger)
+}
+
+#[cfg(feature = "odrl-authz")]
+#[allow(clippy::result_large_err)]
+fn odrl_request_context(req: &AuthzRequest, mode: Mode) -> Result<(&'static str, &str), Response> {
     // 1. The query-action contract: only `read` maps (sq-lrtc3.2). Refuse any other
     //    mode rather than guess an ODRL action for it (fail-closed).
     let Some(action) = odrl_action_for_mode(mode) else {
@@ -2609,15 +2803,46 @@ fn apply_odrl_lane(store: &mut PodStore, req: &AuthzRequest, mode: Mode) -> Resu
              authenticated agent (fail-closed)",
         ));
     };
-    // 3. Parse the policy from the UNION of the dataset's graphs. The parse detail is
-    //    withheld from the client (info-leak posture), as everywhere on this surface.
-    let policy_graph = union_policy_graph(&req.dataset)
-        .map_err(|_| json_error(StatusCode::BAD_REQUEST, "'dataset' is not valid N-Quads"))?;
-    let policy = sparq_policy::parse_policy(&policy_graph).map_err(|_| {
-        json_error(
-            StatusCode::BAD_REQUEST,
-            "the dataset's ODRL policy did not parse (fail-closed)",
-        )
+    Ok((action, agent))
+}
+
+#[cfg(feature = "odrl-authz")]
+fn policy_error_response(error: String, shared_bytes_limited: bool) -> Response {
+    if shared_bytes_limited
+        && sparq_policy::constraint_budget_refusal(&error)
+            == Some(sparq_policy::ConstraintBudget::Bytes)
+    {
+        return body_budget_response(Some(AuthAllowance::PolicyInput));
+    }
+    json_error(
+        StatusCode::BAD_REQUEST,
+        "the dataset's ODRL policy did not parse (fail-closed)",
+    )
+}
+
+#[cfg(feature = "odrl-authz")]
+#[allow(clippy::result_large_err)]
+fn apply_odrl_graph_in(
+    store: &mut PodStore,
+    req: &AuthzRequest,
+    mode: Mode,
+    policy_graph: &sparq_core::Graph,
+    ledger: &mut AuthLedger,
+) -> Result<(), Response> {
+    let (action, agent) = odrl_request_context(req, mode)?;
+    // 3. Preserve the policy parser's input-sized allowance independently of
+    // control-document bytes. All other work remains on the request ledger.
+    let (policy, _) = ledger.with_policy_bytes(|core| {
+        let policy_limits = sparq_policy::default_policy_limits_for(policy_graph, None);
+        let shared_bytes_limited =
+            core.remaining(sparq_core::meter::Dim::Bytes) < policy_limits.bytes;
+        core.with_phase_limits(policy_limits, |core| {
+        core.charge(sparq_core::meter::Dim::QueryRows, policy_graph.len())
+            .map_err(|_| body_budget_response(Some(AuthAllowance::PolicyInput)))?;
+        let policy = sparq_policy::parse_policy_metered(policy_graph, core)
+            .map_err(|error| policy_error_response(error, shared_bytes_limited))?;
+        Ok::<_, Response>((policy, shared_bytes_limited))
+        })
     })?;
     // 4. Refuse an unimplementable `odrl:conflict` strategy UP FRONT: under e.g.
     //    `odrl:perm` NONE of the policy's rules can be trusted into deny-overrides
@@ -2655,16 +2880,22 @@ fn apply_odrl_lane(store: &mut PodStore, req: &AuthzRequest, mode: Mode) -> Resu
     //    request's asset evidence. Each call is independently fail-closed (a
     //    non-matching / unevidenced rule materialises nothing) and idempotent; the deny
     //    side wins at enforcement (∪ allow ∖ ∪ deny).
-    let members = sparq_policy::target_memberships(&policy, &policy_graph).map_err(|_| {
-        json_error(
-            StatusCode::BAD_REQUEST,
-            "the dataset's ODRL policy did not parse (fail-closed)",
-        )
+    let members = ledger.with_policy_bytes(|core| {
+        let limits = sparq_policy::default_policy_limits_for(policy_graph, None);
+        let shared_bytes_limited = core.remaining(sparq_core::meter::Dim::Bytes) < limits.bytes;
+        core.with_phase_limits(limits, |core| {
+            sparq_policy::target_memberships_metered(&policy, policy_graph, core)
+                .map_err(|error| policy_error_response(error, shared_bytes_limited))
+        })
     })?;
     // 7. Bound the work before doing it: every (rule, evaluated target) pair is one
     //    evaluation. Over the cap the request is refused, never evaluated in part.
     let rules = policy.permissions.len() + policy.prohibitions.len();
-    if (targets.len() + members.len()).saturating_mul(rules) > MAX_ODRL_EVALUATIONS {
+    let evaluations = targets
+        .len()
+        .saturating_add(members.len())
+        .saturating_mul(rules);
+    if evaluations > MAX_ODRL_EVALUATIONS {
         return Err(json_error(
             StatusCode::BAD_REQUEST,
             "the ODRL policy and its collection memberships exceed this lane's evaluation \
@@ -2693,6 +2924,9 @@ fn apply_odrl_lane(store: &mut PodStore, req: &AuthzRequest, mode: Mode) -> Resu
             request
         })
         .collect();
+    ledger
+        .checkpoint()
+        .map_err(|error| body_budget_response(materialize_refusal_kind(&error)))?;
     // One index rebuild for the whole request, however many targets it evaluates.
     if store
         .materialize_odrl_policy_for_each(&policy, &requests)
@@ -3417,6 +3651,154 @@ mod odrl_tests {
     fn reads_n1(store: &PodStore, agent: &str) -> bool {
         let s = Session { agent: Some(agent), client: None, issuer: None, now: None };
         store.accessible(&s, Mode::Read).iter().any(|g| g.as_str() == N1)
+    }
+
+    fn collection_boundary_dataset(additional_members: usize) -> String {
+        let odrl = "http://www.w3.org/ns/odrl/2/";
+        let acl = "http://www.w3.org/ns/auth/acl#";
+        let collection = "https://pod.ex/collections/notes";
+        let mut dataset = format!(
+            "{CONTENT}\
+             <https://pod.ex/.acl#owner> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <{acl}Authorization> <https://pod.ex/.acl> .\n\
+             <https://pod.ex/.acl#owner> <{acl}default> <https://pod.ex/> <https://pod.ex/.acl> .\n\
+             <https://pod.ex/.acl#owner> <{acl}agent> <{ALICE}> <https://pod.ex/.acl> .\n\
+             <https://pod.ex/.acl#owner> <{acl}mode> <{acl}Read> <https://pod.ex/.acl> .\n\
+             <https://pod.ex/notes/n2#it> <https://ex.dev/ns#title> \"other\" <https://pod.ex/notes/n2> .\n\
+             <{N1}> <{odrl}partOf> <{collection}> .\n\
+             <urn:pol/p> <{odrl}prohibition> _:pr .\n\
+             _:pr <{odrl}action> <{odrl}read> .\n\
+             _:pr <{odrl}target> <{collection}> .\n\
+             _:pr <{odrl}assignee> <{ALICE}> .\n"
+        );
+        for i in 0..additional_members {
+            dataset.push_str(&format!(
+                "<https://pod.ex/notes/m{i}> <{odrl}partOf> <{collection}> .\n"
+            ));
+        }
+        dataset
+    }
+
+    #[tokio::test]
+    async fn collection_evaluation_boundary_retains_query_contract_without_tcp() {
+        let state = AppState::with_config(
+            sparq_core::Graph::default(),
+            crate::http::ServerConfig {
+                solid_authz: true,
+                ..Default::default()
+            },
+        );
+        for (additional_members, status) in
+            [(9_998, StatusCode::OK), (9_999, StatusCode::BAD_REQUEST)]
+        {
+            let request = serde_json::json!({
+                "dataset": collection_boundary_dataset(additional_members),
+                "session": {"agent": ALICE},
+                "query": "SELECT ?o WHERE { GRAPH ?g { ?s <https://ex.dev/ns#title> ?o } }",
+                "view": "wac",
+            });
+            let request = request.to_string();
+            assert!(request.len() <= crate::http::ServerConfig::default().max_body_bytes);
+            let response =
+                query_endpoint(State(state.clone()), HeaderMap::new(), Bytes::from(request)).await;
+            let actual_status = response.status();
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(
+                actual_status, status,
+                "members={additional_members}: {body}"
+            );
+            if status == StatusCode::OK {
+                let titles: Vec<_> = body["results"]["bindings"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|row| row["o"]["value"].as_str().unwrap())
+                    .collect();
+                assert_eq!(titles, ["other"]);
+            } else {
+                assert!(
+                    body["error"].as_str().unwrap().contains("evaluation bound"),
+                    "{body}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn odrl_request_checks_precede_projection_allowances() {
+        let mut dataset = format!("{CONTENT}{}", permit_nq(ALICE));
+        dataset.push_str("invalid after policy source\n");
+        for (mode, agent, status) in [
+            ("write", Some(ALICE), StatusCode::BAD_REQUEST),
+            ("read", None, StatusCode::FORBIDDEN),
+        ] {
+            let body = serde_json::json!({"dataset":dataset,"resource":N1,"mode":mode,"session":{"agent":agent}});
+            let state = AppState::with_config(
+                sparq_core::Graph::default(),
+                crate::http::ServerConfig {
+                    solid_authz: true,
+                    ..Default::default()
+                },
+            );
+            let response = decide_endpoint(
+                State(state),
+                HeaderMap::new(),
+                Bytes::from(body.to_string()),
+            )
+            .await;
+            assert_eq!(response.status(), status);
+        }
+    }
+
+    #[test]
+    fn odrl_projection_does_not_spend_materializer_facts() {
+        let req = authz_req(format!("{CONTENT}{}", permit_nq(ALICE)), Some(ALICE));
+        let mut store = build_store(&req).unwrap();
+        let mut budget = store.auth_budget();
+        budget.max_input_facts = 0;
+        let mut ledger = AuthLedger::new(budget);
+        apply_odrl_lane_in(&mut store, &req, Mode::Read, &mut ledger).unwrap();
+        assert_eq!(ledger.spent(sparq_core::meter::Dim::Facts), 0);
+        assert!(reads_n1(&store, ALICE));
+    }
+
+    #[test]
+    fn odrl_policy_extraction_uses_the_requests_remaining_bytes() {
+        use sparq_core::meter::Dim;
+        let constraints = concat!(
+            "_:perm <http://www.w3.org/ns/odrl/2/constraint> _:c .\n",
+            "_:c <http://www.w3.org/ns/odrl/2/leftOperand> <http://www.w3.org/ns/odrl/2/purpose> .\n",
+            "_:c <http://www.w3.org/ns/odrl/2/operator> <http://www.w3.org/ns/odrl/2/eq> .\n",
+            "_:c <http://www.w3.org/ns/odrl/2/rightOperand> \"research\" .\n",
+        );
+        let req = authz_req(
+            format!("{CONTENT}{}{constraints}", permit_nq(ALICE)),
+            Some(ALICE),
+        );
+        let mut store = build_store(&req).unwrap();
+        let budget = store.auth_budget();
+        let mut ledger = AuthLedger::new(budget);
+        ledger.with_policy_bytes(|core| {
+            core.charge(Dim::Bytes, core.remaining(Dim::Bytes) - 1)
+                .unwrap();
+        });
+        let response = apply_odrl_lane_in(&mut store, &req, Mode::Read, &mut ledger).unwrap_err();
+        ledger.with_policy_bytes(|core| assert!(core.remaining(Dim::Bytes) <= 1));
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[test]
+    fn odrl_evaluations_have_their_own_phase_allowance() {
+        let req = authz_req(format!("{CONTENT}{}", permit_nq(ALICE)), Some(ALICE));
+        let mut store = build_store(&req).unwrap();
+        let mut budget = store.auth_budget();
+        budget.max_decision_join_rows = 0;
+        let mut ledger = AuthLedger::new(budget);
+        apply_odrl_lane_in(&mut store, &req, Mode::Read, &mut ledger).unwrap();
+        assert!(reads_n1(&store, ALICE));
+        assert_eq!(ledger.spent(sparq_core::meter::Dim::JoinRows), 0);
     }
 
     #[test]
@@ -5515,12 +5897,17 @@ mod build_pool_tests {
     }
 }
 #[cfg(all(test, feature = "solid-authz-trust"))]
-mod trust_limit_tests {
+pub(crate) mod trust_limit_tests {
     use super::*;
     use crate::http::{AppState, ServerConfig};
     use std::sync::atomic::Ordering;
 
-    fn body(rules: usize, credentials: usize, triples: usize, certs: usize) -> serde_json::Value {
+    pub(crate) fn body(
+        rules: usize,
+        credentials: usize,
+        triples: usize,
+        certs: usize,
+    ) -> serde_json::Value {
         use oxrdf::{Literal, NamedNode, Triple};
         use sparq_zk::{
             commit::commit_triples,
@@ -5580,14 +5967,14 @@ mod trust_limit_tests {
         })
     }
 
-    async fn run(
+    pub(crate) async fn run(
         config: ServerConfig,
         body: serde_json::Value,
     ) -> (StatusCode, serde_json::Value, usize) {
         let bytes = body.to_string();
         assert!(
-            bytes.len() <= 1 << 20,
-            "boundary fixture fits the default body limit"
+            bytes.len() <= config.max_body_bytes,
+            "boundary fixture fits the configured body limit"
         );
         let state = AppState::with_config(
             sparq_core::Graph::default(),
@@ -5616,9 +6003,10 @@ mod trust_limit_tests {
     #[tokio::test]
     async fn default_pair_cap_accepts_boundary_and_refuses_one_more_before_verification() {
         let defaults = ServerConfig::default();
-        assert_eq!(defaults.solid_authz_trust_max_pairs, 4096);
+        assert_eq!(defaults.solid_authz_trust_max_pairs, 16384);
+        assert_eq!(defaults.solid_authz_trust_max_pair_checks, 4096);
         let (status, deny, calls) = run(defaults.clone(), body(17, 241, 1, 0)).await;
-        assert_eq!(17 * 241, defaults.solid_authz_trust_max_pairs + 1);
+        assert_eq!(17 * 241, defaults.solid_authz_trust_max_pair_checks + 1);
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert_eq!(deny["trustDenied"], true);
         assert_eq!(deny["allow"], false);
@@ -5637,7 +6025,10 @@ mod trust_limit_tests {
     async fn combined_verify_cap_counts_certifications_before_verification() {
         let config = ServerConfig::default();
         let certs = config.solid_authz_trust_max_certifications;
-        assert_eq!(certs + (1 + certs), config.solid_authz_trust_max_pairs + 1);
+        assert_eq!(
+            certs + (1 + certs),
+            config.solid_authz_trust_max_pair_checks + 1
+        );
         let (status, deny, calls) = run(config, body(1, 1, 1, certs)).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert_eq!(deny["trustDenied"], true);
@@ -5645,22 +6036,29 @@ mod trust_limit_tests {
         assert_eq!(calls, 0, "the combined cap must precede derivation and admission");
 
         let config = ServerConfig::default();
-        assert_eq!((certs - 1) + (2 + certs - 1), config.solid_authz_trust_max_pairs);
-        let (status, allow, calls) = run(config, body(2, 1, 1, certs - 1)).await;
+        let certs = 2047;
+        assert_eq!(
+            certs + (2 + certs),
+            config.solid_authz_trust_max_pair_checks
+        );
+        let (status, allow, calls) = run(config, body(2, 1, 1, certs)).await;
         assert_eq!(status, StatusCode::OK, "{allow}");
         assert_eq!(allow["allow"], true);
         assert!(calls > 0);
 
         // Both independent caps fit; adding the certification verifies reaches the boundary.
         let config = ServerConfig {
-            solid_authz_trust_max_pairs: 5,
+            solid_authz_trust_max_pairs: 11,
             ..Default::default()
         };
         let (status, allow, calls) = run(config.clone(), body(1, 1, 1, 2)).await;
         assert_eq!(status, StatusCode::OK, "{allow}");
         assert_eq!(allow["allow"], true);
         assert!(calls > 0);
-        let config = ServerConfig { solid_authz_trust_max_pairs: 4, ..config };
+        let config = ServerConfig {
+            solid_authz_trust_max_pairs: 10,
+            ..config
+        };
         let (status, deny, calls) = run(config, body(1, 1, 1, 2)).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert_eq!(deny["trustDenied"], true);
@@ -5673,18 +6071,21 @@ mod trust_limit_tests {
             solid_authz_trust_max_pairs: 0,
             ..Default::default()
         };
-        let (status, allow, _) = run(config.clone(), body(1, 0, 1, 0)).await;
+        let (status, allow, _) = run(config.clone(), body(0, 0, 1, 0)).await;
         assert_eq!(status, StatusCode::OK, "{allow}");
         assert_eq!(allow["allow"], true);
 
-        let (status, deny, calls) = run(config.clone(), body(1, 0, 1, 1)).await;
+        let (status, deny, calls) = run(config.clone(), body(0, 0, 1, 1)).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert_eq!(deny["trustDenied"], true);
         assert_eq!(deny["allow"], false);
         assert_eq!(calls, 0, "certification-only work must fit the shared budget");
 
-        let config = ServerConfig { solid_authz_trust_max_pairs: 1, ..config };
-        let (status, allow, calls) = run(config, body(1, 0, 1, 1)).await;
+        let config = ServerConfig {
+            solid_authz_trust_max_pairs: 3,
+            ..config
+        };
+        let (status, allow, calls) = run(config, body(0, 0, 1, 1)).await;
         assert_eq!(status, StatusCode::OK, "{allow}");
         assert_eq!(allow["allow"], true);
         assert!(calls > 0);
@@ -5694,6 +6095,10 @@ mod trust_limit_tests {
     async fn certification_cap_prices_potential_derived_rules_before_verification() {
         let config = ServerConfig::default();
         let cap = config.solid_authz_trust_max_certifications;
+        let config = ServerConfig {
+            solid_authz_trust_max_pairs: usize::MAX,
+            ..config
+        };
         assert_eq!(cap, 2048);
         let (status, deny, calls) = run(config.clone(), body(1, 0, 1, cap + 1)).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
@@ -5711,6 +6116,56 @@ mod trust_limit_tests {
             status,
             StatusCode::FORBIDDEN,
             "one direct plus two potential derived rules"
+        );
+        assert_eq!(calls, 0);
+    }
+
+    #[tokio::test]
+    async fn verify_budget_precedes_key_decode_and_credential_commit() {
+        let config = ServerConfig {
+            solid_authz_trust_max_pairs: 0,
+            ..Default::default()
+        };
+        let mut request = body(1, 0, 1, 0);
+        request["trust"]["rules"][0]["issuerKeyHex"] = serde_json::json!("invalid");
+        let (status, deny, calls) = run(config.clone(), request).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(deny["trustDenyReason"], "trust verify budget exceeded");
+        assert_eq!(calls, 0);
+        let (status, deny, calls) = run(config, body(0, 1, 1, 0)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(deny["trustDenyReason"], "trust verify budget exceeded");
+        assert_eq!(
+            calls, 0,
+            "no admission/canonicalization may start without a debit"
+        );
+    }
+
+    #[tokio::test]
+    async fn credential_field_validation_retains_rule_error_precedence() {
+        let mut malformed_rule = body(1, 0, 1, 0);
+        malformed_rule["trust"]
+            .as_object_mut()
+            .unwrap()
+            .remove("credentials");
+        malformed_rule["trust"]["rules"][0]["issuerKeyHex"] = serde_json::json!("invalid");
+        let (status, deny, calls) = run(ServerConfig::default(), malformed_rule).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(
+            deny["trustDenyReason"],
+            "trust rule 'issuerKeyHex' is not a valid public key"
+        );
+        assert_eq!(calls, 0);
+        let mut missing = body(1, 0, 1, 0);
+        missing["trust"]
+            .as_object_mut()
+            .unwrap()
+            .remove("credentials");
+        let (status, deny, calls) = run(ServerConfig::default(), missing).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(
+            deny["trustDenyReason"],
+            "trust block missing 'credentials' array"
         );
         assert_eq!(calls, 0);
     }
@@ -5739,3 +6194,134 @@ mod trust_limit_tests {
         assert!(calls > 0);
     }
 }
+
+#[cfg(test)]
+std::thread_local! {
+    static BODY_VIEWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+mod request_ledger_tests {
+    use super::*;
+    use sparq_core::meter::Dim;
+
+    #[test]
+    fn parse_refusals_precede_view_builds() {
+        for (source, source_limit, exhaust_facts) in [
+            ("invalid N-Quads", 1, false),
+            ("<urn:s> <urn:p> <urn:o> .\ninvalid", 1024, true),
+        ] {
+            let mut ledger =
+                AuthLedger::with_source_limit(sparq_solid::default_auth_budget(), source_limit);
+            if exhaust_facts {
+                ledger.with_dataset_bytes(|core| core.charge(Dim::Facts, source_limit).unwrap());
+            }
+            BODY_VIEWS.with(|count| count.set(0));
+            let response = build_store_from_in(source, None, &mut ledger)
+                .err()
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+            BODY_VIEWS.with(|count| assert_eq!(count.get(), 0));
+        }
+    }
+
+    #[test]
+    fn materializer_fact_cap_only_counts_assembled_input() {
+        let dataset = "<https://pod.ex/n1> <urn:p> <urn:o> <https://pod.ex/n1> .";
+        let mut budget = sparq_solid::default_auth_budget();
+        budget.max_input_facts = 1;
+        for view in [AuthView::Wac, AuthView::Acp] {
+            let mut ledger = AuthLedger::new(budget);
+            let response = build_store_from_in(dataset, Some(view), &mut ledger)
+                .err()
+                .unwrap();
+            assert!(ledger.spent(Dim::Facts) <= 1);
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        }
+    }
+
+    #[tokio::test]
+    async fn raised_transport_limit_raises_dataset_source_allowance() {
+        let mut data = String::from("<https://pod.ex/n1> <urn:p> <urn:o> <https://pod.ex/n1> .\n");
+        data.push_str(&"<a:s> <a:> <a:>.\n".repeat(70000));
+        assert!(data.len() > 1 << 20);
+        data.push_str(concat!(
+            "<https://pod.ex/.acl#r> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <https://pod.ex/.acl> .\n",
+            "<https://pod.ex/.acl#r> <http://www.w3.org/ns/auth/acl#default> <https://pod.ex/> <https://pod.ex/.acl> .\n",
+            "<https://pod.ex/.acl#r> <http://www.w3.org/ns/auth/acl#agent> <https://alice.ex/card#me> <https://pod.ex/.acl> .\n",
+            "<https://pod.ex/.acl#r> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> <https://pod.ex/.acl> .\n"));
+        let body = serde_json::json!({"dataset":data,"resource":"https://pod.ex/n1","mode":"read","session":{"agent":"https://alice.ex/card#me"}});
+        let config = crate::http::ServerConfig {
+            solid_authz: true,
+            max_body_bytes: 2 << 20,
+            ..Default::default()
+        };
+        assert!(body.to_string().len() < config.max_body_bytes);
+        let response = decide_endpoint(
+            State(AppState::with_config(sparq_core::Graph::default(), config)),
+            HeaderMap::new(),
+            Bytes::from(body.to_string()),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[cfg(feature = "solid-authz-trust")]
+    #[test]
+    fn admitted_text_checks_remaining_allowance_before_retaining_fragments() {
+        use std::fmt::Write;
+        let mut limits = sparq_core::meter::Limits::default();
+        limits.generated_bytes = 3;
+        let mut ledger = sparq_core::meter::Ledger::new(limits);
+        let mut text = MeteredAdmittedText {
+            core: &mut ledger,
+            text: String::new(),
+            error: None,
+        };
+        text.write_str("ok").unwrap();
+        assert!(text.write_str("oversized").is_err());
+        assert_eq!(text.text, "ok");
+        assert_eq!(text.core.spent(Dim::GeneratedBytes), 2);
+        assert!(text.write_str("x").is_err());
+        assert_eq!(text.text, "ok");
+    }
+
+    #[cfg(feature = "solid-authz-trust")]
+    #[test]
+    fn trust_source_limit_precedes_generated_fact_text() {
+        use oxrdf::{NamedNode, Triple};
+        let req=parse_request(&Bytes::from(serde_json::json!({"dataset":"<https://pod.ex/n1> <urn:p> <urn:o> <https://pod.ex/n1> .\n","session":{"agent":"https://alice.ex/card#me"}}).to_string())).unwrap();
+        let fact = sparq_trust::AdmittedFact {
+            triple: Triple::new(
+                NamedNode::new("https://pod.ex/group#t").unwrap(),
+                NamedNode::new("urn:p").unwrap(),
+                NamedNode::new("urn:o").unwrap(),
+            ),
+            issuer: NamedNode::new("urn:issuer").unwrap(),
+        };
+        let store = build_store_with_admitted_limit(&req, &[fact], req.dataset.len());
+        assert!(
+            store.is_ok(),
+            "generated text does not spend external source allowance"
+        );
+        let refusal = build_store_with_admitted_limit(&req, &[], req.dataset.len() - 1)
+            .err()
+            .unwrap();
+        assert_eq!(refusal.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[test]
+    fn request_name_refusals_have_their_own_lane() {
+        let store = PodStore::new(sparq_core::Graph::default());
+        let error = validate_request_resource(&store, &"x".repeat(1 << 20)).unwrap_err();
+        assert_eq!(error, ServerViewError::RequestName);
+        assert_eq!(
+            server_view_error_response(error).status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+    }
+}
+
+#[cfg(test)]
+#[path = "../tests/support/auth_ledger_equivalence.rs"]
+mod auth_ledger_equivalence;
