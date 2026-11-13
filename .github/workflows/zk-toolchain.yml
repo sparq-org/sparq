@@ -63,6 +63,8 @@ on:
     paths:
       - "crates/sparq-zk/**"
       - "crates/sparq-zk-compose/**"
+      - "crates/sparq-zk-query/**"
+      - "zk/noir-query/**"
       # sq-5reoy: narrowed from zk/** to zk/compose/** — the zk/ieee754 and
       # zk/xpath trees were externalized to the sparq-org/noir_IEEE754 and
       # sparq-org/noir_XPath face repos (#1599), whose own CI covers their nargo tests
@@ -89,6 +91,8 @@ on:
     paths:
       - "crates/sparq-zk/**"
       - "crates/sparq-zk-compose/**"
+      - "crates/sparq-zk-query/**"
+      - "zk/noir-query/**"
       # sq-5reoy: narrowed from zk/** to zk/compose/** (see the pull_request
       # paths note above — the ieee754/xpath trees moved to their face repos, #1599).
       - "zk/compose/**"
@@ -687,7 +691,7 @@ jobs:
       # the end of the job is what proves these tests ran.
       - name: Run the default-run live ZK tests (real nargo/bb)
         run: |
-          cargo test -p sparq-zk-compose -p sparq-zk -- --test-threads=1
+          cargo test -p sparq-zk-compose -p sparq-zk -p sparq-zk-query -- --test-threads=1
 
       # Rebuild the immutable foundation separately from the PR candidate.
       # This independently checks the provenance of all four legacy key goldens.

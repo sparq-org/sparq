@@ -1,0 +1,9 @@
+[package]
+name = "sparq_noir_query_core"
+type = "lib"
+authors = ["sparq"]
+# nargo beta.21 rejects prerelease compiler_version requirements; live tests enforce the pin.
+
+[dependencies]
+sparq_ieee754 = { git = "https://github.com/sparq-org/noir_IEEE754", tag = "v0.11.0" }
+sparq_xpath = { git = "https://github.com/sparq-org/noir_XPath", tag = "v0.3.0", directory = "xpath" }

@@ -6175,6 +6175,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "sparq-zk-query"
+version = "0.1.8"
+dependencies = [
+ "num-bigint 0.4.6",
+ "num-traits",
+ "oxrdf 0.3.3",
+ "serde_json",
+ "sparq-core",
+ "sparq-engine",
+ "sparq-spargebra",
+]
+
+[[package]]
 name = "spin"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

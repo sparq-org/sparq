@@ -305,6 +305,8 @@ SCAN_DIRS: list[tuple[str, str]] = [
     ("sparq-zk", "crates/sparq-zk/tests/support"),
     ("sparq-zk-compose", "crates/sparq-zk-compose/tests"),
     ("sparq-zk-compose", "crates/sparq-zk-compose/tests/support"),
+    ("sparq-zk-query", "crates/sparq-zk-query/tests"),
+    ("sparq-zk-query", "crates/sparq-zk-query/tests/support"),
 ]
 # `src` trees: live tests also live in the crates' own `#[cfg(test)]` code, which the
 # lib test target runs. Only the test-only REGIONS of these files are linted and
@@ -312,6 +314,7 @@ SCAN_DIRS: list[tuple[str, str]] = [
 SRC_DIRS: list[tuple[str, str]] = [
     ("sparq-zk", "crates/sparq-zk/src"),
     ("sparq-zk-compose", "crates/sparq-zk-compose/src"),
+    ("sparq-zk-query", "crates/sparq-zk-query/src"),
 ]
 # The ONE permitted way for a crate's `src` tests to reach the gate: the SAME FILE,
 # compiled in with `#[path]`. A second copy could drift; this cannot.
@@ -321,14 +324,17 @@ SRC_GATE_DECL = (
 LIB_ROOTS: dict[str, str] = {
     "sparq-zk": "crates/sparq-zk/src/lib.rs",
     "sparq-zk-compose": "crates/sparq-zk-compose/src/lib.rs",
+    "sparq-zk-query": "crates/sparq-zk-query/src/lib.rs",
 }
 HELPER_MODULES: list[str] = [
     "crates/sparq-zk/tests/support/mod.rs",
     "crates/sparq-zk-compose/tests/support/mod.rs",
+    "crates/sparq-zk-query/tests/support/mod.rs",
 ]
 CARGO_TOMLS: dict[str, str] = {
     "sparq-zk": "crates/sparq-zk/Cargo.toml",
     "sparq-zk-compose": "crates/sparq-zk-compose/Cargo.toml",
+    "sparq-zk-query": "crates/sparq-zk-query/Cargo.toml",
 }
 
 LIVE_TOOLS = ("nargo", "bb")
@@ -346,6 +352,7 @@ LAUNCHERS = ("env", "xargs", "nice", "nohup", "timeout", "stdbuf", "time", "sets
 DECLARED_REL: dict[str, str] = {
     "sparq-zk": "crates/sparq-zk/tests/live-tests.txt",
     "sparq-zk-compose": "crates/sparq-zk-compose/tests/live-tests.txt",
+    "sparq-zk-query": "crates/sparq-zk-query/tests/live-tests.txt",
 }
 DECLARED_KINDS = ("live", "structural")
 
@@ -2150,7 +2157,7 @@ jobs:
           if [ -n "${__OPTOUT__:-}" ]; then exit 1; fi
       - name: Run the default-run live ZK tests (real nargo/bb)
         run: |
-          cargo test -p sparq-zk-compose -p sparq-zk -- --test-threads=1
+          cargo test -p sparq-zk-compose -p sparq-zk -p sparq-zk-query -- --test-threads=1
       - name: __VERIFY__
         run: __VERIFYCMD__
 """
@@ -2547,6 +2554,7 @@ EVASION_RULES: dict[str, str] = {
 # back from the inventory, so a change to either side has to be noticed.
 _FIXTURE_KEYS = [
     "crates/sparq-zk-compose/src/thing.rs:11",
+    "crates/sparq-zk-query/src/thing.rs:11",
     "crates/sparq-zk-compose/tests/live.rs:5",
     "crates/sparq-zk/src/thing.rs:11",
     "crates/sparq-zk/tests/plain.rs:5",
@@ -2554,6 +2562,7 @@ _FIXTURE_KEYS = [
 
 
 _DECLARED = {
+    "sparq-zk-query": "live src/thing.rs::src_live_case\n",
     "sparq-zk": "live tests/plain.rs::plain_case\nlive src/thing.rs::src_live_case\n",
     "sparq-zk-compose": (
         "# the clean fixture's live and structural tests\n"

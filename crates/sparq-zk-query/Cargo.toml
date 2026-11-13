@@ -1,0 +1,19 @@
+[package]
+name = "sparq-zk-query"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Research-grade typed expression lowering for the Noir query method"
+
+[dependencies]
+oxrdf.workspace = true
+spargebra.workspace = true
+
+[dev-dependencies]
+sparq-core = { path = "../sparq-core" }
+sparq-engine = { path = "../sparq-engine" }
+serde_json = "1"
+num-bigint = "0.4"
+num-traits = "0.2"

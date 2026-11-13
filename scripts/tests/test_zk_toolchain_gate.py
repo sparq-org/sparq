@@ -31,7 +31,7 @@ exercised through the CLI, so this maps them to their covering test):
                           .test_dropping_the_shared_gate_declaration_is_red
   * `exempt`           -> AcquisitionLint
                           .test_an_annotation_does_not_reach_past_its_own_line
-  * `check_helpers`    -> GateSource.test_the_two_copies_of_the_gate_are_byte_identical
+  * `check_helpers`    -> GateSource.test_all_gate_sources_are_byte_identical
                           plus the helper-drift fixture in `--self-test`
   * `check_ratchet`    -> AcquisitionLint
                           .test_an_annotation_outside_the_recorded_ratchet_is_an_error
@@ -92,24 +92,28 @@ POSEIDON = "crates/sparq-zk/tests/poseidon2_noir_cross.rs"
 HELPERS = (
     "crates/sparq-zk/tests/support/mod.rs",
     "crates/sparq-zk-compose/tests/support/mod.rs",
+    "crates/sparq-zk-query/tests/support/mod.rs",
 )
 COPIED = (
     "crates/sparq-zk/tests",
     "crates/sparq-zk/Cargo.toml",
     "crates/sparq-zk-compose/tests",
     "crates/sparq-zk-compose/Cargo.toml",
+    "crates/sparq-zk-query/tests",
+    "crates/sparq-zk-query/Cargo.toml",
 )
 # The `src` trees are 2.6 MB of Rust and the checker reads every line of them, so a
 # test that is about `tests/` copies only each crate root (enough for the src scan
 # dirs to exist and for CHECK F to read its declaration) and passes full_src=True
 # only where a src region is the subject.
-SRC_TREES = ("crates/sparq-zk/src", "crates/sparq-zk-compose/src")
-LIB_ROOTS = ("crates/sparq-zk/src/lib.rs", "crates/sparq-zk-compose/src/lib.rs")
+SRC_TREES = ("crates/sparq-zk/src", "crates/sparq-zk-compose/src", "crates/sparq-zk-query/src")
+LIB_ROOTS = ("crates/sparq-zk/src/lib.rs", "crates/sparq-zk-compose/src/lib.rs", "crates/sparq-zk-query/src/lib.rs")
 # Gate call sites in `src` test regions, which the lib test target runs.
 SRC_GATED = (
     "crates/sparq-zk-compose/src/driver.rs",
     "crates/sparq-zk-compose/src/result.rs",
     "crates/sparq-zk-compose/src/result/signed.rs",
+    "crates/sparq-zk-query/src/lower/expr_tests.rs",
 )
 COMPOSE_LIB = "crates/sparq-zk-compose/src/lib.rs"
 
@@ -659,13 +663,10 @@ class GateSource(unittest.TestCase):
     def setUp(self):
         self.text = (REPO / HELPERS[0]).read_text(encoding="utf-8")
 
-    def test_the_two_copies_of_the_gate_are_byte_identical(self):
-        self.assertEqual(
-            (REPO / HELPERS[0]).read_bytes(),
-            (REPO / HELPERS[1]).read_bytes(),
-            "sparq-zk cannot depend on sparq-zk-compose's test tree, so the gate is "
-            "duplicated; the copies must not drift",
-        )
+    def test_all_gate_sources_are_byte_identical(self):
+        expected = (REPO / HELPERS[0]).read_bytes()
+        for helper in HELPERS[1:]:
+            self.assertEqual(expected, (REPO / helper).read_bytes(), helper)
 
     def test_the_gate_mints_a_token_that_live_tool_requires(self):
         self.assertIn("pub struct LiveToolchain", self.text)
@@ -1043,7 +1044,7 @@ class LaneWiring(unittest.TestCase):
         rest = self.text[start + len("- name: Run the default-run live ZK tests (real nargo/bb)") :]
         block = rest.split("- name:", 1)[0]
         self.assertNotIn("if:", block)
-        self.assertIn("cargo test -p sparq-zk-compose -p sparq-zk -- --test-threads=1",
+        self.assertIn("cargo test -p sparq-zk-compose -p sparq-zk -p sparq-zk-query -- --test-threads=1",
                       block)
 
     def test_pyyaml_is_installed_with_python3_dash_m_pip(self):
