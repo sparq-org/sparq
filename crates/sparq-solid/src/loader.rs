@@ -1167,25 +1167,38 @@ fn group_doc_of(group_iri: &str) -> &str {
     group_iri.split('#').next().unwrap_or(group_iri)
 }
 
+#[cfg(test)]
+std::thread_local! {static INPUT_GROUP_SCANS:std::cell::Cell<usize>=const {std::cell::Cell::new(0)};}
+
 /// Group documents named by accepted WAC controls. Unlike update invalidation,
 /// ingestion follows only the documents the WAC input assembler actually reads.
 pub(crate) fn accepted_group_docs(graph: &Graph) -> FxHashSet<String> {
+    #[cfg(test)]
+    INPUT_GROUP_SCANS.with(|count| count.set(count.get() + 1));
+    let controls: Vec<_> = graph
+        .named()
+        .iter()
+        .filter_map(|(name, sub)| {
+            let iri = graph_iri(name)?;
+            (!iri.starts_with(RESERVED_PREFIX)
+                && !iri.starts_with(SKOLEM_PREFIX)
+                && iri.ends_with(ACL_SUFFIX)
+                && !is_authority_less(control_target(iri)))
+            .then(|| (iri, graph_triples(sub)))
+        })
+        .collect();
+    let view = document_view_metered(&controls, System::Wac, None)
+        .expect("document analysis without an allowance cannot refuse");
     let mut docs = FxHashSet::default();
-    for (name, sub) in graph.named() {
-        let Some(iri) = graph_iri(name) else { continue };
-        if iri.starts_with(RESERVED_PREFIX) || !iri.ends_with(ACL_SUFFIX) {
-            continue;
-        }
-        let triples = graph_triples(sub);
-        if triples.iter().any(|triple| !admits(triple, iri)) {
+    for (iri, triples) in &controls {
+        if view.rejected.contains(iri) {
             continue;
         }
         for triple in triples {
             if let (Term::NamedNode(p), Term::NamedNode(o)) = (&triple[1], &triple[2]) {
-                if p.as_str() == ACL_AGENT_GROUP
-                    && !group_doc_of(o.as_str()).starts_with(RESERVED_PREFIX)
-                {
-                    docs.insert(group_doc_of(o.as_str()).to_owned());
+                let doc = group_doc_of(o.as_str());
+                if p.as_str() == ACL_AGENT_GROUP && !doc.starts_with(RESERVED_PREFIX) {
+                    docs.insert(doc.to_owned());
                 }
             }
         }
@@ -2754,6 +2767,48 @@ mod tests {
 #[cfg(test)]
 mod accepted_group_tests {
     use super::*;
+    #[test]
+    fn accepted_group_selection_is_cached_and_invalidated_with_the_view() {
+        let source="<https://pod.ex/.acl#r> <http://www.w3.org/ns/auth/acl#agentGroup> <https://pod.ex/first#t> <https://pod.ex/.acl> .\n";
+        let mut store = crate::PodStore::new(Graph::load_dataset(source, "nquads").unwrap());
+        store.materialize_wac().unwrap();
+        INPUT_GROUP_SCANS.with(|count| count.set(0));
+        assert!(store.input_group_docs().contains("https://pod.ex/first"));
+        assert!(store.input_group_docs().contains("https://pod.ex/first"));
+        INPUT_GROUP_SCANS.with(|count| assert_eq!(count.get(), 1));
+        let replacement=Graph::load_str("<https://pod.ex/.acl#r> <http://www.w3.org/ns/auth/acl#agentGroup> <https://pod.ex/second#t> .","ntriples").unwrap();
+        store
+            .graph_unchecked_mut()
+            .set_named(
+                Term::NamedNode(oxrdf::NamedNode::new("https://pod.ex/.acl").unwrap()),
+                replacement,
+            )
+            .unwrap();
+        store.materialize_wac().unwrap();
+        assert!(!store.input_group_docs().contains("https://pod.ex/first"));
+        assert!(store.input_group_docs().contains("https://pod.ex/second"));
+        INPUT_GROUP_SCANS.with(|count| assert_eq!(count.get(), 2));
+    }
+
+    #[test]
+    fn dependency_rejections_follow_the_selected_model() {
+        let source=concat!(
+            "<https://pod.ex/a.acl#r> <http://www.w3.org/ns/solid/acp#apply> <https://pod.ex/b.acl#p> <https://pod.ex/a.acl> .\n",
+            "<https://pod.ex/a.acl#r> <http://www.w3.org/ns/auth/acl#agentGroup> <https://pod.ex/group#t> <https://pod.ex/a.acl> .\n",
+            "<https://outside.ex/s> <urn:p> <urn:o> <https://pod.ex/b.acl> .\n");
+        let graph = Graph::load_dataset(source, "nquads").unwrap();
+        let controls = graph
+            .named()
+            .iter()
+            .map(|(name, part)| (graph_iri(name).unwrap(), graph_triples(part)))
+            .collect::<Vec<_>>();
+        let acp = document_view_metered(&controls, System::Acp, None).unwrap();
+        assert!(acp.rejected.contains("https://pod.ex/a.acl"));
+        let wac = document_view_metered(&controls, System::Wac, None).unwrap();
+        assert!(!wac.rejected.contains("https://pod.ex/a.acl"));
+        assert!(accepted_group_docs(&graph).contains("https://pod.ex/group"));
+    }
+
     #[test]
     fn input_groups_only_follow_accepted_wac_controls() {
         let mut graph = Graph::load_dataset(concat!(

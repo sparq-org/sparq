@@ -2428,6 +2428,39 @@ fn build_store_with_admitted(
 }
 
 #[cfg(feature = "solid-authz-trust")]
+struct MeteredAdmittedText<'a> {
+    core: &'a mut sparq_core::meter::Ledger,
+    text: String,
+    error: Option<sparq_core::meter::Exceeded>,
+}
+
+#[cfg(feature = "solid-authz-trust")]
+impl std::fmt::Write for MeteredAdmittedText<'_> {
+    fn write_str(&mut self, text: &str) -> std::fmt::Result {
+        if self.error.is_some() {
+            return Err(std::fmt::Error);
+        }
+        if let Err(error) = self
+            .core
+            .charge(sparq_core::meter::Dim::GeneratedBytes, text.len())
+        {
+            self.error = Some(error);
+            return Err(std::fmt::Error);
+        }
+        if self.text.try_reserve(text.len()).is_err() {
+            self.error = Some(sparq_core::meter::Exceeded::new(
+                sparq_core::meter::Dim::Alloc,
+                usize::MAX,
+                text.len(),
+            ));
+            return Err(std::fmt::Error);
+        }
+        self.text.push_str(text);
+        Ok(())
+    }
+}
+
+#[cfg(feature = "solid-authz-trust")]
 #[allow(clippy::result_large_err)]
 fn build_store_with_admitted_limit(
     req: &AuthzRequest,
@@ -2444,36 +2477,43 @@ fn build_store_with_admitted_limit(
         .map_err(|error| {
             body_budget_response(materialize_refusal_kind(&ledger.input_refusal(error)))
         })?;
-    let mut augmented = req.dataset.clone();
-    for fact in admitted {
-        // Named-graph position: the document of the fact's subject (a group IRI's group
-        // document, which may itself be an `.acl`), the only document whose statements about
-        // that node the loader keeps. The loader applies the same confinement to it as to the
-        // rest of that document.
-        if let oxrdf::NamedOrBlankNode::NamedNode(group) = &fact.triple.subject {
-            let doc = group.as_str().split('#').next().unwrap_or(group.as_str());
-            let _ = writeln!(
-                &mut augmented,
-                "{} {} {} <{}> .",
-                fact.triple.subject,
-                fact.triple.predicate,
-                fact.triple.object,
-                doc,
-            );
-        }
-        // Default-graph position: reachable via SPARQL query on the full dataset.
-        let _ = writeln!(
-            &mut augmented,
-            "{} {} {} .",
-            fact.triple.subject,
-            fact.triple.predicate,
-            fact.triple.object,
-        );
-    }
-    let generated_len = augmented.len().saturating_sub(req.dataset.len());
     let graph = ledger
         .with_dataset_bytes(|core| {
-            core.charge(sparq_core::meter::Dim::GeneratedBytes, generated_len)?;
+            let mut augmented = MeteredAdmittedText {
+                core,
+                text: req.dataset.clone(),
+                error: None,
+            };
+            for fact in admitted {
+                // Named-graph position: the document of the fact's subject (a group IRI's group
+                // document, which may itself be an `.acl`), the only document whose statements about
+                // that node the loader keeps. The loader applies the same confinement to it as to the
+                // rest of that document.
+                if let oxrdf::NamedOrBlankNode::NamedNode(group) = &fact.triple.subject {
+                    let doc = group.as_str().split('#').next().unwrap_or(group.as_str());
+                    let _ = writeln!(
+                        &mut augmented,
+                        "{} {} {} <{}> .",
+                        fact.triple.subject, fact.triple.predicate, fact.triple.object, doc,
+                    );
+                    if augmented.error.is_some() {
+                        break;
+                    }
+                }
+                // Default-graph position: reachable via SPARQL query on the full dataset.
+                let _ = writeln!(
+                    &mut augmented,
+                    "{} {} {} .",
+                    fact.triple.subject, fact.triple.predicate, fact.triple.object,
+                );
+                if augmented.error.is_some() {
+                    break;
+                }
+            }
+            if let Some(error) = augmented.error {
+                return Err(sparq_core::meter::LoadError::Ledger(error));
+            }
+            let augmented = augmented.text;
             sparq_core::Graph::load_metered_precharged(&augmented, "nquads", core)
         })
         .map_err(|error| match error {
@@ -5857,12 +5897,17 @@ mod build_pool_tests {
     }
 }
 #[cfg(all(test, feature = "solid-authz-trust"))]
-mod trust_limit_tests {
+pub(crate) mod trust_limit_tests {
     use super::*;
     use crate::http::{AppState, ServerConfig};
     use std::sync::atomic::Ordering;
 
-    fn body(rules: usize, credentials: usize, triples: usize, certs: usize) -> serde_json::Value {
+    pub(crate) fn body(
+        rules: usize,
+        credentials: usize,
+        triples: usize,
+        certs: usize,
+    ) -> serde_json::Value {
         use oxrdf::{Literal, NamedNode, Triple};
         use sparq_zk::{
             commit::commit_triples,
@@ -5922,7 +5967,7 @@ mod trust_limit_tests {
         })
     }
 
-    async fn run(
+    pub(crate) async fn run(
         config: ServerConfig,
         body: serde_json::Value,
     ) -> (StatusCode, serde_json::Value, usize) {
@@ -6219,6 +6264,26 @@ mod request_ledger_tests {
         )
         .await;
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[cfg(feature = "solid-authz-trust")]
+    #[test]
+    fn admitted_text_checks_remaining_allowance_before_retaining_fragments() {
+        use std::fmt::Write;
+        let mut limits = sparq_core::meter::Limits::default();
+        limits.generated_bytes = 3;
+        let mut ledger = sparq_core::meter::Ledger::new(limits);
+        let mut text = MeteredAdmittedText {
+            core: &mut ledger,
+            text: String::new(),
+            error: None,
+        };
+        text.write_str("ok").unwrap();
+        assert!(text.write_str("oversized").is_err());
+        assert_eq!(text.text, "ok");
+        assert_eq!(text.core.spent(Dim::GeneratedBytes), 2);
+        assert!(text.write_str("x").is_err());
+        assert_eq!(text.text, "ok");
     }
 
     #[cfg(feature = "solid-authz-trust")]

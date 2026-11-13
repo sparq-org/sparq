@@ -433,3 +433,7 @@ Solid resource writes meter group documents only when the installed model is WAC
 and an accepted control document references the URL. ACP references and rejected
 controls do not make ordinary content a group input. Refusals name the written
 URL and preserve its previous slot and authorization generation.
+
+The accepted group-input set is cached per authorization generation and invalidated
+with the view. Selection uses the loader's model-specific rejection analysis;
+ACP dependency rejections do not turn WAC group references into ACP inputs.

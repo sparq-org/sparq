@@ -1412,6 +1412,8 @@ impl Graph {
     /// serial dataset-scoped parse does.
     #[cfg(feature = "parallel")]
     fn load_nquads_parallel(bytes: &[u8]) -> Result<Graph, String> {
+        #[cfg(test)]
+        crate::metered::note_parallel_dataset_parse();
         let threads = rayon::current_num_threads().max(1);
         let target = (threads * 4).min(bytes.len() / 4096 + 1).max(1);
         Self::load_nquads_chunked(bytes, target)

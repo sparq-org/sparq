@@ -1130,7 +1130,8 @@ Rules that follow:
 ## Explicitly metered loads
 
 `Graph::load_metered(text, format, &mut meter::Ledger)` preserves named graphs like
-`load_dataset`, using a serial parser. `load_metered_with_base(text, format, base,
+`load_dataset`, using streaming admission for small or tightly limited inputs
+and source-prepaid parallel admission for eligible larger N-Quads. `load_metered_with_base(text, format, base,
 &mut ledger)` resolves document-relative IRIs and folds named graphs like
 `load_str_with_base`. Supported formats and aliases follow those existing loaders.
 The dataset loader closes the per-document window for the aggregate parse; the
@@ -1167,3 +1168,11 @@ For a folded document, `Graph::load_metered_with_base` charges term bytes and
 facts once per distinct stored triple. Repeated source rows still contribute
 source bytes. Dataset ingestion retains its per-source-row accounting in the
 separate dataset account.
+
+For larger bounded N-Quads, `Graph::load_metered` uses the ordinary parallel
+loader after source admission, then charges the parsed rows and retained terms in
+bulk before returning the graph. Smaller inputs keep streaming admission. Tight
+allowances, duplicate source rows and ambiguous line layouts retain the streaming
+path's refusal order and occurrence accounting. The existing store cutoff is
+shared by the path-selection regression. The source limit must be finite when
+using this path for request ingestion.

@@ -276,6 +276,7 @@ pub struct PodStore {
     // can never be more stale than the auth view it guards, and a read-only workload never
     // pays for it.
     group_docs: OnceLock<FxHashSet<String>>,
+    input_group_docs: OnceLock<FxHashSet<String>>,
     // sq-3jtd.6: the cache key ([`SessionKey`]) spans all three session
     // dimensions — agent, client, AND issuer — so two sessions differing only by issuer
     // (e.g. the same WebID vouched for by a trusted vs an untrusted IdP) never collide on
@@ -519,6 +520,7 @@ impl PodStore {
             epoch: 0,
             acl_index: OnceLock::new(), // sq-j8qtt: built lazily on first decide
             group_docs: OnceLock::new(), // #55: built lazily on first update
+            input_group_docs: OnceLock::new(),
             cache: session_cache::SessionCache::new(), // sq-cnuqd: bounded + sharded
             #[cfg(feature = "odrl-bridge")]
             bridge_ledger: odrl_bridge::BridgeLedger::new(),
@@ -1245,16 +1247,19 @@ impl PodStore {
         // `.acl` write that starts (or stops) referencing a group document is reflected on
         // the next update's re-materialization decision.
         self.group_docs.take();
+        self.input_group_docs.take();
     }
 
     /// Group documents read by the installed WAC model, from accepted controls only.
     /// ACP and stores without an installed WAC view return an empty set.
-    pub fn input_group_docs(&self) -> FxHashSet<String> {
-        if self.installed_acp == Some(false) {
-            loader::accepted_group_docs(&self.graph)
-        } else {
-            FxHashSet::default()
-        }
+    pub fn input_group_docs(&self) -> &FxHashSet<String> {
+        self.input_group_docs.get_or_init(|| {
+            if self.installed_acp == Some(false) {
+                loader::accepted_group_docs(&self.graph)
+            } else {
+                FxHashSet::default()
+            }
+        })
     }
 
     /// The graphs the current access-control documents reference via `acl:agentGroup`,

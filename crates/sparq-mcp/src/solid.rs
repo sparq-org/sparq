@@ -2070,7 +2070,10 @@ mod unit {
                 ] {
                     data.push_str(&format!("<{subject}> <http://www.w3.org/ns/solid/acp#{predicate}> <{object}> <https://pod.ex/.acr> .\n"));
                 }
-                data.push_str("<https://pod.ex/.acr#g> <http://www.w3.org/ns/auth/acl#agentGroup> <https://pod.ex/group#team> <https://pod.ex/.acr> .\n");
+                data.push_str(concat!(
+                    "<https://pod.ex/a.acr#r> <http://www.w3.org/ns/solid/acp#apply> <https://pod.ex/b.acr#p> <https://pod.ex/a.acr> .\n",
+                    "<https://pod.ex/a.acr#r> <http://www.w3.org/ns/auth/acl#agentGroup> <https://pod.ex/group#t> <https://pod.ex/a.acr> .\n",
+                    "<https://outside.ex/s> <urn:p> <urn:o> <https://pod.ex/b.acr> .\n"));
             } else {
                 for line in acl.lines() {
                     data.push_str(&format!(

@@ -818,12 +818,17 @@ pub struct ServerConfig {
     /// one canonicalize-and-commit per presented credential, and public-key decodes
     /// (one per direct rule, two per certification). Each depth-one certification also
     /// counts as one potential rule. `SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS` overrides it;
-    /// zero permits none of this work. Excess returns 403 before key decoding or admission.
+    /// With both environment limits explicit, zero permits none of this work.
+    /// A sole environment override retains the legacy signature/pair ceiling and
+    /// derives this combined ceiling by adding `max_body_bytes`. Excess returns
+    /// 403 before key decoding or admission.
     #[cfg(feature = "solid-authz-trust")]
     pub solid_authz_trust_max_pairs: usize,
     /// Original certification-signature plus potential rule/credential pair allowance.
     /// Default: 4096. `SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIR_CHECKS` overrides it.
     /// It is checked alongside the combined decode/commit budget before work begins.
+    /// Setting only this environment variable derives the combined ceiling from
+    /// this value plus `max_body_bytes`; setting both retains both explicit values.
     #[cfg(feature = "solid-authz-trust")]
     pub solid_authz_trust_max_pair_checks: usize,
     /// Maximum certifications parsed from one trust block.
@@ -1372,15 +1377,29 @@ impl ServerConfig {
             cfg.solid_authz_trust = env_truthy(&v);
         }
         #[cfg(feature = "solid-authz-trust")]
+        {
+            let combined = env_parse::<usize>("SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS");
+            let checks = env_parse::<usize>("SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIR_CHECKS");
+            match (combined, checks) {
+                (Some(legacy), None) | (None, Some(legacy)) => {
+                    cfg.solid_authz_trust_max_pair_checks = legacy;
+                    cfg.solid_authz_trust_max_pairs = legacy.saturating_add(cfg.max_body_bytes);
+                }
+                (Some(combined), Some(checks)) => {
+                    cfg.solid_authz_trust_max_pairs = combined;
+                    cfg.solid_authz_trust_max_pair_checks = checks;
+                }
+                (None, None) => {
+                    if cfg.max_body_bytes > Self::default().max_body_bytes {
+                        cfg.solid_authz_trust_max_pairs = cfg
+                            .solid_authz_trust_max_pair_checks
+                            .saturating_add(cfg.max_body_bytes);
+                    }
+                }
+            }
+        }
+        #[cfg(feature = "solid-authz-trust")]
         for (name, limit) in [
-            (
-                "SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS",
-                &mut cfg.solid_authz_trust_max_pairs,
-            ),
-            (
-                "SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIR_CHECKS",
-                &mut cfg.solid_authz_trust_max_pair_checks,
-            ),
             (
                 "SPARQ_SOLID_AUTHZ_TRUST_MAX_CERTIFICATIONS",
                 &mut cfg.solid_authz_trust_max_certifications,
@@ -12658,6 +12677,58 @@ mod from_env_tests {
     }
 
     #[cfg(feature = "solid-authz-trust")]
+    #[tokio::test]
+    async fn trust_single_environment_limit_preserves_raised_and_lowered_boundaries() {
+        use crate::solid_authz::trust_limit_tests::{body, run};
+        for (name, cap, rules, creds) in [
+            ("SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS", 8192, 16, 512),
+            ("SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIR_CHECKS", 8192, 16, 512),
+            ("SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS", 16, 4, 4),
+            ("SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIR_CHECKS", 16, 4, 4),
+            ("SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS", 0, 1, 0),
+        ] {
+            let config = {
+                let _env = env_guard();
+                let names = [
+                    "SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS",
+                    "SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIR_CHECKS",
+                ];
+                let previous = names.map(std::env::var_os);
+                for name in names {
+                    std::env::remove_var(name);
+                }
+                std::env::set_var(name, cap.to_string());
+                let config = ServerConfig::from_env().unwrap();
+                for (name, value) in names.into_iter().zip(previous) {
+                    match value {
+                        Some(value) => std::env::set_var(name, value),
+                        None => std::env::remove_var(name),
+                    }
+                }
+                config
+            };
+            let (status, response, _) = run(config.clone(), body(rules, creds, 1, 0)).await;
+            assert_eq!(status, axum::http::StatusCode::OK, "{name}: {response}");
+            let (status, response, calls) = run(
+                config,
+                body(
+                    if cap == 8192 { 17 } else { 1 },
+                    if cap == 8192 { 482 } else { cap + 1 },
+                    1,
+                    0,
+                ),
+            )
+            .await;
+            assert_eq!(
+                status,
+                axum::http::StatusCode::FORBIDDEN,
+                "{name}: {response}"
+            );
+            assert_eq!(calls, 0);
+        }
+    }
+
+    #[cfg(feature = "solid-authz-trust")]
     #[test]
     fn trust_work_limit_environment_overrides_are_counts() {
         let _env = env_guard();
@@ -12668,7 +12739,7 @@ mod from_env_tests {
             "SPARQ_SOLID_AUTHZ_TRUST_MAX_VALIDATION_WORK",
         ] {
             let limit = |cfg: &ServerConfig| match name {
-                "SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS" => cfg.solid_authz_trust_max_pairs,
+                "SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS" => cfg.solid_authz_trust_max_pair_checks,
                 "SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIR_CHECKS" => cfg.solid_authz_trust_max_pair_checks,
                 "SPARQ_SOLID_AUTHZ_TRUST_MAX_CERTIFICATIONS" => {
                     cfg.solid_authz_trust_max_certifications

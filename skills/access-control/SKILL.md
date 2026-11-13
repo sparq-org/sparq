@@ -1632,7 +1632,9 @@ allowance; provenance pruning has a separate allowance with the same deadline.
 `checkpoint()` checks that deadline. `input_refusal(Exceeded)` returns the usual
 tagged request refusal. `AuthAllowance::PolicyInput` identifies policy budgets.
 `group_docs()` is the conservative set used for update invalidation;
-`input_group_docs()` selects only accepted WAC controls read by the installed view.
+`input_group_docs()` borrows the generation-cached set selected using the loader's
+full WAC rejection analysis. Reindexing invalidates it alongside `group_docs()`.
+ACP views return an empty set because they do not consume WAC group documents.
 
 Dataset terms use the dataset retention ceiling; the materializer keeps its
 control/group term-size cap. Dataset byte retention is bounded by 64 times the transport source cap;

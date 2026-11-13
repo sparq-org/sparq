@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **sparq-server / sparq-mcp:** eligible larger bounded datasets retain the ordinary
+  parallel loader before bulk admission. Accepted group inputs share the
+  loader's rejection analysis and generation cache. Generated trust text is
+  charged before each retained fragment.
+
 - **sparq-server / sparq-mcp:** stateless authorization parsing and Solid group
   writes use the request ledger; MCP message limits apply before JSON parsing.
   Dataset ingestion, assembled authorization input and policy phases retain
@@ -52,6 +57,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The builtin LWS.net ratchet checks exact expected failure names and requires their removal when they pass.
 
 ### Changed
+
+- **sparq-server:** a sole trust-limit environment override retains the legacy
+  signature/pair ceiling and derives its companion verification allowance from
+  the transport limit. Explicit paired overrides remain independent.
 
 - **sparq-server:** combined trust pricing includes public-key decoding and each
   credential's canonicalize-and-commit before admission. Its default allowance

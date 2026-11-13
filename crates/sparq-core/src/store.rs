@@ -507,7 +507,7 @@ const DERIVE_PLAN: &[&[(Perm, Perm)]] = &[&[(Perm::Spo, Perm::Osp)], &[(Perm::Os
 /// adapting its input sweep to compare forced serial and parallel waves at fixed worker
 /// counts. Use interleaved pairs and an identical-arm control; keep serial below the crossover.
 #[cfg(any(feature = "parallel", test))]
-const SERIAL_PERM_ROWS: usize = 3072;
+pub(crate) const SERIAL_PERM_ROWS: usize = 3072;
 
 #[cfg(all(test, feature = "parallel"))]
 std::thread_local! {

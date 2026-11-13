@@ -1,4 +1,4 @@
-//! Serial RDF ingestion with charges before retaining rows and building indexes.
+//! Bounded RDF ingestion with streaming or bulk admission before exposing a graph.
 use crate::dict::Dict;
 use crate::meter::{Dim, Ledger, LoadError, TermRef};
 use crate::Graph;
@@ -7,9 +7,11 @@ use oxttl::{NQuadsParser, NTriplesParser, TriGParser, TurtleParser};
 use std::collections::{HashMap, HashSet};
 
 impl Graph {
-    /// Load a dataset serially under `ledger`, preserving named graphs.
+    /// Load a dataset under `ledger`, preserving named graphs.
     /// Charges source bytes before parsing, then term bytes and facts before retaining
-    /// each row. Refusals keep earlier charges; no graph is returned on failure.
+    /// each row on the serial path. Larger source-bounded N-Quads use the ordinary
+    /// parallel loader followed by bulk admission before the graph is exposed.
+    /// Tighter limits retain streaming refusal behavior. No graph is returned on failure.
     /// Formats and aliases match [`Self::load_dataset`].
     pub fn load_metered(text: &str, format: &str, ledger: &mut Ledger) -> Result<Self, LoadError> {
         load(text, format, None, true, true, ledger)
@@ -78,6 +80,46 @@ fn load(
     if dataset {
         ledger.close_document();
     }
+    #[cfg(feature = "parallel")]
+    if dataset && crate::is_nquads_format(format) && parallel_budget_covers(text, ledger) {
+        let source_rows = text
+            .split(['\n', '\r'])
+            .filter(|line| {
+                let line = line.trim_start();
+                !line.is_empty() && !line.starts_with('#')
+            })
+            .count();
+        if source_rows >= crate::store::SERIAL_PERM_ROWS {
+            let checkpoint = ledger.clone();
+            if let Ok(graph) = Graph::load_dataset(text, format) {
+                let retained = graph
+                    .len()
+                    .saturating_add(graph.named().iter().map(|(_, g)| g.len()).sum::<usize>());
+                // Deduplication or a non-line-oriented form requires the streaming
+                // path to retain source-occurrence accounting and error order.
+                if retained == source_rows && admit_parsed(&graph, ledger).is_ok() {
+                    return Ok(graph);
+                }
+                drop(graph);
+            }
+            *ledger = checkpoint;
+        }
+    }
+    #[cfg(test)]
+    LOAD_PATHS.with(|paths| {
+        let (serial, parallel) = paths.get();
+        paths.set((serial + 1, parallel));
+    });
+    load_serial(text, format, base, dataset, ledger)
+}
+
+fn load_serial(
+    text: &str,
+    format: &str,
+    base: Option<&str>,
+    dataset: bool,
+    ledger: &mut Ledger,
+) -> Result<Graph, LoadError> {
     let mut groups: Vec<(Option<Term>, Dict, Vec<[crate::dict::Id; 3]>)> = Vec::new();
     let mut index = HashMap::new();
     let mut document_rows = HashSet::new();
@@ -202,6 +244,74 @@ fn load(
     Ok(graph)
 }
 
+#[cfg(feature = "parallel")]
+fn parallel_budget_covers(text: &str, ledger: &Ledger) -> bool {
+    // These source-derived bounds cover every streaming charge. Tight callers
+    // retain the streaming path, including its first-refusal and partial counters.
+    let bytes = text.len().saturating_mul(64);
+    ledger.remaining(Dim::Facts) >= text.len()
+        && ledger.remaining(Dim::Bytes) >= bytes
+        && ledger.limits().term_bytes >= bytes
+        && ledger.remaining(Dim::Nodes) >= text.len().saturating_mul(4)
+}
+
+#[cfg(feature = "parallel")]
+fn admit_parsed(graph: &Graph, ledger: &mut Ledger) -> Result<(), LoadError> {
+    let mut bytes = 0usize;
+    let mut largest = 0usize;
+    let mut facts = 0usize;
+    let mut groups = 0usize;
+    for (name, part) in std::iter::once((None, graph))
+        .chain(graph.named().iter().map(|(name, part)| (Some(name), part)))
+    {
+        if part.is_empty() {
+            continue;
+        }
+        groups = groups.saturating_add(1);
+        let name_size = match name {
+            Some(Term::NamedNode(n)) => {
+                crate::meter::TERM_NODE_BYTES.saturating_add(n.as_str().len())
+            }
+            Some(Term::BlankNode(n)) => {
+                crate::meter::TERM_NODE_BYTES.saturating_add(n.as_str().len())
+            }
+            _ => 0,
+        };
+        largest = largest.max(name_size);
+        for row in part.iter_ids() {
+            facts = facts.saturating_add(1);
+            bytes = bytes.saturating_add(name_size);
+            for id in row {
+                let size = crate::meter::stored_term_size(part.dict(), id)?;
+                largest = largest.max(size);
+                bytes = bytes.saturating_add(size);
+            }
+        }
+    }
+    ledger.charge_term_batch(bytes, largest)?;
+    ledger.charge(Dim::Facts, facts)?;
+    ledger.charge(
+        Dim::Nodes,
+        facts
+            .saturating_add(groups)
+            .saturating_add(graph.named().len()),
+    )?;
+    Ok(())
+}
+
+#[cfg(all(test, feature = "parallel"))]
+pub(crate) fn note_parallel_dataset_parse() {
+    LOAD_PATHS.with(|paths| {
+        let (serial, parallel) = paths.get();
+        paths.set((serial, parallel + 1));
+    });
+}
+
+#[cfg(test)]
+std::thread_local! {
+    static LOAD_PATHS: std::cell::Cell<(usize,usize)> = const { std::cell::Cell::new((0,0)) };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,6 +330,124 @@ mod tests {
         }
         rows.sort();
         rows
+    }
+
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn dataset_loader_uses_the_existing_row_cutoff() {
+        for (n, paths) in [(3071, (1, 0)), (3072, (0, 1))] {
+            let source = (0..n)
+                .map(|i| format!("<urn:s{i}> <urn:p> <urn:o> <urn:g> .\n"))
+                .collect::<String>();
+            LOAD_PATHS.with(|value| value.set((0, 0)));
+            let mut bulk = Ledger::new(Limits::default());
+            let graph = Graph::load_metered(&source, "nquads", &mut bulk).unwrap();
+            LOAD_PATHS.with(|value| assert_eq!(value.get(), paths));
+            let mut serial = Ledger::new(Limits::default());
+            serial.charge(Dim::SourceBytes, source.len()).unwrap();
+            serial.close_document();
+            let reference = load_serial(&source, "nquads", None, true, &mut serial).unwrap();
+            assert_eq!(snapshot(&graph), snapshot(&reference));
+            for dim in [Dim::SourceBytes, Dim::Facts, Dim::Bytes, Dim::Nodes] {
+                assert_eq!(bulk.spent(dim), serial.spent(dim), "{dim:?}");
+            }
+        }
+    }
+
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn source_refusal_precedes_parallel_dataset_parsing() {
+        let source = (0..3200)
+            .map(|i| format!("<urn:s{i}> <urn:p> <urn:o> <urn:g> .\n"))
+            .collect::<String>();
+        let limits = Limits {
+            source_bytes: 0,
+            ..Limits::default()
+        };
+        LOAD_PATHS.with(|paths| paths.set((0, 0)));
+        let result = Graph::load_metered(&source, "nquads", &mut Ledger::new(limits));
+        assert!(matches!(result,Err(LoadError::Ledger(error)) if error.dim==Dim::SourceBytes));
+        LOAD_PATHS.with(|paths| assert_eq!(paths.get(), (0, 0)));
+    }
+
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn parallel_admission_keeps_streaming_boundaries_and_duplicates() {
+        for duplicates in [false, true] {
+            let source = (0..3200)
+                .map(|i| {
+                    format!(
+                        "<urn:s{}> <urn:p> <urn:o> <urn:g> .\n",
+                        if duplicates { i % 3 } else { i }
+                    )
+                })
+                .collect::<String>();
+            let mut reference = Ledger::new(Limits::default());
+            reference.close_document();
+            load_serial(&source, "nquads", None, true, &mut reference).unwrap();
+            let mut unrestricted = Ledger::new(Limits::default());
+            Graph::load_metered(&source, "nquads", &mut unrestricted).unwrap();
+            for dim in [Dim::Facts, Dim::Bytes, Dim::Nodes] {
+                assert_eq!(unrestricted.spent(dim), reference.spent(dim));
+            }
+            for dim in [Dim::Facts, Dim::Bytes, Dim::Nodes] {
+                for extra in [0, 1] {
+                    let cap = reference.spent(dim) - extra;
+                    let mut limits = Limits::default();
+                    match dim {
+                        Dim::Facts => limits.facts = cap,
+                        Dim::Bytes => limits.bytes = cap,
+                        _ => limits.nodes = cap,
+                    }
+                    let mut actual = Ledger::new(limits);
+                    let mut serial = Ledger::new(limits);
+                    serial.charge(Dim::SourceBytes, source.len()).unwrap();
+                    serial.close_document();
+                    let expected = load_serial(&source, "nquads", None, true, &mut serial);
+                    let got = Graph::load_metered(&source, "nquads", &mut actual);
+                    assert_eq!(
+                        got.as_ref().map(snapshot).map_err(ToString::to_string),
+                        expected.as_ref().map(snapshot).map_err(ToString::to_string)
+                    );
+                    for dim in [Dim::SourceBytes, Dim::Facts, Dim::Bytes, Dim::Nodes] {
+                        assert_eq!(actual.spent(dim), serial.spent(dim));
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn bulk_term_sizes_and_depth_refusals_match_streaming() {
+        let prefix = (0..3200)
+            .map(|i| format!("<urn:s{i}> <urn:p> <urn:o> <urn:g> .\n"))
+            .collect::<String>();
+        for depth in [3, 65] {
+            let mut object = "\"bonjour\"@fr".to_owned();
+            for _ in 0..depth {
+                object = format!("<<( <urn:a> <urn:b> {object} )>>");
+            }
+            let source=format!("{prefix}<urn:quoted> <urn:p> {object} <urn:g> .\n<urn:number> <urn:p> \"0\"^^<http://www.w3.org/2001/XMLSchema#integer> <urn:g> .\n");
+            let mut actual = Ledger::new(Limits::default());
+            let mut serial = Ledger::new(Limits::default());
+            serial.charge(Dim::SourceBytes, source.len()).unwrap();
+            serial.close_document();
+            let expected = load_serial(&source, "nquads", None, true, &mut serial);
+            let got = Graph::load_metered(&source, "nquads", &mut actual);
+            assert_eq!(
+                got.as_ref().map(snapshot).map_err(ToString::to_string),
+                expected.as_ref().map(snapshot).map_err(ToString::to_string)
+            );
+            if depth == 65 {
+                assert!(matches!(got,Err(LoadError::Ledger(error)) if error.dim==Dim::TermDepth));
+            } else {
+                assert!(got.is_ok());
+            }
+            for dim in [Dim::SourceBytes, Dim::Facts, Dim::Bytes, Dim::Nodes] {
+                assert_eq!(actual.spent(dim), serial.spent(dim));
+            }
+        }
     }
 
     #[test]

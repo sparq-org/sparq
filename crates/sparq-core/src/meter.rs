@@ -192,6 +192,69 @@ impl<'a> From<&'a Term> for TermRef<'a> {
     }
 }
 
+/// Borrowed stored-term sizing, shared by streaming and bulk admission.
+pub(crate) fn stored_term_size(dict: &Dict, id: Id) -> Result<usize, Exceeded> {
+    if !is_inline(id) {
+        let lexical = match dict.term_parts(id) {
+            TermParts::Iri { prefix, suffix } => Some(prefix.len().saturating_add(suffix.len())),
+            TermParts::Blank(s) => Some(s.len()),
+            TermParts::Lit {
+                value,
+                datatype,
+                lang,
+            } => Some(
+                value
+                    .len()
+                    .saturating_add(datatype.len())
+                    .saturating_add(lang.map_or(0, |l| split_lang_dir(l).0.len())),
+            ),
+            TermParts::Triple(_) => None,
+        };
+        if let Some(lexical) = lexical {
+            return Ok(TERM_NODE_BYTES.saturating_add(lexical));
+        }
+    }
+    let mut total: usize = 0;
+    // At most two siblings remain per nesting level. No heap allocation is needed.
+    let mut stack = [(id, 0); 2 * MAX_TRIPLE_DEPTH + 1];
+    let mut len = 1;
+    while len > 0 {
+        len -= 1;
+        let (id, depth) = stack[len];
+        total = total.saturating_add(TERM_NODE_BYTES);
+        if is_inline(id) {
+            let n = id - INLINE_BASE;
+            let digits = if n == 0 { 1 } else { n.ilog10() as usize + 1 };
+            total = total
+                .saturating_add(digits)
+                .saturating_add(oxrdf::vocab::xsd::INTEGER.as_str().len());
+            continue;
+        }
+        let lexical = match dict.term_parts(id) {
+            TermParts::Iri { prefix, suffix } => prefix.len().saturating_add(suffix.len()),
+            TermParts::Blank(s) => s.len(),
+            TermParts::Lit {
+                value,
+                datatype,
+                lang,
+            } => value
+                .len()
+                .saturating_add(datatype.len())
+                .saturating_add(lang.map_or(0, |l| split_lang_dir(l).0.len())),
+            TermParts::Triple(ids) => {
+                check_depth(depth)?;
+                for child in ids {
+                    stack[len] = (child, depth + 1);
+                    len += 1;
+                }
+                0
+            }
+        };
+        total = total.saturating_add(lexical);
+    }
+    Ok(total)
+}
+
 /// A cumulative byte allowance for one class of work on a shared [`Ledger`].
 /// Other ledger dimensions remain shared while this account is active.
 #[derive(Clone, Debug)]
@@ -516,45 +579,17 @@ impl Ledger {
     /// # Errors
     /// As [`Self::term`]. The triple-depth walk uses a fixed-size explicit stack.
     pub fn stored_term(&mut self, dict: &Dict, id: Id) -> Result<usize, Exceeded> {
-        let mut total: usize = 0;
-        // At most two siblings remain per nesting level. No heap allocation is needed.
-        let mut stack = [(id, 0); 2 * MAX_TRIPLE_DEPTH + 1];
-        let mut len = 1;
-        while len > 0 {
-            len -= 1;
-            let (id, depth) = stack[len];
-            total = total.saturating_add(TERM_NODE_BYTES);
-            if is_inline(id) {
-                let n = id - INLINE_BASE;
-                let digits = if n == 0 { 1 } else { n.ilog10() as usize + 1 };
-                total = total
-                    .saturating_add(digits)
-                    .saturating_add(oxrdf::vocab::xsd::INTEGER.as_str().len());
-                continue;
-            }
-            let lexical = match dict.term_parts(id) {
-                TermParts::Iri { prefix, suffix } => prefix.len().saturating_add(suffix.len()),
-                TermParts::Blank(s) => s.len(),
-                TermParts::Lit {
-                    value,
-                    datatype,
-                    lang,
-                } => value
-                    .len()
-                    .saturating_add(datatype.len())
-                    .saturating_add(lang.map_or(0, |l| split_lang_dir(l).0.len())),
-                TermParts::Triple(ids) => {
-                    check_depth(depth)?;
-                    for child in ids {
-                        stack[len] = (child, depth + 1);
-                        len += 1;
-                    }
-                    0
-                }
-            };
-            total = total.saturating_add(lexical);
-        }
-        self.sized(total)
+        self.sized(stored_term_size(dict, id)?)
+    }
+
+    #[cfg(feature = "parallel")]
+    pub(crate) fn charge_term_batch(
+        &mut self,
+        bytes: usize,
+        largest: usize,
+    ) -> Result<(), Exceeded> {
+        self.check(Dim::TermBytes, 0, largest)?;
+        self.charge(Dim::Bytes, bytes)
     }
 
     /// Charges joined lexical bytes before fallibly allocating exact capacity.
