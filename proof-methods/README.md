@@ -2,7 +2,7 @@
 
 A detached Cargo workspace for proof methods that are not Noir circuits or
 zkVM programs, and for the baselines the zero-knowledge methods are compared
-against. The methods take their identifiers from section 9 of the answer
+against. The query proof methods take their identifiers from section 9 of the answer
 specification (`site/specs/zksparql-answers.typ`), but they do not yet
 implement its full proof-method profile: they work on the internal v5 request
 and statement, which do not bind the protocol request's audience, acceptance
@@ -15,6 +15,7 @@ bundle.
 |---|---|---|
 | `disclosed` | `urn:sparq:vcq:method:disclosed-reevaluation` v1 | disclosed credentials |
 | `vole` (scripts, not a crate) | prototype for `urn:sparq:vcq:method:vole-designated-verifier` | zero-knowledge proof, interactive, designated verifier |
+| [`aggregate`](aggregate/README.md) | joint count, sum and comparison with signed commitments | publicly verifiable release, verdict or refusal |
 | `tee` | `urn:sparq:vcq:method:tee-attestation` v1, platform `aws-nitro` | attestation |
 
 `disclosed` runs the relation that the `risc0-authenticated-rdf` v5 guest
