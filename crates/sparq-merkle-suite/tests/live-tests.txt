@@ -1,0 +1,3 @@
+# Uses the existing sparq-zk support module by path, without a third copy.
+live tests/live_noir.rs::credential_modes_match_vectors_and_compiled_public_abi
+live tests/live_noir.rs::random_literals_execute_against_rust_and_engine
