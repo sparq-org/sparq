@@ -23,13 +23,18 @@ Addresses #7326.
 | `w3c_sparql` (SHACL 1.0 pre-binding subset) | 14 / 0 / 0 | 14 / 0 / 0 | 13 |
 
 Pass floors equal the measured counts above; no pass floor was lowered.
-The node-expression evaluation failure ceiling is 4. The SPARQL-RL ceiling
-is 342 in both feature states. All other runners have a failure ceiling of zero.
-The inference and SPARQL-RL runners additionally pin their manifest totals and
-skip ceilings. Feature-disabled inference entries emit failed EARL assertions.
-The node-expression runner's eight skips are validation entries handled by the
+The node-expression evaluation failure ceiling is 4. The inference-rules
+ceiling is zero in both feature states. With `sparql-rl` enabled (alone or with
+`shacl-af`), SPARQL-RL records 339 / 3 / 0 and pins that pass floor, failure
+ceiling and the manifest total of 342. Without `sparql-rl`, its failure ceiling
+is 342. All other runners have a failure ceiling of zero. The inference and
+SPARQL-RL runners additionally pin their manifest totals and skip ceilings.
+Feature-disabled inference entries emit failed EARL assertions. The
+node-expression runner's eight skips are validation entries handled by the
 separate constraint runner and omitted from evaluation EARL assertions. Every
-evaluation entry is attempted in both feature states.
+evaluation entry is attempted with and without `shacl-af`. The table's feature
+columns leave `sparql-rl` disabled; enabling it changes the SPARQL-RL row to
+339 / 3 / 0 in either column.
 
 ## Closed Core and SPARQL gaps
 
@@ -123,50 +128,53 @@ also infers them. Temporary triples and their annotations are removed after
 all layers. Declared rule entailments run before validation; strict validation
 returns rule failures through its existing failure channel.
 
-The inference runner visits all 47 manifest entries: all 41 in the top folder
-and all six `rdfs/` entries pass. Without `shacl-af`, all 47
-entries skip locally and emit failures to EARL. Inferred graphs are compared
-by complete RDF graph isomorphism, including shared blank-node identity and
-nested triple terms. The folder's validation entries expect empty reports;
-the runner checks both conformance and absence of results. Expected failures
-require a production error.
+The inference runner visits all 47 manifest entries: all 41 entries in the top
+folder and all six `rdfs/` entries pass. Without `shacl-af`, all 47 entries skip
+locally and emit failures to EARL. Inferred graphs are compared by complete RDF
+graph isomorphism, including shared blank-node identity and nested triple terms.
+The folder's validation entries expect empty reports; the runner checks both
+conformance and absence of results. Expected failures require a production error.
 
 There are no identified spec/test divergences in the inference entries.
-`ruleProcessor-unknown-at-ruleset` now passes: an unknown processor on an
-unselected rule set is a processing failure, as required by Custom Rule
-Processors.
+Unknown processors on unselected rule sets are processing failures. The engine
+now emits the canonical decimal spelling required by
+`SPARQLRuleTemplate-example-Multiply`; its prior allowance is removed and the
+inference pass floor is raised to 47, with zero failures.
 
-`SPARQLRuleTemplate-example-Multiply` passes now that computed
-`xsd:decimal` values drop trailing fractional zeros, so the expected
-`"6.56168"^^xsd:decimal` matches. With `shacl-af`, the inference pass floor
-is 47 and the failure ceiling is zero.
+SPARQL-RL now has separate syntax, variable inScope/inUse, dependency
+stratification and inference stages behind the default-off `sparql-rl` feature.
+Its six manifests list 342 entries: `eval` 65, `eval2` 6, `examples` 5,
+`stratification` 21, `syntax` 212 and `wellformed` 33. With the feature enabled,
+all 212 syntax and 21 stratification entries pass, as do 31 well-formedness and
+75 evaluation/example entries. Without it, all 342 entries remain failures.
+Unlisted evaluation resource descriptions do not add manifest entries.
 
-SPARQL-RL has no language processor in the crate. Its six manifests list 342
-entries: `eval` 65, `eval2` 6, `examples` 5, `stratification` 21, `syntax` 212
-and `wellformed` 33. The standalone runner records all as failures in both
-feature states, including negative tests. The runner identifies each test type
-and reads its local action resources and expected inference graph where present. It does
-not claim a syntax rejection when no syntax implementation exists. The
-manifests also describe two evaluation resources outside their entry lists;
-those descriptions are not additional test entries.
+The remaining three failures are fixture/spec disagreements at this pin:
 
-The SPARQL-RL draft defines separate syntax and rule-set-evaluation
-conformance criteria, variable-scope well-formedness, and stratification with
-no cyclic closed dependency. The current SHACL-AF scheduler does not supply
-those language stages. `tests/sparql-rl` is not reported in the SHACL 1.2
-EARL report because sparq has no SPARQL-RL processor yet. The standalone
-runner retains its complete manifest census and measured ratchets; it never
-credits unsupported negative tests as successful rejections. The EARL census
-guard still rejects incomplete inference-rule outcomes.
+- `wellformed-group-04` and `eval-group-09` reuse a previously bound non-key
+  variable inside GROUP. The spec initializes the inner in-use set with
+  `Uin union (Vin minus keys)`, so a triple pattern cannot bind that name again.
+- `wellformed-group-09` reuses an inner variable name in a later GROUP. The
+  first GROUP's inUse propagation retains that local name, forbidding its reuse.
+
+These entries expect acceptance under different name-shadowing rules. The
+processor follows the pinned inScope/inUse definitions and emits failed EARL
+assertions for them. No fixture, oracle or floor is weakened. Stage-specific
+negative tests require that stage's rejection, not resource exhaustion or an
+unrelated syntax error. All 342 outcomes are included in the SHACL 1.2 EARL
+report, with a complete-census guard. The architecture and full type census are
+in [sparql-rl.md](sparql-rl.md).
 
 ## Reproduction
 
 With the pinned suite already present, run each `tests/w3c*.rs` runner with
 `cargo test -p sparq-shacl --test <runner> -- --nocapture`, then repeat with
-`--features shacl-af`. The behavioral guards are in
+`--features shacl-af`; SPARQL-RL additionally requires `--features sparql-rl` or
+`--features shacl-af,sparql-rl`. The behavioral guards are in
 [`shacl12_core_sparql.rs`](../crates/sparq-shacl/tests/shacl12_core_sparql.rs),
-[`shacl12_node_expr.rs`](../crates/sparq-shacl/tests/shacl12_node_expr.rs) and
-[`shacl12_rules.rs`](../crates/sparq-shacl/tests/shacl12_rules.rs).
+[`shacl12_node_expr.rs`](../crates/sparq-shacl/tests/shacl12_node_expr.rs),
+[`shacl12_rules.rs`](../crates/sparq-shacl/tests/shacl12_rules.rs) and
+[`sparql_rl_eval.rs`](../crates/sparq-shacl/tests/sparql_rl_eval.rs).
 Generate reports without fetching an already-present pin using:
 
 ```sh
@@ -176,6 +184,6 @@ SHACL_TESTS_PIN=04ecbb4a5b930f4fa9df6c399ac5c98ccec672c9 \
 
 The Core and SHACL-SPARQL sections of that SHACL 1.2 report contain 162 and
 98 passed assertions, respectively, with zero failures. Inference rules contribute
-47 passed assertions. SPARQL-RL is excluded. Node-expression evaluation has
-272 passes and four failures; its separate constraint runner contributes eight
-passes.
+47 passed assertions. SPARQL-RL contributes 339 passed and three failed
+assertions. Node-expression evaluation has 272 passes and four failures; its
+separate constraint runner contributes eight passes.
