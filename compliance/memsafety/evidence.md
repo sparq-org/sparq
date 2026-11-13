@@ -93,9 +93,11 @@ CI wiring — `.github/workflows/ci.yml`, job `unsafe-register:`:
       - name: Ratchet first-party unsafe count against the snapshot
         run: python3 scripts/unsafe-gate.py --check
 ```
-No `continue-on-error`, so a ratchet regression reds the run. `ci.yml` now runs nightly +
-`workflow_dispatch` only and the `ci-summary` aggregator is deleted, so this is post-merge
-detection, not a merge block. An added `unsafe` site stays red until: (1) a register row is added, (2) a `// SAFETY:` comment is
+No `continue-on-error`, so a ratchet regression reds the run. The required `ci-fast`
+workflow also runs `--self-test`, `--verify-register` and `--check` in `lint` on PRs
+changing `crates/**/*.rs`, the register, snapshot, checker or its workflows; non-PR
+runs always check. A failure blocks its aggregator. `ci.yml` retains nightly + dispatch
+coverage. An added `unsafe` site stays red until: (1) a register row is added, (2) a `// SAFETY:` comment is
 added in source, (3) `scripts/unsafe-gate.py --seed` re-seeds `bench/unsafe-snapshot.json`
 — all three land in the same reviewable diff.
 
@@ -220,7 +222,7 @@ register explicitly scopes third-party `unsafe` (memmap2/libc/rayon/hdt) OUT to 
 
 ## MS-12 — edition-2024 unsafe (test-only env)
 
-`unsafe-register.md` rows `src/lib.rs:11596` (`set_var`) + `:11600` (`remove_var`) — TEST-only
+`unsafe-register.md` rows `src/lib.rs:13492` (`set_var`) + `:13496` (`remove_var`) — TEST-only
 (`external_quads_fd_*`), single-threaded, var restored before return; counted by the ratchet.
 
 ## MS-13 — no unsafe in the untrusted-text path
