@@ -231,9 +231,11 @@ zero padding. Its capacity is four entries; a request above that capacity is ref
 deduplication. The group flattens to seventeen canonical big-endian field words. Rust's
 `envelope_policy` module derives these words and both minimal set depths from typed
 stored-policy input. Disabled flags have zero subordinate words, which the circuit asserts. An
-absent holder list has zero count and issuer words. Roots are computed by the verifier, never by
-a generated circuit. Compilation may provide larger path capacity, but the circuit hashes only
-levels below the public depth, bounds that depth, and checks unused siblings and index bits are
+absent holder list has zero count and issuer words and selects all trusted issuers when holder
+binding is enabled. A present list MUST be non-empty; an empty list is refused on the host and
+in the circuit. To require no holder keys, omit `holderBinding`. Roots are computed by the
+verifier, never by a generated circuit. Compilation may provide larger path capacity, but the
+circuit hashes only levels below the public depth, bounds that depth, and checks unused siblings and index bits are
 zero.
 
 There is no request or policy derivation inside the circuit. The existing Rust request module

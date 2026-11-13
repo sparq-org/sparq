@@ -552,6 +552,10 @@ pub fn check_policy<let K: u32, let A: u32>(policy: PublicPolicy) {
 fn check_holder_policy(policy: PublicPolicy) {
     assert(policy.holder_issuer_count <= 4, "holder issuer capacity");
     assert(
+        !policy.holder_issuers_present | (policy.holder_issuer_count > 0),
+        "empty holder issuer list",
+    );
+    assert(
         policy.holder_issuers_present | (policy.holder_issuer_count == 0),
         "holder issuer presence",
     );

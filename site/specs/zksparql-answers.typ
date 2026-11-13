@@ -729,9 +729,10 @@ enabled. The circuit MUST assert these encodings as well as applicable credentia
 
 - `holderBinding`: optional object; absent means no holder requirement. Its optional
   `issuer` RDF list contains issuer IRIs spelled exactly as in `trustedIssuers`.
-  The `holderBinding` scoped JSON-LD context preserves that list, including an empty list.
-  Omission of that collection means all trusted issuers; an explicitly empty collection
-  requires no holder keys. A credential from a listed issuer MUST carry the profile's
+  The `holderBinding` scoped JSON-LD context preserves the list structure. When present,
+  the list MUST be non-empty; an explicitly empty list MUST be refused. Omission of the
+  list means all trusted issuers. To require no holder keys, omit `holderBinding`.
+  A credential from a listed issuer MUST carry the profile's
   subject-to-key relation. The evidence MUST contain exactly one Schnorr signature per
   distinct required holder key, each over a domain-separated encoding of the entire request
   digest. Credentials sharing a key share that signature; distinct keys require distinct

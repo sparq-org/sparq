@@ -1069,8 +1069,8 @@ fn distinct_holder_keys_cannot_share_a_slot() {
         [holder_evidence(1, request_digest(10, 20)), empty_holder_evidence()],
     );
 }
-#[test]
-fn explicit_empty_holder_issuer_list_requires_no_keys() {
+#[test(should_fail_with = "empty holder issuer list")]
+fn explicit_empty_holder_issuer_list_refused() {
     let mut p = scoped_policy(iri(900));
     p.holder_issuer_count = 0;
     p.holder_issuers = [0; 4];

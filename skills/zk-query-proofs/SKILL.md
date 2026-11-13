@@ -194,7 +194,9 @@ of the cache location.
 The query crate's `envelope_policy::{PolicyInput, derive, public_words}` helper
 prepares the agreed public policy extension from typed stored-policy input.
 `TrustMember` binds issuer, verification method, suite and key; `HolderBinding`
-selects all issuers or an explicit list, with a capacity of four before deduplication.
+selects all issuers when its issuer list is absent, or a non-empty explicit list with
+a capacity of four before deduplication. An empty list is refused with
+`Invalid("empty holder issuer list")`. To require no holder keys, omit `holderBinding`.
 `AcceptedSnapshots` takes verifier-curated digests. The helper sorts canonical set
 members, computes minimal roots/depths and emits zero words for disabled conditions.
 The digest remains a separate host-computed public input. This helper is not yet

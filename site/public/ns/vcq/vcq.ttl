@@ -82,6 +82,6 @@ vcq:resultGraph a rdf:Property ; rdfs:domain vcq:QueryAnswerPresentation ; rdfs:
 vcq:verifiedIssuer a rdf:Property ; rdfs:range rdfs:Resource ; rdfs:label "verified issuer"@en ;
   rdfs:comment "Draft: a default-graph assertion from a presentation-local credential graph blank node to the issuer IRI whose trust-set key verified that credential. The issuer spelling matches the trust member and credential exactly. Input credentials using this predicate are refused."@en .
 vcq:holderBinding a rdf:Property ; rdfs:domain vcq:QueryRequest ; rdfs:label "holder binding"@en ;
-  rdfs:comment "Draft: a holder-key requirement with an optional vcq:issuer RDF list. Omission of the list means all trusted issuers; an explicitly empty list requires no keys. Exactly one request-digest signature is required per distinct required holder key."@en .
+  rdfs:comment "Draft: a holder-key requirement with an optional vcq:issuer RDF list. Omission of the list means all trusted issuers. When present, the list must be non-empty; an empty list is refused. To require no holder keys, omit holderBinding. Exactly one request-digest signature is required per distinct required holder key."@en .
 vcq:earliestCreated a rdf:Property ; rdfs:domain vcq:QueryRequest ; rdfs:range xsd:dateTime ; rdfs:label "earliest created"@en ;
   rdfs:comment "Draft: the inclusive lower bound on every credential's authenticated creation instant, separate from validity. Unknown creation refuses this requirement; absence imposes no freshness condition. The request digest covers the bound."@en .

@@ -47,3 +47,6 @@ paths use a public depth bounded by their compiled capacity; unused siblings and
 zero. The status-bit depth stays inside each snapshot digest. The set-root helper is confined to
 the native test module. Its fixed vectors also exercise the Rust policy helper; generated entry
 points consume verifier-computed roots.
+When holder binding is enabled, an absent issuer list selects all trusted issuers.
+A present list must be non-empty; both the host and circuit refuse an empty list.
+To require no holder keys, omit `holderBinding`.
