@@ -141,11 +141,12 @@ pub(super) fn inline_pass_values(cmp: ScanCmp) -> Option<(u32, u32)> {
 /// and the comparison to push down.
 ///
 /// (sq-lr2ii) A NUMERIC comparison is DECLINED (returns `None`) when the graph
-/// holds an f64-inexact decimal ([`Graph::has_high_precision_decimal`]): the f64 `numerics`
+/// holds an uncached valid exact numeric or an f64-inexact decimal
+/// ([`Graph::has_high_precision_decimal`]): the f64 `numerics`
 /// cache the scan probes could then decide `=`/`<`/`>`/`<=`/`>=` wrongly for that value (e.g.
 /// `"1.000000000000000001"^^xsd:decimal` collapses onto the f64 `1.0`), so such comparisons
 /// fall back to the exact general evaluator instead. Temporal pushdown is unaffected, and a
-/// graph with no f64-inexact decimal keeps the numeric fast path.
+/// graph whose exact numerics are cache-safe keeps the numeric fast path.
 pub(super) fn extract_sargable<'a>(graph: &Graph, e: &'a Expression) -> Option<(Variable, ScanCmp<'a>)> {
     if budget::strict_numeric() { return None; }
     // (threshold, whether the float tier could round it) — see the decline below.
@@ -217,7 +218,7 @@ pub(super) fn extract_sargable<'a>(graph: &Graph, e: &'a Expression) -> Option<(
         let Some(v) = var_of(var) else { continue };
         if let Some((c, float_tier_rounds)) = lit_num(konst) {
             // sq-lr2ii: decline the f64 numeric fast path when the graph holds an f64-inexact
-            // decimal — the scan's per-row f64 compare could be wrong for it. A numeric
+            // decimal or an uncached exact numeric — the scan could miscompare or drop it. A numeric
             // constant is never also a temporal one, so declining here yields `None` for this
             // orientation; the exact general evaluator handles the residual FILTER correctly.
             // Likewise when a float row would compare against an `f32`-rounded constant.
