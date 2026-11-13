@@ -10,6 +10,10 @@ RESTORED = {
     "decimal-alignment-overflow", "seconds-numeric-consumer", "stored-false-ask",
     "stored-false-count", "stored-identity-equality", "stored-order", "stored-topk",
 }
+ADDED = {
+    "stored-order-alignment-overflow", "stored-topk-alignment-overflow",
+    "stored-min-alignment-overflow",
+}
 CAPACITY_SOURCE = "zk/sparql-evaluator/fixtures/conformance/numeric-capacity.json"
 VERSIONS = ("v1", "v2", "v3")
 
@@ -28,7 +32,10 @@ def load(path):
 
 
 def compare(before, after):
-    if before.keys() != after.keys():
+    additions = {
+        (CAPACITY_SOURCE, case, holder) for case in ADDED for holder in (False, True)
+    }
+    if before.keys() & additions or after.keys() != before.keys() | additions:
         raise ValueError("corpus record inventories differ")
     restored, preserved, successful = set(), 0, 0
     for key, old in before.items():
@@ -49,9 +56,14 @@ def compare(before, after):
     }
     if restored != expected:
         raise ValueError("missing restored numeric bound case/version/authority")
+    for key in additions:
+        for version in VERSIONS:
+            if after[key][version] != {"error": "Capacity(NumericRepresentation)"}:
+                raise ValueError(f"unexpected added capacity outcome: {key}, {version}")
     return {
         "records": len(before), "preserved_outcomes": preserved,
         "preserved_success_journals": successful, "restored_capacity_rejections": len(restored),
+        "added_capacity_rejections": len(additions) * len(VERSIONS),
     }
 
 

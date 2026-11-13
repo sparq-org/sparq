@@ -116,6 +116,21 @@
       "id": "stored-identity-equality",
       "query": "SELECT ?n {?s ?p ?n FILTER(?n = ?n)}",
       "dataset_ntriples": "<http://ex/s> <http://ex/p> \"9223372036854775808\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+    },
+    {
+      "id": "stored-order-alignment-overflow",
+      "query": "SELECT ?v {?s <http://ex/p> ?v} ORDER BY ?v",
+      "dataset_ntriples": "<http://ex/a> <http://ex/p> \"0.00000000000000000000000000000000000007\"^^<http://www.w3.org/2001/XMLSchema#decimal> .\n<http://ex/b> <http://ex/p> \"100000000000000000000.1\"^^<http://www.w3.org/2001/XMLSchema#decimal> ."
+    },
+    {
+      "id": "stored-topk-alignment-overflow",
+      "query": "SELECT ?v {?s <http://ex/p> ?v} ORDER BY DESC(?v) LIMIT 1",
+      "dataset_ntriples": "<http://ex/a> <http://ex/p> \"0.00000000000000000000000000000000000007\"^^<http://www.w3.org/2001/XMLSchema#decimal> .\n<http://ex/b> <http://ex/p> \"100000000000000000000.1\"^^<http://www.w3.org/2001/XMLSchema#decimal> ."
+    },
+    {
+      "id": "stored-min-alignment-overflow",
+      "query": "SELECT (MIN(?v) AS ?min) {?s <http://ex/p> ?v}",
+      "dataset_ntriples": "<http://ex/a> <http://ex/p> \"0.00000000000000000000000000000000000007\"^^<http://www.w3.org/2001/XMLSchema#decimal> .\n<http://ex/b> <http://ex/p> \"100000000000000000000.1\"^^<http://www.w3.org/2001/XMLSchema#decimal> ."
     }
   ]
 }

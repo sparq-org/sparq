@@ -18,7 +18,7 @@ fn suites() -> Vec<Suite> {
     vec![
         Suite { name: "original", json: include_str!("../../fixtures/conformance/cases.json"), field: "cases", capacity: false, counts: (92, 24, 0) },
         Suite { name: "builtins", json: include_str!("../../../../crates/sparq-engine/tests/fixtures/builtin_edges.json"), field: "cases", capacity: false, counts: (167, 0, 2) },
-        Suite { name: "numeric-capacity", json: include_str!("../../fixtures/conformance/numeric-capacity.json"), field: "cases", capacity: true, counts: (0, 0, 21) },
+        Suite { name: "numeric-capacity", json: include_str!("../../fixtures/conformance/numeric-capacity.json"), field: "cases", capacity: true, counts: (0, 0, 24) },
         Suite { name: "temporal", json: include_str!("../../../../crates/sparq-engine/tests/fixtures/exact_temporal.json"), field: "cases", capacity: false, counts: (28, 0, 0) },
         Suite { name: "temporal-capacity", json: include_str!("../../fixtures/conformance/temporal-capacity.json"), field: "cases", capacity: true, counts: (0, 0, 13) },
         Suite { name: "temporal-lexical", json: include_str!("../../../../crates/sparq-engine/tests/fixtures/temporal_lexical.json"), field: "cases", capacity: false, counts: (37, 0, 0) },
@@ -89,7 +89,7 @@ fn capacity_inventory_requires_each_original_cause() {
             assert_capacity(&suite, case, expected);
         }
     }
-    assert_eq!(counts, [26, 9, 1, 7]);
+    assert_eq!(counts, [29, 9, 1, 7]);
 }
 
 #[test]
@@ -165,5 +165,5 @@ fn actual_v3_executes_shared_semantic_and_rejection_inventories() {
         assert_eq!(counts, suite.counts, "{} inventory", suite.name);
         total.0 += counts.0; total.1 += counts.1; total.2 += counts.2;
     }
-    assert_eq!(total, (419, 59, 43));
+    assert_eq!(total, (419, 59, 46));
 }

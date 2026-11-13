@@ -97,3 +97,44 @@ fn strict_numeric_snapshot_bound_checks_seven_consumer_paths() {
         );
     }
 }
+
+fn check_multirow_comparator(query: &str, selected: &[usize]) {
+    // Each operand fits the decimal lane. Comparing them requires aligning the
+    // large mantissa, so even distinct f64 images must observe strict capacity.
+    let large: Term = Literal::new_typed_literal("100000000000000000000.1", xsd::DECIMAL).into();
+    for (scale, capacity) in [(18, false), (19, true), (38, true)] {
+        let tiny: Term =
+            Literal::new_typed_literal(format!("0.{}7", "0".repeat(scale - 1)), xsd::DECIMAL)
+                .into();
+        for values in [[&tiny, &large], [&large, &tiny]] {
+            let data = format!(
+                "<http://ex/a> <http://ex/p> {} .\n<http://ex/b> <http://ex/p> {} .",
+                values[0], values[1]
+            );
+            let ordered = [&tiny, &large];
+            let rows = selected
+                .iter()
+                .map(|&index| vec![Some(ordered[index].clone())])
+                .collect();
+            check_profiles(query, &data, rows, capacity);
+        }
+    }
+}
+
+#[test]
+fn strict_numeric_snapshot_bound_checks_multirow_order() {
+    check_multirow_comparator("SELECT ?v {?s <http://ex/p> ?v} ORDER BY ?v", &[0, 1]);
+}
+
+#[test]
+fn strict_numeric_snapshot_bound_checks_multirow_topk() {
+    check_multirow_comparator(
+        "SELECT ?v {?s <http://ex/p> ?v} ORDER BY DESC(?v) LIMIT 1",
+        &[1],
+    );
+}
+
+#[test]
+fn strict_numeric_snapshot_bound_checks_multirow_min() {
+    check_multirow_comparator("SELECT (MIN(?v) AS ?min) {?s <http://ex/p> ?v}", &[0]);
+}

@@ -5,7 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from compare_snapshot_journals import CAPACITY_SOURCE, RESTORED, VERSIONS, compare, load
+from compare_snapshot_journals import ADDED, CAPACITY_SOURCE, RESTORED, VERSIONS, compare, load
 
 
 class SnapshotJournalComparison(unittest.TestCase):
@@ -21,6 +21,11 @@ class SnapshotJournalComparison(unittest.TestCase):
         key = ("control.json", "accepted", False)
         before[key] = {version: {"journal": {"result": [None, "value"]}} for version in VERSIONS}
         after[key] = deepcopy(before[key])
+        for case in ADDED:
+            for holder in (False, True):
+                after[(CAPACITY_SOURCE, case, holder)] = {
+                    version: {"error": "Capacity(NumericRepresentation)"} for version in VERSIONS
+                }
         return before, after
 
     def test_reviewed_rejections_preserve_all_control_journals(self):
@@ -44,6 +49,25 @@ class SnapshotJournalComparison(unittest.TestCase):
     def test_missing_corpus_record_is_rejected(self):
         before, after = self.fixtures()
         del after[next(iter(after))]
+        with self.assertRaisesRegex(ValueError, "inventories differ"):
+            compare(before, after)
+
+    def test_each_added_case_requires_both_authorities_and_every_version(self):
+        for case in ADDED:
+            for holder in (False, True):
+                for version in VERSIONS:
+                    before, after = self.fixtures()
+                    after[(CAPACITY_SOURCE, case, holder)][version] = {"journal": {"result": []}}
+                    with self.assertRaisesRegex(ValueError, "unexpected added capacity outcome"):
+                        compare(before, after)
+                before, after = self.fixtures()
+                del after[(CAPACITY_SOURCE, case, holder)]
+                with self.assertRaisesRegex(ValueError, "inventories differ"):
+                    compare(before, after)
+
+    def test_unreviewed_addition_is_rejected(self):
+        before, after = self.fixtures()
+        after[(CAPACITY_SOURCE, "other", False)] = after[(CAPACITY_SOURCE, next(iter(ADDED)), False)]
         with self.assertRaisesRegex(ValueError, "inventories differ"):
             compare(before, after)
 

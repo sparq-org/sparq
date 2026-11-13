@@ -21,14 +21,14 @@ fn check_wide_query(
     budget: &QueryBudget,
     check_lenient: impl FnOnce(sparq_engine::QueryResult),
 ) {
-    let prepared = sparq_engine::PreparedQuery::parse(query).unwrap();
-    let result = sparq_engine::query_prepared_with_budget_detailed(graph, &prepared, budget);
     if budget.strict_numeric_capacity {
+        let prepared = sparq_engine::PreparedQuery::parse(query).unwrap();
+        let result = sparq_engine::query_prepared_with_budget_detailed(graph, &prepared, budget);
         assert!(matches!(result, Err(sparq_engine::QueryFailure::Capacity(
             sparq_engine::EvaluationCapacity::NumericRepresentation
         ))), "{query}: {result:?}");
     } else {
-        check_lenient(result.unwrap());
+        check_lenient(sparq_engine::query_with_budget(graph, query, budget).unwrap());
     }
 }
 

@@ -52,7 +52,7 @@ fn numeric_original_capacity_cases_keep_an_actual_typed_cause() {
         "../../fixtures/conformance/numeric-capacity.json"
     ))
     .unwrap();
-    assert_eq!(corpus["cases"].as_array().unwrap().len(), 21);
+    assert_eq!(corpus["cases"].as_array().unwrap().len(), 24);
     for case in corpus["cases"].as_array().unwrap() {
         expect_capacity(case, EvaluationCapacity::NumericRepresentation);
     }

@@ -28,7 +28,7 @@ fn inputs(query: &str, data: &str, agreed: bool) -> (v2::Witness, v3::Witness) {
 fn original_cases() -> Vec<(serde_json::Value, EvaluationCapacity)> {
     let numeric: serde_json::Value = serde_json::from_str(include_str!("../../fixtures/conformance/numeric-capacity.json")).unwrap();
     let mut cases: Vec<_> = numeric["cases"].as_array().unwrap().iter().cloned().map(|case| (case, EvaluationCapacity::NumericRepresentation)).collect();
-    assert_eq!(cases.len(), 21);
+    assert_eq!(cases.len(), 24);
     let temporal: serde_json::Value = serde_json::from_str(include_str!("../../fixtures/conformance/temporal-capacity.json")).unwrap();
     for id in ["dynamic-coalesce", "dynamic-bind-false-ask", "dynamic-filter-false-ask", "dynamic-cast", "zero-year-strdt", "zero-year-cast"] {
         let case = temporal["cases"].as_array().unwrap().iter().find(|case| case["id"] == id).expect("retained temporal fixture").clone();
@@ -40,12 +40,12 @@ fn original_cases() -> Vec<(serde_json::Value, EvaluationCapacity)> {
         assert_eq!(case["expectation_kind"], "implementation_capacity");
         cases.push((case, EvaluationCapacity::NumericRepresentation));
     }
-    assert_eq!(cases.len(), 29);
+    assert_eq!(cases.len(), 32);
     cases
 }
 
 #[test]
-fn original_29_capacity_ids_keep_typed_causes_in_both_versions_and_authorities() {
+fn original_32_capacity_ids_keep_typed_causes_in_both_versions_and_authorities() {
     let mut contexts = [0; 2];
     for (case, cause) in original_cases() {
         for agreed in [false, true] {
@@ -58,7 +58,7 @@ fn original_29_capacity_ids_keep_typed_causes_in_both_versions_and_authorities()
             contexts[1] += 1;
         }
     }
-    assert_eq!(contexts, [58, 58]);
+    assert_eq!(contexts, [64, 64]);
 }
 
 #[test]

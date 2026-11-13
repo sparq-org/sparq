@@ -30,7 +30,7 @@
     },
     {
       "path": "zk/sparql-evaluator/fixtures/conformance/numeric-capacity.json",
-      "source_sha256": "ce6057181771de5864f97cc8d0ddf6592e8b5f5954a2f771d3f5128726d48999",
+      "source_sha256": "9cd99feb4bfb68258794e9121b24e2bc3c1ee5e0a0a343e6e961a1bd5c349bde",
       "field": "cases",
       "cases": [
         {
@@ -216,6 +216,33 @@
         {
           "id": "stored-identity-equality",
           "original_fixture_sha256": "47f9911e6cc12dc66b798517afcead3f2a8990a9c9a5d42da55c96cb35b53f9a",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "stored-order-alignment-overflow",
+          "original_fixture_sha256": "f349e0a3d3e8614d159cdee064894645c5c4a17b16405a9cd931d29e0eab41f8",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "stored-topk-alignment-overflow",
+          "original_fixture_sha256": "b21ab0792ea6d7650e49d1c29d3e0fcbe8ec33339f5ab16ac931b57a595ae952",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "stored-min-alignment-overflow",
+          "original_fixture_sha256": "fec2759a8d9ac78e61ea159e496db3836ec0876e01d27a6ff8a2682c1f884846",
           "expected_rejection": {
             "category": "capacity",
             "phase": "evaluation",
