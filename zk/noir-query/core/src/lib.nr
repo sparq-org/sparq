@@ -8,6 +8,11 @@ mod term_float;
 mod suite_tests;
 pub mod suite_entry;
 
+mod term_bytes;
+mod term_ids;
+pub mod suite_metadata;
+mod suite_metadata_tests;
+
 pub mod table;
 pub mod ops_core;
 pub mod ops_core_expr;

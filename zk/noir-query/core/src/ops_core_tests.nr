@@ -409,7 +409,7 @@ fn expression_cannot_reference_a_future_step() {
 #[test(should_fail_with = "expression opcode")]
 fn expression_refuses_unknown_instructions() {
     let _result=crate::ops_core_expr::evaluate(Table {rows:[[unbound()]],len:1},[unbound()],
-        [expr_step(7,0,0,0,0),expr_step(8,0,0,0,0)]);
+        [expr_step(7,0,0,0,0),expr_step(9,0,0,0,0)]);
 }
 
 #[test(should_fail_with = "operator length")]
@@ -529,4 +529,57 @@ fn expression_unbound_comparison_keeps_its_error() {
     let result = crate::ops_core_expr::evaluate(Table {rows:[[unbound()]],len:1},
         [expression_cell(0x7f,0,1)], [expr_step(0,0,0,0,0),expr_step(1,0,0,0,0),expr_step(2,0,1,0,0)]);
     assert(!result[0].value & result[0].is_error);
+}
+
+fn bounded_membership(value:TermCell, parameters:[TermCell;16], count:u32) -> ops_core::Boolean {
+    crate::ops_core_expr::evaluate_indexed(Table {rows:[[value]],len:1},parameters,[count],
+        [expr_step(0,0,0,0,0),expr_step(8,0,0,0,0)])[0]
+}
+#[test]
+fn membership_public_length_selects_exactly_the_active_prefix() {
+    let zero=expression_cell(1,0,11);let one=expression_cell(1,1,12);
+    let mut parameters=[zero;16];parameters[0]=one;
+    let empty=bounded_membership(zero,parameters,0);
+    assert(!empty.value & !empty.is_error);
+    let absent=bounded_membership(zero,parameters,1);
+    assert(!absent.value & !absent.is_error);
+    let present=bounded_membership(zero,parameters,2);
+    assert(present.value & !present.is_error);
+    let first=bounded_membership(one,parameters,1);
+    assert(first.value & !first.is_error);
+}
+#[test]
+fn membership_uses_the_final_list_slot() {
+    let mut parameters=[expression_cell(1,0,11);16];
+    parameters[15]=expression_cell(1,7,12);
+    let result=bounded_membership(parameters[15],parameters,16);
+    assert(result.value & !result.is_error);
+}
+#[test]
+fn membership_empty_and_unbound_error_channels_are_distinct() {
+    let parameters=[expression_cell(1,0,11);16];
+    let empty=bounded_membership(unbound(),parameters,0);
+    assert(!empty.value & !empty.is_error);
+    let nonempty=bounded_membership(unbound(),parameters,1);
+    assert(!nonempty.value & nonempty.is_error);
+}
+#[test(should_fail_with = "IN list capacity")]
+fn membership_cannot_claim_more_than_its_list_bucket() {
+    let _=bounded_membership(expression_cell(1,0,11),[expression_cell(1,0,11);16],17);
+}
+#[test(should_fail_with = "IN length parameter")]
+fn membership_length_index_is_checked() {
+    let _=crate::ops_core_expr::evaluate_indexed(Table {rows:[[unbound()]],len:1},[unbound();16],[0],
+        [expr_step(0,0,0,0,0),expr_step(8,0,1,0,0)]);
+}
+#[test(should_fail_with = "IN term parameters")]
+fn membership_term_range_is_checked() {
+    let _=crate::ops_core_expr::evaluate_indexed(Table {rows:[[unbound()]],len:1},[unbound();16],[0],
+        [expr_step(0,0,0,0,0),expr_step(8,0,0,1,0)]);
+}
+#[test(should_fail_with = "IN exact result")]
+fn membership_cannot_release_a_match_from_inactive_padding() {
+    let mut parameters=[expression_cell(1,0,11);16];parameters[0]=expression_cell(1,1,12);
+    let result=bounded_membership(parameters[1],parameters,1);
+    assert(result.value,"IN exact result");
 }

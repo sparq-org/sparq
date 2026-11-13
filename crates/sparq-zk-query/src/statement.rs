@@ -73,7 +73,6 @@ impl EnvelopeInputs {
         if n > self.holder_issuers.len()
             || (!self.holder_required && self.holder_issuers_present)
             || (!self.holder_issuers_present && n != 0)
-            || (self.holder_issuers_present && n == 0)
             || self.holder_issuers[n..].iter().any(|w| *w != [0; 32])
             || self.holder_issuers[..n]
                 .iter()

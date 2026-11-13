@@ -1,7 +1,7 @@
 # Query compiler agreement
 
 This private test harness compares the pinned native and WebAssembly compilers
-on every generated program marked passing by the query coverage manifest. It
+on every operator program for a plan marked passing by the query coverage manifest. It
 compares the ABI and decoded bytecode, then independently derives a WebAssembly
 verification key and compares its bytes with the native key. This is research
 grade and not externally audited.

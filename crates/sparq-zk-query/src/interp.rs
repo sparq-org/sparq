@@ -88,6 +88,21 @@ pub struct CredentialCells {
     pub quads: Vec<[Cell; 4]>,
 }
 
+/// Complete default and named views. Counts refer to signed input quads.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Dataset {
+    pub(crate) quads: Vec<[Cell; 4]>,
+    pub(crate) counts: Vec<usize>,
+}
+impl Dataset {
+    pub fn quads(&self) -> &[[Cell; 4]] {
+        &self.quads
+    }
+    pub fn credential_counts(&self) -> &[usize] {
+        &self.counts
+    }
+}
+
 pub fn evaluate(
     plan: &Plan,
     credentials: &[CredentialCells],
@@ -106,20 +121,7 @@ pub fn evaluate(
     {
         return Err(Error::Capacity("per-credential quad count".into()));
     }
-    let params: Vec<Option<Cell>> = plan
-        .parameters
-        .iter()
-        .map(|p| match p {
-            Parameter::Term(t) => encoder.encode(t).and_then(|c| {
-                c.validate()?;
-                if !c.bound || c.scope != 0 {
-                    return Err(Error::Invalid("public constant".into()));
-                }
-                Ok(Some(c))
-            }),
-            Parameter::Index(_) => Ok(None),
-        })
-        .collect::<Result<_, _>>()?;
+    let counts = credentials.iter().map(|c| c.quads.len()).collect();
     let mut dataset = vec![];
     let mut seen = BTreeSet::new();
     for (credential_index, credential) in credentials.iter().enumerate() {
@@ -142,6 +144,59 @@ pub fn evaluate(
             if seen.insert(key) {
                 dataset.push(*quad);
             }
+        }
+    }
+    evaluate_dataset(
+        plan,
+        &Dataset {
+            quads: dataset,
+            counts,
+        },
+        encoder,
+    )
+}
+
+/// Evaluate the complete method dataset; ordinary scans use its default merge.
+pub fn evaluate_dataset(
+    plan: &Plan,
+    input_dataset: &Dataset,
+    encoder: &impl EncodeTerm,
+) -> Result<Trace, Error> {
+    plan.bounds.check_credentials(&input_dataset.counts)?;
+    if input_dataset
+        .counts
+        .iter()
+        .zip(plan.credential_quad_bounds())
+        .any(|(n, b)| *n > b as usize)
+    {
+        return Err(Error::Capacity("per-credential quad count".into()));
+    }
+    let params: Vec<Option<Cell>> = plan
+        .parameters
+        .iter()
+        .map(|p| match p {
+            Parameter::Term(t) => encoder.encode(t).and_then(|c| {
+                c.validate()?;
+                if !c.bound || c.scope != 0 {
+                    return Err(Error::Invalid("public constant".into()));
+                }
+                Ok(Some(c))
+            }),
+            Parameter::Index(_) => Ok(None),
+        })
+        .collect::<Result<_, _>>()?;
+    let mut dataset = vec![];
+    let mut seen = BTreeSet::new();
+    for quad in &input_dataset.quads {
+        for cell in quad {
+            cell.validate()?;
+        }
+        if quad[..3].iter().any(|c| !c.bound) || quad[0].kind == 3 || quad[1].kind != 1 {
+            return Err(Error::Invalid("RDF triple positions".into()));
+        }
+        let key = std::array::from_fn::<_, 3, _>(|i| quad[i].identity());
+        if seen.insert(key) {
+            dataset.push(*quad);
         }
     }
     let mut tables: Vec<Table> = vec![];
@@ -207,7 +262,8 @@ pub fn evaluate(
             Operator::Filter(a, e) => {
                 let mut rows = vec![];
                 for row in input(*a) {
-                    let (value, error) = eval(e, schema(*a), row, &params)?.ebv()?;
+                    let (value, error) =
+                        eval(e, schema(*a), row, &params, &plan.parameters)?.ebv()?;
                     if value && !error {
                         rows.push(row.clone());
                     }
@@ -481,7 +537,13 @@ fn compare(op: Compare, a: Value, b: Value) -> Result<Value, Error> {
     Ok(Value::Boolean(false, true))
 }
 
-fn eval(e: &Expr, schema: &[Var], row: &[Cell], params: &[Option<Cell>]) -> Result<Value, Error> {
+fn eval(
+    e: &Expr,
+    schema: &[Var],
+    row: &[Cell],
+    params: &[Option<Cell>],
+    public: &[Parameter],
+) -> Result<Value, Error> {
     Ok(match e {
         Expr::Term(slot) => Value::Term(match slot {
             Slot::Variable(v) => lookup(schema, row, *v),
@@ -489,28 +551,52 @@ fn eval(e: &Expr, schema: &[Var], row: &[Cell], params: &[Option<Cell>]) -> Resu
         }),
         Expr::Compare(op, a, b) => compare(
             *op,
-            eval(a, schema, row, params)?,
-            eval(b, schema, row, params)?,
+            eval(a, schema, row, params, public)?,
+            eval(b, schema, row, params, public)?,
         )?,
         Expr::Not(a) => {
-            let (v, e) = eval(a, schema, row, params)?.ebv()?;
+            let (v, e) = eval(a, schema, row, params, public)?.ebv()?;
             Value::Boolean(!v, e)
         }
         Expr::And(a, b) | Expr::Or(a, b) => {
-            let (a, ae) = eval(a, schema, row, params)?.ebv()?;
-            let (b, be) = eval(b, schema, row, params)?.ebv()?;
+            let (a, ae) = eval(a, schema, row, params, public)?.ebv()?;
+            let (b, be) = eval(b, schema, row, params, public)?.ebv()?;
             if matches!(e, Expr::And(..)) {
                 Value::Boolean(a && b, (ae || be) && !(!a && !ae || !b && !be))
             } else {
                 Value::Boolean(a || b, (ae || be) && !(a && !ae || b && !be))
             }
         }
+        Expr::InList {
+            value,
+            start,
+            count,
+        } => {
+            let Parameter::Index(count) = public[*count as usize] else {
+                return Err(Error::Invalid("IN list length parameter".into()));
+            };
+            if count as usize > crate::plan::IN_CAPACITY {
+                return Err(Error::Capacity("IN list".into()));
+            }
+            let a = eval(value, schema, row, params, public)?;
+            let mut matched = false;
+            let mut error = false;
+            for i in 0..count {
+                let b = params[(*start + i) as usize]
+                    .ok_or_else(|| Error::Invalid("IN term parameter".into()))?;
+                let (v, e) = compare(Compare::Equal, a, Value::Term(b))?.ebv()?;
+                matched |= v && !e;
+                error |= e;
+            }
+            Value::Boolean(matched, error && !matched)
+        }
         Expr::In(a, bs) => {
-            let a = eval(a, schema, row, params)?;
+            let a = eval(a, schema, row, params, public)?;
             let mut matched = false;
             let mut error = false;
             for b in bs {
-                let (v, e) = compare(Compare::Equal, a, eval(b, schema, row, params)?)?.ebv()?;
+                let (v, e) =
+                    compare(Compare::Equal, a, eval(b, schema, row, params, public)?)?.ebv()?;
                 matched |= v && !e;
                 error |= e;
             }

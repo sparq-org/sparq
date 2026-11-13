@@ -38,7 +38,7 @@ fn main(
     ops_core::check_indices(indices, 0);
     let credential_flags = core::ops_core_suite::credential_flags::<1>(credential_count, bounds[0], signature_mode);
     let dataset_start = core::ops_core_suite::empty_dataset::<4>();
-    let opened_0 = core::ops_core_suite::open_one(credential_0, credential_proof_0, counts[0], credential_flags[0], credential_quad_bounds[0], 0, issuer_root);
+    let opened_0 = core::ops_core_suite::open_one(credential_0, credential_proof_0, counts[0], credential_flags[0], credential_quad_bounds[0], 0, issuer_root, request_digest);
     let dataset_0 = core::ops_core_suite::append_credential(dataset_start, opened_0, 0);
     let _dataset = dataset_0;
     core::ops_core_statement::check_suite_dataset([opened_0.message], credential_count, presentation_salt, input_commitment);

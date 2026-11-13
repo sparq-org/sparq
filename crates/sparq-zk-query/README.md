@@ -112,4 +112,4 @@ lane's canonical policy-root module.
 The expression dispatcher calls the shared typed comparison, boolean and
 membership gadgets. Capacity remains separate from SPARQL errors. The corpus
 ratchet independently compares native and WebAssembly bytecode and keys for
-each passing program, and the workflow tests the committed Noir manifests.
+each passing operator program, and the workflow tests the committed Noir manifests.

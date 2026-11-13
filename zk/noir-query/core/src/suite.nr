@@ -18,6 +18,7 @@ pub fn credential_root<let N: u32>(quads: [[TermCell; 4]; N], salts: [Field; N],
     let mut row: [Field; N] = [0; N];
     let mut previous: Field = 0;
     for i in 0..N {
+        let mut value: Field = 0;
         if i < count {
             let quad = quads[i];
             for j in 0..4 { assert(quad[j].bound(), "wrong count"); }
@@ -29,45 +30,45 @@ pub fn credential_root<let N: u32>(quads: [[TermCell; 4]; N], salts: [Field; N],
             if i > 0 { assert(field_lt(previous, q), "quads not strictly increasing"); }
             previous = q;
             assert(salts[i] == leaf_salt(salt, i), "leaf salt not derived from tree salt");
-            row[i] = leaf(q, salt, i);
+            value = leaf(q, salt, i);
         } else {
             for j in 0..4 { quads[i][j].assert_padding(); }
             assert(salts[i] == 0, "non-zero padding");
         }
+        row[i] = value;
     }
     let mut result = row[0];
-    let mut width = N;
-    let mut covered: u32 = 1;
-    // Only log(N) reductions have work. The outer bound is comptime and the
-    // compiler eliminates the empty levels; hashes dominate this relation.
-    for _level in 0..N {
-        if width > 1 {
-            for i in 0..N / 2 {
-                if i < width / 2 { row[i] = Poseidon2::hash([NODE_DOMAIN, row[2 * i], row[2 * i + 1]], 3); }
-            }
-            width = width / 2;
-            covered = covered * 2;
-            if (count > covered / 2) & (count <= covered) { result = row[0]; }
+    let mut depth: u32 = 0;
+    for bit in 0..32 { if (N >> bit) > 1 { depth = depth + 1; } }
+    for level in 0..depth {
+        let width = N >> level;
+        for i in 0..width / 2 {
+            row[i] = Poseidon2::hash([NODE_DOMAIN, row[2 * i], row[2 * i + 1]], 3);
         }
+        let covered = 1 << (level + 1);
+        if (count > covered / 2) & (count <= covered) { result = row[0]; }
     }
     result
 }
 
 /// Both configuration halves are range-constrained by their u128 types.
-pub fn signed_message(salt: Field, count: u32, root: Field, config: [u128; 2]) -> Field {
-    Poseidon2::hash([MESSAGE_DOMAIN, SUITE_ID, salt, count as Field, root, config[0] as Field, config[1] as Field], 7)
+pub fn signed_message(salt: Field, count: u32, root: Field, config: [u128; 2], metadata: Field) -> Field {
+    Poseidon2::hash([MESSAGE_DOMAIN, SUITE_ID, salt, count as Field, root, config[0] as Field, config[1] as Field, metadata], 8)
 }
 
 /// Revealed mode releases only the salted signed message. Configuration is an
 /// agreed public input; salt, terms, count, root and signature remain private.
-pub fn open_credential_revealed<let N: u32>(quads: [[TermCell; 4]; N], salts: [Field; N], salt: Field, count: u32, config: [u128; 2]) -> Field {
-    signed_message(salt, count, credential_root(quads, salts, salt, count), config)
+pub(crate) fn tree_message<let N: u32>(quads: [[TermCell; 4]; N], salts: [Field; N], salt: Field, count: u32, config: [u128; 2], metadata: Field) -> Field {
+    signed_message(salt, count, credential_root(quads, salts, salt, count), config, metadata)
 }
 
 /// Hidden mode returns nothing. The caller exposes the issuer public key and
 /// agreed configuration, and keeps message and all credential material private.
-pub fn open_credential_hidden<let N: u32>(quads: [[TermCell; 4]; N], salts: [Field; N], salt: Field, count: u32, config: [u128; 2],
-    pk: Point, r: Point, s: Field, e: Field, e_k: Field) {
-    let message = open_credential_revealed(quads, salts, salt, count, config);
+pub(crate) fn check_credential_signature<let N: u32>(quads: [[TermCell; 4]; N], salts: [Field; N], salt: Field, count: u32, config: [u128; 2],
+    pk: Point, r: Point, s: Field, e: Field, e_k: Field, metadata: Field) {
+    let message = tree_message(quads, salts, salt, count, config, metadata);
     schnorr_verify(pk, r, s, e, e_k, message);
 }
+
+// Public credential entry points authenticate the envelope metadata as well.
+pub use crate::suite_metadata::{open_credential_hidden, open_credential_revealed};

@@ -506,8 +506,25 @@ crates = ["sparq-zk-query"]
 
 [[map]]
 pattern = "zk/compose/compose_core/**"
-readers = ["sparq-zk-query"]
+readers = ["sparq-zk-query", "sparq-merkle-suite"]
 
 [[map]]
 pattern = "zk/dual-leaf-v2/**"
 readers = ["sparq-zk-query"]
+
+# sparq-merkle-suite's parity test compiles the frozen zkVM model's SHA-256 suite
+# source and reads its vectors, so a change to either re-runs the parity test.
+[[map]]
+pattern = "zk/sparql-evaluator/model/src/merkle_suite.rs"
+crates = ["sparq-merkle-suite"]
+
+[[map]]
+pattern = "zk/sparql-evaluator/model/tests/merkle_suite.rs"
+crates = ["sparq-merkle-suite"]
+
+# sparq-merkle-suite's live tests compile generated programs against compose_core.
+# The directory entry attributes the library root the tests name; the shared readers
+# entry above unions the crate into the run set for every file beneath it.
+[[map]]
+pattern = "zk/compose/compose_core"
+crates = ["sparq-merkle-suite"]

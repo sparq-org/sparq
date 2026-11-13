@@ -165,5 +165,15 @@ The canonical policy-root module remains a neighbouring-lane integration.
 
 Expression evaluation uses the shared typed gadgets, with a separate capacity
 channel. The generated-query coverage ratchet requires native and WebAssembly
-ABI, bytecode and independently derived key agreement for every passing program.
+ABI, bytecode and independently derived key agreement for every passing operator
+program. Authenticated delivery uses the native catalogue and requires native
+compile/key determinism; the Node package refuses unknown plans or changed keys.
 Isolated gadget evidence stays distinct from generated-query and proof evidence.
+
+The credential suite now authenticates proof metadata. `Credential::metadata`,
+`Credential::signed_message` and `credential::dataset_commitment` return `Result`;
+propagate their errors. Witness generation carries creation and verification
+method as private openings and uses the authenticated opener's returned message.
+`credential::credential_graph(request_digest, index)` shares the suite's
+presentation-local graph-name construction. Credentials using the reserved
+`vcq:verifiedIssuer` predicate are refused before dataset assembly.

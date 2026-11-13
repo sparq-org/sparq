@@ -288,13 +288,20 @@ fn corpus_cases_execute_with_engine_expected_result_and_altered_witness_controls
             .or_insert_with(|| Workspace::new(&package));
         let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
         if entry["status"] == "passing" && compiler_agreement.insert(plan.hash()) {
-            let artifact = driver.compile().unwrap();
+            // The catalogue design retains compiler agreement on operator
+            // programs; authenticated programs are natively compiled/keyed.
+            let agreement_package =
+                sparq_zk_query::codegen::generate_operator_fixture(&plan).unwrap();
+            let agreement_workspace = Workspace::new(&agreement_package);
+            let agreement_driver =
+                ProgramProver::new(&agreement_workspace.0, &agreement_package.name).unwrap();
+            let artifact = agreement_driver.compile().unwrap();
             let compile_only = support::live_tool(&gate, "node")
                 .arg(root().join("zk/noir-query/compiler-agreement/check.mjs"))
-                .arg(workspace.0.join(&package.name))
+                .arg(agreement_workspace.0.join(&agreement_package.name))
                 .arg(&artifact)
                 .arg("--compile-only")
-                .arg(workspace.0.join("wasm-cache"))
+                .arg(agreement_workspace.0.join("wasm-cache"))
                 .output()
                 .unwrap();
             assert!(
@@ -304,15 +311,17 @@ fn corpus_cases_execute_with_engine_expected_result_and_altered_witness_controls
                 String::from_utf8_lossy(&compile_only.stdout),
                 String::from_utf8_lossy(&compile_only.stderr)
             );
-            let key = driver.canonical_vk(&workspace.0).unwrap();
-            let key_file = workspace.0.join("agreement.vk");
+            let key = agreement_driver
+                .canonical_vk(&agreement_workspace.0)
+                .unwrap();
+            let key_file = agreement_workspace.0.join("agreement.vk");
             std::fs::write(&key_file, key).unwrap();
             let out = support::live_tool(&gate, "node")
                 .arg(root().join("zk/noir-query/compiler-agreement/check.mjs"))
-                .arg(workspace.0.join(&package.name))
+                .arg(agreement_workspace.0.join(&agreement_package.name))
                 .arg(artifact)
                 .arg(key_file)
-                .arg(workspace.0.join("wasm-cache"))
+                .arg(agreement_workspace.0.join("wasm-cache"))
                 .output()
                 .unwrap();
             assert!(
@@ -389,8 +398,8 @@ fn corpus_cases_execute_with_engine_expected_result_and_altered_witness_controls
         let changed = input.replace("request_digest = [7,", "request_digest = [8,");
         assert!(driver.execute(&changed, "altered_public").is_err());
     }
-    // Every passing case was visited, and each distinct generated program
-    // derived its bytecode and key with both pinned implementations.
+    // Every passing case was visited; each distinct operator program derived
+    // its bytecode and key with both pinned implementations.
     let passing_programs: std::collections::BTreeSet<_> = corpus["cases"]
         .as_array()
         .unwrap()

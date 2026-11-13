@@ -340,3 +340,70 @@ fn seeded_engine_interpreter_and_circuit_differential() {
     }
     support::complete(gate);
 }
+
+#[test]
+#[ignore = "requires the pinned native query toolchain"]
+fn constant_membership_length_is_data_and_inactive_values_cannot_match() {
+    use sparq_zk_query::{
+        codegen::generate_operator_fixture,
+        interp::{CredentialCells, ResultValue},
+    };
+    let Some(gate) = support::gate(
+        "constant_membership_length_is_data_and_inactive_values_cannot_match",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
+    let b = Bounds {
+        credentials: 1,
+        quads_per_credential: 4,
+        rows_per_table: 2,
+    };
+    let a = lower("ASK {?s <urn:p> ?x FILTER(?x IN(7,0))}", b).unwrap();
+    let short = lower("ASK {?s <urn:p> ?x FILTER(?x IN(7))}", b).unwrap();
+    let package = generate_operator_fixture(&a).unwrap();
+    assert_eq!(a.hash(), short.hash());
+    assert_eq!(package, generate_operator_fixture(&short).unwrap());
+    let data = vec![CredentialCells {
+        quads: vec![fixture_support::quad(
+            &fixture_support::iri("urn:s"),
+            &fixture_support::iri("urn:p"),
+            &fixture_support::integer(0),
+        )],
+    }];
+    let yes = sparq_zk_query::interp::evaluate(&a, &data, &FixtureEncoder).unwrap();
+    let no = sparq_zk_query::interp::evaluate(&short, &data, &FixtureEncoder).unwrap();
+    assert_eq!(yes.result, ResultValue::Ask(true));
+    assert_eq!(no.result, ResultValue::Ask(false));
+    let workspace = Workspace::new(&package);
+    let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+    for (plan, trace, tag) in [
+        (&a, &yes, "active_suffix"),
+        (&short, &no, "inactive_suffix"),
+    ] {
+        let input = sparq_zk_query::witness::prover_toml(
+            plan,
+            &data,
+            &FixtureEncoder,
+            trace,
+            [7; 32],
+            [3; 32],
+        )
+        .unwrap();
+        driver.execute(&input, tag).unwrap();
+    }
+    // The parameter cells are identical; only the stored list length changes.
+    // Rebind the complete statement while retaining the incompatible old trace.
+    let altered = sparq_zk_query::witness::prover_toml(
+        &short,
+        &data,
+        &FixtureEncoder,
+        &yes,
+        [7; 32],
+        [3; 32],
+    )
+    .unwrap();
+    let error = driver.execute(&altered, "inactive_match").unwrap_err();
+    assert!(error.to_string().contains("operator length"), "{error}");
+    support::complete(gate);
+}

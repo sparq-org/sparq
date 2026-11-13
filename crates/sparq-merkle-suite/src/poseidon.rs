@@ -180,8 +180,14 @@ pub fn root(quads: &[Fr], salt: Fr) -> Result<Fr, Error> {
 
 /// Signed message, binding suite, private salt, exact count, salted root, and
 /// both unsigned halves of the SHA-256 canonical configuration digest.
-pub fn signed_message(salt: Fr, count: u32, root: Fr, configuration: &[u8; 32]) -> Fr {
-    message_for_suite(suite_id(), salt, count, root, configuration)
+pub fn signed_message(
+    salt: Fr,
+    count: u32,
+    root: Fr,
+    configuration: &[u8; 32],
+    metadata: Fr,
+) -> Fr {
+    message_for_suite(suite_id(), salt, count, root, configuration, metadata)
 }
 
 /// Explicit suite slot for cross-member negative controls and future members.
@@ -191,6 +197,7 @@ pub fn message_for_suite(
     count: u32,
     root: Fr,
     configuration: &[u8; 32],
+    metadata: Fr,
 ) -> Fr {
     poseidon2::hash(&[
         Fr::from(MESSAGE_DOMAIN),
@@ -200,6 +207,7 @@ pub fn message_for_suite(
         root,
         Fr::from_be_bytes_mod_order(&configuration[..16]),
         Fr::from_be_bytes_mod_order(&configuration[16..]),
+        metadata,
     ])
 }
 
@@ -245,7 +253,11 @@ pub fn issue(
     let count = u32::try_from(rows.len()).map_err(|_| Error("quad count exceeds member range"))?;
     let root = root(&rows.iter().map(|(q, _)| *q).collect::<Vec<_>>(), salt)?;
     let digest: [u8; 32] = Sha256::digest(proof_config.as_bytes()).into();
-    let signature = sig::sign_deterministic(key, &signed_message(salt, count, root, &digest));
+    let metadata = crate::metadata::from_configuration(&proof_config, &key.public_key())?;
+    let signature = sig::sign_deterministic(
+        key,
+        &signed_message(salt, count, root, &digest, metadata.digest),
+    );
     Ok(Credential {
         document: rows.iter().map(|(_, line)| format!("{line}\n")).collect(),
         proof_config,
@@ -260,6 +272,7 @@ pub fn issue(
 /// canonical label, key, order, tree, count, configuration, and signed message.
 pub fn verify(credential: &Credential, key: &sig::PublicKey) -> bool {
     let check = || -> Result<Fr, Error> {
+        let salt = credential.salt;
         let proof_config =
             crate::canonical_config(&credential.proof_config, SCHNORR_POSEIDON2_MERKLE_2026)?;
         if proof_config != credential.proof_config {
@@ -276,15 +289,16 @@ pub fn verify(credential: &Credential, key: &sig::PublicKey) -> bool {
             .for_slice(credential.document.as_bytes())
             .map(|q| quad_hash(&q.map_err(|_| Error("quad parsing rejected"))?))
             .collect::<Result<Vec<_>, _>>()?;
-        if qs.len() != credential.count as usize || root(&qs, credential.salt)? != credential.root {
+        if qs.len() != credential.count as usize || root(&qs, salt)? != credential.root {
             return Err(Error("count or root differs"));
         }
         let digest: [u8; 32] = Sha256::digest(proof_config.as_bytes()).into();
         Ok(signed_message(
-            credential.salt,
+            salt,
             credential.count,
             credential.root,
             &digest,
+            crate::metadata::from_configuration(&proof_config, key)?.digest,
         ))
     };
     check().is_ok_and(|message| sig::verify(key, &message, &credential.signature))
@@ -297,4 +311,25 @@ pub fn field_bytes(field: Fr) -> [u8; 32] {
         .to_bytes_be()
         .try_into()
         .expect("BN254 field byte width")
+}
+
+/// Verify the credential before exposing its proof metadata to an envelope caller.
+pub fn verify_and_open(
+    credential: &Credential,
+    key: &sig::PublicKey,
+) -> Result<crate::metadata::Metadata, Error> {
+    if !verify(credential, key) {
+        return Err(Error("credential verification failed"));
+    }
+    crate::metadata::from_configuration(&credential.proof_config, key)
+}
+
+/// Dataset cells with the nonzero scope derived from a fixed credential position.
+pub fn credential_cells(quad: &Quad, index: u32) -> Result<[TermCell; 4], Error> {
+    quad_cells(
+        quad,
+        index
+            .checked_add(1)
+            .ok_or(Error("credential scope capacity"))?,
+    )
 }

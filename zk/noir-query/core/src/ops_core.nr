@@ -5,6 +5,7 @@ use crate::table::{TermCell, Table, unbound, same_term, same_row, empty, append,
 pub struct Dataset<let D: u32> {
     pub rows: [[TermCell; 3]; D],
     pub active: [bool; D],
+    pub graphs: [TermCell; D],
 }
 
 /// Supplied-cell assembly for isolated operator fixtures.
@@ -16,7 +17,7 @@ pub fn open_dataset<let C: u32, let N: u32, let D: u32>(
     assert((bounds[0] > 0) & (bounds[0] <= C), "credential request bound");
     assert((bounds[1] > 0) & (bounds[1] <= N), "quad request bound");
     assert(credential_count <= bounds[0], "credential count");
-    let mut dataset = Dataset {rows: [[unbound(); 3]; D], active: [false; D]};
+    let mut dataset = Dataset {rows: [[unbound(); 3]; D], active: [false; D], graphs: [unbound();D]};
     for c in 0..C {
         assert(counts[c] <= bounds[1], "quad count");
         assert((c < credential_count) | (counts[c] == 0), "credential padding count");

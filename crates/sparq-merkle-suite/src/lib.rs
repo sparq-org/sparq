@@ -4,6 +4,7 @@
 //! original SHA-256 implementation; the parity test exercises the existing vectors.
 
 pub mod keys;
+pub mod metadata;
 pub mod poseidon;
 pub mod sha256;
 

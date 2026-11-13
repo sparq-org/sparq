@@ -31,7 +31,7 @@ fn supplied_trace_renders_all_tables_and_keeps_the_public_request() {
         prover_toml(&p, &data, &FixtureEncoder, &trace, [9; 32], [3; 32]).unwrap()
     );
     assert!(a.contains("counts = [2, 0]\ncredential_count = 1\n"));
-    assert!(a.contains("indices = [1, 1]"));
+    assert!(a.contains("indices = [2, 1, 1]"));
     assert!(a.contains("request_digest = [9, 9, 9,"));
     for i in 0..p.nodes().len() {
         assert!(a

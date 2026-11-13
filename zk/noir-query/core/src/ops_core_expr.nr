@@ -111,7 +111,7 @@ fn compare(op: u8, a: Value, b: Value, membership: bool) -> (Lane<bool>, bool) {
         else { expr_compare::value_compare(left, right, op) }
     } else if !a.is_boolean & !b.is_boolean {
         let a = a.term; let b = b.term;
-        if !a.bound | !b.bound { return truth(false, true); }
+        if !a.bound | !b.bound { truth(false, true) } else {
         if a.bound & b.bound & (a.kind == 3) & (b.kind == 3) {
             assert((a.key_class != 2) & (b.key_class != 2), "floating-point comparison not yet supported");
             assert((op != 0) | ((a.key_class != 0) & (b.key_class != 0)), "literal equality without a supported value key");
@@ -145,6 +145,7 @@ fn compare(op: u8, a: Value, b: Value, membership: bool) -> (Lane<bool>, bool) {
         // Credential-local blank labels retain their distinct scopes.
         if op == 0 { expr_core::logical_and(result, truth(a.scope == b.scope, false)) }
         else { result }
+        }
     } else {
         assert(false, "comparison of boolean expression and term not yet supported");
         truth(false, true)
@@ -154,6 +155,11 @@ fn compare(op: u8, a: Value, b: Value, membership: bool) -> (Lane<bool>, bool) {
 pub fn evaluate<let R: u32, let V: u32, let P: u32, let E: u32>(
     input: Table<R, V>, parameters: [TermCell; P], steps: [Step; E],
 ) -> [Boolean; R] {
+    evaluate_indexed(input,parameters,[0],steps)
+}
+pub fn evaluate_indexed<let R:u32, let V:u32, let P:u32, let I:u32, let E:u32>(
+    input:Table<R,V>, parameters:[TermCell;P], indices:[u32;I], steps:[Step;E],
+) -> [Boolean;R] {
     std::static_assert(E > 0, "expression root");
     let mut results = [Boolean {value: false, is_error: true}; R];
     for r in 0..R {
@@ -169,6 +175,20 @@ pub fn evaluate<let R: u32, let V: u32, let P: u32, let E: u32>(
                 values[s] = term(parameters[step.parameter]);
             } else if step.op == 7 {
                 values[s] = boolean(truth(false, false));
+            } else if step.op == 8 {
+                assert(step.a < s, "expression topology");
+                assert(step.b < I, "IN length parameter");
+                assert((step.parameter as u64 + 16) <= P as u64, "IN term parameters");
+                let count = indices[step.b];
+                assert(count <= 16, "IN list capacity");
+                let mut result = truth(false,false);
+                for i in 0..16 {
+                    if i < count {
+                        result = expr_core::logical_or(result,
+                            compare(0,values[step.a],term(parameters[step.parameter+i]),true));
+                    }
+                }
+                values[s] = boolean(result);
             } else {
                 assert((step.a < s) & (step.b < s), "expression topology");
                 let a = values[step.a]; let b = values[step.b];

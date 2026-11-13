@@ -57,12 +57,48 @@ impl Builder {
             E::And(a, b) => Expr::And(boxed(self, a)?, boxed(self, b)?),
             E::Or(a, b) => Expr::Or(boxed(self, a)?, boxed(self, b)?),
             E::Not(a) => Expr::Not(boxed(self, a)?),
-            E::In(a, bs) => Expr::In(
-                boxed(self, a)?,
-                bs.iter()
-                    .map(|b| self.expression(b))
-                    .collect::<Result<_, _>>()?,
-            ),
+            E::In(a, bs) => {
+                if bs.len() > IN_CAPACITY {
+                    return Err(Error::Capacity("IN list".into()));
+                }
+                let constants = bs
+                    .iter()
+                    .map(|b| match b {
+                        E::NamedNode(n) => Some(oxrdf::Term::NamedNode(n.clone())),
+                        E::Literal(l) => Some(oxrdf::Term::Literal(l.clone())),
+                        _ => signed_constant(b).map(oxrdf::Term::Literal),
+                    })
+                    .collect::<Option<Vec<_>>>();
+                if let Some(constants) = constants {
+                    let value = boxed(self, a)?;
+                    let start = self.plan.parameters.len() as u32;
+                    for i in 0..IN_CAPACITY {
+                        let term = constants.get(i).cloned().unwrap_or_else(|| {
+                            oxrdf::Literal::new_typed_literal(
+                                "0",
+                                oxrdf::NamedNode::new_unchecked(
+                                    "http://www.w3.org/2001/XMLSchema#integer",
+                                ),
+                            )
+                            .into()
+                        });
+                        self.parameter(Parameter::Term(term));
+                    }
+                    let count = self.parameter(Parameter::Index(constants.len() as u32));
+                    Expr::InList {
+                        value,
+                        start,
+                        count,
+                    }
+                } else {
+                    Expr::In(
+                        boxed(self, a)?,
+                        bs.iter()
+                            .map(|b| self.expression(b))
+                            .collect::<Result<_, _>>()?,
+                    )
+                }
+            }
             E::FunctionCall(f, _) => return Err(Error::Unsupported(f.to_string())),
             E::Exists(_) => return Err(Error::Unsupported("EXISTS / NOT EXISTS".into())),
             E::SameTerm(_, _) => return Err(Error::Unsupported("sameTerm".into())),

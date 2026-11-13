@@ -1,4 +1,5 @@
 //! Raw ABI openings. Keep this witness type private at a query entry point.
+use crate::suite_constants::{DATATYPE_CAPACITY, LANGUAGE_CAPACITY, KEY_BYTES};
 use std::collections::bounded_vec::BoundedVec;
 use crate::term::{TermCell, open_term, padding};
 
@@ -7,11 +8,11 @@ pub struct TermOpening<let L: u32> {
     pub kind: u8,
     pub lexical: [u8; L],
     pub lexical_len: u32,
-    pub datatype: [u8; 128],
+    pub datatype: [u8; DATATYPE_CAPACITY],
     pub datatype_len: u32,
-    pub language: [u8; 64],
+    pub language: [u8; LANGUAGE_CAPACITY],
     pub language_len: u32,
-    pub key: [u8; 31],
+    pub key: [u8; KEY_BYTES],
 }
 
 pub fn open_cell<let L: u32>(raw: TermOpening<L>, credential: u32) -> TermCell {
@@ -21,7 +22,7 @@ pub fn open_cell<let L: u32>(raw: TermOpening<L>, credential: u32) -> TermCell {
             BoundedVec::from_parts_unchecked(raw.language, raw.language_len), raw.key, credential)
     } else {
         assert((raw.kind == 0) & (raw.lexical_len == 0) & (raw.datatype_len == 0) & (raw.language_len == 0), "non-zero padding");
-        assert((raw.lexical == [0; L]) & (raw.datatype == [0; 128]) & (raw.language == [0; 64]) & (raw.key == [0; 31]), "non-zero padding");
+        assert((raw.lexical == [0; L]) & (raw.datatype == [0; DATATYPE_CAPACITY]) & (raw.language == [0; LANGUAGE_CAPACITY]) & (raw.key == [0; KEY_BYTES]), "non-zero padding");
         padding()
     }
 }

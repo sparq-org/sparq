@@ -166,7 +166,7 @@ impl Compiler {
             .collect::<Result<Vec<_>, _>>()?;
         let trace = interp::evaluate(&plan, &cells, encoder)?;
         let result = Answer::release(&trace.result, &plan, vocabulary, encoder)?;
-        let input_commitment = crate::credential::dataset_commitment(credentials, salt);
+        let input_commitment = crate::credential::dataset_commitment(credentials, salt)?;
         agreement(request, input_commitment)?;
         let statement = Statement {
             request_digest: request.digest(),

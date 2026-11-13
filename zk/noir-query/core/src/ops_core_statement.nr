@@ -93,7 +93,7 @@ pub fn envelope_words(
 ) -> [Field;17] {
     assert(holder_issuer_count <= 4, "holder issuer capacity");
     assert(holder_required | !holder_issuers_present, "inactive holder policy");
-    assert(holder_issuers_present == (holder_issuer_count != 0), "holder issuer presence");
+    assert(holder_issuers_present | (holder_issuer_count == 0), "holder issuer presence");
     for i in 0..4 {
         if i < holder_issuer_count {
             assert(holder_issuers[i] != 0, "zero holder issuer");
@@ -212,4 +212,11 @@ fn authenticated_select_binds_the_issuer_root() {
 fn authenticated_select_binds_each_quad_limit() {
     bind_select_authenticated(issuer_only_envelope(9),[3],[0;32],[0;32],1,[1,4,2],[crate::table::unbound()],[0],crate::table::empty::<2,1>(),
         0x2838f9a4ff1acbd2604d8b50f2ddd4e8073784c67a8c56d8a7368d13a0239b5d);
+}
+
+#[test]
+fn explicit_empty_holder_scope_differs_from_all_trusted_issuers() {
+    let all=envelope_words(9,4,true,false,0,[0;4],false,false,0,0,false,0,false,0);
+    let none=envelope_words(9,4,true,true,0,[0;4],false,false,0,0,false,0,false,0);
+    assert(all[3] == 0);assert(none[3] == 1);
 }

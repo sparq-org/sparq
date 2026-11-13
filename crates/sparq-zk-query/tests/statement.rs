@@ -195,3 +195,14 @@ fn envelope_policy_has_canonical_optional_values_and_binds_wide_times() {
         .unwrap();
     assert_ne!(before.last(), after.last());
 }
+
+#[test]
+fn explicit_empty_holder_scope_is_distinct_from_an_absent_scope() {
+    let mut all = sparq_zk_query::statement::EnvelopeInputs::issuer_only([7; 32]);
+    all.holder_required = true;
+    let mut none = all.clone();
+    none.holder_issuers_present = true;
+    assert!(all.words().is_ok());
+    assert!(none.words().is_ok());
+    assert_ne!(all.words().unwrap(), none.words().unwrap());
+}
