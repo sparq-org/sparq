@@ -29,6 +29,7 @@ Read [`skills/SKILL.md`](skills/SKILL.md) first — it is the router skill that 
 - [`skills/helm-deploy/SKILL.md`](skills/helm-deploy/SKILL.md) — deploy either native server to Kubernetes with the secure-default Helm chart.
 - [`skills/javascript-wasm/SKILL.md`](skills/javascript-wasm/SKILL.md) — the `@sparq-org/sparq` npm package.
 - [`skills/python/SKILL.md`](skills/python/SKILL.md) — the `sparq` Python package.
+- [`skills/zk-result-javascript/SKILL.md`](skills/zk-result-javascript/SKILL.md) — Node successful-result proofs with bundled artifacts; research grade, not externally audited.
 - [`skills/verifiable-aggregate/SKILL.md`](skills/verifiable-aggregate/SKILL.md) — detached research-grade signed-commitment joint count, sum and comparison (Rust / Node WebAssembly).
 - [`skills/vc-api/SKILL.md`](skills/vc-api/SKILL.md) — the opt-in credential HTTP test endpoint and W3C suite runner. See the [Vercel runbook](crates/sparq-vc/vercel/README.md).
 

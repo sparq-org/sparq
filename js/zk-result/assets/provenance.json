@@ -1,0 +1,24 @@
+{
+  "sourceCommit": "0967474ec3c212ff6c0725d47248a885ddce0390",
+  "uncommittedSourceChanges": true,
+  "toolchain": {
+    "nargo": "1.0.0-beta.21",
+    "bb": "5.0.0-nightly.20260324"
+  },
+  "members": [
+    {
+      "member": "result_v5_k1_n16_p3_r4_f0_d10",
+      "acir": "result_v5_k1_n16_p3_r4_f0_d10.json",
+      "vk": "result_v5_k1_n16_p3_r4_f0_d10.vk",
+      "acirSha256": "cdafe6de89b75ef908afd96c933b912d869f8b154030f740620767413949968e",
+      "vkSha256": "2981d456ba8f5d2af50ee1e50741cd4a1573065378fbce552d66f11ca9edf945"
+    },
+    {
+      "member": "result_v5_k2_n16_p3_r4_f0_d10",
+      "acir": "result_v5_k2_n16_p3_r4_f0_d10.json",
+      "vk": "result_v5_k2_n16_p3_r4_f0_d10.vk",
+      "acirSha256": "47273d4ed64ea7aee74f16549175231211eefa65edabecb0c2dfcf305c297d9d",
+      "vkSha256": "f516ad7a18a86419cc0ad8b92a8479267965cdc7a9f3de27091a3df02cc093d1"
+    }
+  ]
+}

@@ -131,6 +131,12 @@ differential-smoke = ["sparq-core", "sparq-engine", "sparq-bench"]
 pattern = "zk/sparql-evaluator/fixtures/conformance/raw-literal-whitespace.json"
 crates = ["sparq-engine"]
 
+# The JS result package's compiled circuit artifacts are read by the wasm
+# crate's ABI test (include_str!), so an artifact change re-runs it.
+[[map]]
+pattern = "js/zk-result/assets/**"
+crates = ["sparq-zk-result-wasm"]
+
 [[map]]
 pattern = "AGENTS.md"
 crates = ["sparq-kb"]

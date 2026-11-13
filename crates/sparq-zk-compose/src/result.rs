@@ -17,6 +17,7 @@
 //! Public predicates run in the independent verifier. An all-public predicate
 //! query selects the member without any numeric predicate circuitry.
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::driver::{CircuitProver, DriverError};
 use crate::manifest::{DisclosedTerm, FieldHex, StatusListSnapshot};
 use crate::planner::signed::{NumericProfile, SignedDisclosureQuery};
@@ -27,7 +28,9 @@ use crate::planner::{
 use crate::revocation::{
     accepted_set_root, accepted_set_witness, merkle_root, merkle_witness, AcceptedStatusEntry,
 };
-use crate::verifier::{SeenNonces, VerifierNonce};
+use crate::verifier::VerifierNonce;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::verifier::SeenNonces;
 use oxrdf::{NamedOrBlankNode, Term, Triple};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -41,7 +44,9 @@ use sparq_zk::field::{
 };
 use sparq_zk::sig::{self, PublicKey, Signature};
 use std::collections::{BTreeMap, BTreeSet};
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
+#[cfg(not(target_arch = "wasm32"))]
 use std::process::Command;
 
 /// Maximum canonical nonnegative private integer accepted by the full-width profile.
@@ -435,7 +440,9 @@ pub struct ResultWork {
 pub struct PreparedResult {
     presentation: ResultPresentation,
     package: &'static str,
+    #[cfg(not(target_arch = "wasm32"))]
     toml: String,
+    witness_inputs: BTreeMap<String, Value>,
     public_inputs: Vec<u8>,
     work: ResultWork,
 }
@@ -448,6 +455,7 @@ pub enum ResultError {
     /// Search ended before finding a complete feasible plan; infeasibility is unknown.
     SearchExhausted,
     /// Prover/backend failure; never interpreted as successful verification.
+    #[cfg(not(target_arch = "wasm32"))]
     Driver(DriverError),
 }
 
@@ -459,11 +467,13 @@ impl std::fmt::Display for ResultError {
                 f,
                 "successful-result search exhausted without a feasible plan"
             ),
+            #[cfg(not(target_arch = "wasm32"))]
             Self::Driver(e) => e.fmt(f),
         }
     }
 }
 impl std::error::Error for ResultError {}
+#[cfg(not(target_arch = "wasm32"))]
 impl From<DriverError> for ResultError {
     fn from(e: DriverError) -> Self {
         Self::Driver(e)
@@ -1663,6 +1673,7 @@ fn prepare_result_contract(
             fields.push(("date_literals", json!(date_literals)));
         }
     }
+    #[cfg(not(target_arch = "wasm32"))]
     let toml = fields
         .iter()
         .map(|(name, value)| format!("{name} = {}\n", toml_witness_value(value)))
@@ -1679,7 +1690,9 @@ fn prepare_result_contract(
     Ok(PreparedResult {
         presentation,
         package: statement.package,
+        #[cfg(not(target_arch = "wasm32"))]
         toml,
+        witness_inputs: fields.into_iter().map(|(name, value)| (name.to_owned(), toml_witness_value(&value))).collect(),
         public_inputs,
         work,
     })
@@ -1699,6 +1712,7 @@ fn toml_witness_value(value: &Value) -> Value {
 }
 
 // beadzkp-13.5: exact version field, not a substring of lossy stdout.
+#[cfg(not(target_arch = "wasm32"))]
 fn pinned_toolchain() -> Result<(), ResultError> {
     for (tool, version) in crate::toolchain::PINNED_TOOLS {
         let out = Command::new(tool)
@@ -1713,6 +1727,26 @@ fn pinned_toolchain() -> Result<(), ResultError> {
 }
 
 impl PreparedResult {
+    /// Exact private input map for the selected circuit ABI. Contains credential secrets.
+    pub fn witness_inputs(&self) -> &BTreeMap<String, Value> {
+        &self.witness_inputs
+    }
+
+    /// Canonical member derived by the shared relation.
+    pub fn member(&self) -> &str {
+        self.package
+    }
+
+    /// Public presentation with an empty proof, ready for a subprocess-free backend.
+    pub fn presentation_skeleton(&self) -> &ResultPresentation {
+        &self.presentation
+    }
+
+    /// Independently derived public input bytes in circuit ABI order.
+    pub fn public_inputs(&self) -> &[u8] {
+        &self.public_inputs
+    }
+
     /// Returns prover-local work counts without any hidden term values.
     pub fn work(&self) -> &ResultWork {
         &self.work
@@ -1726,6 +1760,7 @@ impl PreparedResult {
     /// # Errors
     /// Rejects mismatched toolchain versions, invalid tags, unsatisfiable
     /// witnesses, backend failures, and public-input serialization drift.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn prove(
         &self,
         prover: &CircuitProver,
@@ -1757,6 +1792,48 @@ pub struct VerifiedResult {
     pub rows: Vec<BTreeMap<String, Term>>,
 }
 
+/// Independently reconstructed successful-result public inputs and canonical member.
+#[derive(Debug)]
+pub struct ReconstructedResult {
+    /// Member selected from the expected query and verifier policy.
+    pub member: &'static str,
+    /// Public inputs in the exact circuit ABI order, big-endian field words.
+    pub public_inputs: Vec<u8>,
+    /// Released mappings admitted by the shared verifier checks.
+    pub released: Vec<BTreeMap<String, Term>>,
+}
+
+fn expected_statement(
+    expected_query: &str,
+    presentation: &ResultPresentation,
+    policy: &ResultPolicy,
+    nonce: &VerifierNonce,
+) -> Result<PublicStatement, ResultError> {
+    if presentation.query != expected_query {
+        return Err(reject("query differs from relying-party request"));
+    }
+    public_statement(presentation, policy, nonce)
+}
+
+/// Runs the same independent statement reconstruction used by the native verifier.
+///
+/// This performs no proof verification and grants no acceptance on its own.
+/// # Errors
+/// Rejects mismatched query, challenge, policy, released terms, version or capacity.
+pub fn reconstruct_result_public_inputs(
+    expected_query: &str,
+    presentation: &ResultPresentation,
+    policy: &ResultPolicy,
+    nonce: &VerifierNonce,
+) -> Result<ReconstructedResult, ResultError> {
+    let statement = expected_statement(expected_query, presentation, policy, nonce)?;
+    Ok(ReconstructedResult {
+        member: statement.package,
+        public_inputs: public_bytes(&statement.fields)?,
+        released: statement.rows,
+    })
+}
+
 /// Verifies a released result against the relying party's exact request and policy.
 ///
 /// Re-parses the query, checks public predicates, reconstructs every public input
@@ -1766,6 +1843,7 @@ pub struct VerifiedResult {
 ///
 /// # Errors
 /// Rejects any statement, policy, nonce, proof or pinned-toolchain mismatch.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn verify_result(
     expected_query: &str,
     presentation: &ResultPresentation,
@@ -1775,10 +1853,7 @@ pub fn verify_result(
     prover: &CircuitProver,
     work_dir: &Path,
 ) -> Result<VerifiedResult, ResultError> {
-    if presentation.query != expected_query {
-        return Err(reject("query differs from relying-party request"));
-    }
-    let statement = public_statement(presentation, policy, nonce)?;
+    let statement = expected_statement(expected_query, presentation, policy, nonce)?;
     verify_statement(
         expected_query,
         &presentation.proof,
@@ -1790,6 +1865,7 @@ pub fn verify_result(
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn verify_statement(
     expected_query: &str,
     proof: &[u8],

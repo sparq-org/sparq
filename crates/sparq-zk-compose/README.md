@@ -8,8 +8,8 @@ and verifies one (`verifier::verify_manifest`). `capture` packages native per-ci
 With `dual-leaf`, `ScanV2Dl { k: 1, n: 16, r: 4 }` and `JoinEqV2Dl { n_a: 16, n_b: 16 }` select the two component-witnessed V2 packages only under `DualLeafV2`; opaque `Scan`/`JoinEq` refuse V2 and retain string-canonical / legacy V1 legality. V2 ids refuse every other method and cannot resolve without an authenticated method. Extended fragments still require string-canonical commitments; value-FILTER sub-proofs remain refused at stage 0. No value gate opens.
 `CircuitId::package()` returns `Result<String, CircuitIdError>`; checked constructors, `FromStr`, serde and driver entry points refuse uncompiled V2 shapes with `UncompiledV2Member`. The opaque renderer returns `V2ComponentsRequired`; raw-driver component witnesses are required. See the [skill](../../skills/zk-query-proofs/SKILL.md) for the API and scope.
 
-> **Internal crate — not published** to crates.io (`publish = false`): nothing in
-> the workspace depends on it, so default and wasm builds are byte-identical either way.
+> **Internal crate — not published** to crates.io (`publish = false`). Core/default members do not depend on it.
+> The separate [result host adapter](../sparq-zk-result-wasm) opts in; the lean wasm package does not depend on it.
 
 <!-- separate, distinct blockquotes: the internal-crate note above vs. the soundness caveat below (MD028) -->
 

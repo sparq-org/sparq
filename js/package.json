@@ -61,7 +61,7 @@
     "typecheck": "tsc --noEmit",
     "typecheck:conformance": "tsc --noEmit -p tsconfig.conformance.json",
     "pretest": "node guardrails/check-test-deps.mjs",
-    "test": "node --test",
+    "test": "node --test 'test/**/*.?(c|m)js'",
     "bench": "node bench/vs-oxigraph.mjs",
     "check:package": "node guardrails/check-package.mjs",
     "prepack:skills": "rm -rf skills AGENTS.md && cp -R ../skills skills && cp ../AGENTS.md AGENTS.md",
