@@ -46,6 +46,8 @@ name = "sparq-notation3tests"
 path = "src/bin/notation3tests.rs"
 
 [features]
+# RDF/XML conformance through the opt-in shipping parser. OFF by default.
+rdfxml = ["sparq-core/rdfxml"]
 # sq-oy1f.2 — the W3C JSON-LD 1.1 conformance lane (toRdf + fromRdf
 # ratchets, the crate-local `tests/jsonld_suite.rs` runner). OPT-IN and OFF by
 # default; when disabled, that runner compiles only its self-SKIP test.

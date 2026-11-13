@@ -124,6 +124,143 @@
     },
     {
       "ci_job": "conformance",
+      "command": "cargo test -p sparq-conformance --features rdfxml --test earl_suites",
+      "family": "W3C RDF syntax",
+      "floor_basis": "pass",
+      "is_extension": false,
+      "label": "W3C RDF 1.2 RDF/XML",
+      "note": "SPARQ_RDF_TESTS_ROOT; rdfxml_ratchets; feature-off XML floor is zero",
+      "ratchet_floor": 29,
+      "runner": {
+        "crate": "sparq-conformance",
+        "feature": "rdfxml",
+        "kind": "feature-gated-crate-test",
+        "target": "earl_suites"
+      }
+    },
+    {
+      "ci_job": "conformance",
+      "command": "cargo test -p sparq-conformance --features rdfxml --test earl_suites",
+      "family": "W3C RDF syntax",
+      "floor_basis": "pass",
+      "is_extension": false,
+      "label": "W3C RDF 1.1 RDF/XML",
+      "note": "SPARQ_RDF_TESTS_ROOT; rdfxml_ratchets and rdf11_ratchets; feature-off XML floor is zero",
+      "ratchet_floor": 164,
+      "runner": {
+        "crate": "sparq-conformance",
+        "feature": "rdfxml",
+        "kind": "feature-gated-crate-test",
+        "target": "earl_suites"
+      }
+    },
+    {
+      "ci_job": "conformance",
+      "command": "cargo test -p sparq-conformance --test earl_suites",
+      "family": "W3C RDF Semantics",
+      "floor_basis": "pass",
+      "is_extension": false,
+      "label": "W3C RDF 1.2 Semantics",
+      "note": "SPARQ_RDF_TESTS_ROOT; semantics_ratchet; unsupported kinds and regimes fail",
+      "ratchet_floor": 14,
+      "runner": {
+        "crate": "sparq-conformance",
+        "kind": "crate-test",
+        "target": "earl_suites"
+      }
+    },
+    {
+      "ci_job": "conformance",
+      "command": "cargo test -p sparq-conformance --test earl_suites",
+      "family": "W3C RDF syntax",
+      "floor_basis": "pass",
+      "is_extension": false,
+      "label": "W3C RDF 1.1 Turtle (EARL)",
+      "note": "SPARQ_RDF_TESTS_ROOT; rdf11_ratchets; existing RDF 1.1 floor",
+      "ratchet_floor": 313,
+      "runner": {
+        "crate": "sparq-conformance",
+        "kind": "crate-test",
+        "target": "earl_suites"
+      }
+    },
+    {
+      "ci_job": "conformance",
+      "command": "cargo test -p sparq-conformance --test earl_suites",
+      "family": "W3C RDF Semantics",
+      "floor_basis": "pass",
+      "is_extension": false,
+      "label": "W3C RDF 1.1 Semantics (EARL)",
+      "note": "SPARQ_RDF_TESTS_ROOT; rdf11_ratchets; existing RDF 1.1 floor",
+      "ratchet_floor": 48,
+      "runner": {
+        "crate": "sparq-conformance",
+        "kind": "crate-test",
+        "target": "earl_suites"
+      }
+    },
+    {
+      "ci_job": "conformance",
+      "command": "cargo test -p sparq-conformance --test earl_suites",
+      "family": "W3C N3 community group",
+      "floor_basis": "pass",
+      "is_extension": false,
+      "label": "N3 reasoner (EARL)",
+      "note": "SPARQ_N3_ROOT; n3_ratchets; all non-pass outcomes fail EARL",
+      "ratchet_floor": 83,
+      "runner": {
+        "crate": "sparq-conformance",
+        "kind": "crate-test",
+        "target": "earl_suites"
+      }
+    },
+    {
+      "ci_job": "conformance",
+      "command": "cargo test -p sparq-conformance --test earl_suites",
+      "family": "W3C N3 community group",
+      "floor_basis": "pass",
+      "is_extension": false,
+      "label": "N3 parser (EARL)",
+      "note": "SPARQ_N3_ROOT; n3_ratchets; rejected and withdrawn entries omitted",
+      "ratchet_floor": 212,
+      "runner": {
+        "crate": "sparq-conformance",
+        "kind": "crate-test",
+        "target": "earl_suites"
+      }
+    },
+    {
+      "ci_job": "conformance",
+      "command": "cargo test -p sparq-conformance --test earl_suites",
+      "family": "W3C N3 community group",
+      "floor_basis": "pass",
+      "is_extension": false,
+      "label": "N3 extended (EARL)",
+      "note": "SPARQ_N3_ROOT; n3_ratchets; rejected and withdrawn entries omitted",
+      "ratchet_floor": 871,
+      "runner": {
+        "crate": "sparq-conformance",
+        "kind": "crate-test",
+        "target": "earl_suites"
+      }
+    },
+    {
+      "ci_job": "conformance",
+      "command": "cargo test -p sparq-conformance --test earl_suites",
+      "family": "W3C N3 community group",
+      "floor_basis": "pass",
+      "is_extension": false,
+      "label": "N3 TurtleTests (EARL)",
+      "note": "SPARQ_N3_ROOT; n3_ratchets; strict Turtle mode",
+      "ratchet_floor": 297,
+      "runner": {
+        "crate": "sparq-conformance",
+        "kind": "crate-test",
+        "target": "earl_suites"
+      }
+    },
+    {
+      "ci_job": "conformance",
       "command": "cargo run --release -p sparq-conformance --bin sparq-conformance",
       "family": "W3C SPARQL",
       "floor_basis": "pass + documented divergence",
@@ -728,8 +865,8 @@
   ],
   "title": "sparq conformance scoreboard",
   "totals": {
-    "conformance_floor_total": 6316,
-    "conformance_suites": 36,
+    "conformance_floor_total": 8347,
+    "conformance_suites": 45,
     "extension_assertion_total": 19708,
     "extension_suites": 11
   }

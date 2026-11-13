@@ -208,7 +208,7 @@ pub fn native_dataset(
 
 #[test]
 fn ingest_uses_shipping_parser_and_counts_every_entry() {
-    let fixture = crate::earl::Fixture::new();
+    let fixture = crate::earl_fixture::Fixture::new();
     fixture.write("empty.jsonld", "[]");
     fixture.write("empty.nq", "");
     fixture.write("invalid.jsonld", "{invalid");

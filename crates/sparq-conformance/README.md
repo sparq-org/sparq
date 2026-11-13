@@ -9,19 +9,21 @@ Contributing: [`AGENTS.md`](../../AGENTS.md); [grouped-MIN fixture discrepancy](
 
 ## EARL reports
 
-Run `crates/sparq-conformance/earl-report.sh <rdf12|canon|jsonld|all> [OUT_DIR] [--fetch-only]`.
-Output defaults to `target/earl`, clones to `OUT_DIR/suites`. Fetching restores and cleans script-owned clones. Reports require complete outcomes and invalidate stale artifacts.
-`RDF_TESTS_PIN`, `RDF_CANON_TESTS_PIN`, `JSONLD_TESTS_PIN`, `JSONLD_FRAMING_TESTS_PIN` override upstream HEAD for rdf-tests, rdf-canon, json-ld-api, json-ld-framing; `revisions.tsv` records commits.
-`SPARQ_EARL_PROFILE` selects the Cargo correctness-test profile (default `dev`). Direct tests accept `SPARQ_EARL_OUT` (unset: no append-only IRI/verdict file).
-`SPARQ_RDF12_ROOT` has no default (unset skips its ratchet); `SPARQ_RDF_CANON_ROOT` defaults to vendored tests; `SPARQ_JSONLD_ROOT` / `SPARQ_JSONLD_FRAME_ROOT` default to `tests/w3c/json-ld-api/tests` / `tests/w3c/json-ld-framing/tests`.
-Explicit missing roots fail. Absent default JSON-LD fixtures self-skip offline; the vendored RDFC fixtures are required.
+`crates/sparq-conformance/earl-report.sh <rdf12|rdfxml|semantics|rdf11|n3|canon|jsonld|all> [OUT_DIR] [--fetch-only]`
+fetches each suite at upstream HEAD into `OUT_DIR/suites` (default `target/earl`), records commits
+in `revisions.tsv` and writes reports only from complete outcomes; an outcome outside the report
+prefixes aborts. Pins: `RDF_TESTS_PIN`, `N3_TESTS_PIN`, `RDF_CANON_TESTS_PIN`, `JSONLD_TESTS_PIN`,
+`JSONLD_FRAMING_TESTS_PIN`. Tests append IRI/verdict lines to `SPARQ_EARL_OUT` and read fetched
+suites only from `SPARQ_RDF12_ROOT`, `SPARQ_RDF_TESTS_ROOT`, `SPARQ_N3_ROOT` (unset: self-skip;
+missing explicit root or EARL run: fail); `SPARQ_RDF_CANON_ROOT` and `SPARQ_JSONLD_ROOT` /
+`SPARQ_JSONLD_FRAME_ROOT` override the vendored and `tests/w3c` defaults. RDF/XML lanes need the
+`rdfxml` feature (without it every XML entry fails). Skip policy: only withdrawn or upstream-rejected
+entries and JSON-LD 1.0-only entries are omitted; anything not run fails.
 
 The JSON-LD EARL report measures JSON-LD 1.1 API operations via `sparq-jsonld` (expand, compact, flatten, frame, toRdf, fromRdf).
 `sparq-core`'s Graph JSON-LD ingest uses oxjsonld and is not what this report measures. The API report passes 1295 / 1296 applicable entries; its toRdf subset passes 448 / 448.
 The local API toRdf lane includes legacy 1.0-only entries: 454 pass, 11 fail, two skip. A separate non-EARL `TOTAL toRdf-ingest 429 38 0` line runs all 467 toRdf entries through `parse_jsonld_dataset` (Graph acceptance plus oxjsonld canonical dataset, base only, rejection-only negatives), with floor 429 and failure ceiling 38.
 Unsupported options and remote loading are not emulated; no ingest entries are skipped. The ingest ratchet never contributes EARL assertions.
-
-Withdrawn RDF entries are omitted. JSON-LD entries with `option.specVersion` or `option.processingMode` equal to `json-ld-1.0` are omitted as not applicable to the 1.1 processor; all other unexecuted entries fail EARL.
 HTML and remote documents run through the native processor and virtual manifest responses; unreadable fixtures fail. Syntax C14N compares shipping writer bytes; Eval compares the same output by dataset isomorphism.
 
 **License:** [MIT](../../LICENSE).

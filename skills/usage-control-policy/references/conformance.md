@@ -30,3 +30,32 @@ not-violated duty as active. It does NOT count as a failure and does NOT gate. F
 with `bash scripts/fetch-odrl-suite.sh` (the data is never committed); the runner
 self-skips cleanly when the fetched dir is absent. Run:
 `cargo test -p sparq-policy --test odrl_test_suite -- --nocapture`.
+
+## EARL and results table
+
+```sh
+bash scripts/fetch-odrl-suite.sh
+bash crates/sparq-policy/earl-report.sh
+```
+
+The report script accepts an optional output directory (default `target/earl`).
+It uses the fetched checkout without changing the pin, writes one outcome per
+test-case IRI through the shared test-only EARL sink, and invokes
+`scripts/earl-report.py` with an identity mapping for the upstream `urn:uuid:`
+IRIs. Outputs are `sparq-odrl-earl.ttl`, `sparq-odrl-results.md`,
+`odrl-outcomes.tsv`, `odrl-revisions.tsv` and `odrl.log`.
+
+The table follows upstream's "Result of the test suite" columns. Its comparison
+is the expected rule activation projected to an allow/deny decision, **not** full
+compliance-report graph equality. Support means the runner can evaluate the case;
+a supported decision mismatch has comparison `false` and support `true`.
+Unsupported cases and harness errors are `failed` in EARL, even when the existing
+ratchet permits a documented not-implemented bucket. The ratchets are unchanged.
+
+For direct runner use, `SPARQ_EARL_OUT` (default unset) appends tab-separated
+`IRI`/`passed|failed` lines; `SPARQ_ODRL_TABLE_OUT` (default unset) writes the
+Markdown table. `ODRL_TESTS_DIR` defaults to `tests/odrl-test-suite/data` and
+selects another suite data directory, including tiny hermetic fixtures used by
+the reporting tests. Reporting finishes before ratchet assertions; an incomplete
+run cannot produce a new final EARL report. The shell script preserves a complete
+runner's nonzero exit status after writing its report.

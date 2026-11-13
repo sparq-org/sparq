@@ -1,0 +1,7 @@
+{
+  "@context": {
+    "RelationshipCredential": "https://www.w3.org/ns/credentials/examples#RelationshipCredential",
+    "AlumniCredential": "https://www.w3.org/ns/credentials/examples#AlumniCredential",
+    "alumniOf": "https://www.w3.org/ns/credentials/examples#alumniOf"
+  }
+}

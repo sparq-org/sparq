@@ -25,7 +25,11 @@ class EarlRunnerTest(unittest.TestCase):
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_CONFIG_GLOBAL": os.devnull,
             "GIT_ALLOW_PROTOCOL": "file",  # No test can reach a real remote.
-            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_COUNT": "3",
+            "GIT_CONFIG_KEY_1": f"url.{self.upstream.as_uri()}.insteadOf",
+            "GIT_CONFIG_VALUE_1": "https://github.com/w3c/rdf-tests.git",
+            "GIT_CONFIG_KEY_2": f"url.{self.upstream.as_uri()}.insteadOf",
+            "GIT_CONFIG_VALUE_2": "https://github.com/w3c/N3.git",
             "GIT_CONFIG_KEY_0": f"url.{self.upstream.as_uri()}.insteadOf",
             "GIT_CONFIG_VALUE_0": "https://github.com/w3c/rdf-canon.git",
             "PATH": str(self.bin) + os.pathsep + os.environ["PATH"],
@@ -43,8 +47,8 @@ class EarlRunnerTest(unittest.TestCase):
     def git(self, *args):
         return subprocess.check_output(["git", *args], env=self.env, text=True, stderr=subprocess.PIPE)
 
-    def run_script(self, *, fetch_only=False, **env):
-        args = ["bash", str(SCRIPT), "canon", str(self.out)]
+    def run_script(self, *, suite="canon", fetch_only=False, **env):
+        args = ["bash", str(SCRIPT), suite, str(self.out)]
         if fetch_only:
             args.append("--fetch-only")
         return subprocess.run(args, env={**self.env, **env}, text=True, capture_output=True, check=False)
@@ -62,6 +66,67 @@ if [[ "${COMPLETE:-1}" == 1 ]]; then echo 'EARL complete rdf-canon'; fi
 exit "${RUN_STATUS:-0}"
 """)
         cargo.chmod(0o755)
+
+    def test_new_lanes_preserve_ids_failures_and_require_completion(self):
+        cargo = self.bin / "cargo"
+        cargo.write_text(r'''#!/usr/bin/env bash
+set -euo pipefail
+for arg in "$@"; do if [[ "$arg" == --no-run ]]; then exit 0; fi; done
+case " $* " in
+  *" rdfxml_ratchets "*) marker=rdfxml; dirs="rdf12/rdf-xml/eval rdf11/rdf-xml/manifest.ttl" ;;
+  *" semantics_ratchet "*) marker=semantics; dirs="rdf12/rdf-semantics" ;;
+  *" rdf11_ratchets "*) marker=rdf11; dirs="rdf11/rdf-turtle/manifest.ttl rdf11/rdf-trig/manifest.ttl rdf11/rdf-n-triples/manifest.ttl rdf11/rdf-n-quads/manifest.ttl rdf11/rdf-xml/manifest.ttl rdf11/rdf-mt/manifest.ttl" ;;
+  *" n3_ratchets "*) marker=n3; dirs="N3Tests/manifest-parser.ttl TurtleTests/manifest.ttl" ;;
+  *) exit 3 ;;
+esac
+if [[ "$marker" == n3 ]]; then
+  [[ -d "$SPARQ_N3_ROOT" ]]
+  prefix=https://w3c.github.io/N3/tests
+else
+  [[ -d "$SPARQ_RDF_TESTS_ROOT" && " $* " == *" --features rdfxml "* ]]
+  prefix=https://w3c.github.io/rdf-tests/rdf
+fi
+for dir in $dirs; do
+  printf '%s/%s#ok\tpassed\n%s/%s#bad\tfailed\n' "$prefix" "$dir" "$prefix" "$dir"
+done > "$SPARQ_EARL_OUT"
+if [[ "${EXTRA_OUTCOME:-0}" == 1 ]]; then
+  printf 'https://example.test/other-manifest#unhandled\tfailed\n' >> "$SPARQ_EARL_OUT"
+fi
+if [[ "${COMPLETE:-1}" == 1 ]]; then echo "EARL complete $marker"; fi
+exit "${RUN_STATUS:-0}"
+''')
+        cargo.chmod(0o755)
+        reports = {
+            "rdfxml": ["rdf12-rdf-xml", "rdf11-rdf-xml"],
+            "semantics": ["rdf12-semantics"],
+            "rdf11": ["rdf11-" + name for name in ["rdf-turtle", "rdf-trig", "rdf-n-triples", "rdf-n-quads", "rdf-xml", "rdf-mt"]],
+            "n3": ["n3"],
+        }
+        for suite, names in reports.items():
+            with self.subTest(suite=suite):
+                self.assert_success(self.run_script(suite=suite, RUN_STATUS="101"))
+                self.assertIn(f"EARL complete {suite}", (self.out / f"{suite}.log").read_text())
+                revisions = (self.out / "revisions.tsv").read_text()
+                self.assertIn(("N3" if suite == "n3" else "rdf-tests") + "\t" + self.first_revision, revisions)
+                for name in names:
+                    report = (self.out / f"sparq-{name}-earl.ttl").read_text()
+                    self.assertIn("earl:outcome earl:passed", report)
+                    self.assertIn("earl:outcome earl:failed", report)
+                    self.assertIn(self.first_revision, report)
+                    self.assertNotIn("file://", report)
+                    expected = 4 if suite == "n3" else 2
+                    self.assertEqual(report.count("a earl:Assertion"), expected)
+                result = self.run_script(suite=suite, COMPLETE="0", RUN_STATUS="101")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(f"incomplete {suite} run", result.stderr)
+                for name in names:
+                    self.assertFalse((self.out / f"sparq-{name}-earl.ttl").exists())
+                result = self.run_script(suite=suite, EXTRA_OUTCOME="1")
+                self.assertNotEqual(result.returncode, 0)
+                if suite != "n3":
+                    self.assertIn("uncovered EARL test IRI", result.stderr)
+                for name in names:
+                    self.assertFalse((self.out / f"sparq-{name}-earl.ttl").exists())
 
     def test_fetch_restores_fixture_bytes_and_honors_head_and_pin(self):
         self.assert_success(self.run_script(fetch_only=True))

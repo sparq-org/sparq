@@ -251,7 +251,7 @@ enum Output {
 
 #[test]
 fn virtual_responses_apply_redirect_status_media_and_context_links() {
-    let fixture = crate::earl::Fixture::new();
+    let fixture = crate::earl_fixture::Fixture::new();
     fixture.write("input.json", "{}");
     fixture.write("target.jsonld", "{\"@id\":\"\"}");
     let loader = |options: Value| {

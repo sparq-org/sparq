@@ -18,14 +18,13 @@ Addresses #7326.
 | `w3c_sparql_shacl12` | 98 / 0 / 0 | 98 / 0 / 0 | 24 |
 | `w3c_node_expr_constraints` | feature disabled | 8 / 0 / 0 | 2 |
 | `w3c_node_expr` | feature disabled | 123 / 9 / 152 | 63 |
-| `w3c_inference_rules_shacl12` | 0 / 0 / 47 | 46 / 1 / 0 | new runner |
+| `w3c_inference_rules_shacl12` | 0 / 0 / 47 | 47 / 0 / 0 | new runner |
 | `w3c_sparql_rl_shacl12` | 0 / 342 / 0 | 0 / 342 / 0 | new runner |
 | `w3c_sparql` (SHACL 1.0 pre-binding subset) | 14 / 0 / 0 | 14 / 0 / 0 | 13 |
 
 Pass floors equal the measured counts above; no pass floor was lowered.
-The node-expression evaluation failure ceiling is 9. The inference-rules
-ceiling is 2 with `shacl-af` (zero without it); the SPARQL-RL ceiling is 342
-in both feature states. All other runners have a failure ceiling of zero.
+The node-expression evaluation failure ceiling is 9. The SPARQL-RL ceiling
+is 342 in both feature states. All other runners have a failure ceiling of zero.
 The new runners additionally pin their manifest totals and skip ceilings.
 Feature-disabled inference entries emit failed EARL assertions. Of the node-expression runner's
 152 skips, eight are validation entries handled by the separate constraint
@@ -121,13 +120,10 @@ There are no identified spec/test divergences in the inference entries.
 unselected rule set is a processing failure, as required by Custom Rule
 Processors.
 
-`SPARQLRuleTemplate-example-Multiply` remains failing until the separate
-engine change for canonical computed `xsd:decimal` forms lands. The engine
-currently constructs `"6.561680"^^xsd:decimal`, while the expected graph has
-`"6.56168"^^xsd:decimal`. This is an implementation gap, not a specification
-divergence. No numeric formatting or graph normalization is changed here;
-the decimal failure's ratchet allowance remains in place. The processor fix
-raises the inference pass floor to 46; the failure ceiling stays at two.
+`SPARQLRuleTemplate-example-Multiply` passes now that computed
+`xsd:decimal` values drop trailing fractional zeros, so the expected
+`"6.56168"^^xsd:decimal` matches. With `shacl-af`, the inference pass floor
+is 47 and the failure ceiling is zero.
 
 SPARQL-RL has no language processor in the crate. Its six manifests list 342
 entries: `eval` 65, `eval2` 6, `examples` 5, `stratification` 21, `syntax` 212
@@ -162,7 +158,7 @@ SHACL_TESTS_PIN=04ecbb4a5b930f4fa9df6c399ac5c98ccec672c9 \
 ```
 
 The Core and SHACL-SPARQL sections of that SHACL 1.2 report contain 162 and
-98 passed assertions, respectively, with zero failures. Inference rules contribute 46 passed and one failed assertion.
+98 passed assertions, respectively, with zero failures. Inference rules contribute 47 passed assertions.
 SPARQL-RL is excluded. Node-expression evaluation has 123 passes and
 153 failures (nine mismatches plus 144 unsupported forms); its separate
 constraint runner contributes eight passes.
