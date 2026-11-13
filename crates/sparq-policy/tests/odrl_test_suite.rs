@@ -60,6 +60,10 @@ use sparq_policy::{evaluate, parse_policy_str, Request};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+#[allow(dead_code)]
+#[path = "../../sparq-conformance/tests/support/earl.rs"]
+mod earl;
+
 // ---- The RATCHET floor. The ACTUAL current pass count at the pinned suite
 // revision (scripts/fetch-odrl-suite.sh); it may only RISE. sq-z1xv8:
 // the VALUE lives in the shared `sparq-conformance-floors` crate, which the central
@@ -98,7 +102,11 @@ const DCT_NS: &str = "http://purl.org/dc/terms/";
 /// Workspace-root-relative location of the fetched suite (gitignored), discovered
 /// from this crate's manifest dir (`crates/sparq-policy`; workspace root is two up).
 fn suite_data_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/odrl-test-suite/data")
+    std::env::var_os("ODRL_TESTS_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/odrl-test-suite/data")
+        })
 }
 
 /// The expected decision an expected-report rule-report encodes.
@@ -366,33 +374,19 @@ enum Outcome {
 /// Run one test-case file through the real `parse_policy_str` + `evaluate` path
 /// and compare against the expected-report oracle.
 fn run_case(
-    path: &Path,
+    graph: &Graph,
+    case_subj: &str,
     policies: &BTreeMap<String, String>,
     requests: &BTreeMap<String, String>,
     sotws: &BTreeMap<String, String>,
 ) -> Result<Outcome, String> {
-    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let graph = Graph::load_str(&text, "turtle").map_err(|e| e.to_string())?;
-    let case_subj = {
-        let q = "SELECT ?s WHERE { ?s a <http://example.org/TestCase> }".to_string();
-        let res = sparq_engine::query(&graph, &q).map_err(|e| e.to_string())?;
-        res.rows
-            .into_iter()
-            .next()
-            .and_then(|r| r.into_iter().next().flatten())
-            .and_then(|t| match t {
-                oxrdf::Term::NamedNode(n) => Some(n.into_string()),
-                _ => None,
-            })
-            .ok_or("test case file has no ex:TestCase subject")?
-    };
-    let policy_uuid = first_iri_object(&graph, &case_subj, "http://example.org/policy")
+    let policy_uuid = first_iri_object(graph, case_subj, "http://example.org/policy")
         .ok_or("test case has no ex:policy")?;
-    let request_uuid = first_iri_object(&graph, &case_subj, "http://example.org/request")
+    let request_uuid = first_iri_object(graph, case_subj, "http://example.org/request")
         .ok_or("test case has no ex:request")?;
-    let sotw_uuid = first_iri_object(&graph, &case_subj, "http://example.org/sotw")
+    let sotw_uuid = first_iri_object(graph, case_subj, "http://example.org/sotw")
         .ok_or("test case has no ex:sotw")?;
-    let expected_report = first_iri_object(&graph, &case_subj, "http://example.org/expectedReport")
+    let expected_report = first_iri_object(graph, case_subj, "http://example.org/expectedReport")
         .ok_or("test case has no ex:expectedReport")?;
 
     let policy_ttl = policies
@@ -405,7 +399,7 @@ fn run_case(
         .get(&sotw_uuid)
         .ok_or_else(|| format!("no sotw file for {sotw_uuid}"))?;
 
-    let expected = expected_decision(&graph, &expected_report)?;
+    let expected = expected_decision(graph, &expected_report)?;
     let policy = parse_policy_str(policy_ttl, "turtle")?;
     let request = build_request(request_ttl, sotw_ttl, &policy)?;
     let decision = evaluate(&policy, &request);
@@ -445,6 +439,35 @@ fn run_case(
     }
 }
 
+fn case_iri(graph: &Graph) -> Result<String, String> {
+    let res = sparq_engine::query(
+        graph,
+        "SELECT ?s WHERE { ?s a <http://example.org/TestCase> }",
+    )
+    .map_err(|e| e.to_string())?;
+    if res.rows.len() != 1 {
+        return Err("expected exactly one ex:TestCase subject".into());
+    }
+    match res
+        .rows
+        .into_iter()
+        .next()
+        .unwrap()
+        .into_iter()
+        .next()
+        .flatten()
+    {
+        Some(oxrdf::Term::NamedNode(n)) => Ok(n.into_string()),
+        _ => Err("test case subject must be an IRI".into()),
+    }
+}
+
+fn markdown_cell(text: &str) -> String {
+    text.replace('\\', "\\\\")
+        .replace('|', "\\|")
+        .replace(['\r', '\n'], " ")
+}
+
 #[test]
 fn odrl_test_suite_decision_parity() {
     let data = suite_data_root();
@@ -472,13 +495,52 @@ fn odrl_test_suite_decision_parity() {
     case_files.sort();
 
     let mut score = Score::default();
+    let mut outcomes = Vec::new();
+    let mut table = String::from(
+        "# Result of the test suite\n\nEngine: sparq-policy\n\n\
+         Comparison metric: expected rule activation projected to an allow/deny decision. \
+         This does not compare full compliance-report graphs. Unsupported cases and \
+         harness errors are EARL failures. Support means the runner can evaluate the case; \
+         it does not claim support for every ODRL construct.\n\n\
+         | Number | Test case ID | Scenario | Comparison status | ODRL Evaluator Support |\n\
+         | --- | --- | --- | --- | --- |\n",
+    );
     for path in &case_files {
         let name = path
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("?")
             .to_owned();
-        match run_case(path, &policies, &requests, &sotws) {
+        // Without the manifest identity, a report cannot truthfully label this case.
+        // Abort before the completion marker rather than inventing a filename IRI.
+        let text = std::fs::read_to_string(path).expect("read test case");
+        let graph = Graph::load_str(&text, "turtle").expect("parse test case");
+        let id = case_iri(&graph).expect("test case IRI");
+        assert!(
+            !outcomes.iter().any(|(seen, _)| seen == &id),
+            "duplicate test case IRI {id}"
+        );
+        let title = first_literal_object(&graph, &id, &format!("{DCT_NS}title"))
+            .unwrap_or_else(|| name.clone());
+        let result = run_case(&graph, &id, &policies, &requests, &sotws);
+        let passed = matches!(result, Ok(Outcome::Pass));
+        let supported = matches!(result, Ok(Outcome::Pass | Outcome::Fail));
+        use std::fmt::Write;
+        writeln!(
+            table,
+            "| {} | {} | {} | {passed} | {supported} |",
+            markdown_cell(
+                name.trim_start_matches("testcase-")
+                    .split('-')
+                    .next()
+                    .unwrap_or(&name)
+            ),
+            markdown_cell(&id),
+            markdown_cell(&title)
+        )
+        .unwrap();
+        outcomes.push((id, passed));
+        match result {
             Ok(Outcome::Pass) => score.pass += 1,
             // A GENUINE failure: a decision mismatch with NO unsupported-construct
             // explanation. This counts as a fail and GATES (a real regression).
@@ -509,6 +571,12 @@ fn odrl_test_suite_decision_parity() {
             }
         }
     }
+
+    earl::emit(outcomes.iter().map(|(id, passed)| (id.as_str(), *passed)));
+    if let Some(path) = std::env::var_os("SPARQ_ODRL_TABLE_OUT") {
+        std::fs::write(path, table).expect("write SPARQ_ODRL_TABLE_OUT");
+    }
+    println!("EARL complete odrl {}", outcomes.len());
 
     // CI-greppable summary line (mirrors the Solid `WAC scenarios pass N / fail M`
     // shape). KEEP this exact format — the CI grep gate matches
@@ -550,4 +618,86 @@ fn odrl_test_suite_decision_parity() {
          raising the ceiling",
         score.not_implemented
     );
+}
+
+#[test]
+fn earl_covers_pass_mismatch_unsupported_and_harness_error_before_ratchet() {
+    let fixture = earl::Fixture::new();
+    fixture.write(
+        "policies/plain.ttl",
+        format!(
+            "@prefix odrl: <{ODRL_NS}>. <urn:policy> a odrl:Set; odrl:permission \
+         <urn:permission>. <urn:permission> odrl:action odrl:read."
+        ),
+    );
+    fixture.write(
+        "policies/duty.ttl",
+        format!(
+            "@prefix odrl: <{ODRL_NS}>. <urn:duty-policy> a odrl:Set; odrl:permission \
+         <urn:duty-permission>. <urn:duty-permission> odrl:action odrl:read; \
+         odrl:duty [ odrl:action odrl:compensate ]."
+        ),
+    );
+    fixture.write(
+        "requests/request.ttl",
+        format!(
+            "@prefix odrl: <{ODRL_NS}>. <urn:request> a odrl:Request; odrl:permission \
+         <urn:request-rule>. <urn:request-rule> odrl:action odrl:read."
+        ),
+    );
+    fixture.write(
+        "sotw/world.ttl",
+        format!(
+            "<urn:world> a <http://example.org/Sotw>. <urn:duty-report> a <{REPORT_NS}DutyReport>."
+        ),
+    );
+    let mut expected = Vec::new();
+    for (n, policy, active, passed) in [
+        (1, "urn:policy", "Active", true),
+        (2, "urn:policy", "Inactive", false),
+        (3, "urn:duty-policy", "Active", false),
+        (4, "urn:missing-policy", "Active", false),
+    ] {
+        let id = format!("urn:uuid:00000000-0000-0000-0000-{n:012}");
+        fixture.write(
+            &format!("test_cases/testcase-{n:03}-fixture.ttl"),
+            format!(
+                "@prefix ex: <http://example.org/>. @prefix report: <{REPORT_NS}>. \
+             <{id}> a ex:TestCase; <{DCT_NS}title> \"A | scenario\"; \
+             ex:policy <{policy}>; ex:request <urn:request>; ex:sotw <urn:world>; \
+             ex:expectedReport <urn:report>. <urn:report> report:ruleReport <urn:rule-report>. \
+             <urn:rule-report> a report:PermissionReport; report:activationState report:{active}."
+            ),
+        );
+        expected.push((id, passed));
+    }
+    let table = fixture.root().join("results.md");
+    let runner = match module_path!().split_once("::") {
+        Some((_, module)) => format!("{module}::odrl_test_suite_decision_parity"),
+        None => "odrl_test_suite_decision_parity".into(),
+    };
+    fixture.assert_report(
+        &runner,
+        "EARL complete odrl 4",
+        &[
+            ("ODRL_TESTS_DIR", fixture.root()),
+            ("SPARQ_ODRL_TABLE_OUT", &table),
+        ],
+        &expected,
+    );
+    let table = std::fs::read_to_string(table).unwrap();
+    assert!(table.contains("A \\| scenario"));
+    for (id, verdict, supported) in [
+        (&expected[0].0, "true", "true"),
+        (&expected[1].0, "false", "true"),
+        (&expected[2].0, "false", "false"),
+        (&expected[3].0, "false", "false"),
+    ] {
+        assert!(
+            table.contains(&format!(
+                "{id} | A \\| scenario | {verdict} | {supported} |"
+            )),
+            "{table}"
+        );
+    }
 }
