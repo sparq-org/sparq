@@ -7,11 +7,16 @@ use super::{
     error::CanonicalizationError,
 };
 use digest::Digest;
+use super::dataset::Dataset;
 use itertools::Itertools;
 use oxrdf02::{
-    BlankNode, Dataset, GraphName, GraphNameRef, Quad, QuadRef, Subject, SubjectRef, Term, TermRef,
+    BlankNode, GraphName, GraphNameRef, Quad, QuadRef, Subject, SubjectRef, Term, TermRef,
 };
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+#[cfg(target_os = "zkvm")]
+use std::collections::BTreeMap as HashMap;
+#[cfg(not(target_os = "zkvm"))]
+use std::collections::HashMap;
 
 #[cfg(feature = "log")]
 use tracing::{debug, debug_span, info};

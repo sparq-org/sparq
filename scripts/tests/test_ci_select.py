@@ -598,6 +598,7 @@ class ChangeClassTests(unittest.TestCase):
 
     def test_classify_engine_on_rust_ci_workflow(self):
         self.assertEqual(cs.classify_change([".github/workflows/ci.yml"]), "engine")
+        self.assertEqual(cs.classify_change([".github/actions/zk-exact-setup/action.yml"]), "engine")
 
     # --- the selection consequences (the whole point) ---
     def test_orchestration_only_diff_selects_empty_closure(self):

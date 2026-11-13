@@ -179,3 +179,7 @@ sparq-core = { path = "../sparq-core", version = "0.1.8", features = ["rdfxml"] 
 name = "gsb_compliance"
 required-features = ["geosparql_rewrite", "geof_accessors"]
 test = true
+
+[[test]]
+name = "geosparql_benchmark"
+required-features = ["geosparql_rewrite", "geof_accessors"]
