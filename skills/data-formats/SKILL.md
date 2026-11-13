@@ -38,7 +38,10 @@ number; a missing cache value is not a datatype-validity result.
 `Graph::has_high_precision_decimal()` also flags uncached valid integer/decimal
 literals, so numeric FILTER pushdown defers to exact evaluation rather than
 excluding them. Cached high-precision decimals still set this graph-wide guard;
-ill-typed literals and floating NaN do not. Dictionary growth invalidates its memo.
+ill-typed literals and floating NaN do not. Forks inherit the gate's memo and its
+scanned dictionary watermark. Appending terms to a graph proved safe checks only
+the new IDs; an unsafe verdict remains sticky because dictionary terms linger
+after deletion and compaction.
 
 `temporal::Timeline::parse_datetime`, `parse_date`, `parse_civil_date` and
 `parse_tz` reject raw boundary whitespace, malformed calendar/timezone values and timestamps outside their

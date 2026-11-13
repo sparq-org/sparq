@@ -785,6 +785,10 @@ SPARQL Update `USING` identity behavior.
   string arithmetic, matching the `BIND((?v = c) AS ?b)` expression path). The decline is
   graph-wide/conservative: a graph carrying one high-precision decimal or uncached exact numeric skips the
   numeric-pushdown optimisation for all its numeric FILTERs, never the wrong answer.
+  Forks inherit the safety verdict and scanned dictionary watermark. After a write
+  to a graph proved safe, this gate checks only appended IDs and memoizes the
+  result for the next numeric FILTER. A newly inserted uncached exact value still
+  disables pushdown, including through UPDATE and transactions.
 - **`SELECT *`** never exposes blank-node "variables" (`_:x` in a pattern is an existential var).
 - **Non-deterministic builtins** (`sq-98w7z.1`) — `NOW()` is **query-constant** per SPARQL 1.1
   §17.4.5.1: every evaluation within one execution (across rows, parallel workers, `EXISTS`

@@ -346,6 +346,78 @@ fn small_constant_filters_see_uncached_values_after_dictionary_growth() {
 }
 
 #[test]
+fn uncached_exact_values_after_update_transaction_and_fork_match_bind() {
+    let huge = "340282366920938463463374607431768211456001";
+    for compressed in [false, true] {
+        let paths = ["update", "fork"].into_iter();
+        #[cfg(feature = "txn")]
+        let paths = paths.chain(["transaction"]);
+        for path in paths {
+            let mut graph = Graph::load_str("<urn:s> <urn:p> 7 .", "turtle").unwrap();
+            if compressed {
+                graph = graph.into_compressed();
+            }
+            assert!(!graph.has_high_precision_decimal());
+            let before = graph.snapshot();
+            let insert = format!(
+                "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> INSERT DATA {{
+                    <urn:pos> <urn:p> \"{huge}\"^^xsd:integer .
+                    <urn:neg> <urn:p> \"-{huge}.5\"^^xsd:decimal .
+                }}"
+            );
+            match path {
+                "update" => {
+                    sparq_engine::update_in_place_atomic(&mut graph, &insert).unwrap();
+                }
+                #[cfg(feature = "txn")]
+                "transaction" => {
+                    let manager = sparq_engine::txn::TransactionManager::new(graph);
+                    let mut txn = manager.begin_write();
+                    txn.update(&insert).unwrap();
+                    txn.commit().unwrap();
+                    graph = manager.into_inner();
+                }
+                "fork" => {
+                    graph = graph.fork();
+                    let triples = [
+                        ("urn:pos", huge.to_owned(), oxrdf::vocab::xsd::INTEGER),
+                        ("urn:neg", format!("-{huge}.5"), oxrdf::vocab::xsd::DECIMAL),
+                    ]
+                    .map(|(subject, value, datatype)| {
+                        [
+                            oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(subject)),
+                            oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked("urn:p")),
+                            oxrdf::Term::Literal(oxrdf::Literal::new_typed_literal(
+                                value, datatype,
+                            )),
+                        ]
+                    });
+                    graph.apply_delta(&triples, &[]).unwrap();
+                }
+                _ => unreachable!(),
+            }
+            assert!(!before.has_high_precision_decimal());
+            assert_eq!(before.len(), 1);
+            for expr in ["?v > 7", "7 < ?v", "?v < 0", "0 > ?v"] {
+                for budget in [QueryBudget::unlimited(), bounded()] {
+                    let filter = format!("SELECT ?v {{ ?s <urn:p> ?v FILTER({expr}) }}");
+                    let bind =
+                        format!("SELECT ?v {{ ?s <urn:p> ?v BIND({expr} AS ?ok) FILTER(?ok) }}");
+                    let actual = sparq_engine::query_with_budget(&graph, &filter, &budget).unwrap();
+                    let exact = sparq_engine::query_with_budget(&graph, &bind, &budget).unwrap();
+                    assert_eq!(actual.rows.len(), 1, "{path}: {expr}");
+                    assert_eq!(actual.rows, exact.rows, "{path}: {expr}");
+                }
+            }
+            assert!(
+                graph.has_high_precision_decimal(),
+                "{path}, compressed={compressed}"
+            );
+        }
+    }
+}
+
+#[test]
 fn order_by_past_i128_is_exact_in_both_sort_paths() {
     let mut ordered: Vec<String> = [
         "-340282366920938463463374607431768211456001",
