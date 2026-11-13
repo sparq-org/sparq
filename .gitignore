@@ -127,3 +127,6 @@ metrics/runtime/
 # If a specific property test's seeds are genuinely not worth pinning, opt OUT per-test
 # instead, via `failure_persistence: None` in its proptest Config — see
 # crates/sparq-terse/tests/proptest_keyword.rs for the in-repo precedent.
+
+# External GeoSPARQL Compliance Benchmark (fetch-geosparql-benchmark.sh).
+/crates/sparq-geo/tests/fixtures/geosparql-benchmark/

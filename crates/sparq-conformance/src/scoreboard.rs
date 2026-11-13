@@ -383,6 +383,20 @@ pub const SUITES: &[Suite] = &[
         note: "sh:sparql node + property constraint sub-suites",
     },
     Suite {
+        label: "GeoSPARQL Compliance Benchmark",
+        family: "OGC GeoSPARQL",
+        runner: Runner::FeatureGatedCrateTest {
+            krate: "sparq-geo",
+            target: "geosparql_benchmark",
+            feature: "geosparql_rewrite,geof_accessors",
+        },
+        ci_job: "geo-conformance",
+        ratchet_floor: sparq_conformance_floors::geo::GEOSPARQL_BENCHMARK_FLOOR,
+        floor_basis: "pass",
+        note: "external 206-query community corpus, not an official OGC ETS; fixture-gated; \
+               RDFS materialization, accessor functions and query rewrite enabled",
+    },
+    Suite {
         label: "OGC GeoSPARQL topology compliance",
         family: "OGC GeoSPARQL",
         runner: Runner::CrateTest { krate: "sparq-geo", target: "ogc_compliance_ratchet" },

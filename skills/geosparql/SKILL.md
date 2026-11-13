@@ -250,14 +250,49 @@ Results are the lowest-dimension geometry capturing the answer and serialise bac
 - **Ad-hoc query timing:** `bench_geo query <corpus.nt> <query.rq> [iters]` (the crate example,
   default `engine` feature) — in-process `query_with_functions` + `geof_registry()`, emitting
   `name\tcount\tus`.
-- **Cross-engine CONFORMANCE (not timing):** `bench/geo/gsb.sh` + the `gsb_compliance` example
-  run sparq through the published 206-query GeoSPARQL Compliance Benchmark (ISPRS IJGI
-  10(7):487, 2021) with the benchmark's own requirements-weighted scoring, so sparq sits on the same axis
-  as the published Fuseki/GraphDB/Virtuoso percentages. Gather-only (the artifact is GPL-2.0
-  and is never vendored). The recorded score, the configuration matrix behind it, and the
-  per-requirement gaps — the largest by far being the query-rewrite extension, which currently
-  *lowers* the score — are in `research/gap-conformance-cross-engine-2026-07.md` §3.7.
-  <!-- sq-ql2iy -->
+- **External compliance corpus:** the fixture-gated `geosparql_benchmark` test runs
+  every scored query from OpenLinkSoftware/GeoSPARQLBenchmark through the engine,
+  with RDFS materialization and the opt-in accessor and query-rewrite features.
+  Fetch the default pinned revision with
+  `bash crates/sparq-geo/fetch-geosparql-benchmark.sh`, then run:
+
+  ```sh
+  cargo test -p sparq-geo --features geosparql_rewrite,geof_accessors \
+    --test geosparql_benchmark -- --nocapture
+  ```
+
+  `GEOSPARQL_BENCHMARK_DIR` selects an existing repository checkout without
+  modifying it (default: `crates/sparq-geo/tests/fixtures/geosparql-benchmark`).
+  Without that override, `GEOSPARQL_BENCHMARK_PIN` selects a revision; the fetch
+  script defaults to `879e0746e74c1327f74e57366104bcf1a6d63fb1`, and `HEAD` selects
+  current upstream. Absent default fixtures skip the test; a missing explicit
+  directory or an incomplete corpus fails. Fixtures are external and gitignored.
+  The shared pass floor is in `sparq-conformance-floors`; the hand-curated
+  `ogc_compliance_ratchet` remains a separate suite.
+
+  `SPARQ_EARL_OUT=/path/outcomes.tsv` writes one query-id and `passed`/`failed`
+  outcome per query. `bash crates/sparq-geo/earl-report.sh [OUT_DIR]` generates
+  `results.md` (requirement/query pass/fail table) and `sparq-geosparql-earl.ttl`
+  via `scripts/earl-report.py`. Its default output is `target/earl/geo`; its
+  default suite revision is upstream HEAD, with the same pin/directory overrides.
+  `GSB_DEBUG=query-r19` prints actual and expected answers for matching failures
+  (unset by default). Comparison follows upstream's ordered variables and rows,
+  term metadata and lexical values, WKT space/newline removal and lowercasing,
+  GML XML canonicalization without comments, and numbered alternative answers.
+  Numeric rounding, geometry equivalence and reordered rows are not accepted.
+
+  **Known benchmark gaps:** topology-property queries and the rewrite extension
+  do not yet preserve the benchmark's asserted-plus-inferred answers. RDFS closure
+  also adds geometry-property solutions absent from some expected answers.
+  Cross-CRS equality queries remain mismatches. Non-topological functions differ
+  in metric results and exact geometry serialization (ring start/orientation,
+  singleton geometry types, coordinate precision and GML/WKT output choices).
+  These failures do not by themselves establish an incorrect geometry: the
+  benchmark compares serialization, not spatial equivalence. This community
+  corpus is not an official OGC ETS and passing it does not confer certification.
+  The existing `bench/geo/gsb.sh` + `gsb_compliance` example remains available for
+  the benchmark's requirements-weighted score and runtime configuration matrix;
+  the new ratchet and reports use test counts only.
 
 ## See also
 

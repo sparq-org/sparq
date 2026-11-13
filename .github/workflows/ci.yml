@@ -1404,6 +1404,13 @@ jobs:
           GEO_QR_PASS=$(grep -oE 'pass [0-9]+ / fail' geo-query-rewrite.out | grep -oE '[0-9]+' | head -1)
           echo "OGC GeoSPARQL query-rewrite pass: ${GEO_QR_PASS:-unknown} (floor $GEO_QR_FLOOR)"
           [ -n "$GEO_QR_PASS" ] && [ "$GEO_QR_PASS" -ge "$GEO_QR_FLOOR" ] || { echo "::error::OGC GeoSPARQL query-rewrite regressed below the ratchet (${GEO_QR_PASS:-?} < $GEO_QR_FLOOR)"; exit 1; }
+      - name: Run external GeoSPARQL Compliance Benchmark
+        run: |
+          set -euo pipefail
+          bash crates/sparq-geo/fetch-geosparql-benchmark.sh
+          SPARQ_EARL_OUT=geo-benchmark-outcomes.tsv cargo test -p sparq-geo \
+            --features geosparql_rewrite,geof_accessors --test geosparql_benchmark \
+            -- --nocapture | tee geo-benchmark.out
       - name: Emit consolidated conformance scoreboard
         # sq-ncvq.16: render the ONE central scoreboard index (all suites
         # + floors across crates) into this job's step summary, so the GeoSPARQL job
@@ -1419,6 +1426,8 @@ jobs:
           path: |
             geo-conformance.out
             geo-query-rewrite.out
+            geo-benchmark.out
+            geo-benchmark-outcomes.tsv
             conformance-scoreboard.md
 
   solid-conformance:

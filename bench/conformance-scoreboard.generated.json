@@ -180,6 +180,22 @@
     },
     {
       "ci_job": "geo-conformance",
+      "command": "cargo test -p sparq-geo --features geosparql_rewrite,geof_accessors --test geosparql_benchmark",
+      "family": "OGC GeoSPARQL",
+      "floor_basis": "pass",
+      "is_extension": false,
+      "label": "GeoSPARQL Compliance Benchmark",
+      "note": "external 206-query community corpus, not an official OGC ETS; fixture-gated; RDFS materialization, accessor functions and query rewrite enabled",
+      "ratchet_floor": 124,
+      "runner": {
+        "crate": "sparq-geo",
+        "feature": "geosparql_rewrite,geof_accessors",
+        "kind": "feature-gated-crate-test",
+        "target": "geosparql_benchmark"
+      }
+    },
+    {
+      "ci_job": "geo-conformance",
       "command": "cargo test -p sparq-geo --test ogc_compliance_ratchet",
       "family": "OGC GeoSPARQL",
       "floor_basis": "pass",
@@ -680,8 +696,8 @@
   ],
   "title": "sparq conformance scoreboard",
   "totals": {
-    "conformance_floor_total": 5776,
-    "conformance_suites": 33,
+    "conformance_floor_total": 5900,
+    "conformance_suites": 34,
     "extension_assertion_total": 19708,
     "extension_suites": 11
   }

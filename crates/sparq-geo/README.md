@@ -56,6 +56,8 @@ The `geof::*` / `geof::lex::*` plain-Rust API and the R-tree `GeoIndex`
   pins the exact truth value of every `sf*`/`eh*`/`rcc8*` relation over point/line/
   polygon/MULTI\* operands in both orders; its floor only rises with genuinely-passing,
   hand-derived assertions.
+- **External compliance benchmark** — the fixture-gated [`geosparql_benchmark`](tests/geosparql_benchmark.rs) runner executes the upstream corpus separately from the hand-curated probes.
+  See the [skill](../../skills/geosparql/SKILL.md) for fetching, feature flags, EARL reporting, revision overrides and known gaps.
 - **WKT + GML, two serializations** — `geo:wktLiteral` and the GML Simple-Features
   profile of `geo:gmlLiteral` parse to the same `geo_types` + CRS and interoperate in
   one `geof:` call. `GeoGeometry::to_gml_literal` emits the six GML 3
