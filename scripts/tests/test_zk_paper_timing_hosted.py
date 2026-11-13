@@ -161,6 +161,30 @@ class HostedTiming(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertTrue((self.root / "paper-evidence/time-v.txt").exists())
 
+    def test_hidden_four_credential_cells_are_deferred_without_proving(self):
+        record = self.fixture()
+        for suite in ("eddsa", "merkle"):
+            result = self.run_step("prove", "Prove one case and retain raw output",
+                                   MODE="hidden", N="4", SUITE=suite, FAKE_EXIT="99",
+                                   FAKE_RECORD=json.dumps(record))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            out = self.root / "paper-evidence"
+            coverage = json.loads((out / "coverage.jsonl").read_text())
+            self.assertEqual(coverage["status"], "deferred_pending_calibration")
+            self.assertEqual((coverage["suite"], coverage["mode"], coverage["n"]), (suite, "hidden", 4))
+            self.assertEqual(coverage["environment"], "indicative")
+            self.assertFalse((out / "raw.jsonl").exists())
+            self.assertFalse((out / "time-v.txt").exists())
+
+    def test_planned_active_cells_exclude_only_hidden_four(self):
+        result = self.run_step("prepare", "Plan independent proof jobs")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = json.loads(next(line[7:] for line in (self.root / "outputs").read_text().splitlines()
+                               if line.startswith("matrix=")))["include"]
+        active = [r for r in rows if (r["mode"], r["n"]) != ("hidden", 4)]
+        self.assertEqual(len(active), 150)
+        self.assertEqual(len(rows) - len(active), 50)
+
     def test_failed_prover_keeps_its_status_and_resource_log(self):
         record = self.fixture()
         result = self.run_step("prove", "Prove one case and retain raw output", FAKE_RECORD=json.dumps(record), FAKE_EXIT="124")
@@ -176,6 +200,11 @@ class HostedTiming(unittest.TestCase):
         (build / "commit.txt").write_text("a" * 40 + "\n")
         (build / "build-rustc.txt").write_text("build compiler\n")
         (build / "guest").mkdir()
+        (build / "expected-audit.json").write_text('{"guest_image_id":"0100000002000000030000000400000005000000060000000700000008000000"}')
+        self.env["GITHUB_WORKSPACE"] = str(self.root / "source")
+        expected_dir = self.root / "source/research/zk-paper-evidence"
+        expected_dir.mkdir(parents=True)
+        (expected_dir / "paper-executor-main-audit.json").write_text((build / "expected-audit.json").read_text())
         (build / "guest/pin.json").write_text('{"image_id":[1,2,3,4,5,6,7,8]}')
         digest = hashlib.sha256((build / "paper_sweep").read_bytes()).hexdigest()
         (build / "binary.sha256").write_text(digest + "  paper_sweep\n")
@@ -200,6 +229,15 @@ class HostedTiming(unittest.TestCase):
         self.assertEqual(machine["guest_pin"]["image_id"], list(range(1, 9)))
         self.assertGreater(machine["core_count"], 0)
         self.assertTrue(machine["cpu"] and machine["memory"] and machine["rustc"] and machine["r0vm"])
+
+    def test_changed_expected_guest_is_rejected_before_timing(self):
+        self.machine_fixture()
+        pin = self.root / "paper-build/guest/pin.json"
+        pin.write_text('{"image_id":[9,2,3,4,5,6,7,8]}')
+        result = self.run_step("prove", "Record the machine and exact build")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("guest differs", result.stderr)
+        self.assertFalse((self.root / "paper-evidence/time-v.txt").exists())
 
     def test_changed_binary_or_source_commit_is_rejected(self):
         self.machine_fixture()

@@ -1,6 +1,7 @@
 # Manual insurance campaign; records describe their hosted environment as indicative.
 # Each proof has its own job; repeats are combined only when analysing artifacts.
-# Attempt budgets reserve setup and upload time; completion sizing is provisional.
+# Hidden four-credential cells emit deferred records until separately calibrated.
+# Other cells retain independent attempt budgets and partial artifacts.
 # This workflow is not a required check.
 name: zk-paper-timing-hosted
 
@@ -168,6 +169,15 @@ jobs:
           sha256sum --check --strict binary.sha256
           test "$(cat commit.txt)" = "$FREEZE_COMMIT"
           chmod +x paper_sweep
+          python3 - "$GITHUB_WORKSPACE/research/zk-paper-evidence/paper-executor-main-audit.json" guest/pin.json <<'PY_PIN'
+          import json, os, pathlib, struct, sys
+          expected = json.loads(pathlib.Path(sys.argv[1]).read_text())["guest_image_id"]
+          observed = struct.pack("<8I", *json.loads(pathlib.Path(sys.argv[2]).read_text())["image_id"]).hex()
+          validation = dict(expected_guest_image_id=expected, observed_guest_image_id=observed,
+                            status="matched" if observed == expected else "mismatched")
+          pathlib.Path(os.environ["RUNNER_TEMP"], "paper-evidence/guest-validation.json").write_text(json.dumps(validation) + "\n")
+          assert observed == expected, "guest differs from committed expected image"
+          PY_PIN
           python3 - <<'PY'
           import datetime, hashlib, json, os, pathlib, platform, subprocess
           root = pathlib.Path(os.environ["RUNNER_TEMP"])
@@ -205,6 +215,21 @@ jobs:
           set -euo pipefail
           unset RISC0_DEV_MODE
           out="$RUNNER_TEMP/paper-evidence"
+          # A single proof cannot be split by this harness. Preserve an explicit
+          # coverage record for cells awaiting a separate completion calibration.
+          if [[ "$MODE" == hidden && "$N" == 4 ]]; then
+            python3 - <<'PY_BOUND'
+          import json, os, pathlib
+          out = pathlib.Path(os.environ["RUNNER_TEMP"]) / "paper-evidence"
+          row = dict(environment="indicative", status="deferred_pending_calibration",
+                     reason="indivisible proof exceeds the planned completion budget",
+                     suite=os.environ["SUITE"], mode=os.environ["MODE"], n=int(os.environ["N"]),
+                     query=os.environ["QUERY"], repetition=int(os.environ["REPETITION"]),
+                     machine=json.loads((out / "machine.json").read_text()))
+          (out / "coverage.jsonl").write_text(json.dumps(row) + "\n")
+          PY_BOUND
+            exit 0
+          fi
           set +e
           /usr/bin/time -v -o "$out/time-v.txt" \
             timeout --signal=TERM --kill-after=60s 180m \
