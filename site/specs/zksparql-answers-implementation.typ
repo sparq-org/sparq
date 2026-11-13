@@ -350,9 +350,11 @@ Status purposes and decimal-string indices open the actual entry cells with
 encodings above: snapshot domain, list, purpose, bit length, status-bit tree depth and root;
 status-leaf domain, bit and a zero field. The bit-tree depth is separate from public
 snapshot-set membership depth. Every status entry must have evidence, even in quads unused
-by the query. The combined native case uses four signed credentials in the Solid quad bucket,
-shared and distinct holder keys, issuer scope, suspension and revocation snapshots, inclusive
-validity, freshness and the default/named graph merge. Separate controls change each condition.
+by the query. Default native component cases use the same four signed credentials in the full Solid quad
+bucket. They cover shared and distinct holder keys, issuer scope, both status purposes, validity,
+freshness, complete credential graph views and merge behavior on their signed shared fact.
+The named combined case retains every condition and the whole-dataset merge together; running
+it requires a larger machine and explicit opt-in. Separate controls change each condition.
 
 All public request instants are exact nonnegative Unix epoch milliseconds within the signed
 sixty-four-bit range. `Timestamp.known()` and `Timestamp.millis()` supply the authenticated

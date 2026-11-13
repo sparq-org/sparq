@@ -287,6 +287,238 @@ fn pinned<let N: u32>(d: Table<N, 4>, fact: TermCell, who: TermCell) -> bool {
     found
 }
 
+// Every component case authenticates the same signed Solid vectors at full capacity.
+fn four_inputs(last: OpenedCredential<64>) -> [OpenedCredential<64>; 4] {
+    [
+        open_suite_credential(fixtures::complete::<64>(), 0),
+        open_suite_credential(fixtures::complete_shared::<64>(), 1),
+        open_suite_credential(fixtures::complete_distinct::<64>(), 2),
+        last,
+    ]
+}
+fn four_normal() -> [OpenedCredential<64>; 4] {
+    four_inputs(
+        open_suite_credential(fixtures::complete_unlisted::<64>(), 3),
+    )
+}
+fn four_policy(cs: [OpenedCredential<64>; 4]) -> (PublicPolicy, [Membership<2>; 4]) {
+    let leaves = [
+        trusted_key_leaf(issuer(cs[0]), cs[0].verification_method(), key(1)),
+        trusted_key_leaf(issuer(cs[1]), cs[1].verification_method(), key(2)),
+        trusted_key_leaf(
+            ir("urn:issuer:3".as_bytes()),
+            ir("urn:method:3".as_bytes()),
+            key(3),
+        ),
+        0,
+    ];
+    let mut sorted = leaves;
+    for _ in 0..3 {
+        for i in 0..2 {
+            if envelope_core::term::field_lt(sorted[i + 1], sorted[i]) {
+                let x = sorted[i];
+                sorted[i] = sorted[i + 1];
+                sorted[i + 1] = x;
+            }
+        }
+    }
+    let root = h2(h2(sorted[0], sorted[1]), h2(sorted[2], 0));
+    let (canonical, depth, unique) = native::canonical_set_root(leaves, 3);
+    assert(root == canonical);
+    assert((depth == 2) & (unique == 3));
+    let mut paths = [Membership { index: 0, siblings: [0; 2] }; 4];
+    for j in 0..4 {
+        let leaf = if j == 0 {
+            leaves[0]
+        } else if j == 1 {
+            leaves[1]
+        } else if j == 2 {
+            leaves[0]
+        } else {
+            leaves[2]
+        };
+        for k in 0..3 {
+            if sorted[k] == leaf {
+                paths[j] = Membership {
+                    index: k as Field,
+                    siblings: if k == 0 {
+                        [sorted[1], h2(sorted[2], 0)]
+                    } else if k == 1 {
+                        [sorted[0], h2(sorted[2], 0)]
+                    } else {
+                        [0, h2(sorted[0], sorted[1])]
+                    },
+                };
+            }
+        }
+    }
+    let rev = snapshot_digest::<2>(snapshot(false));
+    let susp = snapshot_digest::<2>(snapshot(true));
+    let mut p = scoped_policy(issuer(cs[0]));
+    p.issuer_root = root;
+    p.issuer_depth = 2;
+    p.holder_issuer_count = 2;
+    let i1 = issuer(cs[0]).enc();
+    let i2 = issuer(cs[1]).enc();
+    p.holder_issuers = if envelope_core::term::field_lt(i1, i2) {
+        [i1, i2, 0, 0]
+    } else {
+        [i2, i1, 0, 0]
+    };
+    let rev_first = envelope_core::term::field_lt(rev, susp);
+    p.status_required = true;
+    p.snapshot_root = if rev_first {
+        h2(rev, susp)
+    } else {
+        h2(susp, rev)
+    };
+    p.snapshot_depth = 1;
+    p.validity_required = true;
+    p.now = 150;
+    p.freshness_required = true;
+    p.earliest_created = 101;
+    (p, paths)
+}
+fn four_issuer(cs: [OpenedCredential<64>; 4]) {
+    let (p, paths) = four_policy(cs);
+    envelope_core::envelope::check_policy::<2, 2>(p);
+    let keys = [key(1), key(2), key(1), key(3)];
+    for i in 0..4 {
+        let actual = check_issuer(cs[i], p.issuer_root, p.issuer_depth, keys[i], paths[i]);
+        assert(same_term(actual, issuer(cs[i])));
+    }
+}
+fn four_holder(cs: [OpenedCredential<64>; 4], slots: [u32; 4]) {
+    let (p, _) = four_policy(cs);
+    check_holders(
+        cs,
+        p,
+        digest(),
+        slots,
+        [holder_evidence(11), holder_evidence(12), empty_holder(), empty_holder()],
+    );
+}
+fn four_status(cs: [OpenedCredential<64>; 4]) {
+    let (p, _) = four_policy(cs);
+    let rev = snapshot_digest::<2>(snapshot(false));
+    let susp = snapshot_digest::<2>(snapshot(true));
+    let rev_first = envelope_core::term::field_lt(rev, susp);
+    // Complete per-credential evidence, with the same accepted snapshot set.
+    for j in 0..4 {
+        let mut es = evidence_for(cs[j]);
+        for i in 0..64 {
+            if es[i].present {
+                let suspended = same_term(es[i].snapshot.purpose, fixtures::purpose_suspension());
+                es[i].accepted = Membership {
+                    index: if suspended == rev_first { 1 } else { 0 },
+                    siblings: [if suspended { rev } else { susp }, 0],
+                };
+            }
+        }
+        check_status(cs[j], p.snapshot_root, p.snapshot_depth, false, es);
+    }
+}
+fn four_validity(cs: [OpenedCredential<64>; 4], last_period: ValidityOpening) {
+    let (p, _) = four_policy(cs);
+    for i in 0..4 {
+        check_validity(cs[i], p.now, if i == 3 { last_period } else { period() });
+    }
+}
+fn four_freshness(cs: [OpenedCredential<64>; 4]) {
+    let (p, _) = four_policy(cs);
+    for i in 0..4 {
+        check_freshness(cs[i], p.freshness_required, p.earliest_created);
+    }
+}
+fn count_quad<let R: u32>(d: Table<R, 4>, row: [envelope_core::table::TermCell; 4]) -> u32 {
+    let mut count: u32 = 0;
+    for i in 0..R {
+        count = count + ((i < d.len) & envelope_core::table::same_row(d.rows[i], row)) as u32;
+    }
+    count
+}
+fn four_dataset_view(cs: [OpenedCredential<64>; 4], index: u32) {
+    let (p, paths) = four_policy(cs);
+    let keys = [key(1), key(2), key(1), key(3)];
+    let actual = check_issuer(
+        cs[index],
+        p.issuer_root,
+        p.issuer_depth,
+        keys[index],
+        paths[index],
+    );
+    let d = credential_dataset::<64, 129, 8>(cs[index], actual, digest(), index);
+    envelope_core::table::check_table(d);
+    assert(d.len == 2 * cs[index].count() + 1);
+    let graph = from_suite_cell(envelope_core::term::credential_graph(
+        [0x07070707070707070707070707070707, 0x07070707070707070707070707070707],
+        index,
+    ));
+    let rows = cs[index].quads();
+    for i in 0..64 {
+        if i < cs[index].count() {
+            let q = [
+                from_suite_cell(rows[i][0]),
+                from_suite_cell(rows[i][1]),
+                from_suite_cell(rows[i][2]),
+                envelope_core::table::unbound(),
+            ];
+            assert(count_quad(d, q) == 1);
+            assert(count_quad(d, [q[0], q[1], q[2], graph]) == 1);
+        }
+    }
+    assert(
+        count_quad(
+            d,
+            [
+                graph,
+                from_suite_cell(envelope_core::envelope::verified_issuer_predicate()),
+                from_suite_cell(actual),
+                envelope_core::table::unbound(),
+            ],
+        )
+            == 1,
+    );
+}
+fn four_shared_merge(cs: [OpenedCredential<64>; 4]) {
+    let (p, paths) = four_policy(cs);
+    let keys = [key(1), key(2), key(1), key(3)];
+    let s = ir("urn:subject".as_bytes());
+    let pred = ir("urn:shared".as_bytes());
+    let mut inputs = [envelope_core::table::empty::<3, 4>(); 4];
+    for i in 0..4 {
+        let actual = check_issuer(cs[i], p.issuer_root, p.issuer_depth, keys[i], paths[i]);
+        let object = required_property(cs[i], s, pred);
+        let graph = from_suite_cell(envelope_core::term::credential_graph(
+            [0x07070707070707070707070707070707, 0x07070707070707070707070707070707],
+            i,
+        ));
+        let q = [
+            from_suite_cell(s),
+            from_suite_cell(pred),
+            from_suite_cell(object),
+            envelope_core::table::unbound(),
+        ];
+        inputs[i] = envelope_core::table::canonicalize(
+            Table {
+                rows: [
+                    q,
+                    [q[0], q[1], q[2], graph],
+                    [
+                        graph,
+                        from_suite_cell(envelope_core::envelope::verified_issuer_predicate()),
+                        from_suite_cell(actual),
+                        envelope_core::table::unbound(),
+                    ],
+                ],
+                len: 3,
+            },
+        );
+    }
+    let merged = merge_datasets::<4, 3, 12>(inputs);
+    assert(merged.len == 9);
+    assert(copies(merged, s, pred, ir("urn:value".as_bytes())) == 5);
+}
 fn run_four(last: OpenedCredential<64>) {
     run_four_with_validity(last, period());
 }
@@ -1497,44 +1729,85 @@ fn four_credentials_enforce_all_conditions_and_merge() {
 
 #[test(should_fail_with = "issuer authorization set")]
 fn fourth_credential_issuer_is_checked() {
-    run_four(
-        open_suite_credential(fixtures::complete_other_issuer::<64>(), 3),
+    four_issuer(
+        four_inputs(
+            open_suite_credential(fixtures::complete_other_issuer::<64>(), 3),
+        ),
     );
 }
-
 #[test(should_fail_with = "status entry absent")]
 fn fourth_credential_status_is_checked() {
-    let c = open_suite_credential(fixtures::complete_no_status::<64>(), 3);
-    run_four(c);
+    four_status(
+        four_inputs(
+            open_suite_credential(fixtures::complete_no_status::<64>(), 3),
+        ),
+    );
 }
-
 #[test(should_fail_with = "after validUntil")]
 fn fourth_credential_validity_is_checked() {
-    run_four_with_validity(
-        open_suite_credential(fixtures::complete_expired::<64>(), 3),
+    four_validity(
+        four_inputs(open_suite_credential(fixtures::complete_expired::<64>(), 3)),
         bounds(
             "1970-01-01T00:00:00.101Z".as_bytes(),
             "1970-01-01T00:00:00.149Z".as_bytes(),
         ),
     );
 }
-
 #[test(should_fail_with = "before earliestCreated")]
 fn fourth_credential_freshness_is_checked() {
-    run_four(open_suite_credential(fixtures::complete_old::<64>(), 3));
+    four_freshness(
+        four_inputs(open_suite_credential(fixtures::complete_old::<64>(), 3)),
+    );
 }
-
 #[test(should_fail_with = "verification key opening differs")]
 fn fourth_credential_holder_is_checked() {
-    let opened_holder = holder();
-    let p = scoped_policy(issuer(base()));
-    check_holders(
-        [opened_holder, opened_holder, opened_holder, open(fixtures::holder_two::<16>())],
-        p,
-        digest(),
-        [0, 0, 0, 0],
-        [holder_evidence(11), empty_holder(), empty_holder(), empty_holder()],
-    );
+    let cs = [
+        open_suite_credential(fixtures::complete::<64>(), 0),
+        open_suite_credential(fixtures::complete_shared::<64>(), 1),
+        open_suite_credential(fixtures::complete_unlisted::<64>(), 2),
+        open_suite_credential(fixtures::complete_distinct::<64>(), 3),
+    ];
+    four_holder(cs, [0, 0, 0, 0]);
+}
+#[test]
+fn four_credentials_issuer_component() {
+    four_issuer(four_normal());
+}
+#[test]
+fn four_credentials_holder_component() {
+    four_holder(four_normal(), [0, 0, 1, 0]);
+}
+#[test]
+fn four_credentials_status_component() {
+    four_status(four_normal());
+}
+#[test]
+fn four_credentials_validity_component() {
+    four_validity(four_normal(), period());
+}
+#[test]
+fn four_credentials_freshness_component() {
+    four_freshness(four_normal());
+}
+#[test]
+fn four_credentials_dataset_first_view() {
+    four_dataset_view(four_normal(), 0);
+}
+#[test]
+fn four_credentials_dataset_second_view() {
+    four_dataset_view(four_normal(), 1);
+}
+#[test]
+fn four_credentials_dataset_third_view() {
+    four_dataset_view(four_normal(), 2);
+}
+#[test]
+fn four_credentials_dataset_fourth_view() {
+    four_dataset_view(four_normal(), 3);
+}
+#[test]
+fn four_credentials_shared_merge_component() {
+    four_shared_merge(four_normal());
 }
 
 #[test]

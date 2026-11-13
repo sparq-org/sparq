@@ -44,7 +44,10 @@ def run(args, cwd, **kwargs):
     return subprocess.run(args, cwd=cwd, check=True, text=True, **kwargs)
 
 
-def run_native_tests():
+COMBINED_CASE = "four_credentials_enforce_all_conditions_and_merge"
+
+
+def run_native_tests(include_combined=False):
     """Discover every case, then serialize the large credential batches."""
     package = HERE / 'tests'
     discovered = run(['nargo', 'test', '--list-tests', '--deny-warnings'],
@@ -57,14 +60,19 @@ def run_native_tests():
         names.append(parts[1])
     if not names or len(names) != len(set(names)):
         raise ValueError('native test discovery must be nonempty and unique')
-    large = [name for name in names if name.startswith('four')]
-    regular = [name for name in names if name not in large]
-    if 'four_credentials_enforce_all_conditions_and_merge' not in large:
+    excluded = [] if include_combined else [COMBINED_CASE]
+    selected = [name for name in names if name not in excluded]
+    large = [name for name in selected if name.startswith('four')]
+    regular = [name for name in selected if name not in large]
+    if COMBINED_CASE not in names:
         raise ValueError('signed Solid case missing from native discovery')
     batches = [(regular, '4')] + [([name], '1') for name in large]
     scheduled = [name for batch, _ in batches for name in batch]
-    if len(scheduled) != len(names) or set(scheduled) != set(names):
-        raise ValueError('native partitions must execute every discovered case once')
+    if (len(scheduled) != len(selected) or set(scheduled) != set(selected)
+            or (set(scheduled) | set(excluded)) != set(names)):
+        raise ValueError('native partitions must account for every discovered case once')
+    if excluded:
+        print('Combined Solid case requires a larger machine; use --include-combined to run it.', flush=True)
     failed = []
     for batch, threads in batches:
         command = ['nargo', 'test', '--test-threads', threads, '--deny-warnings',
@@ -79,6 +87,8 @@ def run_native_tests():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--include-combined', action='store_true',
+                        help='also run the combined Solid case, which requires a larger machine')
     parser.add_argument('--measure', action='store_true')
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
@@ -89,7 +99,7 @@ def main():
     if nargo != 'nargo version = 1.0.0-beta.21' or bb != '5.0.0-nightly.20260324':
         raise SystemExit('programme toolchain pin mismatch')
     packages = ['tests'] + (['issuer', 'holder', 'status', 'validity', 'freshness', 'dataset', 'request', 'total'] if args.measure else [])
-    run_native_tests()
+    run_native_tests(args.include_combined)
     if args.measure:
         measurements = {}
         for name in packages[1:]:

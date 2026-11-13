@@ -7,12 +7,15 @@ Run from the repository root:
 
 ```sh
 python3 zk/noir-query/envelope_tests/run.py
+python3 zk/noir-query/envelope_tests/run.py --include-combined
 python3 zk/noir-query/envelope_tests/run.py --measure --output /tmp/envelope-gates.json
 ```
 
 The packages depend directly on the registered core library. The runner requires the exact
-programme toolchain and denies warnings. The runner discovers every native case and checks that its partitions execute each exactly
-once. Four-credential cases run serially; other cases use the compiler’s default test parallelism. Before each backend
+programme toolchain and denies warnings. The runner discovers every native case and accounts
+for its complete schedule. The combined case requires a larger machine and is skipped by
+default; `--include-combined` explicitly enables it. All other four-credential cases run
+serially; other cases use the compiler’s default test parallelism. Before each backend
 measurement it checks the complete public ABI: names, order, types, widths and array lengths.
 The request digest is public, followed by the agreed public policy group. Private measurement
 output belongs outside the repository.
@@ -33,8 +36,11 @@ rounding. The tests include millisecond endpoints and unknown creation.
 
 The small status trees exercise tagged leaves, depth-bound snapshots and membership. Snapshot
 admission must still authenticate the W3C list, minimum length, purpose, bit order and freshness.
-The native four-credential case covers shared/distinct holder keys, issuer scope, both status
-purposes, validity, freshness, dataset merge and verifiedIssuer assertions. Default triples are
+Default component cases authenticate the same four signed credentials at full capacity. They
+cover shared/distinct holder keys, issuer scope, both status purposes, validity, freshness, each
+complete credential graph view and merge behavior on their signed shared fact. The named
+combined case retains the whole-dataset merge and every condition together; it needs a larger
+machine. Default triples are
 set members; named copies remain in each credential graph. The graph builder uses a sorting
 network and a merge with indexed writes. Its compiled sorting depth is determined by the quad
 bucket; it is checked against the candidate-row capacity and is not a public input. Graph names use the public request
@@ -51,5 +57,5 @@ value words; unused set-path levels are zero and do not enter the root.
 Measurement probes use the Solid credential and quad capacities. `request` measures signed
 opening plus policy checks; individual probes add their named check; `total` adds the complete
 policy envelope. `dataset` measures graph assembly separately. The native case includes the
-full merge. Every probe keeps credential metadata and membership choices private. Generated
+full merge when explicitly enabled. Every probe keeps credential metadata and membership choices private. Generated
 query enforcement and admission remain integration work for the compiler and protocol lanes.
