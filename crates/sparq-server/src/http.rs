@@ -824,6 +824,15 @@ pub struct ServerConfig {
     /// 403 before key decoding or admission.
     #[cfg(feature = "solid-authz-trust")]
     pub solid_authz_trust_max_pairs: usize,
+    /// Combined-budget derivation at configuration finalization. Default: `None`:
+    /// an inherited combined limit scales with the transport or signature/pair
+    /// cap, while a custom combined limit stays explicit. `Some(true)` always derives the
+    /// companion from the signature/pair cap plus `max_body_bytes`; `Some(false)`
+    /// keeps the combined value explicit even when it equals the default.
+    /// Environment loading records sole versus paired overrides here, so later
+    /// transport changes and code-built configurations use the same finalization.
+    #[cfg(feature = "solid-authz-trust")]
+    pub solid_authz_trust_auto_budget: Option<bool>,
     /// Original certification-signature plus potential rule/credential pair allowance.
     /// Default: 4096. `SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIR_CHECKS` overrides it.
     /// It is checked alongside the combined decode/commit budget before work begins.
@@ -1039,6 +1048,8 @@ impl Default for ServerConfig {
             #[cfg(feature = "solid-authz-trust")]
             solid_authz_trust_max_pairs: 16384,
             #[cfg(feature = "solid-authz-trust")]
+            solid_authz_trust_auto_budget: None,
+            #[cfg(feature = "solid-authz-trust")]
             solid_authz_trust_max_pair_checks: 4096,
             #[cfg(feature = "solid-authz-trust")]
             solid_authz_trust_max_certifications: 2048,
@@ -1058,6 +1069,31 @@ impl Default for ServerConfig {
 }
 
 impl ServerConfig {
+    fn finalize(self) -> Self {
+        #[cfg(feature = "solid-authz-trust")]
+        {
+            let mut config = self;
+            let defaults = Self::default();
+            let derive = config.solid_authz_trust_auto_budget.unwrap_or(
+                config.solid_authz_trust_max_pairs == defaults.solid_authz_trust_max_pairs
+                    && (config.max_body_bytes > defaults.max_body_bytes
+                        || config.solid_authz_trust_max_pair_checks
+                            != defaults.solid_authz_trust_max_pair_checks),
+            );
+            if derive {
+                config.solid_authz_trust_auto_budget = Some(true);
+                config.solid_authz_trust_max_pairs = config
+                    .solid_authz_trust_max_pair_checks
+                    .saturating_add(config.max_body_bytes);
+            }
+            config
+        }
+        #[cfg(not(feature = "solid-authz-trust"))]
+        {
+            self
+        }
+    }
+
     /// (sq-9xoh) Resolves the EFFECTIVE SERVICE egress allowlist for one READ
     /// request: the per-request [`service_allow_override`](Self::service_allow_override) hook if it
     /// is installed AND returns `Some` for these headers, otherwise the static
@@ -1383,19 +1419,14 @@ impl ServerConfig {
             match (combined, checks) {
                 (Some(legacy), None) | (None, Some(legacy)) => {
                     cfg.solid_authz_trust_max_pair_checks = legacy;
-                    cfg.solid_authz_trust_max_pairs = legacy.saturating_add(cfg.max_body_bytes);
+                    cfg.solid_authz_trust_auto_budget = Some(true);
                 }
                 (Some(combined), Some(checks)) => {
                     cfg.solid_authz_trust_max_pairs = combined;
                     cfg.solid_authz_trust_max_pair_checks = checks;
+                    cfg.solid_authz_trust_auto_budget = Some(false);
                 }
-                (None, None) => {
-                    if cfg.max_body_bytes > Self::default().max_body_bytes {
-                        cfg.solid_authz_trust_max_pairs = cfg
-                            .solid_authz_trust_max_pair_checks
-                            .saturating_add(cfg.max_body_bytes);
-                    }
-                }
+                (None, None) => {}
             }
         }
         #[cfg(feature = "solid-authz-trust")]
@@ -1432,7 +1463,7 @@ impl ServerConfig {
                 cfg.solid_authz_build_wait = Duration::from_millis(ms);
             }
         }
-        Ok(cfg)
+        Ok(cfg.finalize())
     }
 }
 
@@ -2979,6 +3010,7 @@ impl AppState {
             Box<dyn FnMut() -> Option<String> + Send>,
         >,
     ) -> Result<Self, String> {
+        let config = config.finalize();
         // sq-7cxr: resolve the durable graph (open existing / create fresh) when a
         // persistence dir is configured. `seed` is what the ring starts from; `durable` is the
         // on-disk graph the writer mirrors committed batches to.
@@ -12674,6 +12706,92 @@ mod from_env_tests {
         // Recover from a poisoned lock: a panicking test still leaves the env serialized
         // for the next test, so the poison flag carries no unsound state here.
         ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    #[cfg(feature = "solid-authz-trust")]
+    #[tokio::test]
+    async fn code_built_trust_limits_finalize_before_verification() {
+        use crate::solid_authz::trust_limit_tests::{body, run};
+        let config = ServerConfig {
+            max_body_bytes: 8 << 20,
+            ..ServerConfig::default()
+        };
+        let state =
+            crate::http::AppState::with_config(sparq_core::Graph::default(), config.clone());
+        assert_eq!(
+            state.config().solid_authz_trust_max_pairs,
+            config.solid_authz_trust_max_pair_checks + config.max_body_bytes
+        );
+        let (status, response, _) = run(config.clone(), body(17000, 0, 1, 0)).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{response}");
+        for explicit in [9, ServerConfig::default().solid_authz_trust_max_pairs] {
+            let fixed = ServerConfig {
+                solid_authz_trust_max_pairs: explicit,
+                solid_authz_trust_auto_budget: Some(false),
+                ..config.clone()
+            };
+            let (status, response, calls) = run(fixed, body(17000, 0, 1, 0)).await;
+            assert_eq!(status, axum::http::StatusCode::FORBIDDEN, "{response}");
+            assert_eq!(calls, 0);
+        }
+        let finalized = state.config().clone();
+        let wider = crate::http::AppState::with_config(
+            sparq_core::Graph::default(),
+            ServerConfig {
+                max_body_bytes: 16 << 20,
+                ..finalized
+            },
+        );
+        assert_eq!(
+            wider.config().solid_authz_trust_max_pairs,
+            wider.config().solid_authz_trust_max_pair_checks + wider.config().max_body_bytes
+        );
+    }
+
+    #[cfg(feature = "solid-authz-trust")]
+    #[tokio::test]
+    async fn paired_environment_trust_limits_stay_explicit_after_finalization() {
+        use crate::solid_authz::trust_limit_tests::{body, run};
+        let config = {
+            let _env = env_guard();
+            let names = [
+                "SPARQ_MAX_BODY_BYTES",
+                "SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS",
+                "SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIR_CHECKS",
+            ];
+            let previous = names.map(std::env::var_os);
+            std::env::set_var(names[0], (8 << 20).to_string());
+            std::env::set_var(
+                names[1],
+                ServerConfig::default()
+                    .solid_authz_trust_max_pairs
+                    .to_string(),
+            );
+            std::env::set_var(
+                names[2],
+                ServerConfig::default()
+                    .solid_authz_trust_max_pair_checks
+                    .to_string(),
+            );
+            let config = ServerConfig::from_env().unwrap();
+            for (name, value) in names.into_iter().zip(previous) {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+            config
+        };
+        let (status, response, calls) = run(
+            ServerConfig {
+                max_body_bytes: 16 << 20,
+                ..config
+            },
+            body(17000, 0, 1, 0),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::FORBIDDEN, "{response}");
+        assert_eq!(calls, 0);
     }
 
     #[cfg(feature = "solid-authz-trust")]

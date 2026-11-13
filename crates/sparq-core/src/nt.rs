@@ -100,10 +100,31 @@ fn as_nquads_err(e: String) -> String {
 /// ranges — see the loader (`load_nquads_parallel`).
 #[cfg(feature = "parallel")]
 #[allow(clippy::type_complexity)]
-pub fn parse_quads_chunk(bytes: &[u8]) -> Result<Vec<(Option<GraphKey>, Dict, Vec<[Id; 3]>)>, String> {
+pub fn parse_quads_chunk(
+    bytes: &[u8],
+) -> Result<Vec<(Option<GraphKey>, Dict, Vec<[Id; 3]>)>, String> {
+    let chunk = parse_quads_chunk_report(bytes);
+    match chunk.error {
+        Some((_, error)) => Err(error),
+        None => Ok(chunk.buckets),
+    }
+}
+
+#[cfg(feature = "parallel")]
+pub(crate) type QuadBuckets = Vec<(Option<GraphKey>, Dict, Vec<[Id; 3]>)>;
+
+/// Raw source occurrences, before dictionary merging or row deduplication.
+#[cfg(feature = "parallel")]
+pub(crate) struct QuadChunk {
+    pub buckets: QuadBuckets,
+    /// Start of the first statement the native parser could not complete.
+    pub error: Option<(usize, String)>,
+}
+
+#[cfg(feature = "parallel")]
+pub(crate) fn parse_quads_chunk_report(bytes: &[u8]) -> QuadChunk {
     // (sq-7d3dj.21) Establish the module's `CHUNK-UTF8` invariant ONCE, before any byte
     // is scanned — the safety precondition of every `str_of` span extraction below. See `str_of`.
-    validate_chunk_utf8(bytes, "N-Quads")?;
     // `buckets` is in first-occurrence order of graph keys (push-on-first-sight); `index` maps a
     // key to its slot so repeated references to the same graph append to the one existing bucket.
     use std::collections::HashMap;
@@ -111,67 +132,76 @@ pub fn parse_quads_chunk(bytes: &[u8]) -> Result<Vec<(Option<GraphKey>, Dict, Ve
     let mut index: HashMap<Option<GraphKey>, usize> = HashMap::new();
     let n = bytes.len();
     let mut i = 0;
-    while i < n {
-        i = skip_ws(bytes, i);
-        if i >= n {
-            break;
-        }
-        if bytes[i] == b'#' {
-            i = next_line(bytes, i);
-            continue;
-        }
-        if bytes[i] == b'V' {
-            i = version_directive(bytes, i).map_err(as_nquads_err)?;
-            continue;
-        }
-        // We must know the GRAPH (which bucket dict to intern into) before interning S/P/O, but the
-        // graph is the LAST field. So first locate the optional graph term by SPAN-scanning S/P/O
-        // (a no-intern walk, the same cost as a parse), resolve the bucket, THEN intern S/P/O into
-        // that bucket's dict by re-scanning from their start offsets. The span walk avoids any
-        // throwaway interning into a wrong dict.
-        let s_start = i;
-        check_position(bytes, i, false).map_err(as_nquads_err)?;
-        let j = span_term(bytes, i)?;
-        i = skip_hws(bytes, j);
-        let p_start = i;
-        check_position(bytes, i, true).map_err(as_nquads_err)?;
-        let j = span_term(bytes, i)?;
-        i = skip_hws(bytes, j);
-        let o_start = i;
-        let j = span_object(bytes, i)?;
-        i = skip_hws(bytes, j);
-        // Optional graph term, then the mandatory `.`.
-        let graph = if i < n && bytes[i] == b'.' {
-            i = end_of_statement(bytes, i + 1).map_err(as_nquads_err)?;
-            None
-        } else {
-            // Span first: it rejects a `<<(` triple term in graph position with the precise
-            // object-only message before `graph_key`'s IRI scan sees the inner `<`.
-            let jg = span_term(bytes, i)?;
-            let g = graph_key(bytes, i)?;
-            i = skip_hws(bytes, jg);
-            if i >= n || bytes[i] != b'.' {
-                return Err(format!("N-Quads: expected '.' at byte {i}"));
+    let mut statement_start = 0;
+    let result = (|| -> Result<(), String> {
+        validate_chunk_utf8(bytes, "N-Quads")?;
+        while i < n {
+            i = skip_ws(bytes, i);
+            if i >= n {
+                break;
             }
-            i = end_of_statement(bytes, i + 1).map_err(as_nquads_err)?;
-            Some(g)
-        };
-        // Resolve (or create) the bucket for this graph, then intern S/P/O into ITS dict.
-        let slot = *index.entry(graph.clone()).or_insert_with(|| {
-            buckets.push((graph.clone(), Dict::new(), Vec::new()));
-            buckets.len() - 1
-        });
-        let (_, dict, triples) = &mut buckets[slot];
-        // S/P/O were already span-validated above; the only errors the shared (re-scanning)
-        // intern path can still raise here are escape/UTF-8 decode failures, which carry the
-        // N-Triples prefix from the shared term parser. Relabel them to N-Quads so a caller of
-        // the N-Quads fast path never sees a misleading `N-Triples:` message (sq-25r3).
-        let (s, _) = term(bytes, s_start, dict).map_err(as_nquads_err)?;
-        let (p, _) = term(bytes, p_start, dict).map_err(as_nquads_err)?;
-        let (o, _) = object_term(bytes, o_start, dict).map_err(as_nquads_err)?;
-        triples.push([s, p, o]);
+            statement_start = i;
+            if bytes[i] == b'#' {
+                i = next_line(bytes, i);
+                continue;
+            }
+            if bytes[i] == b'V' {
+                i = version_directive(bytes, i).map_err(as_nquads_err)?;
+                continue;
+            }
+            // We must know the GRAPH (which bucket dict to intern into) before interning S/P/O, but the
+            // graph is the LAST field. So first locate the optional graph term by SPAN-scanning S/P/O
+            // (a no-intern walk, the same cost as a parse), resolve the bucket, THEN intern S/P/O into
+            // that bucket's dict by re-scanning from their start offsets. The span walk avoids any
+            // throwaway interning into a wrong dict.
+            let s_start = i;
+            check_position(bytes, i, false).map_err(as_nquads_err)?;
+            let j = span_term(bytes, i)?;
+            i = skip_hws(bytes, j);
+            let p_start = i;
+            check_position(bytes, i, true).map_err(as_nquads_err)?;
+            let j = span_term(bytes, i)?;
+            i = skip_hws(bytes, j);
+            let o_start = i;
+            let j = span_object(bytes, i)?;
+            i = skip_hws(bytes, j);
+            // Optional graph term, then the mandatory `.`.
+            let graph = if i < n && bytes[i] == b'.' {
+                i = end_of_statement(bytes, i + 1).map_err(as_nquads_err)?;
+                None
+            } else {
+                // Span first: it rejects a `<<(` triple term in graph position with the precise
+                // object-only message before `graph_key`'s IRI scan sees the inner `<`.
+                let jg = span_term(bytes, i)?;
+                let g = graph_key(bytes, i)?;
+                i = skip_hws(bytes, jg);
+                if i >= n || bytes[i] != b'.' {
+                    return Err(format!("N-Quads: expected '.' at byte {i}"));
+                }
+                i = end_of_statement(bytes, i + 1).map_err(as_nquads_err)?;
+                Some(g)
+            };
+            // Resolve (or create) the bucket for this graph, then intern S/P/O into ITS dict.
+            let slot = *index.entry(graph.clone()).or_insert_with(|| {
+                buckets.push((graph.clone(), Dict::new(), Vec::new()));
+                buckets.len() - 1
+            });
+            let (_, dict, triples) = &mut buckets[slot];
+            // S/P/O were already span-validated above; the only errors the shared (re-scanning)
+            // intern path can still raise here are escape/UTF-8 decode failures, which carry the
+            // N-Triples prefix from the shared term parser. Relabel them to N-Quads so a caller of
+            // the N-Quads fast path never sees a misleading `N-Triples:` message (sq-25r3).
+            let (s, _) = term(bytes, s_start, dict).map_err(as_nquads_err)?;
+            let (p, _) = term(bytes, p_start, dict).map_err(as_nquads_err)?;
+            let (o, _) = object_term(bytes, o_start, dict).map_err(as_nquads_err)?;
+            triples.push([s, p, o]);
+        }
+        Ok(())
+    })();
+    QuadChunk {
+        buckets,
+        error: result.err().map(|error| (statement_start, error)),
     }
-    Ok(buckets)
 }
 
 /// (sq-25r3) Parses just the graph (4th) field of an N-Quads quad into a [`GraphKey`]

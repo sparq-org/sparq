@@ -1412,8 +1412,6 @@ impl Graph {
     /// serial dataset-scoped parse does.
     #[cfg(feature = "parallel")]
     fn load_nquads_parallel(bytes: &[u8]) -> Result<Graph, String> {
-        #[cfg(test)]
-        crate::metered::note_parallel_dataset_parse();
         let threads = rayon::current_num_threads().max(1);
         let target = (threads * 4).min(bytes.len() / 4096 + 1).max(1);
         Self::load_nquads_chunked(bytes, target)
@@ -1423,15 +1421,41 @@ impl Graph {
     /// differential tests can force small documents to fan out across many ranges.
     #[cfg(feature = "parallel")]
     fn load_nquads_chunked(bytes: &[u8], target: usize) -> Result<Graph, String> {
+        #[cfg(test)]
+        crate::metered::note_parallel_dataset_parse();
         use rayon::prelude::*;
-        use std::collections::HashMap;
+        let chunks = newline_chunk_bounds(bytes, target)
+            .par_iter()
+            .map(|&(start, end)| nt::parse_quads_chunk(&bytes[start..end]))
+            .collect::<Result<Vec<_>, String>>()?;
+        Ok(Self::from_nquads_chunks(chunks))
+    }
+
+    #[cfg(feature = "parallel")]
+    fn parse_nquads_chunks_report(bytes: &[u8], target: usize) -> Vec<(usize, nt::QuadChunk)> {
+        #[cfg(test)]
+        crate::metered::note_parallel_dataset_parse();
+        use rayon::prelude::*;
         // Split into newline-aligned ranges and parse each into per-graph buckets in parallel.
         let bounds = newline_chunk_bounds(bytes, target);
-        type ChunkBuckets = Vec<(Option<nt::GraphKey>, Dict, Vec<[Id; 3]>)>;
-        let per_chunk: Vec<ChunkBuckets> = bounds
+        bounds
             .par_iter()
-            .map(|&(s, e)| nt::parse_quads_chunk(&bytes[s..e]))
-            .collect::<Result<Vec<_>, String>>()?;
+            .map(|&(s, e)| {
+                let mut chunk = nt::parse_quads_chunk_report(&bytes[s..e]);
+                // Completed partials remain live for occurrence accounting and error
+                // reconciliation; release their spare parser capacity before retaining them.
+                for (_, dict, rows) in &mut chunk.buckets {
+                    dict.shrink_term_capacity();
+                    rows.shrink_to_fit();
+                }
+                (s, chunk)
+            })
+            .collect()
+    }
+
+    #[cfg(feature = "parallel")]
+    fn from_nquads_chunks(per_chunk: impl IntoIterator<Item = nt::QuadBuckets>) -> Graph {
+        use std::collections::HashMap;
         // Regroup the per-chunk buckets BY GRAPH, in first-occurrence document order (chunks are in
         // document order, and within a chunk buckets are already first-occurrence). For each graph
         // we accumulate its (Dict, triples) partials across all chunks — the exact input shape the
@@ -1460,7 +1484,7 @@ impl Graph {
         }
         let mut g = main.unwrap_or_else(|| Self::build(Dict::new(), Vec::new()));
         g.named = named;
-        Ok(g)
+        g
     }
 
     /// (sq-ev37) Chunk-parallel TriG dataset loader. Splits the document with the

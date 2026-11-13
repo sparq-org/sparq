@@ -5973,8 +5973,8 @@ pub(crate) mod trust_limit_tests {
     ) -> (StatusCode, serde_json::Value, usize) {
         let bytes = body.to_string();
         assert!(
-            bytes.len() <= 1 << 20,
-            "boundary fixture fits the default body limit"
+            bytes.len() <= config.max_body_bytes,
+            "boundary fixture fits the configured body limit"
         );
         let state = AppState::with_config(
             sparq_core::Graph::default(),

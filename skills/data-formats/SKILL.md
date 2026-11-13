@@ -1172,7 +1172,11 @@ separate dataset account.
 For larger bounded N-Quads, `Graph::load_metered` uses the ordinary parallel
 loader after source admission, then charges the parsed rows and retained terms in
 bulk before returning the graph. Smaller inputs keep streaming admission. Tight
-allowances, duplicate source rows and ambiguous line layouts retain the streaming
-path's refusal order and occurrence accounting. The existing store cutoff is
+allowances retain streaming admission. Parallel reports preserve raw source
+occurrences before deduplication, so duplicate rows need no second parse. Native
+syntax errors resume streaming at the incomplete statement, preserving the prior
+charges and original diagnostic locations. Bulk refusals restore the checkpoint
+and retain streaming refusal order. Native-only version directives stay on a
+single streaming pass to preserve their existing refusal. The existing store cutoff is
 shared by the path-selection regression. The source limit must be finite when
 using this path for request ingestion.
