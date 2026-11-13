@@ -3,6 +3,67 @@ use std::collections::bounded_vec::BoundedVec;
 use crate::suite_entry::TermOpening;
 use crate::suite_metadata::{open_credential_hidden, OpenedCredential, multikey_cell, open_multikey, open_status_index, open_status_purpose};
 use compose::issuer::Point;
+
+fn compact<let L: u32>(a: TermOpening<L>) -> crate::suite_entry::BoundedTermOpening<L,64,1> {
+    assert((a.datatype_len <= 64) & (a.language_len <= 1));
+    let mut datatype = [0;64];
+    for i in 0..64 { datatype[i] = a.datatype[i]; }
+    for i in 64..128 { assert(a.datatype[i] == 0); }
+    for i in 1..64 { assert(a.language[i] == 0); }
+    crate::suite_entry::BoundedTermOpening { bound:a.bound,kind:a.kind,lexical:a.lexical,
+        lexical_len:a.lexical_len,datatype,datatype_len:a.datatype_len,
+        language:[a.language[0]],language_len:a.language_len,key:a.key }
+}
+fn compact_quads() -> [[crate::suite_entry::BoundedTermOpening<32,64,1>;4];1] {
+    let row = quads()[0];
+    [[compact(row[0]),compact(row[1]),compact(row[2]),compact(row[3])]]
+}
+fn bounded_fixture(created_raw: crate::suite_entry::BoundedTermOpening<128,64,1>, key: Point) -> OpenedCredential<1> {
+    crate::suite::open_bounded_credential_hidden(compact_quads(),[crate::suite::leaf_salt(7,0)],7,1,
+        [0x09090909090909090909090909090909;2],created_raw,compact(method()),key,0,
+        Point {x:0x270d497e79fbe3b7574d1fc62b211e0009ba391e1c8e12c1175632f2fb5afdba,y:0x164b448b1476688eeddfc1359220d79e0c2ed96a694bdd84114fcc63d0a01d0b},
+        0x03203196df02ebfe53e3fa449595f2c334699ac289cb3597b8a1dade2f18df0f,
+        0x03b86d67c45349ac68136ab7c56ee819e85f3c2e4a60f2f1150c18ab98ade013,4)
+}
+fn same_cell(a: crate::term::TermCell, b: crate::term::TermCell) {
+    assert((a.bound()==b.bound()) & (a.kind()==b.kind()) & (a.enc()==b.enc())
+        & (a.key_class()==b.key_class()) & (a.key()==b.key()) & (a.datatype()==b.datatype())
+        & (a.language()==b.language()) & (a.credential()==b.credential()), "metadata cell differs");
+}
+fn same_opening(a: OpenedCredential<1>, b: OpenedCredential<1>) {
+    assert((a.root()==b.root()) & (a.message()==b.message()) & (a.count()==b.count()), "opening differs");
+    assert((a.created().known()==b.created().known()) & (a.created().millis()==b.created().millis()), "creation differs");
+    for j in 0..4 { same_cell(a.quads()[0][j],b.quads()[0][j]); }
+    same_cell(a.created_at(),b.created_at()); same_cell(a.verification_key(),b.verification_key());
+    same_cell(a.verification_method(),b.verification_method());
+}
+#[test]
+fn bounded_credential_openings_match_legacy() {
+    let old=fixture(created(),pk());
+    let hidden=bounded_fixture(compact(created()),pk());
+    let revealed=crate::suite::open_bounded_credential_revealed(compact_quads(),[crate::suite::leaf_salt(7,0)],7,1,
+        [0x09090909090909090909090909090909;2],compact(created()),compact(method()),pk(),0);
+    same_opening(hidden,old);same_opening(revealed,old);
+}
+#[test]
+fn bounded_unknown_creation_matches_legacy() {
+    let old=crate::suite::open_credential_revealed(quads(),[crate::suite::leaf_salt(7,0)],7,1,
+        [0x09090909090909090909090909090909;2],absent::<128>(),method(),pk(),0);
+    let bounded=crate::suite::open_bounded_credential_revealed(compact_quads(),[crate::suite::leaf_salt(7,0)],7,1,
+        [0x09090909090909090909090909090909;2],compact(absent::<128>()),compact(method()),pk(),0);
+    same_opening(bounded,old);assert(!bounded.created().known());
+}
+#[test(should_fail_with="challenge reduction not bound to its preimage")]
+fn bounded_wrong_created_instant() {
+    let mut changed=compact(created());changed.lexical[9]=50;
+    let bytes=crate::term_key::recompute(BoundedVec::<u8,128>::from_parts_unchecked(changed.lexical,changed.lexical_len),crate::suite_constants::DT_DATETIME).1.to_be_bytes::<32>();
+    for i in 0..31 {changed.key[i]=bytes[i+1];}
+    let _opened=bounded_fixture(changed,pk());
+}
+#[test(should_fail_with="challenge reduction not bound to its preimage")]
+fn bounded_wrong_authenticated_key() {
+    let _opened=bounded_fixture(compact(created()),Point {x:0x10e2b0752a9934ad28c9b07eeaa19a511df7bd67051d2b03c0e9e4b51f33c1f6,y:0x0ac6e1123840c217fcf07ef14dacccb4381e5d732458f79a425dfe6af6c17d75});
+}
 fn raw<let C:u32,let L:u32,let D:u32>(kind:u8,lex:[u8;L],dt:[u8;D],key:Field)->TermOpening<C> {
     let mut lexical=[0;C];for i in 0..L { lexical[i]=lex[i]; }
     let mut datatype=[0;128];for i in 0..D { datatype[i]=dt[i]; }
@@ -78,7 +139,7 @@ fn non_zero_padding_salt() {
     let a=quads();let cells=crate::suite_entry::open_quads(a,1);
     let _root=crate::suite::credential_root([cells[0],[crate::term::padding();4]],[crate::suite::leaf_salt(7,0),1],7,1);
 }
-#[test(should_fail_with="non-zero byte padding")]
+#[test(should_fail_with="call to assert_max_bit_size")]
 fn non_zero_lexical_padding() {
     let _cell=crate::term::open_term(1,BoundedVec::<u8,2>::from_parts_unchecked([65,66],1),BoundedVec::<u8,1>::new(),BoundedVec::<u8,1>::new(),[0;31],0);
 }

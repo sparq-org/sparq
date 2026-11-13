@@ -126,6 +126,17 @@ accepts signature/reduction witnesses and checks Schnorr. Both return an opaque
 its exact `message()` using the same public key. Never witness that opaque object
 or a `TermCell` directly.
 
+For caller-selected backing bounds, use
+`suite::{open_bounded_credential_hidden, open_bounded_credential_revealed}`.
+Their quad cells are `BoundedTermOpening<L, D, G>`; creation and method openings
+are `BoundedTermOpening<C, D, G>` and `BoundedTermOpening<V, D, G>`.
+All other arguments and authenticated getters follow the existing entry points.
+Runtime lengths and every padding byte remain constrained. Choose capacities
+from the credential profile and emit separate credential calls directly in the
+generated program. The complete opener specializes subject, predicate and graph
+construction to their RDF roles; general cell/table constructors remain available
+with their existing signatures and behavior.
+
 Both fixture entry points expose the issuer-key coordinates and verifier-agreed
 configuration digest halves. Hidden mode returns nothing; revealed mode releases
 only the salted signed message. Raw metadata, terms, keys, count, root, salts and

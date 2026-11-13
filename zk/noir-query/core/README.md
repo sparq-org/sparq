@@ -46,6 +46,17 @@ singleton property reads. `credential_subject`, `valid_from` and `valid_until`
 read the authenticated table. `open_time` yields exact UTC milliseconds or an
 explicit unknown value. The envelope refuses a required check on unknown time.
 
+For compact generated witnesses, call
+`suite::{open_bounded_credential_hidden, open_bounded_credential_revealed}`.
+They accept `BoundedTermOpening<L, D, G>` quad cells and
+`BoundedTermOpening<C, D, G>` / `BoundedTermOpening<V, D, G>` creation and method
+openings. Their remaining arguments and authenticated return value match the
+existing entry points. All lengths remain witnesses; all backing padding is
+checked. Choose capacities from the credential profile and emit independent
+credential calls directly in generated wiring. The general cell/table
+constructors retain their existing behavior; RDF-role specialization is private
+to complete credential openings.
+
 Use `open_status_index` for decimal string indices, `open_status_purpose` for
 literal purposes, and `open_multikey` for the private codec. Synthetic credential
 graph names come from `term::credential_graph` and include the request digest and
@@ -56,3 +67,6 @@ Fixed datatype/language/vocabulary identifiers are literal fields pinned against
 Rust. Byte packing stores field words outside predicates; tree reductions visit
 each level's actual width. Generated wiring should assign a completed quad to its
 output table outside the count predicate, avoiding selection of the whole table.
+Packing combines short checked chunks into the unchanged field-word encoding.
+Its private split hint is checked by an exact quotient/remainder relation and
+short ranges; padding is enforced by exact division with a bounded quotient.
