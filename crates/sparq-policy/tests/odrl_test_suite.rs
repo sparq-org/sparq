@@ -63,6 +63,8 @@ use std::path::{Path, PathBuf};
 #[allow(dead_code)]
 #[path = "../../sparq-conformance/tests/support/earl.rs"]
 mod earl;
+#[path = "../../sparq-conformance/tests/support/earl_fixture.rs"]
+mod earl_fixture;
 
 // ---- The RATCHET floor. The ACTUAL current pass count at the pinned suite
 // revision (scripts/fetch-odrl-suite.sh); it may only RISE. sq-z1xv8:
@@ -622,7 +624,7 @@ fn odrl_test_suite_decision_parity() {
 
 #[test]
 fn earl_covers_pass_mismatch_unsupported_and_harness_error_before_ratchet() {
-    let fixture = earl::Fixture::new();
+    let fixture = earl_fixture::Fixture::new();
     fixture.write(
         "policies/plain.ttl",
         format!(
