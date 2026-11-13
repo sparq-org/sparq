@@ -352,11 +352,11 @@ With `sparq-zk-compose/successful-results`, use
 work_dir)` with independently chosen request/trust/status/freshness inputs.
 Successful verification returns released mappings. The new contract is separate
 from `verify_manifest`: only nonempty positive `SELECT DISTINCT` answers, selected
-IRIs/literals, and private canonical nonnegative `xsd:integer` predicates through
-`u64::MAX` are admitted. `ResultOptions::integer_capacity` selects the default
-smallest range bucket or explicit `IntegerCapacityPolicy::HideInU64`; actual
-decimal length stays private. Status capacities are independently derived at
-depth 10/17/20 from all freshness-accepted snapshots.
+IRIs/literals, private canonical nonnegative integer predicates, and canonical
+timezone-free `xsd:date` comparisons are admitted. `ResultOptions::integer_capacity` selects the default
+range policy or explicit `IntegerCapacityPolicy::HideInU64`; method-bound hidden
+integers always use the full-width family and keep decimal length private.
+Status capacity is independently derived from all freshness-accepted snapshots.
 Public predicates run in the verifier and select the member without numeric
 circuitry. Roots/salts/status indices and intermediate encodings are private;
 issuer slots/capacities/result size remain public. See the [successful-result contract](references/successful-results.md)
@@ -372,12 +372,18 @@ issuer attests that method and not merely the commitment. A method-unbound
 members are RETAINED unchanged and their proofs keep verifying;
 `ResultPolicy::admit_unbound_legacy` is the written-down opt-in that acts on
 method-unbound material and issues through them, the same shape as
-`MethodPolicy::admit_unbound`. Method-bound members exist at one or two
-credentials, no private predicate and status depth 10; any other capacity
-bucket, and the signed and public-pattern families, are refused by name unless
-that opt-in is written down. Each credential is witnessed under the message the
+`MethodPolicy::admit_unbound`. Method-bound hidden-integer members cover both
+credential-capacity shapes at every admitted status depth. Dedicated date
+members cover a single hidden date predicate in the shallow status profile;
+the signed and public-pattern families still require the opt-in. Each credential
+is witnessed under the message the
 selected member's relation folds, and an attestation that does not match that
 message is refused rather than witnessed.
+Date keys are derived in-circuit from the complete canonical literal token,
+including the exact datatype and Gregorian calendar validation. Query admission
+refuses timezone suffixes, alternate date spellings and date-time bounds by name.
+`planner::IntegerFilter::datatype` records `PredicateDatatype::{Integer, Date}`;
+planner admission and verification retain this distinction when evaluating keys.
 Research-stage, not externally
 audited: no complete-answer, absence, wallet-size or holder-identity guarantee.
 
@@ -564,3 +570,6 @@ then interleaves real adapter subprocesses. It preserves per-sample failures,
 unsupported combinations, exact inputs, authority/authentication identities and
 raw reports. Paired planner acceptance contracts retain visibly different public
 capacities; exact authority modes and selected support are separate contracts.
+
+The [Node package and host seam](references/successful-results.md#node-package-and-webassembly-host)
+use the same private preparation and independent statement reconstruction.

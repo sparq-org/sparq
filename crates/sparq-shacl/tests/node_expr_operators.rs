@@ -11,10 +11,9 @@
 //! the fixtures, and pin the SEMANTICS (not just line-exercise): each assertion is
 //! the node set the SHACL-AF algebra specifies for that operator.
 //!
-//! Whole file is `#[cfg(feature = "shacl-af")]` — the node-expression public API
-//! it drives is itself feature-gated, so with the feature off this compiles to
-//! nothing (and the AGENTS.md "both feature states" standard is met: the file is a
-//! no-op in the default build).
+//! This legacy operator/rule suite requires `shacl-af` for its rule tests.
+//! Standalone evaluation is also tested in both feature states by
+//! `shacl12_node_expr.rs`.
 
 #![cfg(feature = "shacl-af")]
 
@@ -107,10 +106,9 @@ fn sum_integer_decimal_and_empty() {
     assert_eq!(lexes(&eval(&data, &shapes, "empty", &f)), vec!["0"]);
 }
 
-/// `min` / `max` pick the numerically least / greatest member; a set with no
-/// numeric member yields the empty set (NOT a zero).
+/// `min` / `max` pick the least / greatest member, including string values.
 #[test]
-fn min_max_pick_extremes_and_empty_on_non_numeric() {
+fn min_max_pick_numeric_and_string_extremes() {
     let data = g("ex:a a ex:N .");
     let shapes = g(r#"
         ex:Decl
@@ -121,8 +119,8 @@ fn min_max_pick_extremes_and_empty_on_non_numeric() {
     let f = iri("a");
     assert_eq!(lexes(&eval(&data, &shapes, "mn", &f)), vec!["2"]);
     assert_eq!(lexes(&eval(&data, &shapes, "mx", &f)), vec!["9"]);
-    // No numeric member -> empty (min_max returns None).
-    assert!(eval(&data, &shapes, "mnNN", &f).is_empty());
+    // Strings participate in extrema as well as numeric literals.
+    assert_eq!(lexes(&eval(&data, &shapes, "mnNN", &f)), vec!["x"]);
 }
 
 #[test]
@@ -207,8 +205,8 @@ fn min_max_keep_exact_digits() {
         ("equalMin", "01", "integer"),
         ("equalMax", "01", "integer"),
         ("firstMinNaN", "NaN", "double"),
-        ("lastMinNaN", "1", "integer"),
-        ("firstMaxNaN", "NaN", "double"),
+        ("lastMinNaN", "NaN", "double"),
+        ("firstMaxNaN", "1", "integer"),
         ("lastMaxNaN", "1", "integer"),
     ] {
         let actual = eval(&data, &shapes, name, &iri("a"));
@@ -218,7 +216,7 @@ fn min_max_keep_exact_digits() {
 }
 
 #[test]
-fn order_by_keeps_exact_digits_and_selects_least_key() {
+fn order_by_keeps_exact_digits_and_selects_first_key() {
     let data = g(r#"
         ex:hi ex:key 9007199254740994, 9007199254740993 .
         ex:lo ex:key 9007199254740992 .
@@ -235,7 +233,7 @@ fn order_by_keeps_exact_digits_and_selects_least_key() {
         ex:Decl
           ex:asc [ shnex:nodes ( ex:hi ex:lo ) ; shnex:orderBy [ sh:path ex:key ] ] ;
           ex:desc [ shnex:nodes ( ex:lo ex:hi ) ; shnex:orderBy [ sh:path ex:key ] ; shnex:desc true ] ;
-          ex:least [ shnex:nodes ( ex:lo ex:multi ) ; shnex:orderBy [ sh:path ex:key ] ] ;
+          ex:first [ shnex:nodes ( ex:lo ex:multi ) ; shnex:orderBy [ sh:path ex:key ] ] ;
           ex:mixed [ shnex:nodes ( ex:hi ex:dbl ) ; shnex:orderBy [ sh:path ex:key ] ] ;
           ex:huge [ shnex:nodes ( ex:hugeHi ex:hugeLo ex:hugeFloat ) ; shnex:orderBy [ sh:path ex:key ] ] ;
           ex:hugeDesc [ shnex:nodes ( ex:hugeLo ex:hugeFloat ex:hugeHi ) ; shnex:orderBy [ sh:path ex:key ] ; shnex:desc true ] ;
@@ -249,10 +247,13 @@ fn order_by_keeps_exact_digits_and_selects_least_key() {
         eval(&data, &shapes, "desc", &iri("a")),
         [iri("hi"), iri("lo")]
     );
-    assert_eq!(
-        eval(&data, &shapes, "least", &iri("a")),
+    let first = GraphView::new(&data).objects(&iri("multi"), "http://example.org/key")[0].clone();
+    let expected = if matches!(first, Term::Literal(l) if l.value() == "9007199254740991") {
         [iri("multi"), iri("lo")]
-    );
+    } else {
+        [iri("lo"), iri("multi")]
+    };
+    assert_eq!(eval(&data, &shapes, "first", &iri("a")), expected);
     assert_eq!(
         eval(&data, &shapes, "mixed", &iri("a")),
         [iri("dbl"), iri("hi")]

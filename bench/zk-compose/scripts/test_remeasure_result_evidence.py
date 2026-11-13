@@ -140,6 +140,34 @@ class ApplyTests(unittest.TestCase):
         self.assertEqual(self.git("diff", "--cached", "--name-only").stdout, "")
         self.assert_no_temporaries()
 
+    def test_working_tree_provenance_is_explicit(self):
+        self.args.working_tree = True
+        self.apply()
+        for path in self.paths:
+            data = json.loads(path.read_text())
+            self.assertEqual(data["measured_source"]["source_state"],
+                             "uncommitted candidate based on source_commit")
+            self.assertIn("independent snapshots of the uncommitted candidate", data["measurement_method"])
+            self.assertNotIn("clean git archives", data["measurement_method"])
+            self.assertEqual(data["members"], {})
+
+    def test_working_tree_requires_current_source_identity(self):
+        self.args.working_tree = True
+        source = self.root / "zk/compose/compose_core/src/new.nr"
+        source.parent.mkdir(parents=True)
+        source.write_text("pub fn new() {}")
+        with mock.patch.object(remeasure.os, "replace") as replace:
+            with self.assertRaisesRegex(SystemExit, "do not match the current Noir sources"):
+                self.apply()
+            replace.assert_not_called()
+        self.assertEqual({path: path.read_bytes() for path in self.paths}, self.originals)
+
+    def test_working_tree_retains_snapshot_cleanliness_check(self):
+        self.args.working_tree = True
+        (self.evidence_dir / "gate_counts_latest.json").write_text('{"benchmarks": {"local": {}}}')
+        with self.assertRaisesRegex(SystemExit, "unstaged edits against HEAD"):
+            self.apply()
+
     def test_missing_git_fails_closed(self):
         with mock.patch.object(remeasure.subprocess, "run", side_effect=FileNotFoundError("git")):
             with self.assertRaisesRegex(SystemExit, "cannot check evidence cleanliness"):

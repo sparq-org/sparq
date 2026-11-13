@@ -1,0 +1,14 @@
+[
+  {
+    "member": "result_v5_k1_n16_p3_r4_f0_d10",
+    "acir": "result_v5_k1_n16_p3_r4_f0_d10.json",
+    "vk": "result_v5_k1_n16_p3_r4_f0_d10.vk",
+    "proofBytes": 14656
+  },
+  {
+    "member": "result_v5_k2_n16_p3_r4_f0_d10",
+    "acir": "result_v5_k2_n16_p3_r4_f0_d10.json",
+    "vk": "result_v5_k2_n16_p3_r4_f0_d10.vk",
+    "proofBytes": 14656
+  }
+]

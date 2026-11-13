@@ -1,14 +1,9 @@
 //! Document loading — the [`DocumentLoader`] trait, **deny-by-default**.
 //!
-//! (sq-oy1f.23) The pipeline dereferences remote `@context`, `@import`, and
-//! remote-document references **only** through a [`DocumentLoader`]. The default loader is
-//! [`NoopLoader`], which refuses every load and raises
-//! [`JsonLdErrorCode::LoadingDocumentFailed`]: enabling JSON-LD gives a surface **no ambient
-//! network** (design record §5). The network
-//! `HttpLoader` with its SSRF allowlist, and the conformance `MockLoader`, arrive in bead
-//! `sq-oy1f.32` behind an opt-in feature; this scaffold ships the trait, the
-//! [`RemoteDocument`] carrier, the fail-closed [`NoopLoader`], and the local-fixture
-//! [`FsLoader`].
+//! Every remote document, context, and import is supplied by a caller-owned loader.
+//! The processor has no HTTP client. [`NoopLoader`] refuses every load; [`FsLoader`]
+//! maps trusted fixture URLs to local files. Optional HTML/XHTML extraction happens
+//! only after a loader returns its content and metadata.
 
 use std::collections::BTreeMap;
 use std::path::{Component, PathBuf};
@@ -17,8 +12,7 @@ use crate::error::{JsonLdError, JsonLdErrorCode};
 
 /// A retrieved document (the spec's `RemoteDocument`).
 ///
-/// `document` is the raw retrieved text — this scaffold does not yet parse it (the JSON
-/// parser lands with the algorithms in `sq-oy1f.24`+).
+/// `document` is raw retrieved text. The processor parses it according to its content type.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RemoteDocument {
     /// The retrieved document, as unparsed text.
@@ -44,6 +38,77 @@ impl RemoteDocument {
             profile: None,
         }
     }
+}
+
+/// Parse a loader result once, preserving its final URL and media-type semantics.
+pub(crate) fn load_parsed(
+    url: &str,
+    options: &crate::JsonLdOptions,
+    loader: &dyn DocumentLoader,
+) -> Result<(crate::Json, RemoteDocument), JsonLdError> {
+    parse_document(loader.load_document(url)?, url, options)
+}
+
+pub(crate) fn parse_document(
+    mut remote: RemoteDocument,
+    url: &str,
+    options: &crate::JsonLdOptions,
+) -> Result<(crate::Json, RemoteDocument), JsonLdError> {
+    let media = remote
+        .content_type
+        .as_deref()
+        .unwrap_or("application/ld+json")
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    let parsed = match media.as_str() {
+        "text/html" | "application/xhtml+xml" => {
+            #[cfg(feature = "html")]
+            {
+                let fallback = options.base.as_deref().unwrap_or(&remote.document_url);
+                let (json, base) = if media == "application/xhtml+xml" {
+                    crate::html::extract_xml(
+                        &remote.document,
+                        url,
+                        fallback,
+                        options.extract_all_scripts,
+                    )?
+                } else {
+                    crate::html::extract(
+                        &remote.document,
+                        url,
+                        fallback,
+                        options.extract_all_scripts,
+                    )?
+                };
+                remote.document_url = base;
+                json
+            }
+            #[cfg(not(feature = "html"))]
+            {
+                let _ = (url, options);
+                return Err(JsonLdError::new(JsonLdErrorCode::LoadingDocumentFailed));
+            }
+        }
+        m if m == "application/json" || m.ends_with("+json") => {
+            crate::Json::parse(&remote.document).map_err(|e| {
+                JsonLdError::with_detail(JsonLdErrorCode::LoadingDocumentFailed, e.to_string())
+            })?
+        }
+        _ => return Err(JsonLdError::new(JsonLdErrorCode::LoadingDocumentFailed)),
+    };
+    // Context links are ignored for JSON-LD and HTML, even when a custom loader supplies one.
+    if media == "application/ld+json" || media == "text/html" || media == "application/xhtml+xml" {
+        remote.context_url = None;
+    } else if let Some(context) = &remote.context_url {
+        remote.context_url = Some(crate::context::iri::resolve_iri(
+            &remote.document_url,
+            context,
+        ));
+    }
+    Ok((parsed, remote))
 }
 
 /// Retrieves a document for a URL (the spec's `LoadDocumentCallback`). Implementations that
@@ -101,7 +166,7 @@ impl FsLoader {
             .iter()
             .filter(|(p, _)| url.starts_with(p.as_str()))
             .max_by_key(|(p, _)| p.len())?;
-        let rel = &url[prefix.len()..];
+        let rel = url[prefix.len()..].split(['#', '?']).next()?;
         let rel = rel.trim_start_matches('/');
         let rel_path = PathBuf::from(rel);
         // Fixture-escape guard: reject absolute paths and any parent-dir traversal.
@@ -190,6 +255,9 @@ mod tests {
         assert_eq!(doc.document, r#"{"@context":{}}"#);
         assert_eq!(doc.document_url, "https://vocab.example/ctx.jsonld");
         assert_eq!(doc.content_type.as_deref(), Some("application/ld+json"));
+        let addressed = loader.load_document("https://vocab.example/ctx.jsonld?version=1#part").unwrap();
+        assert_eq!(addressed.document, doc.document);
+        assert_eq!(addressed.document_url, "https://vocab.example/ctx.jsonld?version=1#part");
 
         std::fs::remove_file(&fixture).ok();
         std::fs::remove_dir(&dir).ok();

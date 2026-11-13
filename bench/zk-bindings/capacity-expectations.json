@@ -1,5 +1,4 @@
 {
-  "authored_by": "GPT-6",
   "schema": "sparq.proof-bindings.capacity-expectations.v1",
   "scope": "Explicit expected causes for unchanged capacity controls; source and original fixture hashes bind interpretation. Static temporal admission/dataset checks remain distinct from dynamically emitted temporal-year failures. No success golden is changed.",
   "sources": [
@@ -30,12 +29,12 @@
     },
     {
       "path": "zk/sparql-evaluator/fixtures/conformance/numeric-capacity.json",
-      "source_sha256": "ce6057181771de5864f97cc8d0ddf6592e8b5f5954a2f771d3f5128726d48999",
+      "source_sha256": "947501a88e1a8f7d5a281b8709e66fc9c9aee1b0fe787346c5dfcd4f8d268788",
       "field": "cases",
       "cases": [
         {
           "id": "integer-add-overflow",
-          "original_fixture_sha256": "f0cad73508d34e9bf12a1159416ee6ef6332deafb119a0bf7d4e490e0e45d74e",
+          "original_fixture_sha256": "7d73c29d132f999464600adcbdb0c7fd24b7f192dd6ef92974087d6427ce8ddf",
           "expected_rejection": {
             "category": "capacity",
             "phase": "evaluation",
@@ -44,7 +43,7 @@
         },
         {
           "id": "integer-multiply-overflow",
-          "original_fixture_sha256": "08f135dc30301c290f407bd46d69343037a9bd0730b83acc621a8f2c88c16c30",
+          "original_fixture_sha256": "ef35d6812f87a948eec7b2493a23b1038f3755e416f22dd31853cade347e53d4",
           "expected_rejection": {
             "category": "capacity",
             "phase": "evaluation",
@@ -53,7 +52,7 @@
         },
         {
           "id": "integer-negation-overflow",
-          "original_fixture_sha256": "f4aae68674c6df41b920995b6ac4e20e4e7289d0019d660eafe5761da884f3a3",
+          "original_fixture_sha256": "0504846da31516676a4dfa03700e35f30d5da5838605bc3aea8965af9351dd2b",
           "expected_rejection": {
             "category": "capacity",
             "phase": "evaluation",
@@ -62,7 +61,7 @@
         },
         {
           "id": "integer-abs-overflow",
-          "original_fixture_sha256": "5f0faa15dfd61b2c8b2e30bbc90a751b039ad48c88481472457f083674991370",
+          "original_fixture_sha256": "dcde84368a132e9af202a329e77abfa0fd38b3010562caa3a91c3b8d0bdd0d9f",
           "expected_rejection": {
             "category": "capacity",
             "phase": "evaluation",
@@ -71,7 +70,7 @@
         },
         {
           "id": "decimal-add-overflow",
-          "original_fixture_sha256": "f33ec227ff614cf5d65b18dc7feb235bd9f2f17e7771274ffdf2efec3f3147fd",
+          "original_fixture_sha256": "8b71e30deb8ac9de79b8c34ebf0126fbf5dcef611dbe01d0b86af8a6ca72a342",
           "expected_rejection": {
             "category": "capacity",
             "phase": "evaluation",
@@ -80,7 +79,7 @@
         },
         {
           "id": "decimal-multiply-overflow",
-          "original_fixture_sha256": "e485cf6b0fd0befb5826ba1fee028bcd46415e86b4993c565216f32a0fe4615c",
+          "original_fixture_sha256": "5dbbd6dbfd0332ecc450d80ddd23219cb4dfe6f987789939ec5126f07b5195c9",
           "expected_rejection": {
             "category": "capacity",
             "phase": "evaluation",
@@ -89,7 +88,7 @@
         },
         {
           "id": "integer-string-cast",
-          "original_fixture_sha256": "bbf4b821158347c82111a38a0bcdeebda3e4f2ae0114bfc6ce3feb5635dc195c",
+          "original_fixture_sha256": "49f93053c61ff3fd0b04a8fb9927105017b2768d62ec778d069e72ad3f3958b1",
           "expected_rejection": {
             "category": "capacity",
             "phase": "evaluation",
@@ -98,25 +97,7 @@
         },
         {
           "id": "decimal-string-cast",
-          "original_fixture_sha256": "5e4ba8c11e11784b4e3cf31eebc76b73cd2c8d132b7eee0797f86a3fd6886eaf",
-          "expected_rejection": {
-            "category": "capacity",
-            "phase": "evaluation",
-            "cause": "numeric_representation"
-          }
-        },
-        {
-          "id": "decimal-alignment-overflow",
-          "original_fixture_sha256": "f71e8dedbe043b0ebebf8ebd7cd1af2178e85ef46f436459fe80e4b26bb9c890",
-          "expected_rejection": {
-            "category": "capacity",
-            "phase": "evaluation",
-            "cause": "numeric_representation"
-          }
-        },
-        {
-          "id": "seconds-numeric-consumer",
-          "original_fixture_sha256": "aa720835e07c1726d12210144682c752c9807bb0e4b5a9f683080dd460bf0681",
+          "original_fixture_sha256": "0b9586ef8d8202c24ae3ce0bcddb1ebfdc274926629c138ecdb4b4ea113ec03c",
           "expected_rejection": {
             "category": "capacity",
             "phase": "evaluation",
@@ -125,7 +106,7 @@
         },
         {
           "id": "substr-huge-length",
-          "original_fixture_sha256": "2dc1b14734c2b46152c1a1cd35c5f5e70d18b74b357d542f5b5e125e8d03e660",
+          "original_fixture_sha256": "0026da193fed297efaffe13179e356915cb3fe65d4a92e42c8f2b4e58e33304d",
           "expected_rejection": {
             "category": "capacity",
             "phase": "evaluation",
@@ -134,43 +115,7 @@
         },
         {
           "id": "substr-huge-cancellation",
-          "original_fixture_sha256": "71d3c25ce42fcd6f58b93e139b7274a41fbbe91831b07b119564ec883fc8d72a",
-          "expected_rejection": {
-            "category": "capacity",
-            "phase": "evaluation",
-            "cause": "numeric_representation"
-          }
-        },
-        {
-          "id": "stored-false-ask",
-          "original_fixture_sha256": "fd801b60b0d5ae8be09315e3c6317e31079f8b0505272bea824e63dba76e0f05",
-          "expected_rejection": {
-            "category": "capacity",
-            "phase": "evaluation",
-            "cause": "numeric_representation"
-          }
-        },
-        {
-          "id": "stored-false-count",
-          "original_fixture_sha256": "7b1e0bfd0d506821f4c73690b6b22bd3b674f877461e8ac30ef46dd504895b98",
-          "expected_rejection": {
-            "category": "capacity",
-            "phase": "evaluation",
-            "cause": "numeric_representation"
-          }
-        },
-        {
-          "id": "stored-order",
-          "original_fixture_sha256": "e1002ef08796f4a5d0787be3da6ce516c142b302076994103491a04ef6fd7325",
-          "expected_rejection": {
-            "category": "capacity",
-            "phase": "evaluation",
-            "cause": "numeric_representation"
-          }
-        },
-        {
-          "id": "stored-topk",
-          "original_fixture_sha256": "3b4785cd6a4b0925227a0292373bc867d762f3675e669dc069623c59c5bb47e9",
+          "original_fixture_sha256": "35fd382039884406f54e11e8888aad414c3f57820f57027550dcb3bb742abc0a",
           "expected_rejection": {
             "category": "capacity",
             "phase": "evaluation",
@@ -179,7 +124,7 @@
         },
         {
           "id": "stored-sum",
-          "original_fixture_sha256": "2a7a9a8ae4819b265fe81f1f55537bc7cf6ce618dfcf43748c14cbc2a6dfc514",
+          "original_fixture_sha256": "156b7b1fc2cf170551edfa480381a7be5ee53589494e4eed656298d643fcbf91",
           "expected_rejection": {
             "category": "capacity",
             "phase": "evaluation",
@@ -188,7 +133,7 @@
         },
         {
           "id": "stored-avg",
-          "original_fixture_sha256": "acc400e0d00ea3f8da7628843840eb65dd026781ac65356f268b3a0610327e1a",
+          "original_fixture_sha256": "51239b69e247fabaecabf9f8391bccf1146fec396f02cff15d91994d3bac7c0e",
           "expected_rejection": {
             "category": "capacity",
             "phase": "evaluation",
@@ -197,7 +142,7 @@
         },
         {
           "id": "stored-min",
-          "original_fixture_sha256": "611b251ec0e99cf81166bc45d9e037a7e6c3eaf320317bc752f0100bb8ebd750",
+          "original_fixture_sha256": "b3d0f83e0e73879304d4b66eff5353eeceb921107e20b0d6b18ed6a69900fbe0",
           "expected_rejection": {
             "category": "capacity",
             "phase": "evaluation",
@@ -206,7 +151,7 @@
         },
         {
           "id": "stored-max",
-          "original_fixture_sha256": "7f8562c70862174086a0dbff0f77587f15790292909338a293832c3c2b9f8a5d",
+          "original_fixture_sha256": "3667f4ed95c4ca14d879a02310cf7ef428034c274b424643dfe2590ea6f3eb61",
           "expected_rejection": {
             "category": "capacity",
             "phase": "evaluation",
@@ -214,8 +159,62 @@
           }
         },
         {
-          "id": "stored-identity-equality",
-          "original_fixture_sha256": "47f9911e6cc12dc66b798517afcead3f2a8990a9c9a5d42da55c96cb35b53f9a",
+          "id": "decimal-double-comparison-capacity",
+          "original_fixture_sha256": "bf15e58ceded2080e4544942742d2e3c662535c651924c77d298e3d3aa31db78",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "seconds-arithmetic-capacity",
+          "original_fixture_sha256": "0e359b6c6400bb0d4968b52b432ac578af333b121703bdc67ea0d96fbba6f8a1",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "stored-double-comparison-ask-capacity",
+          "original_fixture_sha256": "c3e92c7f788b01aecffc4a783ccb3ba94007c96fed5021b5e76836fcc6beb811",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "stored-double-comparison-count-capacity",
+          "original_fixture_sha256": "0e7fc5f26e9fcd4212a3d90c909e4da7cccb2b7f1259c0364ec5cab3930d3e06",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "stored-arithmetic-order-capacity",
+          "original_fixture_sha256": "06039ab91f3790ebbe25cdfd7d7eba38fb9ee5aae6a5bed688b50ca541948d2c",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "stored-arithmetic-topk-capacity",
+          "original_fixture_sha256": "ad0884928ef7dff8672e6f724ad57fe4afb2e6a3e405df1aa45de8b0ea7e0ce0",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "stored-arithmetic-equality-capacity",
+          "original_fixture_sha256": "c0bfa306ddf5744f4d7c4dbf3e559be9f3ab03adc7212edfe3a8cb59d8c2a58a",
           "expected_rejection": {
             "category": "capacity",
             "phase": "evaluation",

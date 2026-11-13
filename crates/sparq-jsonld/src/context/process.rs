@@ -215,7 +215,7 @@ pub(crate) fn process_inner(
                 .loader
                 .load_document(&resolved)
                 .map_err(|e| JsonLdError::with_detail(E::LoadingRemoteContextFailed, e.to_string()))?;
-            let parsed = Json::parse(&doc.document)
+            let (parsed, doc) = crate::loader::parse_document(doc, &resolved, &JsonLdOptions::default())
                 .map_err(|e| JsonLdError::with_detail(E::InvalidRemoteContext, e.to_string()))?;
             let loaded_ctx = match parsed.get("@context") {
                 Some(c) => c.clone(),

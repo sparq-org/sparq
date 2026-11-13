@@ -950,7 +950,7 @@ fn count_digits(s: &[u8], from: usize) -> usize {
 /// BCP47 *well-formedness* (the language-tag shape check the spec requires for a
 /// compound literal's `rdf:language`): 1–8 alphabetic characters, then `-`-separated
 /// 1–8 character alphanumeric subtags.
-fn well_formed_language(tag: &str) -> bool {
+pub(crate) fn well_formed_language(tag: &str) -> bool {
     let mut parts = tag.split('-');
     match parts.next() {
         Some(first)
