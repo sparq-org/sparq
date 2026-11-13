@@ -18,22 +18,55 @@ async function refused(changes, reason, source = one) {
   const result = await check(source, { ...changes, seenNonces });
   assert.equal(result.verified, false);
   assert.deepEqual(result.released, []);
+  assert.equal(Object.hasOwn(result, 'report'), false);
   assert.match(result.reason, reason);
   assert.equal(reads, 0, 'rejected input must not reach the nonce store');
   assert.equal(adds, 0, 'rejected input must not consume a nonce');
 }
 
-test('one credential proves public filters, degree constant and identity pattern', async () => {
+test('one deterministic credential proves and reports its authenticated issuer', async () => {
   const result = await check();
   assert.equal(result.verified, true, result.reason);
   assert.deepEqual(result.released, [{ age: { kind: 'literal', value: '30', datatype: 'http://www.w3.org/2001/XMLSchema#integer' }, p: { kind: 'iri', value: 'https://example.org/alice' } }]);
   assert.equal(one.presentation.issuer_slots.length, 1);
+  assert.deepEqual(result.report, {
+    rule: { query: one.query, member: 'result_v5_k1_n16_p3_r4_f0_d10' },
+    issuers: [one.credentials[0].issuer], subject: [],
+    fresh: '0x' + BigInt(one.nonce).toString(16).padStart(64, '0'), complete: false,
+  });
 });
-test('two credentials prove the joined public patterns', async () => {
+test('two deterministic credentials report both authenticated issuer slots', async () => {
   const result = await check(two);
   assert.equal(result.verified, true, result.reason);
   assert.deepEqual(result.released, one.result);
   assert.equal(two.presentation.issuer_slots.length, 2);
+  assert.deepEqual(result.report, {
+    rule: { query: two.query, member: 'result_v5_k2_n16_p3_r4_f0_d10' },
+    issuers: two.credentials.map(c => c.issuer).sort(), subject: [],
+    fresh: '0x' + BigInt(two.nonce).toString(16).padStart(64, '0'), complete: false,
+  });
+});
+
+test('report ignores unbound representation choices and caller mutations during verification', async () => {
+  const expected = (await check()).report;
+  const presentation = structuredClone(one.presentation);
+  // Explicit default capacity is equivalent to the omitted field on this member.
+  presentation.integer_capacity = 'two_digits';
+  assert.deepEqual((await check(one, { presentation })).report, expected);
+  const policy = structuredClone(one.policy);
+  const pending = check(one, { presentation, policy });
+  presentation.query = 'unchecked replacement';
+  presentation.issuer_slots = [one.policy.trustedIssuers[1]];
+  policy.trustedIssuers.reverse();
+  const checked = await pending;
+  assert.equal(checked.verified, true, checked.reason);
+  assert.deepEqual(checked.report, expected);
+});
+
+test('substituting a bound issuer slot fails even when the replacement is trusted', async () => {
+  const presentation = structuredClone(one.presentation);
+  presentation.issuer_slots = [one.policy.trustedIssuers[1]];
+  await refused({ presentation }, /^cryptographic proof rejected$/);
 });
 test('wrong expected query rejects before proof verification', async () => {
   await refused({ expectedQuery: one.query.replace('21', '22') }, /statement rejected:.*query differs/);
@@ -97,9 +130,10 @@ test('nonce is recorded only after a valid proof and replay rejects', async () =
   const replay = await check(one, { seenNonces, nonce: one.nonce.toUpperCase().replace('0X', '0x') });
   assert.equal(replay.verified, false);
   assert.equal(replay.reason, 'challenge already consumed');
+  assert.equal(Object.hasOwn(replay, 'report'), false);
   assert.equal(calls, 1);
 });
-test('test issuance uses independent CSPRNG salts', () => {
+test('ordinary issuance uses independent CSPRNG salts with a test issuer', () => {
   const f = fixture();
   const issuer = { seedHex: 'a1', publicKey: f.credentials[0].issuer };
   const again = issue(issuer, f.credentials[0].graphNQuads, f.credentials[0].statusRef);
@@ -115,6 +149,20 @@ test('a nonce store is mandatory even for a valid proof', async () => {
   assert.equal(result.verified, false);
   assert.deepEqual(result.released, []);
   assert.equal(result.reason, 'nonce store rejected');
+  assert.equal(Object.hasOwn(result, 'report'), false);
+});
+
+test('report is released only after successful nonce consumption', async () => {
+  for (const method of ['has', 'add']) {
+    const seenNonces = { has() { return false; }, add() {} };
+    seenNonces[method] = () => { throw new Error('store failure'); };
+    const result = await check(one, { seenNonces });
+    assert.deepEqual(result, { verified: false, released: [], reason: 'nonce store rejected' });
+  }
+  let consumed;
+  const result = await check(one, { seenNonces: { has() { return false; }, add(nonce) { consumed = nonce; } } });
+  assert.equal(result.verified, true, result.reason);
+  assert.equal(result.report.fresh, consumed);
 });
 
 test('missing proof rejects with the native missing-proof reason', async () => {

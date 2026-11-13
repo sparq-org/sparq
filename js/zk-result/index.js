@@ -68,11 +68,27 @@ export function testIssuerKeygen(seedHex) {
   return parse(host.testIssuerKeygen(seedHex));
 }
 
-export function issue(issuer, graphNQuads, statusRef) {
-  if (![statusRef.version, statusRef.index].every(v => Number.isSafeInteger(v) && v >= 0)) {
+function safeStatus(status) {
+  if (![status.version, status.index].every(v => Number.isSafeInteger(v) && v >= 0)) {
     throw new Error('status version and index must be safe nonnegative integers');
   }
+}
+
+export function issue(input, graphNQuads, statusRef) {
+  let issuer = input;
+  if (arguments.length === 1) {
+    const { issuer: key, graphNQuads: graph, status, ...extra } = input;
+    if (Object.keys(extra).length) throw new Error('unknown issue option');
+    issuer = key; graphNQuads = graph; statusRef = status;
+  }
+  safeStatus(statusRef);
   return parse(host.issue(JSON.stringify(issuer), graphNQuads, JSON.stringify(statusRef)));
+}
+
+export function testIssue(input) {
+  if (arguments.length !== 1) throw new Error('testIssue requires one object argument');
+  safeStatus(input.status);
+  return parse(host.testIssue(JSON.stringify(input)));
 }
 
 export async function prove({ query, credentials, policy, nonce }) {
@@ -143,5 +159,5 @@ export async function verify({ expectedQuery, presentation, policy, nonce, seenN
   } catch {
     return { verified: false, released: [], reason: 'nonce store rejected' };
   }
-  return { verified: true, released: statement.released };
+  return { verified: true, released: statement.released, report: statement.report };
 }
