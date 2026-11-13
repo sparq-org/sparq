@@ -1,11 +1,9 @@
-//! Disposable loopback fixture and native EARL merger for conformance/ldp.sh.
+//! Disposable loopback fixture server for conformance/ldp.sh.
 //! Uses the library router, in-memory storage and explicit fixture ACLs.
 
 use std::error::Error;
-use std::path::Path;
 
 use axum::body::Bytes;
-use oxrdf::{BlankNode, NamedOrBlankNode, Term, Triple};
 use solid_oidc_verifier::config::{StaticJwksProvider, VerifierConfig};
 use solid_oidc_verifier::replay::InMemoryReplayStore;
 use solid_oidc_verifier::verifier::Verifier;
@@ -61,62 +59,10 @@ async fn fixture() -> Result<axum::Router, Box<dyn Error>> {
     )))
 }
 
-fn scope_node(node: NamedOrBlankNode, scope: usize) -> NamedOrBlankNode {
-    match node {
-        NamedOrBlankNode::BlankNode(b) => BlankNode::new(format!("report{scope}_{}", b.as_str()))
-            .unwrap()
-            .into(),
-        other => other,
-    }
-}
-
-fn scope_term(term: Term, scope: usize) -> Term {
-    match term {
-        Term::BlankNode(b) => BlankNode::new(format!("report{scope}_{}", b.as_str()))
-            .unwrap()
-            .into(),
-        Term::Triple(t) => Term::Triple(Box::new(scope_triple(*t, scope))),
-        other => other,
-    }
-}
-
-fn scope_triple(triple: Triple, scope: usize) -> Triple {
-    Triple::new(
-        scope_node(triple.subject, scope),
-        triple.predicate,
-        scope_term(triple.object, scope),
-    )
-}
-
-fn merge_reports(paths: &[String]) -> Result<Vec<u8>, Box<dyn Error>> {
-    let mut writer = oxttl::TurtleSerializer::new().for_writer(Vec::new());
-    for (scope, path) in paths.iter().enumerate() {
-        let mut count = 0;
-        for triple in oxttl::TurtleParser::new().for_reader(std::fs::File::open(path)?) {
-            let triple = scope_triple(triple?, scope);
-            if triple.predicate.as_str() == "http://www.w3.org/ns/earl#outcome" {
-                count += 1;
-            }
-            writer.serialize_triple(&triple)?;
-        }
-        if count == 0 {
-            return Err(format!("no EARL outcomes in {path}").into());
-        }
-        println!("{path}: {count} EARL outcomes");
-    }
-    Ok(writer.finish()?)
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.first().map(String::as_str) == Some("merge") && args.len() == 4 {
-        let bytes = merge_reports(&args[2..])?;
-        std::fs::write(Path::new(&args[1]), bytes)?;
-        return Ok(());
-    }
-    if !args.is_empty() {
-        return Err("Usage: ldp_conformance [merge OUTPUT BASIC DIRECT]".into());
+    if std::env::args_os().len() != 1 {
+        return Err("Usage: ldp_conformance".into());
     }
     let app = fixture().await?;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3001").await?;
@@ -185,59 +131,5 @@ mod tests {
                 .unwrap();
             assert_eq!(response.status(), 201);
         }
-    }
-
-    #[test]
-    fn report_scopes_keep_equal_blank_labels_distinct() {
-        let triple = Triple::new(
-            BlankNode::new("same").unwrap(),
-            oxrdf::NamedNode::new("urn:p").unwrap(),
-            BlankNode::new("same").unwrap(),
-        );
-        let first = scope_triple(triple.clone(), 0);
-        let second = scope_triple(triple, 1);
-        assert_ne!(first.subject, second.subject);
-        assert_eq!(Term::from(first.subject), first.object);
-        assert_eq!(Term::from(second.subject), second.object);
-    }
-
-    #[test]
-    fn native_reports_merge_without_losing_failures_or_aliasing_blank_nodes() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut paths = Vec::new();
-        for (level, outcome) in [("basic", "passed"), ("direct", "failed")] {
-            let path = dir.path().join(format!("{level}.ttl"));
-            std::fs::write(
-                &path,
-                format!(
-                    "@prefix earl: <http://www.w3.org/ns/earl#>. \
-                 _:a a earl:Assertion; earl:test <urn:{level}>; earl:result _:r. \
-                 _:r earl:outcome earl:{outcome}."
-                ),
-            )
-            .unwrap();
-            paths.push(path.to_str().unwrap().to_owned());
-        }
-        let bytes = merge_reports(&paths).unwrap();
-        let triples: Vec<_> = oxttl::TurtleParser::new()
-            .for_slice(&bytes)
-            .map(Result::unwrap)
-            .collect();
-        let results: Vec<_> = triples
-            .iter()
-            .filter(|t| t.predicate.as_str() == "http://www.w3.org/ns/earl#result")
-            .collect();
-        assert_eq!(results.len(), 2);
-        assert_ne!(results[0].object, results[1].object);
-        for outcome in ["passed", "failed"] {
-            assert!(triples.iter().any(|t| t.object
-                == Term::NamedNode(
-                    oxrdf::NamedNode::new(format!("http://www.w3.org/ns/earl#{outcome}")).unwrap()
-                )));
-        }
-        std::fs::write(&paths[0], "<urn:x> <urn:y> <urn:z>.").unwrap();
-        assert!(merge_reports(&paths).is_err(), "empty report must fail");
-        std::fs::write(&paths[0], "broken Turtle").unwrap();
-        assert!(merge_reports(&paths).is_err(), "invalid report must fail");
     }
 }

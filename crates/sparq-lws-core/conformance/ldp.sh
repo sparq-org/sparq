@@ -8,7 +8,7 @@ root="$(cd "$here/../../.." && pwd)"
 out="${1:-$root/target/earl}"
 mkdir -p "$out"
 out="$(cd "$out" && pwd)"
-rm -f "$out/sparq-ldp-earl.ttl" "$out/ldp-revisions.tsv"
+rm -f "$out/sparq-ldp-earl.ttl" "$out/sparq-ldp-direct-probe-earl.ttl" "$out/ldp-revisions.tsv"
 suite="${LDP_TESTSUITE:?Set LDP_TESTSUITE to a w3c/ldp-testsuite source checkout}"
 suite="$(cd "$suite" && pwd)"
 suite_commit="$(git -C "$suite" rev-parse HEAD)"
@@ -48,8 +48,9 @@ for level in basic direct; do
   statuses+=("$status")
   reports+=("$native")
 done
-# Parse and reserialize with distinct blank-node scopes; concatenation aliases labels.
-"$SERVER_BIN" merge "$out/sparq-ldp-earl.ttl" "${reports[@]}"
+# Keep the submission report and the unclaimed Direct probe separate and unchanged.
+cp "${reports[0]}" "$out/sparq-ldp-earl.ttl"
+cp "${reports[1]}" "$out/sparq-ldp-direct-probe-earl.ttl"
 printf 'sparq\t%s\nldp-testsuite\t%s\nbasic-exit\t%s\ndirect-exit\t%s\ngroups\tMUST SHOULD MAY\ndirect-scope\tmembership probe; support not claimed\n' \
   "$sparq_commit" "$suite_commit" "${statuses[0]}" "${statuses[1]}" > "$out/ldp-revisions.tsv"
 stop_server TERM

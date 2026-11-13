@@ -100,8 +100,12 @@ do not establish a DirectContainer conformance claim.
 
 `ldp.sh [OUT_DIR]` defaults to `target/earl`. Upstream writes each native report
 under `ldp-{basic,direct}/report/ldp-testsuite-execution-report-earl.ttl`.
-The example parses and merges both into `sparq-ldp-earl.ttl`, preserving native
-test IRIs and outcomes while giving each document's blank nodes a separate scope.
+The Basic run's native report is copied unchanged to `sparq-ldp-earl.ttl`.
+The Direct probe's native report is copied unchanged to
+`sparq-ldp-direct-probe-earl.ttl`. **The Direct probe file is not for submission.**
+Both invocations include RDFSource and NonRDFSource tests, so the reports stay
+separate to avoid duplicate test IRIs and unclaimed Direct assertions in the
+submission report.
 `ldp-revisions.tsv` records source commits, groups, probe scope and both exit
 statuses. Logs and individual reports stay alongside it. A missing report fails
 the run, and TestNG's nonzero status is preserved after exporting valid reports.
@@ -109,7 +113,8 @@ Docker, Maven downloads and TCP listeners are required outside restricted build
 containers for the CTH or LDP runs as applicable.
 
 Override knobs (all optional): `CTH_IMAGE`, `SPEC_TESTS`, `SPEC_TESTS_REPO`, `SERVER_BIN`, `ENV_FILE`,
-`CTH_BASELINE`, `CTH_ENFORCE_BASELINE`, `PSS_SPARQ_BACKEND`.
+`CTH_BASELINE`, `CTH_ENFORCE_BASELINE`, `PSS_SPARQ_BACKEND`. `run.sh` accepts no arguments
+or `--keep-earl [OUT_DIR]`; other positional arguments are rejected.
 
 `PSS_SPARQ_BACKEND=embedded` runs the same suite against the in-process engine over an ephemeral
 in-memory graph. Unlike the source repo, no extra `--features` flag is needed — `embedded-sparq` is

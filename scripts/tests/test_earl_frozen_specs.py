@@ -2,7 +2,7 @@
 """Hermetic subprocess checks of the Solid, LDP and ODRL report drivers.
 
 Every external runner is replaced on PATH, so these tests need no network,
-Docker, Maven or TCP listener. Real RDF merging is tested by the Rust example.
+Docker, Maven or TCP listener. LDP exports are checked against distinct native reports.
 """
 
 import os
@@ -14,6 +14,14 @@ import unittest
 
 REPO = Path(__file__).resolve().parents[2]
 NATIVE = "@prefix earl: <http://www.w3.org/ns/earl#>.\n[] earl:outcome earl:passed.\n[] earl:outcome earl:failed.\n"
+LDP_NATIVE = {
+    "basic": "# native Basic report\r\n@prefix earl: <http://www.w3.org/ns/earl#>.\r\n"
+             "[] a earl:Assertion; earl:test <http://w3c.github.io/ldp-testsuite/manifest#MemberResource-GetResource>;\r\n"
+             "   earl:result [ earl:outcome earl:passed ].\r\n",
+    "direct": "# native Direct probe\n@prefix earl: <http://www.w3.org/ns/earl#>.\n"
+              "[] a earl:Assertion; earl:test <http://w3c.github.io/ldp-testsuite/manifest#MemberResource-GetResource>;\n"
+              "   earl:result [ earl:outcome earl:failed ].\n",
+}
 
 TOOLS = r'''#!/usr/bin/env python3
 import os
@@ -50,7 +58,9 @@ elif name == "java":
     assert args[args.index("--server") + 1] == f"http://127.0.0.1:3001/{level}/"
     out = Path(args[args.index("--output") + 1]) / "report"
     out.mkdir()
-    if complete: (out / "ldp-testsuite-execution-report-earl.ttl").write_text(native)
+    if complete:
+        (out / "ldp-testsuite-execution-report-earl.ttl").write_bytes(
+            os.environ[f"MOCK_{level.upper()}_NATIVE"].encode())
     sys.exit(status)
 elif name == "cargo":
     if "--no-run" not in args:
@@ -65,15 +75,11 @@ else:
 '''
 
 SERVER = '''#!/usr/bin/env python3
-from pathlib import Path
 import signal
 import sys
-if len(sys.argv) > 1:
-    assert sys.argv[1] == "merge" and len(sys.argv) == 5
-    Path(sys.argv[2]).write_text("".join(Path(p).read_text() for p in sys.argv[3:]))
-else:
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-    signal.pause()
+assert len(sys.argv) == 1, "fixture server accepts no arguments"
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+signal.pause()
 '''
 
 
@@ -118,6 +124,8 @@ class FrozenReportDrivers(unittest.TestCase):
             "SERVER_BIN": str(server), "CARGO_TARGET_DIR": str(self.root / "build"),
             "LDP_TESTSUITE": str(self.root / "suite"),
             "MOCK_NATIVE": NATIVE, "CTH_REVISION": "b" * 40,
+            "MOCK_BASIC_NATIVE": LDP_NATIVE["basic"],
+            "MOCK_DIRECT_NATIVE": LDP_NATIVE["direct"],
             "PSS_SPARQ_BACKEND": "memory", "CTH_ENFORCE_BASELINE": "1",
             "GIT_ALLOW_PROTOCOL": "",  # A forgotten real Git runner cannot fetch.
         }
@@ -160,10 +168,16 @@ class FrozenReportDrivers(unittest.TestCase):
         self.assertIn("requires CTH_REVISION", result.stderr)
         self.assertFalse(report.exists())
 
-    def test_ldp_preserves_both_levels_and_nonzero_runner_status(self):
+    def test_ldp_exports_basic_and_direct_native_reports_separately(self):
         result = self.run_driver("ldp", MOCK_STATUS="2")
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-        self.assertEqual((self.out / "sparq-ldp-earl.ttl").read_text(), NATIVE * 2)
+        for level, filename in [("basic", "sparq-ldp-earl.ttl"),
+                                ("direct", "sparq-ldp-direct-probe-earl.ttl")]:
+            report = self.out / filename
+            self.assertTrue(report.is_file(), f"missing {level} report")
+            self.assertEqual(report.read_bytes(), LDP_NATIVE[level].encode())
+            native = self.out / f"ldp-{level}/report/ldp-testsuite-execution-report-earl.ttl"
+            self.assertEqual(report.read_bytes(), native.read_bytes())
         meta = (self.out / "ldp-revisions.tsv").read_text()
         self.assertIn("basic-exit\t2\ndirect-exit\t2", meta)
         self.assertIn("ldp-testsuite\t" + "a" * 40, meta)
@@ -173,6 +187,7 @@ class FrozenReportDrivers(unittest.TestCase):
         result = self.run_driver("ldp", MOCK_COMPLETE="0")
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.out / "sparq-ldp-earl.ttl").exists())
+        self.assertFalse((self.out / "sparq-ldp-direct-probe-earl.ttl").exists())
 
     def test_complete_odrl_failure_exports_both_outcomes_and_keeps_status(self):
         result = self.run_driver("odrl", MOCK_STATUS="101")
