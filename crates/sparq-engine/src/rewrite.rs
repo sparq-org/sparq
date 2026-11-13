@@ -255,7 +255,8 @@ fn antijoin_ok(v: &Variable, left: &GraphPattern, right: &GraphPattern) -> bool 
     let left_certain = certain_vars(left);
     let mut shared = false;
     left.on_in_scope_variable(|w| {
-        shared = shared || (left_certain.contains(w) && right_certain.contains(w));
+        // Probe the right first so disjoint variables never rescan the left.
+        shared = shared || (right_certain.contains(w) && left_certain.contains(w));
     });
     shared
 }
@@ -776,6 +777,46 @@ mod tests {
             raw,
             "no shared variable between A and B → Minus is NOT equivalent → decline"
         );
+    }
+
+    #[test]
+    fn large_disjoint_antijoin_stays_declined() {
+        let predicate = NamedNode::new("http://ex/p").unwrap();
+        let left = GraphPattern::Bgp {
+            patterns: (0..1000)
+                .map(|i| TriplePattern {
+                    subject: TermPattern::Variable(Variable::new(format!("s{i}")).unwrap()),
+                    predicate: NamedNodePattern::NamedNode(predicate.clone()),
+                    object: TermPattern::Variable(Variable::new(format!("o{i}")).unwrap()),
+                })
+                .collect(),
+        };
+        let missing = Variable::new("missing").unwrap();
+        let right = GraphPattern::Bgp {
+            patterns: vec![TriplePattern {
+                subject: TermPattern::Variable(Variable::new("right").unwrap()),
+                predicate: NamedNodePattern::NamedNode(predicate),
+                object: TermPattern::Variable(missing.clone()),
+            }],
+        };
+        assert!(certain_vars(&right).contains(&missing));
+        assert!(!pattern_contains_var(&left, &missing));
+        assert!(!antijoin_ok(&missing, &left, &right));
+
+        let raw = Query::Ask {
+            dataset: None,
+            pattern: GraphPattern::Filter {
+                expr: Expression::Not(Box::new(Expression::Bound(missing))),
+                inner: Box::new(GraphPattern::LeftJoin {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                    expression: None,
+                }),
+            },
+            base_iri: None,
+        };
+        assert!(rewrite_query_ref(&raw).is_none());
+        assert_eq!(rewrite_query(raw.clone()), raw);
     }
 
     // ---- REGRESSION (soundness, PR #1735 review finding #2): `certain_vars`'
