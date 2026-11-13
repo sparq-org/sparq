@@ -1,4 +1,6 @@
 {
+  "buildCommand": "python3 prepare-contexts.py",
+  "outputDirectory": "contexts",
   "functions": {
     "api/*.rs": {"runtime": "vercel-rust@4.0.9"}
   },

@@ -144,7 +144,7 @@ and invokes Mocha directly to avoid `pretest` fetching a moving registry branch.
 are separate evidence. The runner advertises `/presentations/verify` with the same cryptosuite tags.
 Keep handler test evidence distinct from the external suite results.
 
-## Vercel packaging (no deployment performed)
+## Vercel packaging
 
 This directory is a standalone, `publish = false` deployment workspace under
 `sparq-vc` so the CI selector attributes its changes to that crate. It is
@@ -160,11 +160,13 @@ On a network-enabled host, prepare the cache as above, then compile the adapter:
 cargo check --manifest-path crates/sparq-vc/vercel/Cargo.toml --bins
 ```
 
-For deployment review, use `crates/sparq-vc/vercel` as the Vercel project root and retain
-the repository checkout so the Rust path dependencies resolve. Prepare the cache
-before `vercel build`; set `SPARQ_VC_TEST_SEED` using Vercel's environment settings.
-The runtime package and Vercel build require external validation. Deployment is
-a separate maintainer action after review.
+Use `crates/sparq-vc/vercel` as the Vercel project root and keep the repository
+checkout, so the Rust path dependencies resolve. Vercel builds the Rust functions
+directly and skips the project install step, so `vercel.json` runs
+`prepare-contexts.py` as the build command. Its output directory is the prepared
+`contexts/` folder, which serves the public W3C context copies as static files.
+Set `SPARQ_VC_TEST_SEED` (64 hex digits, a test-only key) in the project's
+environment settings; never commit or print it.
 
 ## Local checks
 
