@@ -1,8 +1,9 @@
 //! (sq-tonhr.2) The W3C **rdf-n-triples**, **rdf-n-quads** and **rdf-trig**
-//! syntax suites (`rdf/rdf11/rdf-{n-triples,n-quads,trig}/manifest.ttl` in w3c/rdf-tests),
+//! syntax suites, plus RDF/XML (`rdf/rdf11/rdf-{n-triples,n-quads,trig,xml}` in w3c/rdf-tests),
 //! run THROUGH THE REAL SPARQ PARSE PATHS — the same entry points `sparq-cli` /
 //! `sparq-server` ingest through:
 //!
+//! - RDF/XML: [`sparq_core::Graph::load_str_with_base`]`(_, "rdfxml", base)` (opt-in).
 //! - N-Triples: [`sparq_core::Graph::parse_to_triples`]`(_, "ntriples")` — under the
 //!   default `parallel` feature this is the NATIVE chunk-parallel `nt.rs` parser (the
 //!   incumbent any generated candidate parser must beat, epic sq-tonhr).
@@ -27,12 +28,14 @@ use crate::inference::report::TestResult;
 use crate::quadset::dataset_quads;
 use std::path::Path;
 
-/// Which of the three line-oriented suites to run — selects the manifest's test kinds,
+/// Which RDF syntax suite to run — selects the manifest's test kinds,
 /// the parse path and (for TriG) the canonical base handling.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LineSuite {
     /// `rdf/rdf11/rdf-n-triples` through the native chunk-parallel `nt.rs` path.
     NTriples,
+    /// RDF/XML through the opt-in graph loader.
+    RdfXml,
     /// `rdf/rdf11/rdf-n-quads` through the chunk-parallel dataset loader.
     NQuads,
     /// `rdf/rdf11/rdf-trig` through the serial with-base dataset loader.
@@ -44,17 +47,19 @@ impl LineSuite {
     pub fn label(self) -> &'static str {
         match self {
             LineSuite::NTriples => "rdf-n-triples",
+            LineSuite::RdfXml => "rdf-xml",
             LineSuite::NQuads => "rdf-n-quads",
             LineSuite::TriG => "rdf-trig",
         }
     }
 
     /// The canonical base the suite's actions resolve against — the manifest's own
-    /// `mf:assumedTestBase`. Only TriG documents can contain relative IRIs; the
+    /// `mf:assumedTestBase`. TriG and RDF/XML can contain relative IRIs; the
     /// line-based formats require absolute IRIs, so their base is never consulted.
     fn canonical_base(self) -> &'static str {
         match self {
             LineSuite::NTriples => "https://w3c.github.io/rdf-tests/rdf/rdf11/rdf-n-triples/",
+            LineSuite::RdfXml => "https://w3c.github.io/rdf-tests/rdf/rdf11/rdf-xml/",
             LineSuite::NQuads => "https://w3c.github.io/rdf-tests/rdf/rdf11/rdf-n-quads/",
             LineSuite::TriG => "https://w3c.github.io/rdf-tests/rdf/rdf11/rdf-trig/",
         }
@@ -64,6 +69,7 @@ impl LineSuite {
     fn kind_stem(self) -> &'static str {
         match self {
             LineSuite::NTriples => "TestNTriples",
+            LineSuite::RdfXml => "TestXML",
             LineSuite::NQuads => "TestNQuads",
             LineSuite::TriG => "TestTrig",
         }
@@ -78,6 +84,7 @@ pub fn parse_sparq_quads(
     base: &str,
 ) -> Result<Vec<[String; 4]>, String> {
     match suite {
+        LineSuite::RdfXml => parse_sparq_graph(suite, text, base).map(|g| dataset_quads(&g)),
         LineSuite::NTriples => {
             let (dict, ids) = sparq_core::Graph::parse_to_triples(text, "ntriples")?;
             Ok(ids
@@ -110,6 +117,7 @@ pub(crate) fn parse_sparq_graph(
 ) -> Result<sparq_core::Graph, String> {
     match suite {
         LineSuite::NTriples => sparq_core::Graph::load_str(text, "ntriples"),
+        LineSuite::RdfXml => sparq_core::Graph::load_str_with_base(text, "rdfxml", base),
         LineSuite::NQuads => sparq_core::Graph::load_dataset(text, "nquads"),
         LineSuite::TriG => sparq_core::Graph::load_dataset_with_base(text, "trig", base),
     }
@@ -123,6 +131,13 @@ pub fn run_manifest(
     base: Option<&str>,
 ) -> Result<Vec<(String, TestResult)>, String> {
     match suite {
+        LineSuite::RdfXml => crate::syntax_suite::run_manifest(
+            manifest,
+            base,
+            suite.label(),
+            suite.kind_stem(),
+            |text, base| parse_sparq_graph(LineSuite::RdfXml, text, base),
+        ),
         LineSuite::NTriples => crate::syntax_suite::run_manifest(
             manifest,
             base,
