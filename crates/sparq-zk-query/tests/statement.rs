@@ -206,3 +206,23 @@ fn explicit_empty_holder_scope_is_distinct_from_an_absent_scope() {
     assert!(none.words().is_ok());
     assert_ne!(all.words().unwrap(), none.words().unwrap());
 }
+
+#[test]
+fn computed_boolean_answers_do_not_require_a_source_vocabulary_entry() {
+    use sparq_zk_query::{answer::Answer, credential::SuiteEncoder, interp::EncodeTerm};
+    let plan = lower("SELECT ?result WHERE {VALUES ?result {}}", B).unwrap();
+    for value in [true, false] {
+        let term: oxrdf::Term = oxrdf::Literal::from(value).into();
+        let result = ResultValue::Select {
+            variables: vec!["result".into()],
+            rows: vec![vec![SuiteEncoder.encode(&term).unwrap()]],
+        };
+        assert_eq!(
+            Answer::release(&result, &plan, &[], &SuiteEncoder).unwrap(),
+            Answer::Select {
+                variables: vec!["result".into()],
+                rows: vec![vec![Some(term)]]
+            }
+        );
+    }
+}

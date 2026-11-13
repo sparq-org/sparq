@@ -70,6 +70,28 @@
       ],
       "guest_proof_evidence": "not_asserted",
       "limits": "Research grade and not externally audited. Isolated gadgets only; credential openings and generated-query result binding are integration prerequisites. Exact numeric bucket: abs(value * 10^18) < 2^112; excess result precision is a capacity refusal. Mixed temporal key classes are refused."
+    },
+    {
+      "id": "target_query_expressions",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#bind",
+      "positive_cases": [
+        "noir:expr_target_tests::target_1a_insurance_stated",
+        "noir:expr_target_tests::target_1b_insurance_closed",
+        "noir:expr_target_tests::target_2_trial",
+        "noir:expr_target_tests::target_3_recycled",
+        "noir:expr_target_tests::target_sum_having",
+        "rust:expr_live_targets::noir_target_queries_match_host_mirror"
+      ],
+      "rejection_cases": [
+        "noir:expr_target_tests::target_1a_error_low",
+        "noir:expr_target_tests::target_1b_error_low",
+        "noir:expr_target_tests::target_2_error_low",
+        "noir:expr_target_tests::target_3_error_low",
+        "noir:expr_target_tests::target_sum_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Expression-level checks with lane A source snapshot; whole-query native proofs are not asserted. Integers through 2^48, IN lists of 32, opened strings of 128 bytes, timezone-free dates in years 0001 through 9999. Aggregate and absence inputs are supplied by lane C. The production opening and encoding adapters remain integration seams."
     }
   ],
   "functions": [
@@ -151,6 +173,22 @@
       ],
       "guest_proof_evidence": "not_asserted",
       "limits": "Research grade and not externally audited. Isolated gadgets only; credential openings and generated-query result binding are integration prerequisites. Exact numeric bucket: abs(value * 10^18) < 2^112; excess result precision is a capacity refusal. Mixed temporal key classes are refused."
+    },
+    {
+      "name": "to_term(boolean,integer,decimal)",
+      "group": "functional_forms",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_binding_tests::computed_numeric_canonical_lexical",
+        "rust:expr_live_targets::noir_target_queries_match_host_mirror"
+      ],
+      "rejection_cases": [
+        "noir:expr_binding_tests::boolean_bind_error_low",
+        "noir:expr_binding_tests::numeric_bind_error_low",
+        "noir:expr_binding_tests::computed_integer_fraction_changed"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Newly computed values only. Existing cells retain their lexical identity. Absolute exact scaled magnitude below 2^112; decimal precision through 18 fractional digits. Lane A supplies the static encoding implementation."
     }
   ],
   "known_semantic_divergences": []

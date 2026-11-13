@@ -527,6 +527,25 @@ mod literal_tests {
     use super::*;
 
     #[test]
+    fn noir_verified_issuer_predicate_is_a_literal_equal_to_the_suite() {
+        use crate::interp::EncodeTerm;
+        let term = oxrdf::NamedNode::new_unchecked(crate::credential::VERIFIED_ISSUER).into();
+        let expected = crate::credential::SuiteEncoder.encode(&term).unwrap().enc;
+        let source = include_str!("../../../zk/noir-query/core/src/ops_core_suite.nr");
+        let literal = source
+            .split("pub global VERIFIED_ISSUER_ENCODING: Field = ")
+            .nth(1)
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap();
+        assert_eq!(
+            field(expected).unwrap(),
+            field_from_hex_str_strict(literal).unwrap()
+        );
+    }
+
+    #[test]
     fn noir_expression_numeric_offset_matches_the_suite() {
         use crate::interp::EncodeTerm;
         let zero = oxrdf::Literal::new_typed_literal(

@@ -113,3 +113,10 @@ The expression dispatcher calls the shared typed comparison, boolean and
 membership gadgets. Capacity remains separate from SPARQL errors. The corpus
 ratchet independently compares native and WebAssembly bytecode and keys for
 each passing operator program, and the workflow tests the committed Noir manifests.
+
+The dataset assembly helpers retain a named copy per credential and the default
+merge, plus method-generated issuer assertions. They receive issuer cells from
+the envelope's trust check. Their production wiring awaits the graph dispatcher
+and canonical trust consumer. Constant membership lists use a fixed parameter
+block with a public active length, preserving the program shape as values and
+length change within the profile.

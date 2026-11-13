@@ -47,15 +47,33 @@ fn merged_manifest() -> Value {
                     replaced.insert((group.to_owned(), name.to_owned())),
                     "conflicting lane fragment: {group}/{name}"
                 );
-                let slot = m[group]
+                let mut row = row.clone();
+                row["evidence"] = fragment["evidence"].clone();
+                if let Some(slot) = m[group]
                     .as_array_mut()
                     .unwrap()
                     .iter_mut()
                     .find(|r| r[key] == name)
-                    .expect("fragment refers to inventory entry");
-                *slot = row.clone();
-                if let Some(evidence) = fragment.get("evidence") {
-                    slot["evidence"] = evidence.clone();
+                {
+                    *slot = row;
+                } else {
+                    // These reviewed integration probes are outside the standard
+                    // inventory and cannot alter its passing floor.
+                    assert!(
+                        matches!(
+                            (group, name),
+                            ("features", "target_query_expressions")
+                                | ("functions", "to_term(boolean,integer,decimal)")
+                        ),
+                        "unknown inventory row: {group}/{name}"
+                    );
+                    assert_eq!(row["evidence"]["layer"], "isolated_gadget_execution");
+                    assert_eq!(row["guest_proof_evidence"], "not_asserted");
+                    assert_eq!(row["status"], "partial_fixture_coverage");
+                    if m["isolated_extensions"].is_null() {
+                        m["isolated_extensions"] = serde_json::json!([]);
+                    }
+                    m["isolated_extensions"].as_array_mut().unwrap().push(row);
                 }
             }
         }
@@ -151,6 +169,45 @@ fn manifest_covers_the_corpus_without_overstating_and_never_lowers_the_floor() {
                 if let Some(reference) = id.as_str().and_then(|s| s.strip_prefix("noir:")) {
                     assert_eq!(row["evidence"]["layer"], "isolated_gadget_execution");
                     assert_noir_reference(reference, true);
+                }
+            }
+        }
+    }
+    for row in m["isolated_extensions"].as_array().into_iter().flatten() {
+        assert_eq!(row["guest_proof_evidence"], "not_asserted");
+        for (group, rejection) in [("positive_cases", false), ("rejection_cases", true)] {
+            for id in row[group].as_array().unwrap() {
+                let id = id.as_str().unwrap();
+                if let Some(reference) = id.strip_prefix("noir:") {
+                    assert_noir_reference(reference, rejection);
+                } else if let Some(reference) = id.strip_prefix("rust:") {
+                    assert!(!rejection);
+                    let (module, function) = reference.split_once("::").unwrap();
+                    assert!(module
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'_'));
+                    let source = std::fs::read_to_string(
+                        root()
+                            .join("crates/sparq-zk-query/src/lower")
+                            .join(format!("{module}.rs")),
+                    )
+                    .unwrap();
+                    let before = source
+                        .split_once(&format!("fn {function}("))
+                        .expect("referenced live Rust test")
+                        .0;
+                    assert_eq!(
+                        before
+                            .lines()
+                            .rev()
+                            .find(|s| !s.trim().is_empty())
+                            .unwrap()
+                            .trim(),
+                        "#[test]"
+                    );
+                    assert!(source.contains("crate::support::gate("));
+                } else {
+                    panic!("unknown isolated evidence reference: {id}");
                 }
             }
         }

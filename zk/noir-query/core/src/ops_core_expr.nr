@@ -37,8 +37,9 @@ fn scalar(cell: TermCell, equality: bool, effective_boolean: bool) -> (Lane<Scal
         string: StringLane { bytes: [0; 32], len: 0, lang: 0 },
         temporal: TemporalLane { key_class: 0, key: 0 },
         term: crate::expr_term_contract::TermCell {
-            bound: cell.bound, kind: if cell.kind > 0 { cell.kind - 1 } else { 0 },
+            bound: cell.bound, kind: cell.kind,
             enc: cell.enc, key_class: cell.key_class, key: cell.key, dt: cell.dt, lang: cell.lang,
+            credential: cell.scope,
         },
     };
     let mut capacity = false;

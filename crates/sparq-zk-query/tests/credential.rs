@@ -232,3 +232,87 @@ fn presentation_graph_names_use_the_shared_suite_constructor() {
     assert_ne!(first.enc, other_request.enc);
     assert!(sparq_zk_query::credential::credential_graph([7; 32], u32::MAX).is_err());
 }
+
+#[test]
+fn method_dataset_keeps_named_copies_and_a_deduplicated_default_merge() {
+    use sparq_zk_query::{
+        credential::{assemble_dataset, SuiteEncoder, VERIFIED_ISSUER},
+        interp::{evaluate_dataset, EncodeTerm, ResultValue},
+    };
+    let cell = fixture_support::quad(
+        &fixture_support::iri("urn:s"),
+        &fixture_support::iri("urn:p"),
+        &fixture_support::integer(1),
+    );
+    let credentials = vec![sparq_zk_query::interp::CredentialCells { quads: vec![cell] }; 2];
+    let issuers = [
+        SuiteEncoder
+            .encode(&fixture_support::iri("urn:issuer:a"))
+            .unwrap(),
+        SuiteEncoder
+            .encode(&fixture_support::iri("urn:issuer:b"))
+            .unwrap(),
+    ];
+    let dataset = assemble_dataset(&credentials, &issuers, [7; 32]).unwrap();
+    assert_eq!(dataset.credential_counts(), [1, 1]);
+    assert_eq!(dataset.quads().len(), 4);
+    let named = dataset
+        .quads()
+        .iter()
+        .filter(|q| q[3].bound)
+        .collect::<Vec<_>>();
+    assert_eq!(named.len(), 2);
+    assert_ne!(named[0][3].enc, named[1][3].enc);
+    let defaults = dataset
+        .quads()
+        .iter()
+        .filter(|q| !q[3].bound)
+        .collect::<Vec<_>>();
+    assert_eq!(defaults.len(), 2);
+    let predicate = SuiteEncoder
+        .encode(&fixture_support::iri(VERIFIED_ISSUER))
+        .unwrap();
+    for (i, q) in defaults.iter().enumerate() {
+        assert_eq!(q[0], named[i][3]);
+        assert_eq!(q[1], predicate);
+        assert_eq!(q[2], issuers[i]);
+    }
+    let bounds = Bounds {
+        credentials: 2,
+        quads_per_credential: 4,
+        rows_per_table: 4,
+    };
+    let plan = lower("SELECT ?x WHERE {?s <urn:p> ?x}", bounds).unwrap();
+    let ResultValue::Select { rows, .. } = evaluate_dataset(&plan, &dataset, &SuiteEncoder)
+        .unwrap()
+        .result
+    else {
+        panic!()
+    };
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0][0], cell[2]);
+    let plan = lower(
+        &format!("SELECT ?issuer WHERE {{?g <{VERIFIED_ISSUER}> ?issuer}}"),
+        bounds,
+    )
+    .unwrap();
+    let ResultValue::Select { rows, .. } = evaluate_dataset(&plan, &dataset, &SuiteEncoder)
+        .unwrap()
+        .result
+    else {
+        panic!()
+    };
+    assert_eq!(rows.len(), 2);
+    let actual = rows
+        .iter()
+        .map(|r| r[0].enc)
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(actual, issuers.iter().map(|c| c.enc).collect());
+    let other = assemble_dataset(&credentials, &issuers, [8; 32]).unwrap();
+    assert_ne!(dataset.quads()[0][3].enc, other.quads()[0][3].enc);
+    assert_eq!(other.credential_counts(), dataset.credential_counts());
+    assert!(assemble_dataset(&credentials, &issuers[..1], [7; 32]).is_err());
+    let mut invalid = issuers;
+    invalid[0] = sparq_zk_query::interp::Cell::default();
+    assert!(assemble_dataset(&credentials, &invalid, [7; 32]).is_err());
+}

@@ -60,3 +60,12 @@ output table outside the count predicate, avoiding selection of the whole table.
 The expression modules expose `(Lane<T>, is_error)`, with a distinct capacity
 channel. Call `filter_accept` at a FILTER root. The term-opening contract binds
 scalar values to authenticated lexical openings and recomputed keys.
+
+The operator dataset carries triple rows, active flags and parallel graph names.
+Suite conversion obtains presentation-local graph names from the shared term
+constructor. The envelope integration can call `ops_core_suite::authenticate`,
+check its returned opaque suite object, and pass it to `from_authenticated`.
+`append_verified_issuer` consumes the envelope-authenticated issuer cell and adds
+a default-only assertion. Constant-list evaluation uses `evaluate_indexed` with
+the public active-length index. The canonical policy-root consumer and graph
+dispatch remain separate integrations.

@@ -10,3 +10,4 @@ live tests/proofs.rs::shape_cache_reuses_constants_and_invalidates_library_revis
 live tests/authentication.rs::suite_program_checks_authentication_membership_keys_and_credential_limits
 live src/lower/expr_tests.rs::noir_samples_match_host_mirror
 live tests/execution.rs::constant_membership_length_is_data_and_inactive_values_cannot_match
+live src/lower/expr_live_targets.rs::noir_target_queries_match_host_mirror

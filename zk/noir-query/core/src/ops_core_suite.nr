@@ -77,11 +77,29 @@ pub fn open_one<let N: u32, let L: u32>(
     check_limits::<N>(count, quad_bound);
     let mut opened = OpenedCredential {rows: [[unbound(); 3]; N], active: [false; N], message: 0, graph: unbound()};
     if active {
-        let authenticated = open_credential_hidden(credentials, proof.salts, proof.salt, count, proof.config,
-            proof.created, proof.method, proof.pk, credential_index, proof.r, proof.s, proof.e, proof.e_k);
-        let quads = authenticated.quads();
+        let authenticated = authenticate(credentials,proof,count,quad_bound,credential_index);
         key_set_membership(proof.pk, issuer_root, proof.issuer_index, proof.issuer_siblings);
-        opened.message = authenticated.message();
+        opened=from_authenticated(authenticated,credentials,credential_index,request_digest);
+    } else {
+        check_inactive(credentials, proof, count, credential_index);
+    }
+    opened
+}
+
+/// Shared signature/metadata opening. The envelope consumes this object once.
+pub fn authenticate<let N:u32, let L:u32>(credentials:[[TermOpening<L>;4];N],
+    proof:CredentialProof<N>,count:u32,quad_bound:u32,credential_index:u32) -> crate::suite_metadata::OpenedCredential<N> {
+    check_limits::<N>(count,quad_bound);
+    open_credential_hidden(credentials,proof.salts,proof.salt,count,proof.config,
+        proof.created,proof.method,proof.pk,credential_index,proof.r,proof.s,proof.e,proof.e_k)
+}
+
+/// Convert after the envelope has consumed the authenticated metadata/properties.
+pub fn from_authenticated<let N:u32, let L:u32>(authenticated:crate::suite_metadata::OpenedCredential<N>,
+    credentials:[[TermOpening<L>;4];N],credential_index:u32,request_digest:[u8;32]) -> OpenedCredential<N> {
+        let quads = authenticated.quads();
+        let count=authenticated.count();
+        let mut opened=OpenedCredential {rows:[[unbound();3];N],active:[false;N],message:authenticated.message(),graph:unbound()};
         let mut request: [u128;2] = [0;2];
         for i in 0..32 { request[i/16] = request[i/16] * 256 + request_digest[i] as u128; }
         opened.graph = table_cell(crate::term::credential_graph(request, credential_index));
@@ -98,10 +116,15 @@ pub fn open_one<let N: u32, let L: u32>(
                 check_input_predicate(quads[n][1].enc());
             }
         }
-    } else {
-        check_inactive(credentials, proof, count, credential_index);
-    }
     opened
+}
+
+/// Canonical inactive slot, shared by the suite and envelope dispatchers.
+pub fn inactive_credential<let N:u32, let L:u32>(credentials:[[TermOpening<L>;4];N],proof:CredentialProof<N>,
+    count:u32,quad_bound:u32,credential_index:u32) -> OpenedCredential<N> {
+    check_limits::<N>(count,quad_bound);
+    check_inactive(credentials,proof,count,credential_index);
+    OpenedCredential {rows:[[unbound();3];N],active:[false;N],message:0,graph:unbound()}
 }
 
 fn check_limits<let N:u32>(count:u32, quad_bound:u32) {

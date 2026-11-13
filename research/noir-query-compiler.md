@@ -117,3 +117,16 @@ public-input reconstruction and presentation values. The compiler driver alone
 owns native subprocesses and temporary files. The target-query dataset and native
 capacity acceptance evidence remain integration work; they are not established
 by isolated operator or compiler tests.
+
+Constant membership lists occupy a fixed public term block and carry their active
+length in the index group. Their values and length are erased from the shape;
+the generator emits the indexed expression gadget call. Native controls rebind
+the statement while retaining a trace that would match inactive padding, and
+require the operator relation to refuse it.
+
+Dataset assembly retains complete named copies and original signed counts. Its
+default view merges those facts and the method's issuer assertions; ordinary scans
+deduplicate the merged triples. The Noir representation keeps a parallel graph
+array beside rows and active flags. Issuer terms enter only after the envelope
+layer's trust check. The production method awaits that consumer and graph dispatch;
+the assembly helpers alone do not establish a target-query proof.

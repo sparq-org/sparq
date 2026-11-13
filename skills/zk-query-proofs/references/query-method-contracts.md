@@ -177,3 +177,27 @@ method as private openings and uses the authenticated opener's returned message.
 `credential::credential_graph(request_digest, index)` shares the suite's
 presentation-local graph-name construction. Credentials using the reserved
 `vcq:verifiedIssuer` predicate are refused before dataset assembly.
+
+Constant membership lists use a fixed parameter block and a public active-length
+index, so changing their contents or admitted length preserves plan hash and
+program source. Oversized lists receive the named `IN list` capacity refusal.
+The existing parameter enum and envelope group order are unchanged.
+
+For the closed-world integration, `credential::assemble_dataset` takes complete
+opened credential cells, envelope-authenticated issuer cells and the request
+digest. Its `interp::Dataset` exposes `quads()` and `credential_counts()`;
+`interp::evaluate_dataset` evaluates the default merge while retaining named
+copies for the graph dispatcher. The method-generated issuer assertions occur
+only in the default view. These helpers await production wiring to the envelope
+consumer and graph dispatcher.
+
+The Noir seam is `ops_core_suite::authenticate` followed by the envelope checks
+and `from_authenticated`; inactive slots use `inactive_credential`. This reuses
+the authenticated suite object and its metadata getters. `Dataset` retains
+triple rows and active flags, with a parallel graph-name array.
+`append_verified_issuer` receives an issuer term already checked by the envelope
+and adds its default-only assertion. It does not supply that trust check itself.
+
+`Answer::release` includes canonical boolean terms for computed results, even if
+they were absent from the source vocabulary. Other result terms use the supplied
+vocabulary or the plan's public constants.
