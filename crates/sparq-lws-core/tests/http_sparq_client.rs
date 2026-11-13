@@ -503,24 +503,16 @@ fn answer_query(state: &MockState, sparql: &str) -> Response {
         );
     }
     if sparql.starts_with("SELECT ?g ?ct ?bk ?etag") {
-        // select_read_plan: `VALUES ?g { <target> <acl…> } GRAPH ?g { record… }` — one row per
-        // VALUES graph that has an index record.
-        let values = sparql
-            .find("VALUES ?g {")
-            .map(|p| p + "VALUES ?g {".len())
-            .and_then(|start| {
-                sparql[start..]
-                    .find('}')
-                    .map(|end| sparql[start..start + end].to_string())
-            })
-            .unwrap_or_default();
-        let rows: Vec<String> = extract_iris(&values)
-            .into_iter()
+        // One row per constant GRAPH branch that has an index record.
+        let rows: Vec<String> = sparql
+            .split("GRAPH <")
+            .skip(1)
+            .filter_map(|arm| arm.split_once('>').map(|(g, _)| g))
             .filter_map(|g| {
-                store.meta.get(&g).map(|(ct, bk, et)| {
+                store.meta.get(g).map(|(ct, bk, et)| {
                     format!(
                         r#"{{"g":{{"type":"uri","value":{g}}},"ct":{{"type":"literal","value":{ct}}},"bk":{{"type":"literal","value":{bk}}},"etag":{{"type":"literal","value":{et}}}}}"#,
-                        g = json_str(&g),
+                        g = json_str(g),
                         ct = json_str(ct),
                         bk = json_str(bk),
                         et = json_str(et),
@@ -893,10 +885,15 @@ async fn read_plan_is_one_protocol_request_carrying_target_and_all_candidates() 
     let plan = c.read_plan(RES, &candidates).await.unwrap();
     let after = state.store.lock().unwrap().requests;
     assert_eq!(after - before, 1, "read_plan = ONE protocol request");
-    // The one request was the combined SELECT with a single VALUES block over all four graphs.
+    // The one request carries a constant GRAPH branch for each distinct requested name.
     let sent = state.store.lock().unwrap().last_sparql.clone().unwrap();
     assert!(sent.starts_with("SELECT ?g ?ct ?bk ?etag"), "{sent}");
-    assert_eq!(sent.matches("VALUES").count(), 1, "{sent}");
+    assert!(!sent.contains("GRAPH ?g"), "{sent}");
+    assert_eq!(
+        sent.matches("GRAPH <").count(),
+        1 + candidates.len(),
+        "{sent}"
+    );
 
     assert_eq!(
         plan.target,

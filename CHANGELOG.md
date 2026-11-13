@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **sparq-lws-core:** embedded and HTTP read plans evaluate metadata only in
+  the requested target and distinct ACL candidate graphs. Embedded reads retain
+  one actor snapshot; both clients retain metadata validation and candidate order.
+
 - **sparq-lws-core:** metadata writes, resource deletes, containment removals and
   append/fold publication use fenced HTTP updates. Resource deletion detaches its
   parent edge in the same write.

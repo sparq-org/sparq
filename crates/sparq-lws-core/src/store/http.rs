@@ -1011,7 +1011,7 @@ impl SparqClient for HttpSparqClient {
         acl_candidates: &[String],
     ) -> Result<ReadPlan, SparqError> {
         // read-2 (§3.1): the ENTIRE per-read metadata chain — the target's record + every ACL
-        // candidate's presence/etag — in ONE combined SELECT (`VALUES ?g { … }`), replacing the
+        // candidate's presence/etag — in ONE combined SELECT (constant GRAPH branches), replacing the
         // k+2 sequential per-IRI queries. Fail-closed: a transport/backend/malformed-response
         // failure fails the WHOLE plan (no per-candidate partial degrade — design invariant 4).
         let q = sparql::select_read_plan(target, acl_candidates)?;
