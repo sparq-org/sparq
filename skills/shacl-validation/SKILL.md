@@ -507,7 +507,8 @@ The node-expression evaluation APIs are available in both feature states.
 `eval_node_expression_with_scope` wrappers return `None` on failure. Output lists
 preserve order and duplicates where the operator does; they are not universally
 deduplicated. Custom expression bodies and SPARQL function calls use the same
-evaluator during validation.
+evaluator during validation and rule execution. Evaluated list arguments retain
+their RDF values; named arguments remain expressions.
 
 See [Advanced Features](references/advanced-features.md) for SHACL-AF rules,
 SHACL 1.2 inference rules and declared rule entailment, node-expression APIs and graph scopes, and [validation details](references/validation-details.md)

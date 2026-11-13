@@ -171,6 +171,11 @@ empty variable scope, retaining the current focus. List custom arguments are
 evaluated in the caller's scope before the body runs: each must produce at most
 one node, a failure takes precedence over an empty argument, and the body must
 produce at most one node. An empty supplied argument prevents body application.
+Evaluated list arguments are retained as values, including blank nodes and IRIs
+that also name an expression operator. Custom-body inline shapes are registered
+when the shapes model is built, including bodies reached through constraints and
+rules. Calls through SPARQL retain the specification's separate restriction
+against blank-node arguments.
 SPARQL functions apply SPARQL error/unbound semantics, including `coalesce`,
 `if`, and the logical operators. Named `shnex:if` permits omitted branches and
 evaluates only the selected branch.
@@ -188,6 +193,11 @@ SELECT expressions bind the focus as `this` and scope variables by name;
 list-function argument keys become `arg0`, `arg1`, and so on. A scope name of
 `this` or a name that is not a SPARQL variable name produces a failure.
 SPARQL calls reuse the validation-scoped function registry and dataset.
+`shnex:conformsToShape` requires the evaluated shape argument to be an IRI.
+Named shape definitions can be untyped and selected by a computed IRI; their
+constraints are resolved from the supplied shapes graph before evaluation.
+Legacy SHACL-AF rule queries also see declared list-parameter expression
+functions, with one function context for each rule pass.
 The fixture-independent guards in `tests/shacl12_node_expr.rs` run in both
 feature states, including custom expression bodies called as SPARQL functions.
 

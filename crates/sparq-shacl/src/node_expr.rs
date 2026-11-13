@@ -53,7 +53,20 @@ pub type Scope = FxHashMap<String, Vec<Term>>;
 #[derive(Default)]
 pub(super) struct EvalScope {
     variables: Scope,
-    arguments: FxHashMap<Term, Term>,
+    arguments: FxHashMap<Term, Argument>,
+}
+
+pub(super) enum Argument {
+    Expression(Term),
+    Value(Term),
+}
+
+impl Argument {
+    fn term(&self) -> &Term {
+        match self {
+            Self::Expression(term) | Self::Value(term) => term,
+        }
+    }
 }
 
 thread_local! {
@@ -186,7 +199,12 @@ pub(crate) fn eval_function_body(
         arguments: args
             .iter()
             .enumerate()
-            .map(|(i, t)| (oxrdf::Literal::from(i as i64).into(), t.clone()))
+            .map(|(i, t)| {
+                (
+                    oxrdf::Literal::from(i as i64).into(),
+                    Argument::Value(t.clone()),
+                )
+            })
             .collect(),
     };
     expr.try_eval(data, &GraphView::new(data), model, focus, &scope)
@@ -327,9 +345,6 @@ pub fn eval_node_expression_result(
 ) -> Result<Vec<Term>, String> {
     let mut model = ShapesModel::parse(shapes);
     model.register_node_expr_shapes(shapes, expr);
-    for [_, _, body] in GraphView::new(shapes).triples(None, Some(&sh("bodyExpression")), None) {
-        model.register_node_expr_shapes(shapes, &body);
-    }
     let parsed = parse_node_expr(&GraphView::new(shapes), &model, expr)
         .ok_or("Unsupported or ill-formed node expression")?;
     crate::functions::with_validation(data, shapes, || {

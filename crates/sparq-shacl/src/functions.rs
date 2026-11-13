@@ -250,11 +250,7 @@ fn build_registry(context: Option<&Arc<Context>>, functions: Vec<Term>) -> Funct
                 let body = shapes.object(&function, &sh("bodyExpression")).ok_or("Missing function body")?;
                 let result = with_context(&context, || {
                     let model = context.model.get_or_init(|| {
-                        let mut model = crate::ShapesModel::parse(&context.source);
-                        for [_, _, expr] in shapes.triples(None, Some(&sh("bodyExpression")), None) {
-                            model.register_node_expr_shapes(&context.source, &expr);
-                        }
-                        Arc::new(model)
+                        Arc::new(crate::ShapesModel::parse(&context.source))
                     });
                     let parsed = parsed_body.get_or_init(|| crate::node_expr::parse_node_expr(&shapes, model, &body));
                     crate::node_expr::eval_function_body(model, context.data.as_ref().unwrap(),
@@ -273,6 +269,31 @@ fn build_registry(context: Option<&Arc<Context>>, functions: Vec<Term>) -> Funct
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(feature = "shacl-af")]
+    fn legacy_rules_build_one_function_context_per_pass() {
+        let targets = (0..40)
+            .map(|i| format!("<urn:n{i}>"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let shapes = Graph::load_str(&format!(r#"
+            @prefix sh: <http://www.w3.org/ns/shacl#> .
+            @prefix shnex: <http://www.w3.org/ns/shacl-node-expr#> .
+            <urn:echo> a sh:ListParameterExpressionFunction; sh:bodyExpression [shnex:arg 0] .
+            <urn:S> sh:targetNode {targets}; sh:rule [a sh:TripleRule; sh:subject sh:this;
+                sh:predicate <urn:result>; sh:object [sh:select "SELECT (<urn:echo>(7) AS ?v) WHERE {{}}"]] .
+        "#), "turtle").unwrap();
+        let before = build_counts();
+        let inference = crate::apply_rules(&Graph::new(), &shapes);
+        assert_eq!(inference.triples.len(), 40);
+        assert_eq!(inference.iterations, 2);
+        let after = build_counts();
+        assert_eq!(
+            std::array::from_fn::<_, 4, _>(|i| after[i] - before[i]),
+            [2, 0, 2, 0]
+        );
+    }
 
     #[test]
     fn nested_expression_failures_can_be_handled_without_changing_validation_failures() {

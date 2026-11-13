@@ -581,8 +581,87 @@ impl ShapesModel {
         for t in g.triples(None, Some(RDF_TYPE), Some(&iri(RDFS_CLASS))) {
             roots.push(t[0].clone());
         }
+        // Conformance expressions may compute the name of an untyped shape.
+        // Resolve named definitions once, before evaluation needs their ids.
+        if !g
+            .subjects_of("http://www.w3.org/ns/shacl-node-expr#conformsToShape")
+            .is_empty()
+            || !g.subjects_of(&sh("conformsToShape")).is_empty()
+        {
+            // Built-in constraint-component parameters, plus user-declared ones.
+            let mut parameters: rustc_hash::FxHashSet<String> = [
+                "and",
+                "class",
+                "closed",
+                "datatype",
+                "disjoint",
+                "equals",
+                "expression",
+                "flags",
+                "hasValue",
+                "ignoredProperties",
+                "in",
+                "languageIn",
+                "lessThan",
+                "lessThanOrEquals",
+                "maxCount",
+                "maxExclusive",
+                "maxInclusive",
+                "maxLength",
+                "maxListLength",
+                "memberShape",
+                "minCount",
+                "minExclusive",
+                "minInclusive",
+                "minLength",
+                "minListLength",
+                "node",
+                "nodeByExpression",
+                "nodeKind",
+                "not",
+                "or",
+                "pattern",
+                "property",
+                "qualifiedMaxCount",
+                "qualifiedMinCount",
+                "qualifiedValueShape",
+                "qualifiedValueShapesDisjoint",
+                "reificationRequired",
+                "reifierShape",
+                "rootClass",
+                "singleLine",
+                "someValue",
+                "sparql",
+                "subsetOf",
+                "uniqueLang",
+                "uniqueMembers",
+                "uniqueValuesFor",
+                "xone",
+            ]
+            .into_iter()
+            .map(sh)
+            .collect();
+            parameters.extend(
+                m.components
+                    .iter()
+                    .flat_map(|component| component.parameters.iter().map(|p| p.predicate.clone())),
+            );
+            for predicate in parameters {
+                roots.extend(
+                    g.subjects_of(&predicate)
+                        .into_iter()
+                        .filter(|node| matches!(node, Term::NamedNode(_))),
+                );
+            }
+        }
+
         for root in crate::view::dedup(roots) {
             m.shape_id(&g, &root);
+        }
+
+        // Custom bodies can contain inline shapes even when the call site does not.
+        for [_, _, body] in g.triples(None, Some(&sh("bodyExpression")), None) {
+            m.register_node_expr_shapes(shapes_graph, &body);
         }
 
         // Fix up qualified-value-shape sibling lists: the qualified shapes of the

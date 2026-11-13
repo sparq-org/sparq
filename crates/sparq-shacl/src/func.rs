@@ -2,7 +2,7 @@
 //! SPARQL scalar semantics come from the engine; custom argument scopes remain
 //! local to the expression call.
 
-use super::{EvalScope, NodeExpr};
+use super::{Argument, EvalScope, NodeExpr};
 use crate::model::{sh, ShapesModel};
 use crate::view::{dedup, GraphView};
 use oxrdf::{Literal, NamedNode, Term};
@@ -595,15 +595,15 @@ impl Func {
                     scope.variables.get(name).cloned().unwrap_or_default()
                 }
             }
-            Op::Arg(key) => {
-                if let Some(value) = scope.arguments.get(key) {
+            Op::Arg(key) => match scope.arguments.get(key) {
+                Some(Argument::Value(value)) => vec![value.clone()],
+                Some(Argument::Expression(value)) => {
                     let expr = super::parse_node_expr(&GraphView::new(&model.source), model, value)
                         .ok_or("Invalid argument expression")?;
                     expr.try_eval(graph, view, model, focus, &EvalScope::default())?
-                } else {
-                    Vec::new()
                 }
-            }
+                None => Vec::new(),
+            },
             Op::Custom { body, args, scalar } => {
                 let mut inner = EvalScope::default();
                 let mut empty = false;
@@ -620,9 +620,9 @@ impl Func {
                             empty = true;
                             continue;
                         };
-                        value
+                        Argument::Value(value)
                     } else {
-                        value.clone()
+                        Argument::Expression(value.clone())
                     };
                     inner.arguments.insert(key.clone(), value);
                 }
@@ -654,6 +654,9 @@ impl Func {
                 if empty {
                     return Ok(Vec::new());
                 }
+                if !matches!(&values[1], Term::NamedNode(_)) {
+                    return Err("Shape argument must be an IRI".into());
+                }
                 let shape = model.by_node(&values[1]).ok_or("Unknown shape")?;
                 vec![bool_literal(super::conforms(
                     graph, model, shape, &values[0],
@@ -680,7 +683,7 @@ impl Func {
                     if oxrdf::Variable::new(&name).is_err() {
                         return Err("Invalid argument variable".into());
                     }
-                    owned.push((name, value.clone()));
+                    owned.push((name, value.term().clone()));
                 }
                 let bindings: Vec<_> = owned
                     .iter()

@@ -484,3 +484,159 @@ fn temporal_order_uses_exact_values_and_a_total_timezone_order() {
         matches!(&actual[0], Term::Literal(l) if l.value()=="2000-01-01T00:00:00.0000000000000001Z")
     );
 }
+
+#[test]
+fn review_list_identity_preserves_evaluated_nodes() {
+    let data = graph("ex:focus ex:value [] .");
+    let shapes = graph(&format!(
+        "{FUNCTIONS} ex:Decl ex:expr [ex:echo [shnex:pathValues ex:value]] ."
+    ));
+    let blank = GraphView::new(&data)
+        .object(&iri("focus"), "urn:ex:value")
+        .unwrap();
+    assert_eq!(run(&data, &shapes, &Scope::default()).unwrap(), vec![blank]);
+    let shapes = graph(&format!(
+        "{FUNCTIONS} ex:Decl ex:expr [ex:echo [shnex:var \"input\"]]; ex:template [shnex:count (1 2)] ."
+    ));
+    let template = GraphView::new(&shapes)
+        .object(&iri("Decl"), "urn:ex:template")
+        .unwrap();
+    for value in [
+        template,
+        NamedNode::new("http://www.w3.org/ns/shacl#this")
+            .unwrap()
+            .into(),
+    ] {
+        let mut scope = Scope::default();
+        scope.insert("input".into(), vec![value.clone()]);
+        assert_eq!(run(&data, &shapes, &scope).unwrap(), vec![value]);
+    }
+}
+
+#[test]
+fn review_sparql_callback_arguments_are_evaluated_values() {
+    let shapes = graph(&format!(
+        r#"{FUNCTIONS}
+        ex:S sh:targetNode ex:focus; sh:sparql [sh:select
+          "SELECT $this WHERE {{ BIND(<urn:ex:echo>(<http://www.w3.org/ns/shacl#this>) AS ?value) FILTER(!BOUND(?value) || ?value != <http://www.w3.org/ns/shacl#this>) }}"] .
+    "#
+    ));
+    assert!(
+        sparq_shacl::validate_strict(&graph(""), &shapes)
+            .unwrap()
+            .conforms
+    );
+}
+
+#[test]
+fn review_sparql_callback_blank_arguments_remain_errors() {
+    let shapes = graph(&format!(
+        r#"{FUNCTIONS}
+        ex:S sh:targetNode ex:focus; sh:sparql [sh:select
+          "SELECT $this WHERE {{ $this <urn:ex:value> ?blank BIND(<urn:ex:echo>(7) AS ?normal) BIND(<urn:ex:echo>(?blank) AS ?value) FILTER(?normal = 7 && !BOUND(?value)) }}"] .
+    "#
+    ));
+    let report = sparq_shacl::validate_strict(&graph("ex:focus ex:value [] ."), &shapes).unwrap();
+    assert_eq!(report.results.len(), 1);
+    assert_eq!(report.results[0].focus_node, iri("focus"));
+}
+
+#[test]
+#[cfg(feature = "shacl-af")]
+fn review_custom_body_shapes_work_in_constraints_and_rules() {
+    let function = r#"
+        ex:check a sh:ListParameterExpressionFunction; rdfs:subClassOf sh:ListParameterExpression;
+          sh:bodyExpression [shnex:matchAll [sh:minInclusive 3]; shnex:nodes [shnex:arg 0]] .
+    "#;
+    let shapes = graph(&format!(
+        r#"{function}
+        ex:S sh:targetNode ex:good; sh:expression [ex:check 5] .
+        ex:T sh:targetNode ex:bad; sh:expression [ex:check 2] .
+    "#
+    ));
+    let report = sparq_shacl::validate_strict(&graph(""), &shapes).unwrap();
+    assert_eq!(report.results.len(), 1);
+    assert_eq!(report.results[0].focus_node, iri("bad"));
+    let shapes = graph(&format!(
+        r#"{function}
+        ex:S sh:targetNode ex:focus; sh:rule [a sh:TripleRule; sh:subject sh:this;
+          sh:predicate ex:result; sh:object [ex:check 5]] .
+    "#
+    ));
+    assert_eq!(
+        sparq_shacl::apply_rules(&graph(""), &shapes).triples,
+        vec![oxrdf::Triple::new(
+            NamedNode::new("urn:ex:focus").unwrap(),
+            NamedNode::new("urn:ex:result").unwrap(),
+            Literal::from(true)
+        )]
+    );
+}
+
+#[test]
+fn review_conformance_resolves_untyped_dynamic_shapes() {
+    let shapes = graph(
+        r#"
+        ex:Valid sh:nodeKind sh:IRI .
+        ex:Invalid sh:nodeKind sh:Literal .
+        ex:Custom <http://example.org/requireIRI> true .
+        ex:C a sh:ConstraintComponent; sh:parameter [sh:path <http://example.org/requireIRI>];
+          sh:validator [a sh:SPARQLAskValidator; sh:ask "ASK { FILTER(isIRI($this)) }"] .
+        ex:Decl ex:expr [shnex:conformsToShape ([shnex:var "focusNode"] [shnex:var "shape"])] .
+    "#,
+    );
+    for (shape, expected) in [("Valid", true), ("Invalid", false), ("Custom", true)] {
+        let mut scope = Scope::default();
+        scope.insert("shape".into(), vec![iri(shape)]);
+        assert_eq!(
+            run(&graph(""), &shapes, &scope).unwrap(),
+            vec![Literal::from(expected).into()]
+        );
+    }
+}
+
+#[test]
+fn review_conformance_requires_a_shape_iri() {
+    let shapes = graph(
+        r#"
+        ex:Decl ex:shape [a sh:NodeShape; sh:nodeKind sh:IRI];
+          ex:expr [shnex:conformsToShape ([shnex:var "focusNode"] [shnex:var "shape"])] .
+    "#,
+    );
+    let shape = GraphView::new(&shapes)
+        .object(&iri("Decl"), "urn:ex:shape")
+        .unwrap();
+    let mut scope = Scope::default();
+    scope.insert("shape".into(), vec![shape]);
+    assert!(run(&graph(""), &shapes, &scope).is_err());
+}
+
+#[test]
+#[cfg(feature = "shacl-af")]
+fn review_legacy_rule_select_calls_expression_functions() {
+    let shapes = graph(&format!(
+        r#"{FUNCTIONS}
+        ex:S sh:targetNode ex:focus; sh:rule [a sh:TripleRule; sh:subject sh:this;
+          sh:predicate ex:result; sh:object [sh:select "SELECT (<urn:ex:echo>(7) AS ?v) WHERE {{}}"]] .
+    "#
+    ));
+    assert_eq!(
+        sparq_shacl::apply_rules(&graph(""), &shapes).triples,
+        vec![oxrdf::Triple::new(
+            NamedNode::new("urn:ex:focus").unwrap(),
+            NamedNode::new("urn:ex:result").unwrap(),
+            Literal::from(7)
+        )]
+    );
+}
+
+#[test]
+fn review_conformance_does_not_promote_prefix_metadata_to_a_shape() {
+    let shapes = graph(
+        r#"
+        ex:Prefixes sh:declare [sh:prefix "ex"; sh:namespace "urn:ex:"] .
+        ex:Decl ex:expr [shnex:conformsToShape ([shnex:var "focusNode"] ex:Prefixes)] .
+    "#,
+    );
+    assert!(run(&graph(""), &shapes, &Scope::default()).is_err());
+}

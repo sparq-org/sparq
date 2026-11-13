@@ -318,24 +318,28 @@ fn run_rules(
             .extend_named(named.iter().map(|(n, g)| (n.clone(), g.fork())))
             .expect("fresh in-memory graphs take in-memory named graphs");
         let view = GraphView::new(&augmented);
-        let mut pass_new = false;
+        let pass_new = crate::functions::with_validation(&augmented, shapes, || {
+            let mut pass_new = false;
 
-        for (sid, rule) in &ruleset.scheduled {
-            if rule.deactivated {
-                continue;
-            }
-            for focus in focus_nodes(&view, model, *sid) {
-                if !conforms_to_all(&augmented, model, &rule.conditions, &focus) {
+            for (sid, rule) in &ruleset.scheduled {
+                if rule.deactivated {
                     continue;
                 }
-                for triple in fire_rule(&augmented, &view, model, &focus, rule) {
-                    if inferred_set.insert(triple.clone()) {
-                        inferred.push(triple);
-                        pass_new = true;
+                for focus in focus_nodes(&view, model, *sid) {
+                    if !conforms_to_all(&augmented, model, &rule.conditions, &focus) {
+                        continue;
+                    }
+                    for triple in fire_rule(&augmented, &view, model, &focus, rule) {
+                        if inferred_set.insert(triple.clone()) {
+                            inferred.push(triple);
+                            pass_new = true;
+                        }
                     }
                 }
             }
-        }
+            pass_new
+        })
+        .0;
 
         if !pass_new {
             break;
