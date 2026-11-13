@@ -184,13 +184,11 @@ impl NargoCacheLock {
 
 // The witness is born under 0700, before nargo creates it. Neither this
 // owner nor its credential-input path is serializable or printable with Debug.
-#[cfg(feature = "successful-results")]
 pub(crate) struct PrivateWitness {
     pub(crate) path: PathBuf,
     input_path: PathBuf,
     _scratch: ScratchDir,
 }
-#[cfg(feature = "successful-results")]
 impl Drop for PrivateWitness {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.input_path);
@@ -492,7 +490,6 @@ impl CircuitProver {
 
     // A caller tag is descriptive; the actual input/witness names are
     // allocated internally so even identical caller tags cannot collide.
-    #[cfg(feature = "successful-results")]
     pub(crate) fn private_package_witness(
         &self,
         pkg: &str,
@@ -527,7 +524,6 @@ impl CircuitProver {
         Ok(private)
     }
 
-    #[cfg(feature = "successful-results")]
     pub(crate) fn prove_private_package(
         &self,
         pkg: &str,
@@ -760,6 +756,102 @@ impl CircuitProver {
     /// for the prover-side round-trip / bb-tamper tests only.
     pub fn verify(&self, art: &ProofArtifacts, work_dir: &Path) -> Result<bool, DriverError> {
         self.verify_with(&art.proof, &art.public_inputs, &art.vk, work_dir)
+    }
+}
+
+/// The existing driver over a locally generated package, with exact toolchain pins.
+/// Package sources and the workspace must be controlled by the caller.
+pub struct ProgramProver {
+    driver: CircuitProver,
+    package: String,
+}
+
+impl ProgramProver {
+    /// Select a generated package using a single identifier, never a path.
+    pub fn new(workspace: impl Into<PathBuf>, package: &str) -> Result<Self, DriverError> {
+        validate_witness_tag(package)?;
+        if package.is_empty()
+            || !package
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            || package.as_bytes()[0].is_ascii_digit()
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "invalid generated package name",
+            )
+            .into());
+        }
+        Ok(Self {
+            driver: CircuitProver::new(workspace),
+            package: package.into(),
+        })
+    }
+
+    fn pins(&self) -> Result<(), DriverError> {
+        for (tool, _) in crate::toolchain::PINNED_TOOLS {
+            let out = Command::new(tool)
+                .arg("--version")
+                .output()
+                .map_err(|source| DriverError::Spawn {
+                    tool: tool.into(),
+                    source,
+                })?;
+            if !out.status.success() || !crate::toolchain::pinned_version_output(tool, &out.stdout)
+            {
+                return Err(DriverError::Tool {
+                    tool: tool.into(),
+                    stderr: "query method requires the pinned toolchain".into(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Compile to the driver's immutable content-addressed snapshot.
+    pub fn compile(&self) -> Result<PathBuf, DriverError> {
+        self.pins()?;
+        self.driver.compile_package(&self.package)
+    }
+
+    /// Execute with isolated private inputs and discard the resulting witness.
+    pub fn execute(&self, prover_toml: &str, tag: &str) -> Result<(), DriverError> {
+        validate_witness_tag(tag)?;
+        self.pins()?;
+        self.driver
+            .private_package_witness(&self.package, prover_toml, tag)?;
+        Ok(())
+    }
+
+    /// Prove through the shared private-witness and isolated-artifact driver.
+    pub fn prove(
+        &self,
+        prover_toml: &str,
+        work_dir: &Path,
+        tag: &str,
+    ) -> Result<ProofArtifacts, DriverError> {
+        validate_witness_tag(tag)?;
+        self.pins()?;
+        self.driver
+            .prove_private_package(&self.package, prover_toml, work_dir, tag)
+    }
+
+    /// Recompute the key from the locally generated program.
+    pub fn canonical_vk(&self, work_dir: &Path) -> Result<Vec<u8>, DriverError> {
+        self.pins()?;
+        self.driver.canonical_package_vk(&self.package, work_dir)
+    }
+
+    /// Verify only with independently reconstructed inputs and a locally pinned key.
+    pub fn verify_with(
+        &self,
+        proof: &[u8],
+        public_inputs: &[u8],
+        vk: &[u8],
+        work_dir: &Path,
+    ) -> Result<bool, DriverError> {
+        self.pins()?;
+        self.driver.verify_with(proof, public_inputs, vk, work_dir)
     }
 }
 

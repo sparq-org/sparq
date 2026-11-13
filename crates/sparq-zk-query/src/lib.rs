@@ -1,0 +1,37 @@
+//! Bounded query plans for the research query method. Not externally audited.
+
+pub mod capacity;
+pub mod codegen;
+pub mod interp;
+pub mod lower;
+pub mod plan;
+pub mod witness;
+
+/// Stable admission and evaluation refusals.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Error {
+    /// Invalid SPARQL syntax.
+    Parse(String),
+    /// A named construct outside this method.
+    Excluded(String),
+    /// A named construct outside the implemented stage.
+    Unsupported(String),
+    /// A request or evaluation exceeds a compiled bound.
+    Capacity(String),
+    /// The supplied object does not follow the plan contract.
+    Invalid(String),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Parse(why) => write!(f, "SPARQL parse refused: {why}"),
+            Self::Excluded(name) => write!(f, "{name} is excluded by the query method"),
+            Self::Unsupported(name) => write!(f, "{name} is not yet supported by the query method"),
+            Self::Capacity(name) => write!(f, "capacity refusal: {name}"),
+            Self::Invalid(why) => write!(f, "invalid query-method input: {why}"),
+        }
+    }
+}
+
+impl std::error::Error for Error {}

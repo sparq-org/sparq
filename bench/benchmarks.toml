@@ -2092,3 +2092,18 @@ pinning     = "crates/sparq-lws-crypt/tests/vectors/e1.json"
 records_to  = "stdout"
 featured    = false
 status      = "planning"
+
+
+[[benchmark]]
+id = "zk-query-contracts"
+name = "Query method compiler contracts"
+category = "zk"
+measures = "canonical plan identity and named admission refusals"
+invoke = "cargo test -p sparq-zk-query"
+source = "crates/sparq-zk-query/tests/plan.rs"
+dataset = "embedded deterministic queries"
+quiet_box_sensitive = false
+pinning = "source fixtures and pinned Noir toolchain"
+records_to = "test output"
+status = "ok"
+featured = false

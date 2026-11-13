@@ -164,6 +164,13 @@ The four raw `sign_commitment*` helpers are for string-canonical legacy commitme
 inventories non-test raw signer calls with counted certification exceptions;
 `docs-quality / quick-gates` runs it and its self-tests on every PR.
 
+The research query compiler uses `driver::ProgramProver` over a caller-controlled
+Nargo workspace and a checked package identifier. Its `compile`, `execute`,
+`prove`, `canonical_vk` and `verify_with` entries share the existing driver,
+private witness lifecycle and exact pinned-version matcher. `execute` discards
+its private witness after checking the relation. The caller derives its package,
+key and public inputs independently of the presentation.
+
 ## Prerequisites
 
 - **Noir toolchain on `PATH`** (the only way to prove/verify): `nargo` **1.0.0-beta.21** and Barretenberg `bb` **5.0.0-nightly.20260324** (bb target `noir-recursive`). Other versions may change the bb public-input byte layout the verifier reconstructs against. If `nargo`/`bb` are absent, the structural pre-filter and all host-side helpers still work, but `verify_manifest` / `CircuitProver` cannot.

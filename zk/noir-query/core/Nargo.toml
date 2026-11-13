@@ -1,0 +1,8 @@
+[package]
+name = "sparq_noir_query_core"
+type = "lib"
+authors = ["sparq"]
+compiler_version = "=1.0.0-beta.21"
+
+[dependencies]
+compose_core = { path = "../../compose/compose_core" }

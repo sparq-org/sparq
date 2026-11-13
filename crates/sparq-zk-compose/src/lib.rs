@@ -170,7 +170,6 @@ pub use verifier::HolderRegistry;
 #[cfg(feature = "successful-results")]
 pub mod result;
 // beadzkp-13.5: private exact pinned-toolchain version matcher.
-#[cfg(feature = "successful-results")]
 mod toolchain;
 
 // The LIVE-toolchain gate for the `#[cfg(test)]` tests that live in `src/` (the
