@@ -2,6 +2,7 @@
 """Exercise benchmark fetch and reporting entry points with local fixtures only."""
 
 import importlib.util
+import json
 import os
 from pathlib import Path
 import shutil
@@ -84,6 +85,10 @@ sys.exit(101)
         return subprocess.run(["bash", str(self.geo / "earl-report.sh"), str(self.out)],
                               env={**self.env, **env}, text=True, capture_output=True, check=False)
 
+    def run_fetch(self, **env):
+        return subprocess.run(["bash", str(self.geo / "fetch-geosparql-benchmark.sh")],
+                              env={**self.env, **env}, text=True, capture_output=True, check=False)
+
     def assert_success(self, run):
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
 
@@ -128,11 +133,90 @@ sys.exit(101)
     def test_fetch_refuses_edited_cache(self):
         self.assert_success(self.run_report())
         data = self.clone / "src/main/resources/gsb_dataset/dataset.rdf"
+        pristine = data.read_text()
         data.write_text("local change")
         run = self.run_report()
         self.assertNotEqual(run.returncode, 0)
         self.assertIn("local changes", run.stderr)
         self.assertEqual(data.read_text(), "local change")
+        data.write_text(pristine)
+        self.assert_success(self.run_report())
+        self.assertEqual(data.read_text(), pristine)
+
+    def test_fetch_refuses_fixtures_without_checkout_provenance(self):
+        unverified = self.root / "unverified"
+        shutil.copytree(self.resources, unverified / "src/main/resources")
+        # The parent is a clean repository too: status/rev-parse alone would
+        # otherwise attribute this plain directory to the parent's commit.
+        self.commit(self.root)
+        run = self.run_report(GEOSPARQL_BENCHMARK_DIR=str(unverified))
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn("not a Git checkout root", run.stderr)
+        self.assertFalse((self.out / "sparq-geosparql-earl.ttl").exists())
+        self.assert_success(self.run_report())
+        # A matching ref string is not proof when its commit object is missing.
+        missing = "e" * 40
+        (self.clone / ".git/HEAD").write_text(missing + "\n")
+        run = self.run_fetch(GEOSPARQL_BENCHMARK_PIN=missing)
+        self.assertNotEqual(run.returncode, 0)
+
+    def test_fetch_restores_clean_but_different_cache_revision_to_pin(self):
+        self.assert_success(self.run_report())
+        data = self.clone / "src/main/resources/gsb_dataset/dataset.rdf"
+        data.write_text("locally committed replacement")
+        self.git("-C", str(self.clone), "config", "user.name", "Fixture")
+        self.git("-C", str(self.clone), "config", "user.email", "fixture@example.test")
+        local_revision = self.commit(self.clone)
+        self.assertNotEqual(local_revision, self.first)
+        self.assertEqual(self.git("-C", str(self.clone), "status", "--porcelain"), "")
+        for _ in range(2):
+            self.assert_success(self.run_fetch(GEOSPARQL_BENCHMARK_PIN=self.first))
+            self.assertEqual(self.git("-C", str(self.clone), "rev-parse", "HEAD"), self.first)
+            self.assertEqual(data.read_text(), "fixture")
+
+    def test_verified_pin_cache_needs_no_fetch_but_other_refs_do(self):
+        self.assert_success(self.run_report())
+        self.git("-C", str(self.clone), "remote", "set-url", "origin",
+                 str(self.base / "unavailable.git"))
+        self.assert_success(self.run_fetch(GEOSPARQL_BENCHMARK_PIN=self.first))
+        self.assertEqual(self.git("-C", str(self.clone), "rev-parse", "HEAD"), self.first)
+        for revision in ("HEAD", "e" * 40):
+            with self.subTest(revision=revision):
+                run = self.run_fetch(GEOSPARQL_BENCHMARK_PIN=revision)
+                self.assertNotEqual(run.returncode, 0)
+                self.assertEqual(self.git("-C", str(self.clone), "rev-parse", "HEAD"), self.first)
+
+    def test_documented_examples_use_the_shared_checkout_resources(self):
+        cargo = self.bin / "cargo"
+        cargo.write_text("#!/usr/bin/env python3\nimport json, os, pathlib, sys\n"
+                         "pathlib.Path(os.environ['ARGS_OUT']).write_text(json.dumps(sys.argv[1:]))\n")
+        rustdoc = (ROOT / "crates/sparq-geo/examples/gsb_compliance.rs").read_text()
+        rustdoc = "\n".join(line[4:] for line in rustdoc.splitlines() if line.startswith("//! "))
+        readme = (ROOT / "bench/geo/README.md").read_text().split(
+            "## GeoSPARQL Compliance Benchmark family", 1)[1]
+        for name, text in (("example", rustdoc), ("readme", readme)):
+            with self.subTest(name=name):
+                snippet = text.split("```sh\n", 1)[1].split("```", 1)[0]
+                args = self.base / "args.json"
+                run = subprocess.run(["bash", "-e", "-c", snippet], cwd=self.root,
+                                     env={**self.env, "GEOSPARQL_BENCHMARK_PIN": self.first,
+                                          "ARGS_OUT": str(args)},
+                                     text=True, capture_output=True, check=False)
+                self.assert_success(run)
+                self.assertEqual(json.loads(args.read_text())[-1],
+                                 str(self.clone / "src/main/resources"))
+
+    def test_fetch_and_report_tests_are_unconditionally_wired_in_quick_gates(self):
+        import yaml
+
+        workflow = yaml.safe_load((ROOT / ".github/workflows/docs-quality.yml").read_text())
+        job = workflow["jobs"]["quick-gates"]
+        command = "python3 scripts/tests/test_geosparql_benchmark_report.py"
+        steps = [step for step in job["steps"] if step.get("run") == command]
+        self.assertEqual(len(steps), 1)
+        self.assertNotIn("continue-on-error", job)
+        self.assertNotIn("if", steps[0])
+        self.assertNotIn("continue-on-error", steps[0])
 
     def test_table_rejects_missing_wrong_and_malformed_outcomes(self):
         spec = importlib.util.spec_from_file_location("gsb_report", ROOT / "crates/sparq-geo/benchmark-report.py")

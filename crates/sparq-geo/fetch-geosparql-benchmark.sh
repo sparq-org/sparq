@@ -15,15 +15,29 @@ if [[ -z "${GEOSPARQL_BENCHMARK_DIR:-}" ]]; then
     git clone https://github.com/OpenLinkSoftware/GeoSPARQLBenchmark.git "$repo"
   else
     # Refuse edited fixtures rather than silently replacing a developer's files.
-    if [[ -n "$(fixture_status)" ]]; then
+    fixture_changes="$(fixture_status)"
+    if [[ -n "$fixture_changes" ]]; then
       echo "benchmark checkout has local changes: $repo" >&2
       exit 1
     fi
   fi
-  git -C "$repo" fetch origin "$pin"
-  git -C "$repo" checkout --detach FETCH_HEAD
+  # A full commit ID is immutable and a clean matching checkout is its own
+  # cache proof. Mutable refs (including HEAD) must still be fetched each time.
+  if [[ ! "$pin" =~ ^[0-9a-f]{40}$ ]] ||
+     [[ "$(git -C "$repo" rev-parse HEAD)" != "$pin" ]]; then
+    git -C "$repo" fetch origin "$pin"
+    git -C "$repo" checkout --detach FETCH_HEAD
+  fi
 fi
-if [[ -n "$(fixture_status -- src/main/resources)" ]]; then
+repo="$(cd "$repo" && pwd -P)"
+# Do not mistake a plain fixture directory inside another repository for a
+# checkout of the benchmark: that would attribute its contents to the parent HEAD.
+if [[ "$(git -C "$repo" rev-parse --show-toplevel)" != "$repo" ]]; then
+  echo "benchmark directory is not a Git checkout root: $repo" >&2
+  exit 1
+fi
+fixture_changes="$(fixture_status -- src/main/resources)"
+if [[ -n "$fixture_changes" ]]; then
   echo "benchmark resources have local changes: $repo" >&2
   exit 1
 fi

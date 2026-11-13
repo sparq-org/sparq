@@ -13,13 +13,13 @@
 //! published axis.
 //!
 //! ```sh
-//! GSB="$(bench/geo/gsb.sh)"
+//! GSB="$(bash crates/sparq-geo/fetch-geosparql-benchmark.sh)"
 //! cargo run --release -p sparq-geo --features geosparql_rewrite,geof_accessors \
-//!     --example gsb_compliance -- "$GSB"
+//!     --example gsb_compliance -- "$GSB/src/main/resources"
 //! ```
 //!
-//! The benchmark artifact is GPL-2.0 and is NEVER vendored — `bench/geo/gsb.sh`
-//! is the pinned gather-only recipe (see its header).
+//! The benchmark artifact is GPL-2.0 and is NEVER vendored — `crates/sparq-geo/fetch-geosparql-benchmark.sh`
+//! is the shared pinned fetch recipe (see its header).
 //!
 //! ## System under test
 //!
@@ -141,7 +141,7 @@ fn main() {
     let dir = match std::env::args().nth(1) {
         Some(d) => std::path::PathBuf::from(d),
         None => {
-            eprintln!("usage: gsb_compliance <gsb-resources-dir>   (see bench/geo/gsb.sh)");
+            eprintln!("usage: gsb_compliance <gsb-resources-dir>   (see crates/sparq-geo/fetch-geosparql-benchmark.sh; append /src/main/resources to its output)");
             std::process::exit(2);
         }
     };

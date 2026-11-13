@@ -265,7 +265,8 @@ Results are the lowest-dimension geometry capturing the answer and serialise bac
   modifying it (default: `crates/sparq-geo/tests/fixtures/geosparql-benchmark`).
   Without that override, `GEOSPARQL_BENCHMARK_PIN` selects a revision; the fetch
   script defaults to `879e0746e74c1327f74e57366104bcf1a6d63fb1`, and `HEAD` selects
-  current upstream. Absent default fixtures skip the test; a missing explicit
+  current upstream. A clean cache at the full pinned commit needs no fetch;
+  mutable refs such as `HEAD` are refreshed. Absent default fixtures skip the test; a missing explicit
   directory or an incomplete corpus fails. Fixtures are external and gitignored.
   The shared pass floor is in `sparq-conformance-floors`; the hand-curated
   `ogc_compliance_ratchet` remains a separate suite.
@@ -284,14 +285,16 @@ Results are the lowest-dimension geometry capturing the answer and serialise bac
   **Known benchmark gaps:** topology-property queries and the rewrite extension
   do not yet preserve the benchmark's asserted-plus-inferred answers. RDFS closure
   also adds geometry-property solutions absent from some expected answers.
-  Cross-CRS equality queries remain mismatches. Non-topological functions differ
+  Empty WKT/GML literal equality queries (R13/R16) return an unbound result;
+  the default-SRS and axis-order queries (R11/R12) pass. Non-topological functions differ
   in metric results and exact geometry serialization (ring start/orientation,
   singleton geometry types, coordinate precision and GML/WKT output choices).
   These failures do not by themselves establish an incorrect geometry: the
   benchmark compares serialization, not spatial equivalence. This community
   corpus is not an official OGC ETS and passing it does not confer certification.
-  The existing `bench/geo/gsb.sh` + `gsb_compliance` example remains available for
-  the benchmark's requirements-weighted score and runtime configuration matrix;
+  The `gsb_compliance` example uses the same `crates/sparq-geo/fetch-geosparql-benchmark.sh`
+  recipe; pass `"$GSB/src/main/resources"` when `GSB` holds its returned checkout.
+  It reports the benchmark's requirements-weighted score and runtime configuration matrix;
   the new ratchet and reports use test counts only.
 
 ## See also
