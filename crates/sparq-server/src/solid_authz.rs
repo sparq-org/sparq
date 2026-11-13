@@ -6049,6 +6049,7 @@ pub(crate) mod trust_limit_tests {
         // Both independent caps fit; adding the certification verifies reaches the boundary.
         let config = ServerConfig {
             solid_authz_trust_max_pairs: 11,
+            solid_authz_trust_auto_budget: Some(false),
             ..Default::default()
         };
         let (status, allow, calls) = run(config.clone(), body(1, 1, 1, 2)).await;
@@ -6069,6 +6070,7 @@ pub(crate) mod trust_limit_tests {
     async fn combined_verify_cap_counts_certifications_without_credentials() {
         let config = ServerConfig {
             solid_authz_trust_max_pairs: 0,
+            solid_authz_trust_auto_budget: Some(false),
             ..Default::default()
         };
         let (status, allow, _) = run(config.clone(), body(0, 0, 1, 0)).await;
@@ -6097,6 +6099,7 @@ pub(crate) mod trust_limit_tests {
         let cap = config.solid_authz_trust_max_certifications;
         let config = ServerConfig {
             solid_authz_trust_max_pairs: usize::MAX,
+            solid_authz_trust_auto_budget: Some(false),
             ..config
         };
         assert_eq!(cap, 2048);
@@ -6109,6 +6112,7 @@ pub(crate) mod trust_limit_tests {
         assert!(calls > 0);
         let config = ServerConfig {
             solid_authz_trust_max_pairs: 2,
+            solid_authz_trust_auto_budget: Some(false),
             ..Default::default()
         };
         let (status, _, calls) = run(config, body(1, 1, 1, 2)).await;
@@ -6124,6 +6128,7 @@ pub(crate) mod trust_limit_tests {
     async fn verify_budget_precedes_key_decode_and_credential_commit() {
         let config = ServerConfig {
             solid_authz_trust_max_pairs: 0,
+            solid_authz_trust_auto_budget: Some(false),
             ..Default::default()
         };
         let mut request = body(1, 0, 1, 0);

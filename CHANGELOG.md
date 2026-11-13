@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **sparq-server:** code-built configurations that set only the existing trust
+  pair limit retain its legacy signature/pair meaning. Explicit combined limits
+  remain available through the automatic-budget setting.
+
 - **sparq-core:** bounded parallel dataset ingestion retains source-occurrence
   accounting for duplicate rows and resumes syntax diagnostics at the incomplete
   statement, preserving earlier charges without parsing the accepted prefix again.

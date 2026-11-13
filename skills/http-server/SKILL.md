@@ -2168,8 +2168,10 @@ Code-built `ServerConfig` values and environment-loaded values finalize trust
 allowances when installed in `AppState`. Raising `max_body_bytes` with the default
 combined limit derives the same wider companion allowance. Changing only the
 signature/pair ceiling also derives its companion. With the default
-`solid_authz_trust_auto_budget: None`, a custom combined limit stays explicit;
-`Some(true)` always derives the combined limit from pair checks plus
+`solid_authz_trust_auto_budget: None`, a non-default
+`solid_authz_trust_max_pairs` value keeps the legacy signature/pair meaning,
+matching a sole environment override. Finalization moves that value into the
+legacy ceiling and derives its combined companion. `Some(true)` always derives the combined limit from pair checks plus
 transport bytes, while `Some(false)` preserves a fixed combined value even when
 it equals the default. Environment loading records sole overrides as derived and
 paired overrides as explicit. Repeated finalization remains idempotent and a

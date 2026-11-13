@@ -812,7 +812,7 @@ pub struct ServerConfig {
     /// `SPARQ_SOLID_AUTHZ_TRUST=1`.
     #[cfg(feature = "solid-authz-trust")]
     pub solid_authz_trust: bool,
-    /// Combined verify budget for one trust block.
+    /// Combined verify budget for one trust block after configuration finalization.
     ///
     /// Default: 16384. Counts certification signatures, potential rule/credential pairs,
     /// one canonicalize-and-commit per presented credential, and public-key decodes
@@ -820,13 +820,17 @@ pub struct ServerConfig {
     /// counts as one potential rule. `SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS` overrides it;
     /// With both environment limits explicit, zero permits none of this work.
     /// A sole environment override retains the legacy signature/pair ceiling and
-    /// derives this combined ceiling by adding `max_body_bytes`. Excess returns
+    /// derives this combined ceiling by adding `max_body_bytes`. With automatic
+    /// selection unset, a non-default code-built value has the same legacy meaning;
+    /// choose `solid_authz_trust_auto_budget: Some(false)` for a fixed combined cap.
+    /// Excess returns
     /// 403 before key decoding or admission.
     #[cfg(feature = "solid-authz-trust")]
     pub solid_authz_trust_max_pairs: usize,
     /// Combined-budget derivation at configuration finalization. Default: `None`:
-    /// an inherited combined limit scales with the transport or signature/pair
-    /// cap, while a custom combined limit stays explicit. `Some(true)` always derives the
+    /// a non-default `solid_authz_trust_max_pairs` value sets the legacy ceiling;
+    /// otherwise an inherited combined limit scales with the transport or signature/pair
+    /// cap. `Some(true)` always derives the
     /// companion from the signature/pair cap plus `max_body_bytes`; `Some(false)`
     /// keeps the combined value explicit even when it equals the default.
     /// Environment loading records sole versus paired overrides here, so later
@@ -1074,11 +1078,17 @@ impl ServerConfig {
         {
             let mut config = self;
             let defaults = Self::default();
+            let legacy = config.solid_authz_trust_auto_budget.is_none()
+                && config.solid_authz_trust_max_pairs != defaults.solid_authz_trust_max_pairs;
+            if legacy {
+                config.solid_authz_trust_max_pair_checks = config.solid_authz_trust_max_pairs;
+            }
             let derive = config.solid_authz_trust_auto_budget.unwrap_or(
-                config.solid_authz_trust_max_pairs == defaults.solid_authz_trust_max_pairs
-                    && (config.max_body_bytes > defaults.max_body_bytes
-                        || config.solid_authz_trust_max_pair_checks
-                            != defaults.solid_authz_trust_max_pair_checks),
+                legacy
+                    || config.solid_authz_trust_max_pairs == defaults.solid_authz_trust_max_pairs
+                        && (config.max_body_bytes > defaults.max_body_bytes
+                            || config.solid_authz_trust_max_pair_checks
+                                != defaults.solid_authz_trust_max_pair_checks),
             );
             if derive {
                 config.solid_authz_trust_auto_budget = Some(true);
@@ -12706,6 +12716,50 @@ mod from_env_tests {
         // Recover from a poisoned lock: a panicking test still leaves the env serialized
         // for the next test, so the poison flag carries no unsound state here.
         ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    #[cfg(feature = "solid-authz-trust")]
+    #[tokio::test]
+    async fn code_built_legacy_pair_limit_preserves_main_boundaries() {
+        use crate::solid_authz::trust_limit_tests::{body, run};
+        for (cap, rules, credentials, over_rules, over_credentials) in
+            [(16, 4, 4, 1, 17), (8192, 16, 512, 17, 482), (0, 1, 0, 1, 1)]
+        {
+            let config = ServerConfig {
+                solid_authz_trust_max_pairs: cap,
+                ..ServerConfig::default()
+            };
+            let (status, response, _) = run(config.clone(), body(rules, credentials, 1, 0)).await;
+            assert_eq!(
+                status,
+                axum::http::StatusCode::OK,
+                "legacy ceiling {cap}: {response}"
+            );
+
+            let state =
+                crate::http::AppState::with_config(sparq_core::Graph::default(), config.clone());
+            let normalized = state.config().clone();
+            let (status, response, calls) =
+                run(normalized, body(over_rules, over_credentials, 1, 0)).await;
+            assert_eq!(
+                status,
+                axum::http::StatusCode::FORBIDDEN,
+                "legacy ceiling {cap}: {response}"
+            );
+            assert_eq!(calls, 0, "re-finalization must retain the legacy ceiling");
+
+            let fixed = ServerConfig {
+                solid_authz_trust_auto_budget: Some(false),
+                ..config
+            };
+            let (status, response, calls) = run(fixed, body(rules, credentials, 1, 0)).await;
+            assert_eq!(
+                status,
+                axum::http::StatusCode::FORBIDDEN,
+                "fixed combined ceiling {cap}: {response}"
+            );
+            assert_eq!(calls, 0);
+        }
     }
 
     #[cfg(feature = "solid-authz-trust")]
