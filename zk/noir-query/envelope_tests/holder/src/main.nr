@@ -1,9 +1,6 @@
-use envelope_core::envelope::{
-    check_holder, check_policy, Credential, holder_applies, Point, PublicPolicy, required_property,
-    Signature, vocabulary,
-};
-// Public: verifier-derived policy words in the authenticated layout order.
-// Credential evidence and selected members remain private.
+use envelope_core::envelope::{check_policy, CredentialOpening, open_suite_credential, PublicPolicy};
+// Public scope is the stored request digest. All instants use exact epoch milliseconds.
+// Roots, depths, flags and lists are verifier-derived public policy values.
 fn main(
     request_digest: pub [u8; 32],
     issuer_root: pub Field,
@@ -20,10 +17,11 @@ fn main(
     now: pub u64,
     freshness_required: pub bool,
     earliest_created: pub u64,
-    c: Credential<8>,
-    pk: Point,
-    sig: Signature,
+    proofs: [CredentialOpening<64, 160>; 4],
+    holders: [envelope_core::envelope::HolderEvidence; 4],
+    slots: [u32; 4],
 ) {
+    let _scope = request_digest;
     let policy = PublicPolicy {
         issuer_root,
         issuer_depth,
@@ -40,11 +38,12 @@ fn main(
         freshness_required,
         earliest_created,
     };
-    check_policy::<2, 2>(policy);
-    if holder_required {
-        let (_, issuer) = required_property(c, c.root, vocabulary().issuer);
-        if holder_applies(issuer, policy) {
-            check_holder(c, request_digest, pk, sig);
-        }
-    }
+    check_policy::<4, 4>(policy);
+    let cs = [
+        open_suite_credential(proofs[0], 0),
+        open_suite_credential(proofs[1], 1),
+        open_suite_credential(proofs[2], 2),
+        open_suite_credential(proofs[3], 3),
+    ];
+    envelope_core::envelope::check_holders(cs, policy, request_digest, slots, holders);
 }

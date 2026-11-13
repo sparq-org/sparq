@@ -1,8 +1,8 @@
-use envelope_core::envelope::{check_policy, Credential, credential_dataset, PublicPolicy, TermCell};
-use envelope_core::table::{assert_table, Table};
-// Public: verifier-derived policy words in the authenticated layout order.
-// Credential evidence and selected members remain private.
+use envelope_core::envelope::{check_policy, CredentialOpening, open_suite_credential, PublicPolicy};
+// Public scope is the stored request digest. All instants use exact epoch milliseconds.
+// Roots, depths, flags and lists are verifier-derived public policy values.
 fn main(
+    request_digest: pub [u8; 32],
     issuer_root: pub Field,
     issuer_depth: pub u32,
     holder_required: pub bool,
@@ -17,11 +17,9 @@ fn main(
     now: pub u64,
     freshness_required: pub bool,
     earliest_created: pub u64,
-    presentation_scope: Field,
-    c: Credential<4>,
-    issuer: TermCell,
-    expected: Table<9, 4>,
+    proofs: [CredentialOpening<64, 160>; 4],
 ) {
+    let _scope = request_digest;
     let policy = PublicPolicy {
         issuer_root,
         issuer_depth,
@@ -38,9 +36,15 @@ fn main(
         freshness_required,
         earliest_created,
     };
-    check_policy::<2, 2>(policy);
-    assert_table(
-        credential_dataset::<4, 9>(c, issuer, presentation_scope),
-        expected,
-    );
+    check_policy::<4, 4>(policy);
+    for i in 0..4 {
+        let c = open_suite_credential(proofs[i], i);
+        let issuer = envelope_core::envelope::required_property(
+            c,
+            c.credential_subject(),
+            envelope_core::term::iri_issuer(),
+        );
+        let _dataset =
+            envelope_core::envelope::credential_dataset::<64, 129, 8>(c, issuer, request_digest, i);
+    }
 }

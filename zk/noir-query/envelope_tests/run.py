@@ -12,6 +12,7 @@ HERE = Path(__file__).resolve().parent
 FIELD = {'kind': 'field'}
 BOOL = {'kind': 'boolean'}
 U32 = {'kind': 'integer', 'sign': 'unsigned', 'width': 32}
+# Request and authenticated credential instants are exact Unix epoch milliseconds.
 U64 = {'kind': 'integer', 'sign': 'unsigned', 'width': 64}
 DIGEST = {'kind': 'array', 'length': 32,
           'type': {'kind': 'integer', 'sign': 'unsigned', 'width': 8}}
@@ -26,8 +27,8 @@ POLICY_INPUTS = [
     ('freshness_required', BOOL), ('earliest_created', U64),
 ]
 PUBLIC_INPUTS = {
-    name: ([('request_digest', DIGEST)] if name == 'holder' else []) + POLICY_INPUTS
-    for name in ('issuer', 'holder', 'status', 'validity', 'freshness', 'dataset', 'request')
+    name: [('request_digest', DIGEST)] + POLICY_INPUTS
+    for name in ('issuer', 'holder', 'status', 'validity', 'freshness', 'dataset', 'request', 'total')
 }
 
 
@@ -43,6 +44,39 @@ def run(args, cwd, **kwargs):
     return subprocess.run(args, cwd=cwd, check=True, text=True, **kwargs)
 
 
+def run_native_tests():
+    """Discover every case, then serialize the large credential batches."""
+    package = HERE / 'tests'
+    discovered = run(['nargo', 'test', '--list-tests', '--deny-warnings'],
+                     package, capture_output=True).stdout.splitlines()
+    names = []
+    for line in discovered:
+        parts = line.split()
+        if len(parts) != 2 or parts[0] != 'envelope_tests':
+            raise ValueError(f'unexpected native test discovery: {line!r}')
+        names.append(parts[1])
+    if not names or len(names) != len(set(names)):
+        raise ValueError('native test discovery must be nonempty and unique')
+    large = [name for name in names if name.startswith('four')]
+    regular = [name for name in names if name not in large]
+    if 'four_credentials_enforce_all_conditions_and_merge' not in large:
+        raise ValueError('signed Solid case missing from native discovery')
+    batches = [(regular, '4')] + [([name], '1') for name in large]
+    scheduled = [name for batch, _ in batches for name in batch]
+    if len(scheduled) != len(names) or set(scheduled) != set(names):
+        raise ValueError('native partitions must execute every discovered case once')
+    failed = []
+    for batch, threads in batches:
+        command = ['nargo', 'test', '--test-threads', threads, '--deny-warnings',
+                   '--exact', *batch]
+        result = subprocess.run(command, cwd=package, check=False)
+        if result.returncode:
+            failed.append((command, result.returncode))
+    if failed:
+        command, code = failed[0]
+        raise subprocess.CalledProcessError(code, command)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--measure', action='store_true')
@@ -54,8 +88,8 @@ def main():
     bb = run(['bb', '--version'], ROOT, capture_output=True).stdout.strip()
     if nargo != 'nargo version = 1.0.0-beta.21' or bb != '5.0.0-nightly.20260324':
         raise SystemExit('programme toolchain pin mismatch')
-    packages = ['tests'] + (['issuer', 'holder', 'status', 'validity', 'freshness', 'dataset', 'request'] if args.measure else [])
-    run(['nargo', 'test', '--test-threads', '1', '--deny-warnings'], HERE / 'tests')
+    packages = ['tests'] + (['issuer', 'holder', 'status', 'validity', 'freshness', 'dataset', 'request', 'total'] if args.measure else [])
+    run_native_tests()
     if args.measure:
         measurements = {}
         for name in packages[1:]:
@@ -64,7 +98,7 @@ def main():
             artifact = package / f'target/envelope_{name}.json'
             abi = json.loads(artifact.read_text())['abi']
             public = check_public_abi(name, abi)
-            result = run(['bb', 'gates', '-s', 'ultra_honk', '-b', str(artifact)], package, capture_output=True)
+            result = run(['bb', 'gates', '-s', 'ultra_honk', '-t', 'noir-recursive', '-b', str(artifact)], package, capture_output=True)
             measurements[name] = {'public_inputs': public, 'backend': json.loads(result.stdout)}
             print(f'Measured {name}', flush=True)
         args.output.write_text(json.dumps({'nargo': nargo, 'bb': bb, 'checks': measurements}, indent=2) + '\n')

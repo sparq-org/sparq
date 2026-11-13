@@ -81,5 +81,6 @@
       "unique": 3,
       "noir_capacity": 4
     }
-  ]
+  ],
+  "issued_trust_member": "0x0c5601a7b6ed97c5b96b2b47bc8f5070685558888532218dfff47658feafb511"
 }

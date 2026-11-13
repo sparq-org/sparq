@@ -1,7 +1,8 @@
-use envelope_core::envelope::{check_policy, PublicPolicy};
-// Public: verifier-derived policy words in the authenticated layout order.
-// Credential evidence and selected members remain private.
+use envelope_core::envelope::{check_policy, CredentialOpening, open_suite_credential, PublicPolicy};
+// Public scope is the stored request digest. All instants use exact epoch milliseconds.
+// Roots, depths, flags and lists are verifier-derived public policy values.
 fn main(
+    request_digest: pub [u8; 32],
     issuer_root: pub Field,
     issuer_depth: pub u32,
     holder_required: pub bool,
@@ -16,7 +17,9 @@ fn main(
     now: pub u64,
     freshness_required: pub bool,
     earliest_created: pub u64,
+    proofs: [CredentialOpening<64, 160>; 4],
 ) {
+    let _scope = request_digest;
     let policy = PublicPolicy {
         issuer_root,
         issuer_depth,
@@ -33,6 +36,9 @@ fn main(
         freshness_required,
         earliest_created,
     };
-    check_policy::<2, 2>(policy);
-    // Canonical public policy only; request normalization belongs to Rust.
+    check_policy::<4, 4>(policy);
+    for i in 0..4 {
+        let c = open_suite_credential(proofs[i], i);
+        let _message = c.message();
+    }
 }

@@ -658,7 +658,7 @@ to its description in RDF.
 
 = Draft amendment: credential statements <sec-envelope-draft>
 
-#strong[Draft — integration part A of the Noir query programme.]
+#strong[Draft — authenticated envelope integration of the Noir query programme.]
 This section proposes an opt-in credential statement profile for methods that explicitly
 implement it. It takes precedence over the earlier dataset-layout and bearer-only wording
 only for those methods. The profile is research grade and not externally audited. A method
@@ -686,10 +686,16 @@ actually verified the credential, and in the credential's `issuer` or `issuer.id
 issuer or a different spelling MUST be refused. There is no case folding, trailing-slash change
 or `did:` rewriting; a `did:web:` issuer remains a `did:web:` IRI. The assertion is in the
 default graph, outside `GRAPH` blocks. `GRAPH` uses a variable because the graph name is a blank
-node. Separate presentations assign different graph names. The method makes no additional
-graph-to-issuer inference. The trust set binds issuer, verification method, cryptosuite,
-assertion authorization and key together. Hidden mode proves membership in its public digest
-with the member and membership path private. A query can require an issuer for a particular
+node. The graph name is the suite-domain hash of the two unsigned big-endian halves of the
+public request digest and the credential index; its blank-node scope is that index plus one.
+The request digest MUST supply this scope; a private presentation value MUST NOT replace it.
+Different request digests change graph names. Reusing a request repeats its graph names.
+The method makes no additional graph-to-issuer inference. The trust set binds issuer, verification method, cryptosuite,
+assertion authorization and key together. The issuer IRI comes from the opened credential
+subject’s unique `issuer` property; the verification-method IRI and Multikey come from the
+suite-authenticated proof metadata. The key coordinates MUST open that Multikey, and the
+authorization term is exactly `https://w3id.org/security#assertionMethod`. Hidden mode proves
+membership in its public digest with the member and membership path private. A query can require an issuer for a particular
 fact, for example:
 
 ```sparql
@@ -724,6 +730,11 @@ requirement and instant, and freshness requirement and earliest creation instant
 requirement flag is false its value words MUST be zero: no holder scope, count or issuer words
 for disabled holder binding; no missing-status option, snapshot root or depth for disabled
 status; no validity instant for disabled validity; and no creation bound for disabled freshness.
+All public instants (`now` and `earliest_created`) are exact nonnegative Unix epoch
+milliseconds, at most the maximum signed sixty-four-bit integer. The suite timestamps
+retain signed epoch milliseconds for comparisons, including pre-epoch credential bounds.
+No fractional milliseconds are rounded; unrepresentable instants are refused.
+
 An absent holder issuer list has zero count and issuer words even when holder binding is
 enabled. The circuit MUST assert these encodings as well as applicable credential conditions.
 

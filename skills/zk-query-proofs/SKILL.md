@@ -202,8 +202,14 @@ a capacity of four before deduplication. An empty list is refused with
 `AcceptedSnapshots` takes verifier-curated digests. The helper sorts canonical set
 members, computes minimal roots/depths and emits zero words for disabled conditions.
 The digest remains a separate host-computed public input. This helper is not yet
-wired into the compiler's layout or admission; authenticated metadata integration
-remains pending and the method is not externally audited.
+admitted as a complete generated method. The envelope consumes authenticated suite metadata,
+uses exact Unix epoch milliseconds for request instants, and scopes graph names by the public
+request digest. Generated policy enforcement remains an integration item; the method is not
+externally audited. `check_holder_key` binds each active credential's key, and
+`check_holder_signatures` checks the accumulated required slots once across the batch;
+generated callers must derive those slots from active credentials and the public policy.
+`credential_dataset<N, O, G>` uses the operator order and fixes its sorting depth `G`
+so the smallest tree covers the default/named copies plus the issuer assertion.
 
 ## Prerequisites
 

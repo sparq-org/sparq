@@ -166,8 +166,8 @@ Verifiers"); a later version of the data model should reuse it.
 #strong[Draft — public policy integration. Not an available proof method.]
 The proposed identifier is `urn:sparq:vcq:method:noir-query:v1`. The statement amendment is
 @sec-impl-envelope-draft. The envelope is registered in the real core package alongside the suite and compiler
-operators. Its fixtures include hand-built cells and a complete suite-message opening.
-Authenticated metadata remains explicitly marked; stored-policy wiring awaits compiler integration. It does not
+operators. Its native fixtures use deterministically issued, signed credentials and authenticated
+metadata openings; generated envelope enforcement awaits compiler integration. It does not
 produce an answers-data-model presentation. This method is research grade, not externally
 audited; its description states a proposed contract, not established assurance.
 
@@ -201,12 +201,13 @@ components is required in addition to any issuer claims about the world.
 == Statement, layout and disclosures
 
 The target public statement binds the complete request digest, dataset commitment, chosen
-signature mode and canonical released result. The current authenticated compiler layout is
+signature mode and canonical released result. The authenticated layout binds
 request digest bytes, input commitment bytes, signature-mode byte, credential/quad/row bounds,
-term parameters, index parameters, released result, issuer root, ordered credential quad bounds
-and statement binding, as defined in `statement::Layout` and `ops_core_statement`.
+term parameters, index parameters, released result, the envelope policy group below, ordered
+credential quad bounds and statement binding, as defined in `statement::Layout` and
+`ops_core_statement`. Envelope enforcement still requires the generated checks.
 
-The agreed envelope extension replaces that single issuer-root slot with the following group,
+The envelope uses the following public group,
 after the result and before `credential_quad_bounds`, with exactly this declaration order:
 
 ```noir
@@ -264,8 +265,9 @@ The verification key and plan identify the compiled credential, quad, intermedia
 lexical-byte, numeric and path-depth buckets. These are public upper bounds, chosen from request
 bounds, not assertions of actual private cardinalities. The released result exposes its size and
 duplicates, and any query-selected identifiers. A public key-set or snapshot-set digest can
-distinguish verifier policies. Fresh presentation-local graph names avoid a persistent graph
-identifier; stable selected values can still link answers. Canonical term order fixes choices
+distinguish verifier policies. Graph names are derived from the public request digest and credential index. Different
+requests change them; reuse of a request repeats them. Stable selected values can also link
+answers. Canonical term order fixes choices
 left open by SPARQL, including unordered slices, SAMPLE and GROUP_CONCAT ordering in admitted
 profiles.
 
@@ -289,8 +291,8 @@ names all the public buckets above. `toolchain` pins the compiler and backend ve
 are no implicit capacity or profile defaults. The accepted request carries the trust and
 snapshot digests and requirement values as defined in the amendment. The draft context defines
 the new request terms and the amendment fixes policy-root ordering, padding and minimal depth.
-Admission still requires the integrated plan and digest encodings; the local stand-ins are not
-these encodings and cannot be sent as a method descriptor.
+Admission still requires the integrated plan and digest encodings. The partial generated
+wiring does not define an admitted method descriptor.
 
 The draft `proofValue` encoding is a length-prefixed evidence frame: an unsigned big-endian
 length followed by the backend proof bytes, then an unsigned big-endian length followed by the
@@ -328,33 +330,44 @@ supplied. All credential-root status entries must be covered. Unsupported shapes
 values where the profile requires a singleton are refused. The graph builder emits the complete
 named graph and default copies plus the verified-issuer assertion, and the envelope set-merge
 helper collapses duplicate default triples while preserving every credential named graph.
+Graph construction uses the operator table order, a sorting network and direct indexed output
+writes. Its sorting depth is fixed by the compiled quad bucket and adds no public input.
 Compiler query integration remains separate.
 
-The envelope adapts lane A's authenticated term observations to lane B's distinct table
-representation. Its IRI constructor and vocabulary use the suite encoding. The complete suite
-opening recomputes the salted signed message before table conversion. Created instant, Multikey,
-status purpose/index and scoped graph-name metadata still await their authenticated openers.
-Hand-built fixtures continue to use marked metadata transports; they are not admitted credential
-witnesses. The request-digest and policy-derivation stand-ins have been removed. Rust derives
-the digest and policy words from the stored request; the circuit receives them as public inputs
-and performs no request normalization. The batch entry applies the public policy to every
-credential. Holder evidence is deduplicated by full key coordinates and each required key has
-one signature over the public request digest. The combined fixture covers four credentials and
-their default/named dataset merge, with controls changing every condition on its final
-credential. Status binds list identifier, purpose, length, compiled tree depth and root in an
-accepted snapshot digest and proves the credential's actual index clear. Status leaves hash the
-status-leaf domain tag, the boolean bit and a zero field; two-input internal nodes keep their
-distinct arity. The snapshot digest hashes its domain tag followed by list, purpose, bit length,
-depth and root, in that order. The status-bit tree depth remains inside the snapshot digest and
-is distinct from the public snapshot-set membership depth. Validity endpoints are inclusive,
-with an absent individual bound contributing no comparison and reversed bounds refused. When
-both bounds are absent, the creation instant from suite metadata is the inclusive start;
-unavailable creation metadata refuses a validity request. Freshness compares the authenticated
-creation instant with inclusive `earliestCreated`; unknown creation refuses only a required
-check, and absence imposes no freshness condition. This does not replace the validity fallback
-above. The verifier computes the bound. The temporal fixture uses exact whole-second offset
-keys; finer or wider times need the suite's checked temporal opening, not a cast or rounding
-operation.
+The envelope consumes lane A's `OpenedCredential` directly. Its hidden suite opener verifies
+all signed quads, salted root, message and proof metadata; no separate credential metadata
+transport remains. Complete singleton reads use `credential_subject()`, `property()`,
+`valid_from()` and `valid_until()`. The issuer property is an exact IRI from that table.
+The verification-method IRI and verification-key Multikey come from the opened proof metadata.
+The trust leaf hashes the trust domain, issuer encoding, verification-method encoding,
+`Poseidon2(suite ID, key x, key y)` and the exact `assertionMethod` IRI encoding, in that order.
+The key coordinates must open the authenticated Multikey before membership is checked.
+
+Holder keys open the credential subject's confidence-method Multikey using the suite's
+`open_multikey`; one signature covers the public request digest per distinct required key.
+Status purposes and decimal-string indices open the actual entry cells with
+`open_status_purpose` and `open_status_index`. Snapshot digests and tagged leaves retain the
+encodings above: snapshot domain, list, purpose, bit length, status-bit tree depth and root;
+status-leaf domain, bit and a zero field. The bit-tree depth is separate from public
+snapshot-set membership depth. Every status entry must have evidence, even in quads unused
+by the query. The combined native case uses four signed credentials in the Solid quad bucket,
+shared and distinct holder keys, issuer scope, suspension and revocation snapshots, inclusive
+validity, freshness and the default/named graph merge. Separate controls change each condition.
+
+All public request instants are exact nonnegative Unix epoch milliseconds within the signed
+sixty-four-bit range. `Timestamp.known()` and `Timestamp.millis()` supply the authenticated
+creation instant; `open_time` checks lexical openings of signed validity cells without rounding.
+Signed pre-epoch bounds retain their ordering. Endpoints are inclusive. An absent individual
+bound adds no comparison; with both absent, authenticated creation is the inclusive start and
+there is no end. Unknown creation refuses that fallback and required freshness. An absent
+freshness property adds no freshness condition. Fractional milliseconds that cannot be represented
+exactly are refused. The host policy helper emits these millisecond values unchanged.
+
+Graph names use `term::credential_graph` with the public request digest's exact unsigned
+big-endian halves and the credential index. No private graph scope is accepted by the envelope
+entry. The same request and index repeat the graph name; changing either changes it. Generated
+wiring must pass that public digest to the dataset builder and the verified issuer result to its
+assertion. This is the remaining lane B stand-in. Request and policy derivation stay on the host.
 
 The accepted-snapshot and trust roots follow the amendment exactly: sort unique canonical
 unsigned field values as thirty-two big-endian bytes, refuse zero members and empty enabled
