@@ -32,3 +32,5 @@ pub mod expr_open;
 mod expr_binding_tests;
 mod expr_target_tests;
 mod expr_open_tests;
+
+pub mod ops_core_profile;

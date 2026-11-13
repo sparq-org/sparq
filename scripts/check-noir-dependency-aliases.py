@@ -12,7 +12,8 @@ def check_alias(alias: str, package: Path) -> None:
         raise ValueError(f"dependency alias {alias!r} equals a nested module in {package}")
 
 
-def check(root: Path) -> None:
+def check(root: Path, cache: Path | None = None) -> None:
+    cache = cache if cache is not None else Path.home() / "nargo"
     pending = [root / "zk/noir-query/core"]
     pending.extend(p.parent for p in (root / "zk/noir-query/fixtures").rglob("Nargo.toml"))
     seen = set()
@@ -25,17 +26,17 @@ def check(root: Path) -> None:
         for alias, dep in manifest.get("dependencies", {}).items():
             if "path" in dep:
                 target = (package / dep["path"]).resolve()
-                pending.append(target)
             else:
                 url = urlparse(dep["git"])
                 revision = dep.get("tag", dep.get("rev"))
                 if revision is None:
                     raise ValueError(f"dependency has no pinned revision: {alias}")
-                target = Path.home() / "nargo" / url.netloc / url.path.strip("/") / revision
+                target = cache / url.netloc / url.path.strip("/") / revision
                 target /= dep.get("directory", "")
             if not (target / "src").is_dir():
                 raise ValueError(f"load dependencies with pinned nargo first: {target}")
             check_alias(alias, target)
+            pending.append(target)
 
 
 def self_test() -> None:
@@ -50,6 +51,29 @@ def self_test() -> None:
             pass
         else:
             raise AssertionError("nested module alias was accepted")
+
+        root = package / "project"
+        core = root / "zk/noir-query/core"
+        core.mkdir(parents=True)
+        (core / "Nargo.toml").write_text(
+            '[dependencies]\nouter={git="https://example.invalid/library",rev="snapshot"}\n'
+        )
+        git_package = package / "cache/example.invalid/library/snapshot"
+        (git_package / "src").mkdir(parents=True)
+        (git_package / "src/lib.nr").write_text("pub fn value() -> Field { 1 }\n")
+        (git_package / "Nargo.toml").write_text('[dependencies]\ninner={path="../nested"}\n')
+        nested = git_package.parent / "nested"
+        (nested / "src").mkdir(parents=True)
+        (nested / "src/inner.nr").write_text("pub fn value() -> Field { 1 }\n")
+        (nested / "Nargo.toml").write_text("[dependencies]\n")
+        try:
+            check(root, package / "cache")
+        except ValueError as error:
+            assert "alias 'inner'" in str(error), error
+        else:
+            raise AssertionError("git dependency's transitive alias was accepted")
+        (git_package / "Nargo.toml").write_text('[dependencies]\nlocal={path="../nested"}\n')
+        check(root, package / "cache")
 
 
 if __name__ == "__main__":

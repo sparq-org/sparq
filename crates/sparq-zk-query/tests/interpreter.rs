@@ -243,3 +243,13 @@ fn differential(seed: u64) {
         fixture_support::assert_engine(q, &rdf, &result);
     }
 }
+
+#[test]
+fn mixed_string_equality_preserves_false_and_error_as_the_engine_does() {
+    for (query, expected) in fixture_support::mixed_string_queries() {
+        let plan = lower(&query, BOUNDS).unwrap();
+        let result = evaluate(&plan, &[], &FixtureEncoder).unwrap().result;
+        assert_eq!(result, ResultValue::Ask(expected), "{query}");
+        fixture_support::assert_engine(&query, "", &result);
+    }
+}

@@ -437,13 +437,22 @@ fn check_exact_magnitude(c: Cell) -> Result<(), Error> {
     Ok(())
 }
 
+fn datatype_id(iri: &[u8]) -> Word {
+    sparq_merkle_suite::poseidon::field_bytes(sparq_merkle_suite::poseidon::hash_bytes(
+        sparq_merkle_suite::poseidon::DATATYPE_DOMAIN,
+        iri,
+    ))
+}
+static STRING_DATATYPE: std::sync::LazyLock<Word> =
+    std::sync::LazyLock::new(|| datatype_id(b"http://www.w3.org/2001/XMLSchema#string"));
+static LANGUAGE_STRING_DATATYPE: std::sync::LazyLock<Word> = std::sync::LazyLock::new(|| {
+    datatype_id(b"http://www.w3.org/1999/02/22-rdf-syntax-ns#langString")
+});
 fn plain_string(c: Cell) -> bool {
-    c.lang == [0; 32]
-        || c.dt
-            == sparq_merkle_suite::poseidon::field_bytes(sparq_merkle_suite::poseidon::hash_bytes(
-                sparq_merkle_suite::poseidon::DATATYPE_DOMAIN,
-                b"http://www.w3.org/2001/XMLSchema#string",
-            ))
+    c.lang == [0; 32] || c.dt == *STRING_DATATYPE
+}
+fn string_cell(cell: Cell) -> bool {
+    cell.kind == 3 && (matches!(cell.key_class, 6 | 7) || cell.dt == *LANGUAGE_STRING_DATATYPE)
 }
 
 fn compare(op: Compare, a: Value, b: Value) -> Result<Value, Error> {
@@ -486,8 +495,8 @@ fn compare(op: Compare, a: Value, b: Value) -> Result<Value, Error> {
             return Err(Error::Unsupported("mixed temporal datatypes".into()));
         }
         if op != Compare::Equal
-            && matches!(a.key_class, 6 | 7)
-            && matches!(b.key_class, 6 | 7)
+            && string_cell(a)
+            && string_cell(b)
             && ((!plain_string(a)) || (!plain_string(b)))
         {
             return Err(Error::Unsupported("language-tagged string ordering".into()));
@@ -498,10 +507,13 @@ fn compare(op: Compare, a: Value, b: Value) -> Result<Value, Error> {
         {
             return Err(Error::Unsupported("mixed timezone comparison".into()));
         }
-        if op == Compare::Equal && matches!(a.key_class, 6 | 7) && matches!(b.key_class, 6 | 7) {
+        if op == Compare::Equal && string_cell(a) && string_cell(b) {
             return Ok(Value::Boolean(a.same_term(b), false));
         }
-        if a.key_class == 7 || b.key_class == 7 {
+        if op == Compare::Equal && (string_cell(a) || string_cell(b)) {
+            return Ok(Value::Boolean(false, true));
+        }
+        if string_cell(a) && string_cell(b) && (a.key_class == 7 || b.key_class == 7) {
             return Err(Error::Unsupported("string comparison capacity".into()));
         }
         if op == Compare::Equal && (a.key_class == 0 || b.key_class == 0) {

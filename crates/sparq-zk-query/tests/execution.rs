@@ -407,3 +407,102 @@ fn constant_membership_length_is_data_and_inactive_values_cannot_match() {
     assert!(error.to_string().contains("operator length"), "{error}");
     support::complete(gate);
 }
+
+#[test]
+#[ignore = "requires the pinned native query toolchain"]
+fn mixed_string_classes_execute_and_refuse_rebound_wrong_traces() {
+    let Some(gate) = support::gate(
+        "mixed_string_classes_execute_and_refuse_rebound_wrong_traces",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
+    let bounds = Bounds {
+        credentials: 1,
+        quads_per_credential: 4,
+        rows_per_table: 2,
+    };
+    let cases = fixture_support::mixed_string_queries();
+    let traces = cases
+        .iter()
+        .map(|(query, expected)| {
+            let plan = lower(query, bounds).unwrap();
+            let trace = evaluate(&plan, &[], &FixtureEncoder).unwrap();
+            assert_eq!(trace.result, ResultValue::Ask(*expected), "{query}");
+            fixture_support::assert_engine(query, "", &trace.result);
+            (plan, trace)
+        })
+        .collect::<Vec<_>>();
+    let package = generate(&traces[0].0).unwrap();
+    let workspace = Workspace::new(&package);
+    let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+    for (i, (plan, trace)) in traces.iter().enumerate() {
+        assert_eq!(generate(plan).unwrap(), package);
+        let input = prover_toml(plan, &[], &FixtureEncoder, trace, [7; 32], [3; 32]).unwrap();
+        driver.execute(&input, &format!("honest_{i}")).unwrap();
+        let wrong = &traces
+            .iter()
+            .find(|(_, other)| other.result != trace.result)
+            .unwrap()
+            .1;
+        let input = prover_toml(plan, &[], &FixtureEncoder, wrong, [7; 32], [3; 32]).unwrap();
+        let error = driver.execute(&input, &format!("wrong_{i}")).unwrap_err();
+        assert!(error.to_string().contains("operator length"), "{error}");
+    }
+    support::complete(gate);
+}
+
+#[test]
+#[ignore = "requires the pinned native query toolchain"]
+fn inactive_expression_rows_skip_values_but_active_capacity_still_refuses() {
+    let Some(gate) = support::gate(
+        "inactive_expression_rows_skip_values_but_active_capacity_still_refuses",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
+    let bounds = Bounds {
+        credentials: 1,
+        quads_per_credential: 4,
+        rows_per_table: 2,
+    };
+    let query = "ASK {?s <urn:p> ?x FILTER((1000000000000000000 > 0) || true)}";
+    let large = lower(query, bounds).unwrap();
+    let small = lower(&query.replace("1000000000000000000", "1"), bounds).unwrap();
+    let package = generate(&large).unwrap();
+    assert_eq!(package, generate(&small).unwrap());
+    let empty = evaluate(&large, &[], &FixtureEncoder).unwrap();
+    assert_eq!(empty.result, ResultValue::Ask(false));
+    fixture_support::assert_engine(query, "", &empty.result);
+    let workspace = Workspace::new(&package);
+    let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+    driver
+        .execute(
+            &prover_toml(&large, &[], &FixtureEncoder, &empty, [7; 32], [3; 32]).unwrap(),
+            "inactive_values",
+        )
+        .unwrap();
+    let data = vec![sparq_zk_query::interp::CredentialCells {
+        quads: vec![fixture_support::quad(
+            &fixture_support::iri("urn:s"),
+            &fixture_support::iri("urn:p"),
+            &fixture_support::integer(1),
+        )],
+    }];
+    assert!(matches!(
+        evaluate(&large, &data, &FixtureEncoder),
+        Err(sparq_zk_query::Error::Capacity(_))
+    ));
+    let active = evaluate(&small, &data, &FixtureEncoder).unwrap();
+    assert_eq!(active.result, ResultValue::Ask(true));
+    driver
+        .execute(
+            &prover_toml(&small, &data, &FixtureEncoder, &active, [7; 32], [3; 32]).unwrap(),
+            "active_values",
+        )
+        .unwrap();
+    let rebound = prover_toml(&large, &data, &FixtureEncoder, &active, [7; 32], [3; 32]).unwrap();
+    let error = driver.execute(&rebound, "active_capacity").unwrap_err();
+    assert!(error.to_string().contains("expression capacity"), "{error}");
+    support::complete(gate);
+}

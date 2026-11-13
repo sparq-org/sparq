@@ -526,6 +526,31 @@ fn structure(value: &serde_json::Value, expected: &[(&str, Abi)]) -> bool {
 mod literal_tests {
     use super::*;
 
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn require_consumer_refuses_each_pending_policy_independently() {
+        let base = EnvelopeInputs::issuer_only(number(1));
+        assert_eq!(base.require_consumer(), Ok(()));
+        for case in 0..5 {
+            let mut policy = base.clone();
+            match case {
+                0 => policy.issuer_depth = 0,
+                1 => policy.holder_required = true,
+                2 => policy.status_required = true,
+                3 => policy.validity_required = true,
+                4 => policy.freshness_required = true,
+                _ => unreachable!(),
+            }
+            assert_eq!(
+                policy.require_consumer(),
+                Err(Error::Unsupported(
+                    "credential envelope policy integration".into()
+                )),
+                "policy case {case}"
+            );
+        }
+    }
+
     #[test]
     fn noir_verified_issuer_predicate_is_a_literal_equal_to_the_suite() {
         use crate::interp::EncodeTerm;

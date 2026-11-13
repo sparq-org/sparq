@@ -130,3 +130,18 @@ deduplicate the merged triples. The Noir representation keeps a parallel graph
 array beside rows and active flags. Issuer terms enter only after the envelope
 layer's trust check. The production method awaits that consumer and graph dispatch;
 the assembly helpers alone do not establish a target-query proof.
+
+The compact opening adapter separates root identities from value consumption.
+Resources omit literal metadata; private literal tags select fixed datatype
+constructors. The identity route retains complete term encodings and canonical
+padding. Comparisons, functions and aggregates require checked lexical input;
+the conservative checked route remains available until read-site integration is
+complete. The authenticated metadata wrapper is shared with the suite and awaits
+its constructor for already opened cells. No practical capacity is inferred from
+the preparatory adapter alone.
+
+String comparisons preserve the distinction between false and a SPARQL error.
+Identity tokens are local to equality between strings of the same datatype.
+Plain/language string pairs and mixed value families use their type classes in
+the shared comparison gadget, with host and native execution controls against
+the engine. The tokens are never lexical inputs to string functions.

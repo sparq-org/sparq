@@ -69,3 +69,14 @@ check its returned opaque suite object, and pass it to `from_authenticated`.
 a default-only assertion. Constant-list evaluation uses `evaluate_indexed` with
 the public active-length index. The canonical policy-root consumer and graph
 dispatch remain separate integrations.
+
+The `ops_core_profile` adapter constructs compact credential cells through the suite
+openers. Resource fields omit datatype and language payloads; a private literal tag
+selects a fixed datatype and its checked key constructor. Scalar lexical bounds are
+separate from resource and string bounds. The default graph is constructed for each
+active quad, and padding remains canonical. This adapter returns internal cells for
+the authenticated metadata opener; it does not authenticate a credential by itself.
+`open_quads` checks supported literal keys as well as constructing their identities.
+`open_identity_quads` constructs the root's complete identity table; its callers
+must use checked lexical openings for every value consumed by a comparison,
+function or aggregate. This follows the suite's separate identity/value contract.

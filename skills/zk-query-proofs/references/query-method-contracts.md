@@ -201,3 +201,18 @@ and adds its default-only assertion. It does not supply that trust check itself.
 `Answer::release` includes canonical boolean terms for computed results, even if
 they were absent from the source vocabulary. Other result terms use the supplied
 vocabulary or the plan's public constants.
+
+The circuit library's `ops_core_profile::open_quads` accepts compact resource and
+object openings and returns suite cells. A private literal tag selects a supported
+fixed datatype for `term::open_key_checked`; resources pass through
+`suite_entry::open_bounded_quads` with empty metadata. The returned cells still
+require the suite's root, count, salt, signature and metadata authentication. This
+helper alone is not a credential verifier.
+`open_identity_quads` supplies the complete identity table for root authentication.
+A comparison, function or aggregate must obtain its value through a checked lexical
+opening; the identity route alone does not provide that value contract.
+
+String equality keeps type errors distinct from false. Term-identity tokens are
+local to same-datatype string equality; mixed string types and value families
+pass through the shared comparison's type classes. These tokens must never be
+used as lexical input by string functions.
