@@ -8,7 +8,7 @@
 //! in `tests/jsonld_suite/{common,to_rdf,from_rdf,expand,compact,flatten,frame}.rs`
 //! as SUBMODULES of this one test binary (the CI invocation
 //! `cargo test -p sparq-conformance --features jsonld-suite --test jsonld_suite`
-//! is unchanged), and the eight ratchet FLOORS live LIB-SIDE
+//! is unchanged), and the API and ingest ratchet FLOORS live LIB-SIDE
 //! in `sparq_conformance::floors::<lane>` so the runner's `assert!(pass >= FLOOR)`
 //! and `scoreboard::SUITES`' `ratchet_floor` read the SAME compile-time const (no
 //! textual drift — the #1463 floor-drift class is killed structurally). The
@@ -16,7 +16,9 @@
 //!
 //! ## What is gated (v1) — only what sparq runs TODAY
 //!
-//! * **toRdf** (JSON-LD → RDF) — see `jsonld_suite/to_rdf.rs`.
+//! * **toRdf** (native JSON-LD → RDF; legacy 1.0 compatibility via oxjsonld).
+//! * **toRdf-ingest** (Graph / oxjsonld over the same manifest, excluded from EARL).
+//!   Both use `jsonld_suite/to_rdf.rs`.
 //! * **fromRdf** (RDF → JSON-LD, round-trip) — see `jsonld_suite/from_rdf.rs`.
 //! * **compact** (native document-level `sparq_jsonld::compact::compact()` oracle
 //!   against the W3C expected document — sq-oy1f.27) — see
@@ -117,6 +119,8 @@ mod gated {
         }
 
         let tordf = to_rdf::run_tordf(&root);
+        // Deliberately excluded from common::report and therefore EARL.
+        let tordf_ingest = to_rdf::run_tordf_ingest(&root);
         let fromrdf = from_rdf::run_fromrdf(&root);
         let compact_scores = compact::run_compact(&root);
         let compact = compact_scores.semantic;
@@ -186,6 +190,14 @@ mod gated {
             "TOTAL toRdf {} {} {} (floor {})",
             tordf.pass, tordf.fail, tordf.skip, TORDF_FLOOR
         );
+        println!(
+            "TOTAL toRdf-ingest {} {} {} (floor {})",
+            tordf_ingest.pass, tordf_ingest.fail, tordf_ingest.skip,
+            sparq_conformance::floors::to_rdf_ingest::FLOOR
+        );
+        for (id, why) in &tordf_ingest.failures {
+            println!("toRdf-ingest {id}: {why}");
+        }
         println!(
             "TOTAL fromRdf {} {} {} (floor {})",
             fromrdf.pass, fromrdf.fail, fromrdf.skip, FROMRDF_FLOOR
@@ -277,6 +289,19 @@ mod gated {
         assert!(html.fail <= sparq_conformance::floors::html::FAIL_CEILING, "HTML failure ceiling exceeded");
         assert!(remote_doc.pass >= sparq_conformance::floors::remote_doc::FLOOR, "remote-document pass count regressed");
         assert_eq!(remote_doc.fail, sparq_conformance::floors::remote_doc::FAIL_CEILING, "remote-document failure ceiling exceeded");
+
+        assert!(
+            tordf_ingest.pass >= sparq_conformance::floors::to_rdf_ingest::FLOOR,
+            "JSON-LD toRdf-ingest pass count regressed: {} < floor {}",
+            tordf_ingest.pass, sparq_conformance::floors::to_rdf_ingest::FLOOR
+        );
+        assert!(
+            tordf_ingest.fail <= sparq_conformance::floors::to_rdf_ingest::FAIL_CEILING,
+            "JSON-LD toRdf-ingest failure ceiling exceeded: {} > {}",
+            tordf_ingest.fail, sparq_conformance::floors::to_rdf_ingest::FAIL_CEILING
+        );
+
+        assert_eq!(tordf_ingest.skip, 0, "Graph ingest must execute every toRdf entry");
 
         // The ratchet: pass counts may only RISE. A regression below the pinned
         // floor fails the build.

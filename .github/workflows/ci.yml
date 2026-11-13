@@ -1818,30 +1818,13 @@ jobs:
             conformance-scoreboard.md
 
   jsonld-conformance:
-    # sq-oy1f.2 / sq-3uos5 / sq-oy1f.19 — W3C JSON-LD 1.1 conformance
-    # RATCHET (toRdf + fromRdf + compact + frame), a DEDICATED gating job alongside
-    # SPARQL / inference / SHACL / GeoSPARQL / Solid. The runner is crate-local
-    # (crates/sparq-conformance/tests/jsonld_suite.rs) but behind the OPT-IN
-    # `jsonld-suite` feature (forwards to sparq-core/jsonld +
-    # sparq-engine/serialize-rdf), so it runs ONLY here — the generic
-    # `cargo test --workspace` shards build it feature-OFF (a single self-SKIP test,
-    # zero oxjsonld/writer code linked: the lean-core posture). This job fetches the
-    # pinned w3c/json-ld-api suite (toRdf/fromRdf/compact) AND the SEPARATE pinned
-    # w3c/json-ld-framing suite (frame), runs the runner with the feature ON +
-    # --nocapture, and re-checks the printed `TOTAL toRdf|fromRdf|compact|frame
-    # <pass> …` lines as the same belt-and-braces `>= floor` gate. The runner's own
-    # `assert!(pass >= FLOOR)` is the primary gate. Honest baseline: NOT 100%
-    # conformant (remote-context / option / negative divergences are documented gaps;
-    # compact is the NATIVE document-level Compaction Algorithm (sparq-jsonld) gated
-    # on document equivalence with the W3C EXPECTED output (sq-oy1f.27 —
-    # the oracle correction from the old writer self-reparse round-trip); frame is
-    # RDF→framed-JSON-LD via the native Framing Algorithm gated on RDF-equivalence
-    # to the normative expected output, each with its own honest below-floor
-    # divergence + skip buckets. Never lower the ratchet (raise the `FLOOR` const in
-    # crates/sparq-conformance/src/floors/<lane>.rs as the native pipeline improves —
-    # sq-oy1f.40: the lib-side single source the runner + scoreboard + the
-    # grep gate below all read; the floors in this job's display name are informative,
-    # the greps below read the real consts).
+    # Native sparq-jsonld API operations and a separate non-EARL Graph/oxjsonld
+    # ingest ratchet share the pinned toRdf manifest. HTML and remote documents
+    # use native API operations with local manifest responses; framing uses the
+    # separate pinned w3c/json-ld-framing suite. The opt-in jsonld-suite feature
+    # enables this runner; the generic workspace build compiles its self-SKIP test.
+    # Every floor is sourced from src/floors/<lane>.rs by the runner, central
+    # scoreboard and grep gate below. Ingest also enforces its failure ceiling.
     name: W3C JSON-LD 1.1 conformance (ratcheted API and framing suites)
     runs-on: ubuntu-latest
     steps:
@@ -1921,6 +1904,8 @@ jobs:
             echo "$n"
           }
           TORDF_FLOOR=$(floor_of to_rdf)
+          TORDF_INGEST_FLOOR=$(floor_of to_rdf_ingest)
+          TORDF_INGEST_CEILING=$(sed -nE 's/^pub const FAIL_CEILING: usize = ([0-9]+);/\1/p' crates/sparq-conformance/src/floors/to_rdf_ingest.rs)
           FROMRDF_FLOOR=$(floor_of from_rdf)
           COMPACT_FLOOR=$(floor_of compact)
           FRAME_FLOOR=$(floor_of frame)
@@ -1938,6 +1923,11 @@ jobs:
           fi
           # runner prints: "TOTAL toRdf <pass> <fail> <skip> (floor F)"
           TORDF_PASS=$(grep -E '^TOTAL toRdf ' jsonld-conformance.out | awk '{print $3}' | head -1)
+          TORDF_INGEST_PASS=$(grep -E '^TOTAL toRdf-ingest ' jsonld-conformance.out | awk '{print $3}' | head -1)
+          TORDF_INGEST_FAIL=$(grep -E '^TOTAL toRdf-ingest ' jsonld-conformance.out | awk '{print $4}' | head -1)
+          echo "JSON-LD Graph/oxjsonld ingest pass: ${TORDF_INGEST_PASS:-unknown} (floor $TORDF_INGEST_FLOOR); fail: ${TORDF_INGEST_FAIL:-unknown} (ceiling $TORDF_INGEST_CEILING); excluded from EARL"
+          [ -n "$TORDF_INGEST_PASS" ] && [ "$TORDF_INGEST_PASS" -ge "$TORDF_INGEST_FLOOR" ] || { echo "::error::JSON-LD toRdf-ingest regressed below the ratchet"; exit 1; }
+          [ -n "$TORDF_INGEST_FAIL" ] && [ -n "$TORDF_INGEST_CEILING" ] && [ "$TORDF_INGEST_FAIL" -le "$TORDF_INGEST_CEILING" ] || { echo "::error::JSON-LD toRdf-ingest failure ceiling exceeded"; exit 1; }
           FROMRDF_PASS=$(grep -E '^TOTAL fromRdf ' jsonld-conformance.out | awk '{print $3}' | head -1)
           COMPACT_PASS=$(grep -E '^TOTAL compact ' jsonld-conformance.out | awk '{print $3}' | head -1)
           FRAME_PASS=$(grep -E '^TOTAL frame ' jsonld-conformance.out | awk '{print $3}' | head -1)

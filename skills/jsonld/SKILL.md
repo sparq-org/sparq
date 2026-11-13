@@ -1,6 +1,6 @@
 ---
 name: jsonld
-description: Parse, expand, flatten, compact, and frame W3C JSON-LD 1.1 with sparq — the native, dependency-free document-level pipeline in the `sparq-jsonld` crate (expand/flatten/compact/frame/fromRdf over a JSON AST, deny-by-default document loader) and how each surface exposes it (native CLI `dump … jsonld[-compact] --context`; CLI framing is planned, the HTTP server's `application/ld+json` content-negotiation, the Solid/LWS server's profile-aware expanded/compacted negotiation, the wasm `serializeCompact`, the engine's RDF-first writer matrix). Use when converting JSON-LD document forms, choosing a surface, or reasoning about the honest conformance / remote-loading posture.
+description: Parse, expand, flatten, compact, and frame W3C JSON-LD 1.1 with sparq — the native document-level pipeline in the `sparq-jsonld` crate (expand/flatten/compact/frame/toRdf/fromRdf over a JSON AST, deny-by-default document loader) and how each surface exposes it (native CLI `dump … jsonld[-compact] --context`; CLI framing is planned, the HTTP server's `application/ld+json` content-negotiation, the Solid/LWS server's profile-aware expanded/compacted negotiation, the wasm `serializeCompact`, the engine's RDF-first writer matrix). Use when converting JSON-LD document forms, choosing a surface, or reasoning about the honest conformance / remote-loading posture.
 license: MIT
 metadata:
   version: "0.1.0"
@@ -12,12 +12,12 @@ metadata:
 How to move a JSON-LD 1.1 document between its four output forms — **expanded**,
 **flattened**, **compacted**, **framed** — and how each sparq surface exposes them.
 
-There are **two** JSON-LD code paths, and it is load-bearing to keep them apart:
+JSON-LD document processing, RDF writing and Graph ingest are distinct surfaces:
 
-1. **The native document-level pipeline** — the `sparq-jsonld` crate. A from-scratch,
-   dependency-free implementation of the W3C JSON-LD 1.1 API + Framing algorithms that
-   operates on JSON trees (`expand`, `flatten`, `compact`, `frame`, `from_rdf`). This is
-   the Rust API you call directly; it is where document-form conversion lives.
+1. **The native document-level pipeline** — the `sparq-jsonld` crate implements the
+   W3C JSON-LD 1.1 API + Framing algorithms with zero mandatory dependencies. It
+   operates on JSON trees (`expand`, `flatten`, `compact`, `frame`, `to_rdf`, `from_rdf`).
+   This is the Rust API you call directly for document-form conversion.
 2. **The engine's RDF-first writer matrix** — `sparq_engine::serialize::*` behind the
    `serialize-rdf` feature. sparq always holds RDF, so the CLI / server / wasm surfaces
    serialise **from a `Graph`** through this writer (see
@@ -28,10 +28,9 @@ There are **two** JSON-LD code paths, and it is load-bearing to keep them apart:
    `jsonld-compact` and "what `sparq_jsonld::compact` produces" are the same code. The
    `JsonLdForm::{Expanded, Flattened, Compacted}` writer (the prefix-only `@context` form) is
    still the engine's own, so this skill says which is which for every surface.
-
-> This document was re-verified against the source on branch `main` on 2026-10-14.
-> Every function, flag, and conformance number below exists today; where a
-> form is *not* exposed on a surface, it is called out as planned, not implied.
+3. **Graph JSON-LD ingest** — `sparq-core` uses oxjsonld when loading JSON-LD.
+   It does not call native `sparq_jsonld::to_rdf`; the native API conformance count
+   does not describe `Graph::load_*(..., "jsonld")` behavior.
 
 ## Native pipeline — the `sparq-jsonld` crate
 
@@ -273,9 +272,12 @@ The Python wheel enables JSON-LD **ingest** by default (`sq-oy1f.20`); the docum
 ## Honest conformance status
 
 sparq drives the official `w3c/json-ld-api` and the separate `w3c/json-ld-framing`
-suites through eight ratcheted lanes. Floors are measured minimum pass counts at the
-pinned revision and may only rise. They measure algorithm behavior, not HTTP negotiation,
-CLI flags, Python bindings, or wasm bundle contents.
+suites through eight API ratcheted lanes plus a separate Graph ingest ratchet.
+Floors are measured minimum pass counts at the pinned revision and may only rise.
+The JSON-LD EARL report measures JSON-LD 1.1 API operations via `sparq-jsonld`
+(expand, compact, flatten, frame, toRdf, fromRdf). `sparq-core`'s Graph JSON-LD
+ingest uses oxjsonld and is not what EARL measures. These counts do not measure
+HTTP negotiation, CLI flags, Python bindings, or wasm bundle contents.
 
 | Lane | Measured floor | Oracle |
 | ---- | -------------: | ------ |
@@ -287,6 +289,17 @@ CLI flags, Python bindings, or wasm bundle contents.
 | frame | 92 / 92 | native normative document comparison |
 | html | 49 / 50 | native expand/compact/flatten/toRdf with HTML/XHTML extraction |
 | remote-doc | 18 / 18 | native expansion through virtual manifest responses |
+| toRdf-ingest (excluded from EARL) | 429 / 467 | Graph acceptance + oxjsonld canonical dataset; base only; rejection-only negatives |
+
+`TOTAL toRdf-ingest 429 38 0` covers the same 467 toRdf manifest entries, with a
+pass floor of 429 and failure ceiling of 38. It passes the raw input and base to
+`parse_jsonld_dataset`: Graph must accept the input, then oxjsonld supplies the
+canonical dataset preserving named graphs. Unsupported options and remote loading
+are not emulated. All entries execute, including generalized-RDF cases that the
+oxrdf dataset model cannot represent. Negative cases check rejection without an
+exact W3C error code. This ratchet never contributes EARL assertions. The native
+toRdf lane's 454 passes include legacy 1.0-only compatibility entries; its EARL
+subset is 448 / 448, within the API report's 1295 / 1296 applicable entries.
 
 The authoritative constants are in `crates/sparq-conformance/src/floors/`.
 EARL excludes only JSON-LD 1.0-only entries. All other unexecuted entries fail;

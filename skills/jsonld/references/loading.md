@@ -1,5 +1,10 @@
 # Loading JSON-LD and HTML documents
 
+These loader and HTML behaviors belong to the `sparq-jsonld` API measured by the
+JSON-LD EARL report. `sparq-core`'s Graph JSON-LD ingest uses oxjsonld and has a
+separate `TOTAL toRdf-ingest` ratchet, excluded from EARL. Enabling `html` here does
+not change Graph ingest.
+
 For trusted local HTML fixtures, enable the default-off feature:
 
 ```toml

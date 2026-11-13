@@ -523,6 +523,19 @@ pub const SUITES: &[Suite] = &[
         note: "JSON-LD 1.1 → RDF through the native sparq-jsonld processor; legacy 1.0-only entries retain the oxjsonld path; HTML and remote documents have separate ratchets",
     },
     Suite {
+        label: "W3C JSON-LD toRdf-ingest (Graph / oxjsonld)",
+        family: "W3C JSON-LD",
+        runner: Runner::FeatureGatedCrateTest {
+            krate: "sparq-conformance",
+            target: "jsonld_suite",
+            feature: "jsonld-suite",
+        },
+        ci_job: "jsonld-conformance",
+        ratchet_floor: crate::floors::to_rdf_ingest::FLOOR,
+        floor_basis: "pass",
+        note: "Separate non-EARL Graph ingest ratchet over all toRdf entries via parse_jsonld_dataset; oxjsonld, base only, rejection-only negatives; failure ceiling in floors::to_rdf_ingest",
+    },
+    Suite {
         label: "W3C JSON-LD 1.1 fromRdf",
         family: "W3C JSON-LD",
         runner: Runner::FeatureGatedCrateTest {

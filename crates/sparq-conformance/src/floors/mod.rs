@@ -1,6 +1,6 @@
-//! sq-oy1f.40 — the LIB-SIDE single source of truth for the eight W3C
-//! JSON-LD 1.1 conformance-lane ratchet FLOORS (`toRdf`, `fromRdf`, `expand`,
-//! `compact`, `flatten`, `frame`).
+//! sq-oy1f.40 — the LIB-SIDE single source of truth for the JSON-LD API
+//! and Graph ingest ratchet FLOORS (`toRdf`, `fromRdf`, `expand`, `compact`,
+//! `flatten`, `frame`, `html`, `remote-doc`, `toRdf-ingest`).
 //!
 //! ## Why the floors live in the LIBRARY, not the test binary
 //!
@@ -13,19 +13,19 @@
 //! registry `ratchet_floor`, and the `ci.yml` grep gate) each spelled the same
 //! number and could silently disagree until a guard caught it AFTER the fact.
 //!
-//! Moving the eight floors HERE — into the library the test binary AND the scoreboard
+//! Moving the floors HERE — into the library the test binary AND the scoreboard
 //! both depend on — makes the runner's `assert!` and the registry's `ratchet_floor`
 //! read the SAME `const` at COMPILE TIME. They cannot drift because there is only
 //! one number. The `ci.yml` `jsonld-conformance` job greps each floor from
 //! `src/floors/<lane>.rs` at run time (a single-source read, not a hard-coded
 //! duplicate), so the third place is bound to the same source too.
 //!
-//! Each per-lane sub-module owns exactly one `pub const FLOOR: usize` plus the
+//! Each JSON-LD lane owns one `pub const FLOOR: usize`, optional failure ceiling, and
 //! honest oracle / SKIP-bucket / measured-count documentation that belongs on the
 //! floor it pins. The runner (`tests/jsonld_suite`) imports these as
 //! `sparq_conformance::floors::<lane>::FLOOR`; the scoreboard imports them into its
 //! `Suite` rows; and the floor-sync guard no longer needs a textual row for these
-//! six (the compile-time import cannot drift). See `scoreboard::SUITES` and
+//! lanes (the compile-time import cannot drift). See `scoreboard::SUITES` and
 //! `tests/scoreboard_floors.rs`.
 //!
 //! RATCHET: every floor may only RISE — never lower one. Each is the ACTUAL
@@ -38,6 +38,7 @@ pub mod flatten;
 pub mod frame;
 pub mod from_rdf;
 pub mod to_rdf;
+pub mod to_rdf_ingest;
 
 pub mod rdf12;
 

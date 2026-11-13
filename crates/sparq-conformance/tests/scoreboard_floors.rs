@@ -370,6 +370,7 @@ const LIB_SOURCED_FLOORS: &[&str] = &[
     "W3C RDF 1.2 N-Quads syntax",
     "W3C RDF 1.2 N-Quads C14N",
     "W3C JSON-LD 1.1 toRdf",
+    "W3C JSON-LD toRdf-ingest (Graph / oxjsonld)",
     "W3C JSON-LD 1.1 fromRdf",
     "W3C JSON-LD 1.1 compact",
     "W3C JSON-LD 1.1 frame",
@@ -399,6 +400,7 @@ const LIB_SOURCED_EXPECTED: &[(&str, usize)] = &[
     ("W3C RDF 1.2 N-Quads syntax", 31),
     ("W3C RDF 1.2 N-Quads C14N", 41),
     ("W3C JSON-LD 1.1 toRdf", 454),
+    ("W3C JSON-LD toRdf-ingest (Graph / oxjsonld)", 429),
     // sq-oy1f.28 — raised 51 → 52: the lane flipped from the engine-writer
     // round-trip oracle to the native document-level `sparq_jsonld::from_rdf` (§8.1)
     // oracle (normative expected-doc comparison + scoped round-trip + REAL negative

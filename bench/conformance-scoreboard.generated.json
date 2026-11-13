@@ -291,6 +291,22 @@
       "family": "W3C JSON-LD",
       "floor_basis": "pass",
       "is_extension": false,
+      "label": "W3C JSON-LD toRdf-ingest (Graph / oxjsonld)",
+      "note": "Separate non-EARL Graph ingest ratchet over all toRdf entries via parse_jsonld_dataset; oxjsonld, base only, rejection-only negatives; failure ceiling in floors::to_rdf_ingest",
+      "ratchet_floor": 429,
+      "runner": {
+        "crate": "sparq-conformance",
+        "feature": "jsonld-suite",
+        "kind": "feature-gated-crate-test",
+        "target": "jsonld_suite"
+      }
+    },
+    {
+      "ci_job": "jsonld-conformance",
+      "command": "cargo test -p sparq-conformance --features jsonld-suite --test jsonld_suite",
+      "family": "W3C JSON-LD",
+      "floor_basis": "pass",
+      "is_extension": false,
       "label": "W3C JSON-LD 1.1 fromRdf",
       "note": "RDF → JSON-LD through the native sparq_jsonld::from_rdf (JSON-LD API §8.1), compared document-level against the normative expected docs plus a scoped re-parse round-trip; negatives assert exact error codes",
       "ratchet_floor": 52,
@@ -712,8 +728,8 @@
   ],
   "title": "sparq conformance scoreboard",
   "totals": {
-    "conformance_floor_total": 5887,
-    "conformance_suites": 35,
+    "conformance_floor_total": 6316,
+    "conformance_suites": 36,
     "extension_assertion_total": 19708,
     "extension_suites": 11
   }

@@ -4,6 +4,14 @@ A native W3C [JSON-LD 1.1] document pipeline for sparq: Context Processing,
 Expansion, Flattening, Compaction, Framing, and RDF conversion over JSON trees.
 It has zero mandatory dependencies and forbids unsafe code.
 
+The JSON-LD EARL report measures this crate's JSON-LD 1.1 API operations (expand,
+compact, flatten, frame, toRdf, fromRdf). `sparq-core`'s Graph JSON-LD ingest uses
+oxjsonld and is not what EARL measures. A separate non-EARL `TOTAL toRdf-ingest`
+ratchet runs the same toRdf manifest through Graph acceptance and oxjsonld dataset
+comparison: 429 passes, 38 failures, no skips (floor 429, failure ceiling 38).
+The native API toRdf lane has 454 passes, 11 failures and two skips including
+legacy 1.0-only entries; its 1.1 EARL subset passes 448 / 448.
+
 [JSON-LD 1.1]: https://www.w3.org/TR/json-ld11/
 
 ## 🚀 Quickstart

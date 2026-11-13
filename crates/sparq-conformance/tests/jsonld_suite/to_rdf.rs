@@ -1,5 +1,5 @@
 //! sq-oy1f.40 — the W3C JSON-LD 1.1 `toRdf` lane runner (split out of the
-//! former monolithic `tests/jsonld_suite.rs`; behaviour byte-identical).
+//! former monolithic `tests/jsonld_suite.rs`).
 //!
 //! JSON-LD 1.1 entries use native sparq-jsonld conversion, with canonical RDF
 //! dataset comparison, exact negative codes, and positive syntax acceptance.
@@ -10,6 +10,17 @@ use std::path::Path;
 
 /// Run the toRdf category. Returns the scoreboard.
 pub fn run_tordf(root: &Path) -> Score {
+    run(root, false)
+}
+
+/// Measure Graph ingest over the same manifest, separately from native API EARL.
+/// Unsupported options are not emulated: the shipping parser receives the input
+/// and base only. Negatives require rejection; Graph exposes no W3C error code.
+pub fn run_tordf_ingest(root: &Path) -> Score {
+    run(root, true)
+}
+
+fn run(root: &Path, ingest: bool) -> Score {
     let mut s = Score::default();
     let entries = match read_manifest(root, "toRdf") {
         Ok(e) => e,
@@ -20,7 +31,7 @@ pub fn run_tordf(root: &Path) -> Score {
     };
     for e in &entries {
         // These legacy generalized-RDF fixtures have no oxrdf dataset representation.
-        if e.requires.as_deref() == Some("GeneralizedRdf") {
+        if !ingest && e.requires.as_deref() == Some("GeneralizedRdf") {
             s.skip();
             continue;
         }
@@ -34,7 +45,8 @@ pub fn run_tordf(root: &Path) -> Score {
         };
         let base = doc_base(e);
         // Keep the legacy compatibility lane; 1.1 uses the native document processor.
-        let parsed = if e.spec_version.as_deref() == Some("json-ld-1.0")
+        let parsed = if ingest
+            || e.spec_version.as_deref() == Some("json-ld-1.0")
             || e.processing_mode.as_deref() == Some("json-ld-1.0")
         {
             parse_jsonld_dataset(&text, &base)
@@ -192,4 +204,36 @@ pub fn native_dataset(
     }
     dataset.canonicalize(oxrdf::dataset::CanonicalizationAlgorithm::Unstable);
     Ok(dataset)
+}
+
+#[test]
+fn ingest_uses_shipping_parser_and_counts_every_entry() {
+    let fixture = crate::earl::Fixture::new();
+    fixture.write("empty.jsonld", "[]");
+    fixture.write("empty.nq", "");
+    fixture.write("invalid.jsonld", "{invalid");
+    fixture.write("direction.jsonld", r#"{"@id":"https://example.test/s","https://example.test/p":{"@value":"v","@direction":"rtl"}}"#);
+    fixture.write("direction.nq", "<https://example.test/s> <https://example.test/p> \"v\"^^<https://www.w3.org/ns/i18n#_rtl> .");
+    fixture.write("toRdf-manifest.jsonld", serde_json::to_vec(&serde_json::json!({"sequence": [
+        {"@id":"#ok", "input":"empty.jsonld", "expect":"empty.nq"},
+        {"@id":"#syntax", "input":"empty.jsonld", "@type":"jld:PositiveSyntaxTest"},
+        {"@id":"#negative", "input":"invalid.jsonld", "@type":"jld:NegativeEvaluationTest", "expectErrorCode":"loading document failed"},
+        {"@id":"#generalized", "input":"empty.jsonld", "expect":"empty.nq", "requires":"GeneralizedRdf"},
+        {"@id":"#missing", "input":"absent", "expect":"empty.nq"},
+        {"@id":"#direction", "input":"direction.jsonld", "expect":"direction.nq", "option":{"rdfDirection":"i18n-datatype"}, "requires":"I18nDatatype"}
+    ]})).unwrap());
+    let score = run_tordf_ingest(fixture.root());
+    assert_eq!((score.pass, score.fail, score.skip), (4, 2, 0));
+    assert_eq!(
+        score.passed,
+        ["#generalized", "#negative", "#ok", "#syntax"]
+            .map(str::to_owned)
+            .into()
+    );
+    assert_eq!(score.failures[0].0, "#missing");
+    assert_eq!(score.failures[1].0, "#direction");
+    // Native API handles the direction option; substituting it for Graph must fail this test.
+    let score = run_tordf(fixture.root());
+    assert_eq!((score.pass, score.fail, score.skip), (4, 1, 1));
+    assert!(score.passed.contains("#direction"));
 }
