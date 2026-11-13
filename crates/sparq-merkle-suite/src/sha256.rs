@@ -1,9 +1,17 @@
 //! SHA-256 member. Existing vectors retain their byte encodings.
-use crate::{comparison_key, term_kind, SALT_BYTES};
+use crate::{term_kind, SALT_BYTES};
 use oxrdf::{GraphName, Quad, Term};
 use sha2::{Digest, Sha256};
 /// Data Integrity suite identifier.
 pub const EDDSA_SHA256_MERKLE_2026: &str = "eddsa-sha256-merkle-2026";
+/// Frozen SHA-member dispatch. The field-native member owns the extended date/subtype profile.
+pub fn comparison_key(literal: &oxrdf::Literal) -> [u8; crate::KEY_BYTES] {
+    let datatype = literal.datatype().as_str();
+    let local = datatype.strip_prefix("http://www.w3.org/2001/XMLSchema#");
+    if matches!(local, Some("date")) || local.is_some_and(|name| name != "integer" && crate::keys::integer_type(name)) {
+        [0; crate::KEY_BYTES]
+    } else { crate::comparison_key(literal) }
+}
 /// Appends the typed byte encoding of one term (or graph name) to `out`.
 pub fn encode_term(term: &Term, out: &mut Vec<u8>) {
     match term {

@@ -163,8 +163,8 @@ fn poseidon_vector_and_length_binding() {
         "0x0a6bb130a5e4691b0f13a1abe83604e81f62a55e3c0f91ef15c859dee31c83ff"
     );
     assert_eq!(
-        field_to_hex(&p::signed_message(Fr::from(7u64), 1, root, &[9; 32])),
-        "0x2ac6f224930ddc0c2a91fec2849028cfe65a199584d85fcf86bcebe52114ea61"
+        field_to_hex(&p::signed_message(Fr::from(7u64), 1, root, &[9; 32], Fr::from(0u64))),
+        "0x11d3772b6e07a2d71fb63ccef479fc94c43e6c8837cf7e387737043504aed322"
     );
     assert_ne!(
         p::hash_bytes(p::TERM_DOMAIN, &[1]),
@@ -237,7 +237,7 @@ fn message_for_another_suite_is_rejected() {
     let c = p::issue(DOC, CONFIG, &sk, Fr::from(7u64)).unwrap();
     assert!(!sig::verify(
         &sk.public_key(),
-        &p::message_for_suite(Fr::from(1u64), c.salt, c.count, c.root, &[9; 32]),
+        &p::message_for_suite(Fr::from(1u64), c.salt, c.count, c.root, &[9; 32], Fr::from(0u64)),
         &c.signature
     ));
 }

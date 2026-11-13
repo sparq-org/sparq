@@ -10,11 +10,34 @@ pub(crate) fn digit(b: u8) -> bool { (b >= 48) & (b <= 57) }
 fn class_key(class: u8, payload: Field) -> (u8, Field) {
     (class, class as Field * 0x1000000000000000000000000000000000000000000000000000000000000 + payload)
 }
-pub(crate) fn recompute<let L: u32>(text: BoundedVec<u8, L>, dt: Field) -> (u8, Field) {
-    let integer = (dt == DT_INTEGER) | (dt == DT_NONPOSITIVEINTEGER) | (dt == DT_NEGATIVEINTEGER)
+fn integer_datatype(dt: Field) -> bool {
+    (dt == DT_INTEGER) | (dt == DT_NONPOSITIVEINTEGER) | (dt == DT_NEGATIVEINTEGER)
         | (dt == DT_LONG) | (dt == DT_INT) | (dt == DT_SHORT) | (dt == DT_BYTE)
         | (dt == DT_NONNEGATIVEINTEGER) | (dt == DT_UNSIGNEDLONG) | (dt == DT_UNSIGNEDINT)
-        | (dt == DT_UNSIGNEDSHORT) | (dt == DT_UNSIGNEDBYTE) | (dt == DT_POSITIVEINTEGER);
+        | (dt == DT_UNSIGNEDSHORT) | (dt == DT_UNSIGNEDBYTE) | (dt == DT_POSITIVEINTEGER)
+}
+pub(crate) fn class_matches(class: u8, dt: Field) -> bool {
+    if dt == DT_STRING { (class == CLASS_STRING) | (class == CLASS_STRING_PREFIX) }
+    else if class == CLASS_NONE { true }
+    else if integer_datatype(dt) | (dt == DT_DECIMAL) { (class == CLASS_DECIMAL) | (class == CLASS_UNREPRESENTABLE) }
+    else if (dt == DT_DOUBLE) | (dt == DT_FLOAT) { (class == CLASS_DOUBLE) | (class == CLASS_UNREPRESENTABLE) }
+    else if dt == DT_DATETIME { (class == CLASS_DATE_TIME) | (class == CLASS_LOCAL_DATE_TIME) | (class == CLASS_UNREPRESENTABLE) }
+    else if dt == DT_DATE { (class == CLASS_DATE) | (class == CLASS_UNREPRESENTABLE) }
+    else if dt == DT_BOOLEAN { class == CLASS_BOOLEAN }
+    else { false }
+}
+/// Bytes outside each class's payload are canonical zero even before value use.
+pub(crate) fn check_key_shape(key: [u8;31]) {
+    let class = key[0];
+    for i in 1..31 {
+        if (class == CLASS_NONE) | (class == CLASS_UNREPRESENTABLE) { assert(key[i] == 0, "empty key payload"); }
+        if ((class == CLASS_DOUBLE) | (class == CLASS_DATE_TIME) | (class == CLASS_LOCAL_DATE_TIME) | (class == CLASS_DATE)) & (i >= 9) { assert(key[i] == 0, "non-zero key tail"); }
+        if (class == CLASS_BOOLEAN) & (i >= 2) { assert(key[i] == 0, "non-zero key tail"); }
+    }
+    if class == CLASS_BOOLEAN { assert(key[1] <= 1, "boolean key payload"); }
+}
+pub(crate) fn recompute<let L: u32>(text: BoundedVec<u8, L>, dt: Field) -> (u8, Field) {
+    let integer = integer_datatype(dt);
     if integer | (dt == DT_DECIMAL) { decimal(text, dt, integer) }
     else if (dt == DT_DOUBLE) | (dt == DT_FLOAT) {
         let (valid, nan, bits) = crate::term_float::parse(text, dt == DT_FLOAT);

@@ -22,12 +22,14 @@ literal `schnorr-poseidon2-merkle-2026`.
 
 `poseidon::verify(&credential, &public_key)` rechecks canonicalization, keys,
 strict ordering, count, tree, configuration and signature. Treat the entire
-`Credential` as private prover material. Use `quad_cells` to lay out subject,
+`Credential` as private prover material. Use `credential_cells(quad, index)` for dataset cells; it derives the nonzero
+blank-node scope from the fixed position. `quad_cells` instead accepts an explicit
+scope for low-level encoding. Both lay out subject,
 predicate, object and graph cells. Triple terms are refused.
 
 `sha256::{encode_term, leaf, root, signed_message, issue, verify}` provides the
 Ed25519/SHA-256 member. Its configuration must name `eddsa-sha256-merkle-2026`
-under the same predicate. Its `SignedCredential` carries the signature followed by
+under the same predicate. Its frozen datatype dispatch is separate from the field-native extension. Its `SignedCredential` carries the signature followed by
 the private byte salt. The detached evaluator still holds its frozen second
 copy; existing vectors are parity-checked, while its key dispatch remains frozen.
 
@@ -71,13 +73,54 @@ leaf-salt derivation and the minimal tree. Credential scope must be fixed by the
 caller from the credential's dataset position. A blank-node join compares both
 `enc` and credential scope.
 
-`suite::open_credential_hidden` additionally checks the existing Baby Jubjub
-Schnorr relation against the public issuer key. It returns nothing.
-`suite::open_credential_revealed` returns only the salted signed message.
-Both modes take the verifier-agreed configuration digest as two public unsigned
-halves. Salt, count, root, raw quads, keys, leaf salts and signature material
-remain private. A generated entry point must preserve this ABI; library visibility
-alone cannot decide an entry point's public inputs.
+`suite::{open_credential_hidden, open_credential_revealed}` accept raw quads,
+leaf-salt witnesses, salt/count/configuration, raw creation and verification-method
+openings, the issuer key and a caller-fixed credential index. Hidden mode also
+accepts signature/reduction witnesses and checks Schnorr. Both return an opaque
+`OpenedCredential`; revealed mode requires external signature verification over
+its exact `message()` using the same public key. Never witness that opaque object
+or a `TermCell` directly.
+
+Both fixture entry points expose the issuer-key coordinates and verifier-agreed
+configuration digest halves. Hidden mode returns nothing; revealed mode releases
+only the salted signed message. Raw metadata, terms, keys, count, root, salts and
+signature witnesses stay private. `OpenedCredential` is internal proof state.
+
+The signed message includes a dedicated metadata digest over the creation term,
+the verification key's Multikey literal and the verification-method IRI. Those
+fields are reconstructed before hashing; the full canonical configuration digest
+also remains bound. `poseidon::verify_and_open` checks the signature before
+returning native metadata. `metadata::from_configuration` alone is an extraction
+helper, not a verification result.
+
+The Multikey profile uses lower-case base16 Multibase and a private-use multicodec
+followed by canonical big-endian coordinates. It is not a registered interoperable
+key type. `metadata::{multikey, open_multikey}` and Noir
+`suite_metadata::{multikey_cell, open_multikey}` use that same codec, pinned with
+its byte prefix. Both reject invalid verification points through the existing
+curve implementation. See the design record for the exact layout.
+
+Use `created_at()` / `created()` for the authenticated proof creation and its exact
+UTC millisecond value. Unknown/absent or unrepresentable time yields `known() ==
+false`; do not substitute zero for an actual time. `credential_subject()` finds the
+unique default-graph credential root, or absence. `valid_from()` / `valid_until()`
+and `property(subject, predicate)` are complete singleton reads of the verified
+table; duplicate values refuse. `open_time` checks the lexical opening and key
+before returning a usable instant. Inclusive-start and fallback policy belong to
+the envelope, which must refuse required checks on unknown creation.
+
+`open_status_index` checks a string literal and parses only unsigned decimal
+characters into a bounded integer; `open_status_purpose` checks the exact string
+literal value. Obtain both cells from the authenticated table before opening.
+`term::credential_graph(request_digest, index)` derives the synthetic graph name
+under its own domain. Its blank-node scope is the fixed dataset position, as for
+credential-local blank nodes, while its encoding is separate from issuer labels.
+Use the literal vocabulary getters for the common credential predicates.
+
+The frozen evaluator remains a second SHA copy. Every new caller uses the new
+crate. Required-CI source inclusion checks fixed/generated encodings, keys,
+leaves, trees, messages, issuance and verification. The authorized consolidation
+is [#7391](https://github.com/sparq-org/sparq/issues/7391).
 
 ## Validation
 

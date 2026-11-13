@@ -5,6 +5,7 @@
 
 pub mod keys;
 pub mod poseidon;
+pub mod metadata;
 pub mod sha256;
 
 pub use keys::{comparison_key, key_class};

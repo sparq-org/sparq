@@ -41,6 +41,7 @@ fn assert_compiler(gate: &support::LiveToolchain) {
         .unwrap();
     assert!(out.status.success(), "nargo version command failed");
     let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("is dirty: false"), "credential suite requires the pinned release compiler");
     let lines: Vec<_> = stdout.lines().take(2).collect();
     assert_eq!(
         lines,
@@ -51,9 +52,11 @@ fn assert_compiler(gate: &support::LiveToolchain) {
         "credential suite compiler pin drifted"
     );
 }
-fn repo() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
-}
+// One constant per path: the out-of-crate input audit attributes each literal
+// path that follows CARGO_MANIFEST_DIR up to the next semicolon.
+const NOIR_CORE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../zk/noir-query/core");
+const COMPOSE_CORE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../zk/compose/compose_core");
+const NOIR_FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../zk/noir-query/fixtures");
 fn toml(v: &Value) -> String {
     match v {
         Value::Array(a) => format!("[{}]", a.iter().map(toml).collect::<Vec<_>>().join(",")),
@@ -95,7 +98,7 @@ fn execute(g: &support::LiveToolchain, path: &Path) -> String {
 }
 fn project(path: &Path, name: &str, source: &str) {
     fs::create_dir_all(path.join("src")).unwrap();
-    fs::write(path.join("Nargo.toml"), format!("[package]\nname=\"{name}\"\ntype=\"bin\"\ncompiler_version=\"=1.0.0\"\n[dependencies]\ncore={{path={:?}}}\ncompose={{path={:?}}}\n", repo().join("zk/noir-query/core"), repo().join("zk/compose/compose_core"))).unwrap();
+    fs::write(path.join("Nargo.toml"), format!("[package]\nname=\"{name}\"\ntype=\"bin\"\ncompiler_version=\">=1.0.0\"\n[dependencies]\ncore={{path={:?}}}\ncompose={{path={:?}}}\n", NOIR_CORE, COMPOSE_CORE)).unwrap();
     fs::write(path.join("src/main.nr"), source).unwrap();
 }
 
@@ -110,14 +113,21 @@ fn random_literals_execute_against_rust_and_engine() {
     };
     assert_compiler(&gate);
     let scratch = Scratch::new();
-    for ((datatype, bucket), inputs) in cases::fixtures() {
-        let path = scratch.0.join(format!("{datatype}-{bucket}"));
-        project(&path, "merkle_keys", &cases::program(&datatype, bucket));
-        for input in inputs {
-            prover(&path, &input);
-            execute(&gate, &path);
+    let mut workers = [Vec::new(), Vec::new()];
+    for (i, fixture) in cases::fixtures().into_iter().enumerate() { workers[i % 2].push(fixture); }
+    std::thread::scope(|scope| {
+        for fixtures in workers {
+            let gate_ref = &gate;
+            let root = &scratch.0;
+            scope.spawn(move || {
+                for ((datatype, bucket), inputs) in fixtures {
+                    let path = root.join(format!("{datatype}-{bucket}"));
+                    project(&path, "merkle_keys", &cases::program(&datatype, bucket));
+                    for input in inputs { prover(&path, &input); execute(gate_ref, &path); }
+                }
+            });
         }
-    }
+    });
     support::complete(gate);
 }
 
@@ -133,7 +143,7 @@ fn credential_modes_match_vectors_and_compiled_public_abi() {
     assert_compiler(&gate);
     let scratch = Scratch::new();
     for mode in ["hidden", "revealed"] {
-        let fixture = repo().join("zk/noir-query/fixtures").join(mode);
+        let fixture = Path::new(NOIR_FIXTURES).join(mode);
         let path = scratch.0.join(mode);
         project(
             &path,
@@ -145,9 +155,9 @@ fn credential_modes_match_vectors_and_compiled_public_abi() {
             (11, [9; 32]),
             (7, std::array::from_fn(|i| i as u8)),
         ] {
-            let (mut input, message) = credential::input(salt, config);
+            let (mut input, message) = credential::input_created(salt, config, if salt == 11 { Some("2026-01-01T00:00:00Z") } else { None });
             if mode == "revealed" {
-                for k in ["pk", "r", "s", "e", "e_k"] {
+                for k in ["r", "s", "e", "e_k"] {
                     input.as_object_mut().unwrap().remove(k);
                 }
             }
@@ -176,7 +186,7 @@ fn credential_modes_match_vectors_and_compiled_public_abi() {
             if mode == "hidden" {
                 vec!["pk", "config"]
             } else {
-                vec!["config"]
+                vec!["config", "pk"]
             }
         );
         let return_type = &artifact["abi"]["return_type"];
@@ -194,13 +204,13 @@ fn credential_modes_match_vectors_and_compiled_public_abi() {
             1,
             p::root(&[q], Fr::from(7u64)).unwrap(),
             &[9; 32],
-        );
+         Fr::from(0u64));
         let b = p::signed_message(
             Fr::from(8u64),
             1,
             p::root(&[q], Fr::from(8u64)).unwrap(),
             &[9; 32],
-        );
+         Fr::from(0u64));
         assert_ne!(a, b);
     }
     support::complete(gate);

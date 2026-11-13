@@ -24,14 +24,26 @@ never establish an order. Equal string prefixes also establish no order.
 
 The Poseidon2 member uses length-bound byte packing, strict private quad-hash
 ordering, index-derived leaf salts, minimal binary trees with zero padding, and
-suite/count/configuration-bound signed messages. It reuses the existing Poseidon2
+suite/count/configuration-bound signed messages with an explicit proof-metadata frame. It reuses the existing Poseidon2
 and Baby Jubjub implementations rather than maintaining another primitive body.
 
-The detached `zk/sparql-evaluator` model **still holds a second copy of the SHA-256
-code**. Its guest source graph and lockfiles are frozen. The test-only source
-inclusion in `tests/suites.rs` compares the existing vectors without modifying that
-workspace. New callers use this crate. Its expanded datatype dispatch does not
-retroactively change the model's comparison keys.
+The frozen zkVM model retains its own SHA implementation. **Every new caller
+uses this crate**; the model file is included directly only by the test oracle.
+The SHA member preserves the frozen datatype dispatch. The field-native member
+owns the extended date and integer-subtype profile.
+
+`tests/sha_parity.rs` checks the actual model source against this crate over fixed
+vectors and generated data, including issuance and verification. It runs in the
+required `ci-fast` job. Consolidation is tracked by
+[#7391](https://github.com/sparq-org/sparq/issues/7391) at the next guest re-freeze.
+The model, guests, detached lockfiles and evidence remain untouched.
+
+Proof creation and the verification-method IRI are lifted into the signed metadata
+frame together with the actual verification key's Multikey literal. Native
+`verify_and_open` verifies before exposing those fields. Noir's authenticated
+openers return opaque cells, the derived root and exact timestamp information;
+status and validity policy remain the envelope lane's responsibility. The private
+Multikey codec is documented in the usage skill and design record.
 
 ## 📚 Learn more
 

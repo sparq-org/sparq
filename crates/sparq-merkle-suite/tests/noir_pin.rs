@@ -4,6 +4,14 @@ use std::collections::BTreeMap;
 const SOURCE: &str = include_str!("../../../zk/noir-query/core/src/suite_constants.nr");
 #[test]
 fn every_noir_constant_equals_its_rust_source() {
+    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../zk/noir-query/core/src");
+    for entry in std::fs::read_dir(directory).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_some_and(|e| e == "nr") && path.file_name().unwrap() != "suite_constants.nr" {
+            let source = std::fs::read_to_string(&path).unwrap();
+            assert!(!source.lines().map(|line| line.split("//").next().unwrap()).flat_map(str::split_whitespace).any(|word| word == "global"), "declare every protocol constant in suite_constants: {}",path.display());
+        }
+    }
     let mut actual = BTreeMap::new();
     assert!(!SOURCE.contains("/*"));
     for declaration in SOURCE.split("pub global ").skip(1) {
@@ -104,6 +112,30 @@ fn every_noir_constant_equals_its_rust_source() {
             b"http://www.w3.org/1999/02/22-rdf-syntax-ns#langString",
         ),
     );
+    for (name, value) in [
+        ("METADATA_DOMAIN", sparq_merkle_suite::metadata::METADATA_DOMAIN),
+        ("GRAPH_DOMAIN", sparq_merkle_suite::metadata::GRAPH_DOMAIN),
+        ("MULTIKEY_CODEC", sparq_merkle_suite::metadata::MULTIKEY_CODEC as u64),
+        ("MULTIKEY_LENGTH", sparq_merkle_suite::metadata::MULTIKEY_LENGTH as u64),
+        ("LEXICAL_SHORT", sparq_merkle_suite::metadata::LEXICAL_BUCKETS[0] as u64),
+        ("LEXICAL_MEDIUM", sparq_merkle_suite::metadata::LEXICAL_BUCKETS[1] as u64),
+        ("LEXICAL_LONG", sparq_merkle_suite::metadata::LEXICAL_BUCKETS[2] as u64),
+        ("DATATYPE_CAPACITY", sparq_merkle_suite::metadata::DATATYPE_CAPACITY as u64),
+        ("LANGUAGE_CAPACITY", sparq_merkle_suite::metadata::LANGUAGE_CAPACITY as u64),
+    ] { expected.insert(name.to_owned(), Fr::from(value)); }
+    for (i, b) in sparq_merkle_suite::metadata::MULTIKEY_PREFIX.iter().enumerate() {
+        expected.insert(format!("MULTIKEY_PREFIX_{i}"), Fr::from(*b));
+    }
+    for (name, value) in [
+        ("LANG_EMPTY", p::hash_bytes(p::LANGUAGE_DOMAIN, b"")),
+        ("LANG_EN", p::hash_bytes(p::LANGUAGE_DOMAIN, b"en")),
+        ("DEFAULT_GRAPH_ENC", p::default_graph().enc),
+        ("DT_OTHER", p::hash_bytes(p::DATATYPE_DOMAIN, b"http://www.w3.org/2001/XMLSchema#other")),
+    ] { expected.insert(name.to_owned(), value); }
+    for (name, iri) in sparq_merkle_suite::metadata::VOCABULARY {
+        expected.insert(format!("IRI_{name}"), p::term_cell(&oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(*iri)), 0).unwrap().enc);
+    }
+    expected.insert("GRAPH_VECTOR".to_owned(), sparq_merkle_suite::metadata::graph_name([11,13],1).unwrap().enc);
     expected.insert("SUITE_ID".to_owned(), p::suite_id());
     assert_eq!(actual, expected);
     let tags = [
@@ -116,6 +148,8 @@ fn every_noir_constant_equals_its_rust_source() {
         p::DATATYPE_DOMAIN,
         p::LANGUAGE_DOMAIN,
         p::SUITE_DOMAIN,
+        sparq_merkle_suite::metadata::METADATA_DOMAIN,
+        sparq_merkle_suite::metadata::GRAPH_DOMAIN,
     ];
     for (i, a) in tags.iter().enumerate() {
         for b in &tags[i + 1..] {

@@ -3,6 +3,15 @@ use oxrdf::{Literal, NamedNode, Term};
 use sparq_merkle_suite::{comparison_key, poseidon as p, Fr};
 use sparq_zk::field::field_to_hex;
 fn main() {
+    for (name, value) in [
+        ("LANG_EMPTY", p::hash_bytes(p::LANGUAGE_DOMAIN, b"")),
+        ("LANG_EN", p::hash_bytes(p::LANGUAGE_DOMAIN, b"en")),
+        ("DEFAULT_GRAPH_ENC", p::default_graph().enc),
+        ("DT_OTHER", p::hash_bytes(p::DATATYPE_DOMAIN, b"http://www.w3.org/2001/XMLSchema#other")),
+    ] { println!("{name}={}", field_to_hex(&value)); }
+    for (name, iri) in sparq_merkle_suite::metadata::VOCABULARY {
+        println!("IRI_{name}={}", field_to_hex(&p::term_cell(&Term::NamedNode(NamedNode::new_unchecked(*iri)), 0).unwrap().enc));
+    }
     let datatypes = [
         "integer",
         "decimal",
@@ -74,7 +83,7 @@ fn main() {
     );
     println!(
         "MESSAGE={}",
-        field_to_hex(&p::signed_message(Fr::from(7u64), 1, leaf, &[9; 32]))
+        field_to_hex(&p::signed_message(Fr::from(7u64), 1, leaf, &[9; 32], Fr::from(0u64)))
     );
     println!("SUITE_ID={}", field_to_hex(&p::suite_id()));
     println!(
@@ -92,7 +101,7 @@ fn main() {
     );
     println!(
         "MESSAGE_DISTINCT_CONFIG={}",
-        field_to_hex(&p::signed_message(Fr::from(7u64), 1, leaf, &distinct))
+        field_to_hex(&p::signed_message(Fr::from(7u64), 1, leaf, &distinct, Fr::from(0u64)))
     );
 
     let parse = |text: &str| {
@@ -117,10 +126,10 @@ fn main() {
             3,
             p::root(&three, Fr::from(11u64)).unwrap(),
             &distinct
-        ))
+        , Fr::from(0u64)))
     );
 
-    let message = p::signed_message(Fr::from(7u64), 1, leaf, &[9; 32]);
+    let message = p::signed_message(Fr::from(7u64), 1, leaf, &[9; 32], Fr::from(0u64));
     let sk = sparq_zk::sig::SecretKey::from_seed(19);
     let signature = sparq_zk::sig::sign_deterministic(&sk, &message);
     let witness =
@@ -142,7 +151,7 @@ fn main() {
         1,
         leaf,
         &[9; 32],
-    );
+     Fr::from(0u64));
     let signature = sparq_zk::sig::sign_deterministic(&sk, &wrong_suite);
     let witness =
         sparq_zk::sig::in_circuit_witness(&sk.public_key(), &wrong_suite, &signature).unwrap();

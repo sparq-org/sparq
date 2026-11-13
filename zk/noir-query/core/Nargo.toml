@@ -3,7 +3,7 @@ name = "sparq_noir_query_core"
 type = "lib"
 # Nargo validates the release tuple after stripping prerelease metadata.
 # The live Rust tests and toolchain workflow pin the exact beta and compiler hash.
-compiler_version = "=1.0.0"
+compiler_version = ">=1.0.0"
 
 [dependencies]
 poseidon = { git = "https://github.com/noir-lang/poseidon", tag = "v0.3.0" }
