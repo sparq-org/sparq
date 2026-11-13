@@ -639,6 +639,8 @@ use self::terms::*;
 #[cfg(test)]
 mod exact_decimal_tests;
 #[cfg(test)]
+mod strict_numeric_snapshot_tests;
+#[cfg(test)]
 mod wcoj_tests;
 #[cfg(test)]
 mod function_tests;

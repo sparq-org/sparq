@@ -426,7 +426,7 @@ controls, and the native `edge_matrix.py` feature compiler. The kernel's default
 binary dependency activation and embedded ELF remain unchanged; the patch record
 separately documents an upstream real-target binary compilation limitation.
 Synthetic dependency checks remain separate from actual guest proof evidence.
-The exact evaluator enables the [numeric capacity guard](references/numeric-capacity.md). Valid values beyond the finite arithmetic lane can be returned directly; integer/decimal EBV uses exact zero classification. Unsupported arithmetic/comparison consumption fails the entire evaluation. Native default budgets leave this option off.
+The exact evaluator enables the engine's [strict numeric capacity guard](references/numeric-capacity.md). It retains the V1 snapshot's operand and scale-alignment bounds for arithmetic and comparisons; widening the range belongs to a future dialect/version bump. Valid values beyond the finite arithmetic lane can be returned directly; integer/decimal EBV uses exact zero classification. Unsupported arithmetic/comparison consumption fails the entire evaluation. Native default budgets leave this option off and retain exact lexical comparisons beyond these lanes.
 
 The SDK provenance checks bind both workspace patch tables and resolved
 feature-matrix package manifests to the exact inventoried vendor directories.

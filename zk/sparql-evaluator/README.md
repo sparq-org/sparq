@@ -85,8 +85,28 @@ expressions, including subqueries, aggregate operands and EXISTS bodies.
 The SPARQL version identifies query syntax/operators. Numeric datatype facets
 follow [RDF 1.1 / XSD 1.1](https://www.w3.org/TR/2014/REC-rdf11-concepts-20140225/#xsd-datatypes),
 including unsigned `+1` and `-0`. The [numeric capacity guard](../../skills/zk-query-proofs/references/numeric-capacity.md)
-enforces finite arithmetic limits as whole-query failures, separately from
-lexical validity and direct RDF output. [Exact temporal/year capacity](../../skills/zk-query-proofs/references/exact-temporals.md)
+enforces the V1 snapshot's finite representation limits as whole-query failures,
+separately from lexical validity and direct RDF output. Arithmetic/comparison
+operands use `i64` integers; decimal mantissas and scale alignment use checked `i128`.
+Other consumers, such as `SUBSTR`, retain their existing argument-specific limits.
+Arithmetic intermediates, casts, stored operands and computed comparison keys
+share the bound. The model enables the engine's `strict_numeric_capacity` option,
+whose checked consumers retain the original representation bound. The default,
+non-strict budget keeps the wider exact comparisons introduced by
+[#7317](https://github.com/sparq-org/sparq/pull/7317). V2/V3 and the authenticated-RDF
+profile inherit these consumers. Widening the numeric range belongs to a future
+dialect/version bump. Changing this bound requires reviewing the snapshot boundary
+tests and rebuilding the independently accepted guest image.
+
+For native journal comparison, run the `model/examples/snapshot_journals.rs`
+example with `graph-results` against each revision and give it a new JSONL output
+path. It replays the model conformance files and the shared builtin/temporal
+corpora under both authorities through V1, V2 and V3. Then run
+`python3 zk/sparql-evaluator/scripts/compare_snapshot_journals.py BEFORE.jsonl AFTER.jsonl`.
+The comparison requires every restored numeric rejection and identical remaining
+journals and rejection categories; it provides native evidence only.
+
+[Exact temporal/year capacity](../../skills/zk-query-proofs/references/exact-temporals.md)
 has its own explicit limits.
 EXISTS and NOT EXISTS bodies admit BGP, join, UNION, pure FILTER and the
 [scoped published-2013 MINUS rule](../../skills/sparql-query/exists-minus.md).

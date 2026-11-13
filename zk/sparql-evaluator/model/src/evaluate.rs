@@ -29,12 +29,18 @@ pub(crate) enum DatasetProfile {
     DefaultOnly,
     NamedCatalog,
     GraphResults,
+    #[cfg(feature = "graph-results")]
     GraphResultsBlankFree,
 }
 
 impl DatasetProfile {
     fn graph_results(self) -> bool {
-        matches!(self, Self::GraphResults | Self::GraphResultsBlankFree)
+        match self {
+            Self::GraphResults => true,
+            #[cfg(feature = "graph-results")]
+            Self::GraphResultsBlankFree => true,
+            _ => false,
+        }
     }
 }
 
@@ -471,7 +477,7 @@ pub(crate) fn execute_detailed(
     prepared: &sparq_engine::PreparedQuery,
     max_rows: u32,
 ) -> Result<CanonicalResult, EvaluationError> {
-    let budget = query_budget(max_rows);
+    let budget = v1_snapshot_numeric_budget(max_rows);
     let result = sparq_engine::query_prepared_with_budget_detailed(graph, prepared, &budget)?;
     if result.rows.len() > max_rows as usize {
         return Err(Rejected("result row capacity").into());
@@ -507,7 +513,12 @@ pub(crate) fn execute_detailed(
     Ok(result)
 }
 
-pub(crate) fn query_budget(max_rows: u32) -> sparq_engine::QueryBudget {
+/// V1 snapshot numeric tower: i64 integer operands, i128 decimal mantissas and
+/// checked i128 scale alignment in arithmetic and comparison intermediates.
+/// The engine's strict numeric budget retains these consumers; lexical validity and
+/// direct RDF output remain independent. Widening belongs to a future dialect/version.
+/// Dataset and graph-result profiles inherit these same numeric consumers.
+pub(crate) fn v1_snapshot_numeric_budget(max_rows: u32) -> sparq_engine::QueryBudget {
     sparq_engine::QueryBudget {
         max_rows: Some(max_rows as usize),
         temporal_year_range: Some(TEMPORAL_YEAR_RANGE),
