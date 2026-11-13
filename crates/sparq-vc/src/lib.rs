@@ -136,3 +136,5 @@ pub use suite::{
     CRYPTOSUITE, DataIntegrityProof, PROOF_TYPE, ProofConfig, SigningKey, VcError, VerifiedProof,
     VerifyingKey, sign, sign_graph, verify, verify_graph,
 };
+#[cfg(feature = "vc-api")]
+pub use suite::api;

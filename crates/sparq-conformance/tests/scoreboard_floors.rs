@@ -94,6 +94,51 @@ fn const_floor_in(rel_from_crate: &str, const_name: &str) -> usize {
 /// read that escapes the crate dir is the CI test-selection hole sq-z1xv8 closed (see
 /// the module docs).
 const CRATE_LOCAL_FLOORS: &[(&str, &str, &str)] = &[
+    (
+        "W3C RDF 1.2 RDF/XML",
+        "tests/earl_suites.rs",
+        "RDF12_XML_FLOOR",
+    ),
+    (
+        "W3C RDF 1.1 RDF/XML",
+        "tests/earl_suites.rs",
+        "RDF11_XML_FLOOR",
+    ),
+    (
+        "W3C RDF 1.2 Semantics",
+        "tests/earl_suites.rs",
+        "RDF12_SEMANTICS_FLOOR",
+    ),
+    (
+        "W3C RDF 1.1 Turtle (EARL)",
+        "tests/earl_suites.rs",
+        "RDF11_TURTLE_FLOOR",
+    ),
+    (
+        "W3C RDF 1.1 Semantics (EARL)",
+        "tests/earl_suites.rs",
+        "RDF11_SEMANTICS_FLOOR",
+    ),
+    (
+        "N3 reasoner (EARL)",
+        "tests/earl_suites.rs",
+        "N3_REASONER_FLOOR",
+    ),
+    (
+        "N3 parser (EARL)",
+        "tests/earl_suites.rs",
+        "N3_PARSER_FLOOR",
+    ),
+    (
+        "N3 extended (EARL)",
+        "tests/earl_suites.rs",
+        "N3_EXTENDED_FLOOR",
+    ),
+    (
+        "N3 TurtleTests (EARL)",
+        "tests/earl_suites.rs",
+        "N3_TURTLE_FLOOR",
+    ),
     // sq-z1xv8 — the ELEVEN foreign-runner ratchets (W3C SHACL core +
     // SHACL-SPARQL, both OGC GeoSPARQL lanes, Solid WAC/ACP decision parity + the two
     // differential oracles, the SolidLab ODRL suite, the sparq-text BM25 oracle, the

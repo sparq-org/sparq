@@ -29,6 +29,7 @@ Read [`skills/SKILL.md`](skills/SKILL.md) first — it is the router skill that 
 - [`skills/helm-deploy/SKILL.md`](skills/helm-deploy/SKILL.md) — deploy either native server to Kubernetes with the secure-default Helm chart.
 - [`skills/javascript-wasm/SKILL.md`](skills/javascript-wasm/SKILL.md) — the `@sparq-org/sparq` npm package.
 - [`skills/python/SKILL.md`](skills/python/SKILL.md) — the `sparq` Python package.
+- [`skills/vc-api/SKILL.md`](skills/vc-api/SKILL.md) — the opt-in credential HTTP test endpoint and W3C suite runner. See the [Vercel runbook](crates/sparq-vc/vercel/README.md).
 
 The capability surfaces (reasoning — RDFS/OWL-RL/N3 in `sparq-reason` plus the opt-in OWL 2 EL classifier in `sparq-reason-el`, both covered by [`skills/inference/SKILL.md`](skills/inference/SKILL.md) — SHACL, full-text, vector, GeoSPARQL, streaming RSP-QL, RDFC-1.0 dataset canonicalization, ZK query proofs, MPC, GenAI retrieval) each have their own `skills/<surface>/SKILL.md` — the router in [`skills/SKILL.md`](skills/SKILL.md) enumerates them.
 

@@ -19,6 +19,8 @@ mod report;
 // cargo feature so the base validation path carries zero rule code when off.
 #[cfg(feature = "shacl-af")]
 pub mod rules;
+#[cfg(feature = "shacl-af")]
+pub mod rules12;
 // (sq-v0b8, #796) SHACL Compact Syntax (SCS) PARSER (text → shapes
 // triples) — OPT-IN behind the `scs` cargo feature so the base validation path
 // (and the default + wasm bundles) carry zero parser code when off.
@@ -83,6 +85,9 @@ pub enum FactDomain {
 /// SHACL queries use a validation-scoped function registry containing the shapes'
 /// custom functions. This temporarily replaces any ambient engine function registry;
 /// the ambient registry is restored when validation returns.
+/// With `shacl-af`, declared `sh:RulesEntailment` and `sh:RuleSet` regimes run
+/// SHACL 1.2 inference before validation. Rule failures become diagnostics here
+/// and errors in [`validate_strict`].
 pub fn validate(data: &Graph, shapes: &Graph) -> ValidationReport {
     let model = ShapesModel::parse(shapes);
     validate_with_model(data, &model)
@@ -95,6 +100,29 @@ pub fn validate(data: &Graph, shapes: &Graph) -> ValidationReport {
 /// `sh:conformanceDisallows` declaration ([`ShapesModel::conformance_disallows`])
 /// when present, falling back to the default {Violation, Warning, Info} set.
 pub fn validate_with_model(data: &Graph, model: &ShapesModel) -> ValidationReport {
+    #[cfg(feature = "shacl-af")]
+    if model.rule_entailment {
+        let (sets, all) = rules12::entailments(&model.source);
+        return match rules12::execute(data, &model.source, &sets, all) {
+            Ok(inference) => {
+                validate_asserted_with_model(&rules::expand_graph(data, &inference.triples), model)
+            }
+            Err(message) => ValidationReport::with_diagnostics_and_disallows(
+                Vec::new(),
+                vec![ShapeDiagnostic {
+                    source_shape: oxrdf::NamedNode::new_unchecked(model::sh("RulesEntailment"))
+                        .into(),
+                    source_component: model::sh("failure"),
+                    message,
+                }],
+                model.conformance_disallows(),
+            ),
+        };
+    }
+    validate_asserted_with_model(data, model)
+}
+
+fn validate_asserted_with_model(data: &Graph, model: &ShapesModel) -> ValidationReport {
     let ((results, mut diagnostics), failures) =
         functions::with_validation(data, &model.source, || eval::validate_graph(data, model));
     diagnostics.extend(failures.into_iter().map(|node| ShapeDiagnostic {

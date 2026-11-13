@@ -35,3 +35,13 @@
   crate: "sparq-vc"
   features: "did-web"
   test: true
+
+# Socket-free VC-API handler tests and the native runner compilation.
+# crates/sparq-vc/vercel/ is a separate deployment workspace, owned by this
+# crate in CI selection and excluded from its package; this leg gates the
+# shared handlers. Offline cache tests: python3 -B -m unittest discover
+# -s crates/sparq-vc/vercel/tests -v (the standalone runtime is built separately).
+- name: "sparq-vc (vc-api — offline credential HTTP handlers)"
+  crate: "sparq-vc"
+  features: "vc-api"
+  test: true

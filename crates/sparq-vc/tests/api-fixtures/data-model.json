@@ -1,0 +1,1735 @@
+[
+  {
+    "name": "credential-context-combo1-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2",
+        "https://www.w3.org/ns/credentials/examples/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-context-combo2-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2",
+        {
+          "ExampleVerifiableCredential": "https://example.org/#ExampleVerifiableCredential"
+        }
+      ],
+      "type": [
+        "VerifiableCredential",
+        "ExampleVerifiableCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-context-combo3-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2",
+        "https ://not-a-url/contexts/example/v1"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-context-combo4-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2",
+        123192875
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-evidence-missing-type-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      },
+      "evidence": {}
+    }
+  },
+  {
+    "name": "credential-evidence-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2",
+        {
+          "DocumentVerification2018": "https://example.org/examples#DocumentVerification2018"
+        }
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      },
+      "evidence": {
+        "type": "DocumentVerification2018"
+      }
+    }
+  },
+  {
+    "name": "credential-evidences-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2",
+        {
+          "DocumentVerification2018": "https://example.org/examples#DocumentVerification2018"
+        }
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      },
+      "evidence": [
+        {
+          "type": "DocumentVerification2018"
+        },
+        {
+          "type": "DocumentVerification2018"
+        }
+      ]
+    }
+  },
+  {
+    "name": "credential-id-multi-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "id": [
+        "https://example.org/credentials/1",
+        "https://example.net/credentials/1"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-id-nonidentifier-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "id": null,
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-id-not-url-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2",
+        "https://www.w3.org/ns/credentials/examples/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "id": "https ://not-a-url/vcs/343cf54b-2c38-480e-b6e8-7302332eae75",
+      "credentialSubject": {
+        "name": "id not a url test"
+      }
+    }
+  },
+  {
+    "name": "credential-id-other-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-id-single-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2",
+        "https://www.w3.org/ns/credentials/examples/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "id": "https://example.org/credentials/1",
+      "credentialSubject": {
+        "description": "A single id test for VC 2.0"
+      }
+    }
+  },
+  {
+    "name": "credential-id-subject-multi-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": {
+        "id": [
+          "did:example:subject:one",
+          "did:example:subject:two"
+        ]
+      }
+    }
+  },
+  {
+    "name": "credential-id-subject-single-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-issuer-no-url-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "issuer": "fake-issuer",
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-issuer-null-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "issuer": null,
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-issuer-object-id-no-url-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "issuer": {
+        "id": "fake-issuer"
+      },
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-issuer-object-id-null-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "issuer": {
+        "id": null
+      },
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-issuer-object-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "issuer": {},
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-missing-base-context-fail-or-inject.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/examples/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-missing-required-type-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2",
+        "https://www.w3.org/ns/credentials/examples/v2"
+      ],
+      "type": [
+        "RelationshipCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-no-context-fail-or-inject.json",
+    "valid": false,
+    "credential": {
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-no-subject-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ]
+    }
+  },
+  {
+    "name": "credential-no-type-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-optional-type-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2",
+        "https://www.w3.org/ns/credentials/examples/v2"
+      ],
+      "type": [
+        "VerifiableCredential",
+        "RelationshipCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-redef-type-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2",
+        {
+          "VerifiableCredential": "https://example.org/#BadVerifiableCredential"
+        }
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-redef-type2-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2",
+        {
+          "@protected": true,
+          "ExampleVerifiableCredential": "https://example.org/#ExampleVerifiableCredential"
+        },
+        {
+          "ExampleVerifiableCredential": "https://example.org/#ExampleBadVerifiableCredential"
+        }
+      ],
+      "type": [
+        "VerifiableCredential",
+        "ExampleVerifiableCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-refresh-no-type-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "refreshService": {
+        "id": "did:example:refresh/1"
+      },
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-refresh-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "refreshService": {
+        "type": "https://example.org/#ExampleTestSuiteRefreshService",
+        "id": "did:example:refresh/1"
+      },
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-refresh-type-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2",
+        {
+          "ExampleRefreshService": "https://example.org/examples#ExampleRefreshService"
+        }
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "refreshService": {
+        "id": "did:example:refresh/1",
+        "type": "ExampleRefreshService"
+      },
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-refreshs-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "refreshService": [
+        {
+          "type": "https://example.org/#ExampleTestSuiteRefreshService",
+          "id": "did:example:refresh/2"
+        },
+        {
+          "type": "https://example.org/#ExampleTestSuiteRefreshService",
+          "id": "did:example:refresh/3"
+        }
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-schema-no-id-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSchema": {
+        "type": "https://example.org/#ExampleTestSuiteSchema"
+      },
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-schema-no-type-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSchema": {
+        "id": "did:example:schemas/1"
+      },
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-schema-non-url-id-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSchema": {
+        "type": "https://example.org/#ExampleTestSuiteSchema",
+        "id": "https ://not-a-url.org/cd28a5c0-a3ca-4057-9e18-074769a54fdb"
+      },
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-schema-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSchema": {
+        "type": "https://example.org/#ExampleTestSuiteSchema",
+        "id": "did:example:schemas/1"
+      },
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-schema-type-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2",
+        {
+          "ExampleJsonSchema": "https://example.org/examples#ExampleJsonSchema"
+        }
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSchema": {
+        "id": "did:example:schemas/1",
+        "type": "ExampleJsonSchema"
+      },
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-schemas-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSchema": [
+        {
+          "type": "https://example.org/#ExampleTestSuiteSchema",
+          "id": "did:example:schemas/1"
+        },
+        {
+          "type": "https://example.org/#ExampleTestSuiteSchema",
+          "id": "did:example:schemas/2"
+        }
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-status-missing-id-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2",
+        {
+          "CredentialStatusList2017": "https://example.org/examples#CredentialStatusList2017"
+        }
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      },
+      "credentialStatus": {
+        "type": "CredentialStatusList2017"
+      }
+    }
+  },
+  {
+    "name": "credential-status-missing-type-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      },
+      "credentialStatus": {
+        "id": "did:example:status"
+      }
+    }
+  },
+  {
+    "name": "credential-status-multiple-id-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2",
+        {
+          "CredentialStatusList2017": "https://example.org/examples#CredentialStatusList2017"
+        }
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      },
+      "credentialStatus": {
+        "id": [
+          "did:example:status:1",
+          "did:example:status:2"
+        ],
+        "type": "CredentialStatusList2017"
+      }
+    }
+  },
+  {
+    "name": "credential-status-nonurl-id-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2",
+        {
+          "CredentialStatusList2017": "https://example.org/examples#CredentialStatusList2017"
+        }
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      },
+      "credentialStatus": {
+        "type": "CredentialStatusList2017",
+        "id": "https ://not-a-url/statusList/4"
+      }
+    }
+  },
+  {
+    "name": "credential-status-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2",
+        {
+          "CredentialStatusList2017": "https://example.org/examples#CredentialStatusList2017"
+        }
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      },
+      "credentialStatus": {
+        "id": "did:example:status",
+        "type": "CredentialStatusList2017"
+      }
+    }
+  },
+  {
+    "name": "credential-status-type-nonurl-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2",
+        {
+          "CredentialStatusList2017": "https://example.org/examples#CredentialStatusList2017"
+        }
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      },
+      "credentialStatus": {
+        "id": "did:example:status",
+        "type": 2
+      }
+    }
+  },
+  {
+    "name": "credential-subject-multiple-empty-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": [
+        {
+          "id": "did:example:subject"
+        },
+        {}
+      ]
+    }
+  },
+  {
+    "name": "credential-subject-multiple-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": [
+        {
+          "id": "did:example:subject"
+        },
+        {
+          "id": "did:example:other:subject"
+        }
+      ]
+    }
+  },
+  {
+    "name": "credential-subject-no-claims-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": {}
+    }
+  },
+  {
+    "name": "credential-termsofuse-id-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2",
+        {
+          "OdrlPolicy2017": "https://example.org/examples#OdrlPolicy2017"
+        }
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      },
+      "termsOfUse": {
+        "type": "OdrlPolicy2017",
+        "id": "did:example:terms/1"
+      }
+    }
+  },
+  {
+    "name": "credential-termsofuse-missing-type-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      },
+      "termsOfUse": {}
+    }
+  },
+  {
+    "name": "credential-termsofuse-no-type-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      },
+      "termsOfUse": {
+        "id": "did:example:terms/1"
+      }
+    }
+  },
+  {
+    "name": "credential-termsofuse-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2",
+        {
+          "OdrlPolicy2017": "https://example.org/examples#OdrlPolicy2017"
+        }
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      },
+      "termsOfUse": {
+        "type": "OdrlPolicy2017"
+      }
+    }
+  },
+  {
+    "name": "credential-termsofuses-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2",
+        {
+          "OdrlPolicy2017": "https://example.org/examples#OdrlPolicy2017"
+        }
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      },
+      "termsOfUse": [
+        {
+          "type": "OdrlPolicy2017"
+        },
+        {
+          "type": "OdrlPolicy2017"
+        }
+      ]
+    }
+  },
+  {
+    "name": "credential-type-mapped-nonurl-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2",
+        {
+          "ExampleTestCredential": "https ://not-a-url#ExampleTestCredential"
+        }
+      ],
+      "type": [
+        "VerifiableCredential",
+        "ExampleTestCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-type-mapped-url-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2",
+        {
+          "ExampleTestCredential": "https://example.org/#ExampleTestCredential"
+        }
+      ],
+      "type": [
+        "VerifiableCredential",
+        "ExampleTestCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-type-unmapped-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2",
+        {
+          "@vocab": null
+        }
+      ],
+      "type": [
+        "VerifiableCredential",
+        "ExampleTestCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-type-url-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential",
+        "https://example.org/#ExampleCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-type-urls-order-1-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "https://example.org/#ExampleCredential1",
+        "https://example.org/#ExampleCredential2",
+        "VerifiableCredential"
+      ],
+      "validFrom": "2023-02-23T21:41:38Z",
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-type-urls-order-2-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "https://example.org/#ExampleCredential2",
+        "VerifiableCredential",
+        "https://example.org/#ExampleCredential1"
+      ],
+      "validFrom": "2023-02-23T21:41:38Z",
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-validUntil-validFrom-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "validFrom": "2040-01-01T00:00:00Z",
+      "validUntil": "2020-01-01T00:00:00Z",
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-validUntil-validFrom-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "validFrom": "2020-01-01T00:00:00Z",
+      "validUntil": "2040-01-01T00:00:00Z",
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-validfrom-far-future-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "validFrom": "4023-02-26T01:02:58.447Z",
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-validfrom-invalid-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "validFrom": "Sat 25 Feb 2023 07:16:31 PM CST",
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-validfrom-ms-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "validFrom": "2023-02-26T01:02:58.447Z",
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-validfrom-tz-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "validFrom": "2023-02-25T19:10:39-06:00",
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-validuntil-invalid-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "validFrom": "2023-02-26T01:21:51Z",
+      "validUntil": "Sun, 26 Feb 2023 01:22:14 +0000",
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-validuntil-ms-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "validFrom": "2023-02-26T01:20:00Z",
+      "validUntil": "2023-02-26T01:20:18.477Z",
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-validuntil-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "validFrom": "2023-02-26T01:19:19Z",
+      "validUntil": "2023-02-26T01:19:20Z",
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "credential-validuntil-tz-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "validFrom": "2023-02-26T01:21:23Z",
+      "validUntil": "2023-02-25T19:21:29-06:00",
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "names-and-descriptions/credential-description-extra-prop-en-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "description": {
+        "@value": "An Example Credential",
+        "@language": "en",
+        "url": "did:example:credential"
+      },
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "names-and-descriptions/credential-description-language-direction-en-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "description": {
+        "@value": "An Example Credential",
+        "@language": "en",
+        "@direction": "ltr"
+      },
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "names-and-descriptions/credential-description-language-en-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "description": {
+        "@value": "An Example Credential",
+        "@language": "en"
+      },
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "names-and-descriptions/credential-description-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "description": "An Example Credential",
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "names-and-descriptions/credential-description-optional-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "names-and-descriptions/credential-multi-language-description-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "description": [
+        {
+          "@value": "Dog",
+          "@language": "en"
+        },
+        {
+          "@value": "Chien",
+          "@language": "fr"
+        },
+        {
+          "@value": "Cane",
+          "@language": "it"
+        }
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "names-and-descriptions/credential-multi-language-name-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "name": [
+        {
+          "@value": "Dog",
+          "@language": "en"
+        },
+        {
+          "@value": "Chien",
+          "@language": "fr"
+        },
+        {
+          "@value": "Cane",
+          "@language": "it"
+        }
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "names-and-descriptions/credential-name-extra-prop-en-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "name": {
+        "@value": "Example Credential",
+        "@language": "en",
+        "url": "did:example:credential"
+      },
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "names-and-descriptions/credential-name-language-direction-en-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "name": {
+        "@value": "Example Credential",
+        "@language": "en",
+        "@direction": "ltr"
+      },
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "names-and-descriptions/credential-name-language-en-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "name": {
+        "@value": "Example Credential",
+        "@language": "en"
+      },
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "names-and-descriptions/credential-name-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "name": "Example Credential",
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "names-and-descriptions/credential-name-optional-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "names-and-descriptions/issuer-description-extra-prop-en-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "issuer": {
+        "description": {
+          "@value": "An Example Issuer",
+          "@language": "en",
+          "url": "did:example:issuer"
+        }
+      },
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "names-and-descriptions/issuer-description-language-direction-en-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "issuer": {
+        "description": {
+          "@value": "An Example Issuer",
+          "@language": "en",
+          "@direction": "ltr"
+        }
+      },
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "names-and-descriptions/issuer-description-language-en-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "issuer": {
+        "description": {
+          "@value": "An Example Issuer",
+          "@language": "en"
+        }
+      },
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "names-and-descriptions/issuer-description-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "issuer": {
+        "description": "An Example Issuer"
+      },
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "names-and-descriptions/issuer-description-optional-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "issuer": {},
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "names-and-descriptions/issuer-multi-language-description-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "issuer": {
+        "description": [
+          {
+            "@value": "Dog",
+            "@language": "en"
+          },
+          {
+            "@value": "Chien",
+            "@language": "fr"
+          },
+          {
+            "@value": "Cane",
+            "@language": "it"
+          }
+        ]
+      },
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "names-and-descriptions/issuer-multi-language-name-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "issuer": {
+        "name": [
+          {
+            "@value": "Dog",
+            "@language": "en"
+          },
+          {
+            "@value": "Chien",
+            "@language": "fr"
+          },
+          {
+            "@value": "Cane",
+            "@language": "it"
+          }
+        ]
+      },
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "names-and-descriptions/issuer-name-extra-prop-en-fail.json",
+    "valid": false,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "issuer": {
+        "name": {
+          "@value": "ExampleIssuer",
+          "@language": "en",
+          "url": "did:example:issuer"
+        }
+      },
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "names-and-descriptions/issuer-name-language-direction-en-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "issuer": {
+        "name": {
+          "@value": "ExampleIssuer",
+          "@language": "en",
+          "@direction": "ltr"
+        }
+      },
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "names-and-descriptions/issuer-name-language-en-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "issuer": {
+        "name": {
+          "@value": "ExampleIssuer",
+          "@language": "en"
+        }
+      },
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "names-and-descriptions/issuer-name-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "issuer": {
+        "name": "ExampleIssuer"
+      },
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  },
+  {
+    "name": "names-and-descriptions/issuer-name-optional-ok.json",
+    "valid": true,
+    "credential": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiableCredential"
+      ],
+      "issuer": {},
+      "credentialSubject": {
+        "id": "did:example:subject"
+      }
+    }
+  }
+]

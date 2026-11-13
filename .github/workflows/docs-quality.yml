@@ -857,6 +857,8 @@ jobs:
       # `sparq-kb --features validate --test yamlld_write_path`.)
       - name: Self-test PKG write-path YAML-LD compiler (sq-mztg8.2)
         run: python3 scripts/tests/test_yamlld_compile.py
+      - name: Self-test Solid, LDP and ODRL EARL report drivers
+        run: python3 scripts/tests/test_earl_frozen_specs.py
       # sq-lhwo.4 (epic sq-lhwo): the firm ast-grep+outline token A/B harness
       # (scripts/agent-telemetry/ast-grep-outline/) under the shared §5 protocol. Its
       # statistics + §5.6 verdict-object emitter (Wilcoxon signed-rank + bootstrap CI +

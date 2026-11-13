@@ -341,7 +341,9 @@ fn query_batchable(pattern: &GraphPattern) -> bool {
 fn partitioned(pattern: &GraphPattern, outer_projection: bool) -> bool {
     let expr_safe = |expr: &Expression| {
         let mut safe = true;
-        walk_expr(&mut expr.clone(), &mut |p| safe &= partitioned(p, false));
+        walk_expr(&mut expr.clone(), &mut |p: &mut GraphPattern| {
+            safe &= partitioned(p, false)
+        });
         safe
     };
     match pattern {
@@ -639,9 +641,35 @@ pub(crate) fn expression_bindings(
         .collect())
 }
 
+#[cfg(feature = "shacl-af")]
+pub(crate) fn construct_bound(
+    data: &sparq_core::Graph,
+    query: &Query,
+    bindings: &[Binding],
+) -> Result<Vec<oxrdf::Triple>, String> {
+    let Query::Construct { template, dataset, pattern, base_iri } = query else {
+        return Err("Expected CONSTRUCT".into());
+    };
+    let bound = Query::Construct {
+        template: template.clone(),
+        dataset: dataset.clone(),
+        base_iri: base_iri.clone(),
+        pattern: if bindings.is_empty() {
+            pattern.clone()
+        } else {
+            inject_values(
+                pattern,
+                pre_bind_values(bindings).ok_or("Invalid rule bindings")?,
+                bindings.iter().map(|(n, _)| *n),
+            )
+        },
+    };
+    sparq_engine::construct(data, &bound.to_string())
+}
+
 /// Check admission rules in the author's algebra, including nested expressions.
 /// Local VALUES and hidden subquery projections are permitted by SHACL 1.2.
-fn check_pre_binding(
+pub(crate) fn check_pre_binding(
     pattern: &GraphPattern,
     in_scope: &[&str],
 ) -> Result<(), PreBindingViolation> {
@@ -799,7 +827,7 @@ fn legacy_pattern(p: &GraphPattern, names: &[&str]) -> bool {
             ..
         } => {
             let mut illegal = false;
-            walk_expr(&mut expr.clone(), &mut |p| {
+            walk_expr(&mut expr.clone(), &mut |p: &mut GraphPattern| {
                 illegal |= legacy_pattern(p, names)
             });
             illegal || legacy_pattern(inner, names)
@@ -822,10 +850,29 @@ fn legacy_pattern(p: &GraphPattern, names: &[&str]) -> bool {
     }
 }
 
-fn walk_expr(expr: &mut Expression, visit: &mut impl FnMut(&mut GraphPattern)) {
+/// Mutable algebra traversal shared by pre-binding and rule-query rewrites.
+pub(crate) trait AlgebraVisitor {
+    fn expression(&mut self, expr: &mut Expression) {
+        walk_expr(expr, self);
+    }
+
+    fn pattern(&mut self, pattern: &mut GraphPattern) {
+        walk_pattern(pattern, self);
+    }
+}
+
+// Pre-binding callbacks own the recursion into EXISTS patterns because each
+// operation has its own admission, correlation or projection semantics.
+impl<F: FnMut(&mut GraphPattern)> AlgebraVisitor for F {
+    fn pattern(&mut self, pattern: &mut GraphPattern) {
+        self(pattern);
+    }
+}
+
+pub(crate) fn walk_expr<V: AlgebraVisitor + ?Sized>(expr: &mut Expression, visit: &mut V) {
     use Expression::*;
     match expr {
-        Exists(p) => visit(p),
+        Exists(p) => visit.pattern(p),
         Or(a, b)
         | And(a, b)
         | Equal(a, b)
@@ -838,33 +885,91 @@ fn walk_expr(expr: &mut Expression, visit: &mut impl FnMut(&mut GraphPattern)) {
         | Subtract(a, b)
         | Multiply(a, b)
         | Divide(a, b) => {
-            walk_expr(a, visit);
-            walk_expr(b, visit);
+            visit.expression(a);
+            visit.expression(b);
         }
         In(a, args) => {
-            walk_expr(a, visit);
+            visit.expression(a);
             for a in args {
-                walk_expr(a, visit);
+                visit.expression(a);
             }
         }
-        UnaryPlus(a) | UnaryMinus(a) | Not(a) => walk_expr(a, visit),
+        UnaryPlus(a) | UnaryMinus(a) | Not(a) => visit.expression(a),
         If(a, b, c) => {
-            walk_expr(a, visit);
-            walk_expr(b, visit);
-            walk_expr(c, visit);
+            visit.expression(a);
+            visit.expression(b);
+            visit.expression(c);
         }
         Coalesce(args) | FunctionCall(_, args) => {
             for a in args {
-                walk_expr(a, visit);
+                visit.expression(a);
             }
         }
         NamedNode(_) | Literal(_) | Variable(_) | Bound(_) => {}
     }
 }
 
+pub(crate) fn walk_pattern<V: AlgebraVisitor + ?Sized>(p: &mut GraphPattern, visit: &mut V) {
+    use GraphPattern::*;
+    match p {
+        Join { left, right }
+        | Union { left, right }
+        | Minus { left, right }
+        | Lateral { left, right } => {
+            visit.pattern(left);
+            visit.pattern(right);
+        }
+        LeftJoin {
+            left,
+            right,
+            expression,
+        } => {
+            visit.pattern(left);
+            visit.pattern(right);
+            if let Some(e) = expression {
+                visit.expression(e);
+            }
+        }
+        Filter { inner, expr }
+        | Extend {
+            inner,
+            expression: expr,
+            ..
+        } => {
+            visit.pattern(inner);
+            visit.expression(expr);
+        }
+        OrderBy { inner, expression } => {
+            visit.pattern(inner);
+            for e in expression {
+                let (spargebra::algebra::OrderExpression::Asc(e)
+                | spargebra::algebra::OrderExpression::Desc(e)) = e;
+                visit.expression(e);
+            }
+        }
+        Group {
+            inner, aggregates, ..
+        } => {
+            visit.pattern(inner);
+            for (_, a) in aggregates {
+                if let spargebra::algebra::AggregateExpression::FunctionCall { expr, .. } = a {
+                    visit.expression(expr);
+                }
+            }
+        }
+        Graph { inner, .. }
+        | Service { inner, .. }
+        | Distinct { inner }
+        | Reduced { inner }
+        | Slice { inner, .. }
+        | Project { inner, .. } => visit.pattern(inner),
+        Bgp { .. } | Path { .. } | Values { .. } => {}
+    }
+}
+
 fn check_expr(expr: &Expression, names: &[&str]) -> Result<(), PreBindingViolation> {
     let mut result = Ok(());
-    walk_expr(&mut expr.clone(), &mut |p| {
+    walk_expr(&mut expr.clone(), &mut |p: &mut GraphPattern| {
         if result.is_ok() {
             result = check_pre_binding(p, names);
         }
@@ -901,7 +1006,7 @@ fn bind_expr(expr: &Expression, values: &GraphPattern) -> Expression {
         values
     };
     let mut expr = expr.clone();
-    walk_expr(&mut expr, &mut |p| {
+    walk_expr(&mut expr, &mut |p: &mut GraphPattern| {
         // BGP and path correlation already work directly in the engine.
         if !batched || !matches!(p, GraphPattern::Bgp { .. } | GraphPattern::Path { .. }) {
             *p = push_values_down(p, values);
