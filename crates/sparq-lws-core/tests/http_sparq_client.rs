@@ -503,18 +503,17 @@ fn answer_query(state: &MockState, sparql: &str) -> Response {
         );
     }
     if sparql.starts_with("SELECT ?g ?ct ?bk ?etag") {
-        // select_read_plan: `VALUES ?g { <target> <acl…> } GRAPH ?g { record… }` — one row per
-        // VALUES graph that has an index record.
-        let values = sparql
-            .find("VALUES ?g {")
-            .map(|p| p + "VALUES ?g {".len())
-            .and_then(|start| {
-                sparql[start..]
-                    .find('}')
-                    .map(|end| sparql[start..start + end].to_string())
-            })
-            .unwrap_or_default();
-        let rows: Vec<String> = extract_iris(&values)
+        // Both query forms name the same metadata records.
+        let graphs: Vec<String> = if let Some((_, values)) = sparql.split_once("VALUES ?g {") {
+            extract_iris(values.split_once('}').unwrap().0)
+        } else {
+            sparql
+                .split("GRAPH <")
+                .skip(1)
+                .filter_map(|arm| arm.split_once('>').map(|(g, _)| g.to_string()))
+                .collect()
+        };
+        let rows: Vec<String> = graphs
             .into_iter()
             .filter_map(|g| {
                 store.meta.get(&g).map(|(ct, bk, et)| {
@@ -889,32 +888,47 @@ async fn read_plan_is_one_protocol_request_carrying_target_and_all_candidates() 
         "https://pod.example/alice/.acl".to_string(),
         "https://pod.example/.acl".to_string(),
     ];
-    let before = state.store.lock().unwrap().requests;
-    let plan = c.read_plan(RES, &candidates).await.unwrap();
-    let after = state.store.lock().unwrap().requests;
-    assert_eq!(after - before, 1, "read_plan = ONE protocol request");
-    // The one request was the combined SELECT with a single VALUES block over all four graphs.
-    let sent = state.store.lock().unwrap().last_sparql.clone().unwrap();
-    assert!(sent.starts_with("SELECT ?g ?ct ?bk ?etag"), "{sent}");
-    assert_eq!(sent.matches("VALUES").count(), 1, "{sent}");
-
-    assert_eq!(
-        plan.target,
-        Some(meta()),
-        "the target row is the raw target's meta"
-    );
-    assert_eq!(
-        plan.acls,
-        vec![
-            (format!("{RES}.acl"), None),
-            ("https://pod.example/alice/.acl".to_string(), None),
-            (
-                "https://pod.example/.acl".to_string(),
-                Some("\"etag-acl\"".to_string())
-            ),
-        ],
-        "one entry per candidate, in order: absent ⇒ None, present ⇒ its etag"
-    );
+    let mut wide = candidates.clone();
+    wide.extend((0..4096).map(|i| format!("https://pod.example/unindexed-{i}.acl")));
+    wide.push("https://pod.example/.acl".to_string());
+    for (candidates, values_form) in [(candidates, false), (wide, true)] {
+        let before = state.store.lock().unwrap().requests;
+        let plan = c.read_plan(RES, &candidates).await.unwrap();
+        let after = state.store.lock().unwrap().requests;
+        assert_eq!(after - before, 1, "read_plan = ONE protocol request");
+        let sent = state.store.lock().unwrap().last_sparql.clone().unwrap();
+        assert!(sent.starts_with("SELECT ?g ?ct ?bk ?etag"), "{sent}");
+        assert_eq!(
+            sent.contains("VALUES ?g {"),
+            values_form,
+            "shared query form"
+        );
+        if !values_form {
+            assert!(!sent.contains("GRAPH ?g"), "{sent}");
+            assert_eq!(
+                sent.matches("GRAPH <").count(),
+                1 + candidates.len(),
+                "{sent}"
+            );
+        }
+        assert_eq!(
+            plan.target,
+            Some(meta()),
+            "the target row is the raw target's meta"
+        );
+        let expected: Vec<_> = candidates
+            .iter()
+            .map(|candidate| {
+                let etag =
+                    (candidate == "https://pod.example/.acl").then(|| "\"etag-acl\"".to_string());
+                (candidate.clone(), etag)
+            })
+            .collect();
+        assert_eq!(
+            plan.acls, expected,
+            "one entry per candidate, in order: absent or its etag"
+        );
+    }
 }
 
 #[tokio::test]

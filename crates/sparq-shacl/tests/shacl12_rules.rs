@@ -60,6 +60,33 @@ fn blank_focus_nested_limit_is_prebound() {
         .iter()
         .all(|t| matches!(t.subject, oxrdf::NamedOrBlankNode::BlankNode(_))));
 }
+
+#[test]
+fn rule_select_uses_shared_custom_bodies_and_named_sparql_results() {
+    let out = run(
+        "",
+        r#"
+        ex:S sh:targetNode ex:a ; sh:rule [ a sh:TripleRule ;
+            sh:predicate ex:label ;
+            sh:object [ sh:select "SELECT (<urn:ex:wrapper>($this) AS ?value) WHERE {}" ] ] .
+        ex:wrapper a sh:ListParameterExpressionFunction ;
+            rdfs:subClassOf sh:ListParameterExpression ;
+            sh:bodyExpression [ ex:format ([shnex:arg 0]) ] .
+        ex:format a sh:SPARQLFunction ;
+            sh:parameter [sh:path <urn:arg/input>] ;
+            sh:select "SELECT ('ignored' AS ?noise) (STR($input) AS ?result) WHERE {}" .
+        "#,
+    );
+    assert_eq!(
+        out,
+        vec![oxrdf::Triple::new(
+            NamedNode::new("urn:ex:a").unwrap(),
+            NamedNode::new("urn:ex:label").unwrap(),
+            oxrdf::Literal::new_simple_literal("urn:ex:a"),
+        )]
+    );
+}
+
 #[test]
 fn omitted_triple_operands_default_to_focus_and_global_empty() {
     let out = run(

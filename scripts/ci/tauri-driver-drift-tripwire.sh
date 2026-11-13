@@ -3,7 +3,7 @@
 #
 # The native GUI smoke (nightly-full-sweep.yml `tauri-smoke`, gui.yml `tauri-e2e`) launches the
 # Tauri shell through `tauri-driver`, which proxies to the runner's WebKitWebDriver (from the
-# `webkit2gtk-driver` apt package). The WebDriver server and the app's webview come from the SAME
+# `webkitgtk-webdriver` apt package, formerly `webkit2gtk-driver`). The WebDriver server and the app's webview come from the SAME
 # runner-image apt version of webkit2gtk, so they are internally consistent — the drift that broke
 # the lane is between the CLIENT capability shape (gui/e2e/run-e2e.mjs) and the WebKitGTK the runner
 # ships, which GitHub bumps on ITS schedule, not ours.
@@ -87,7 +87,9 @@ echo "  regression guard : PASS — run-e2e.mjs does not hard-code a browserName
 
 # --- 2. VERSION TRIPWIRE (diagnostic) ----------------------------------------------------------
 
-WEBKIT_APT_FULL="$(dpkg-query -W -f='${Version}' webkit2gtk-driver 2>/dev/null || echo "")"
+# The package was renamed webkit2gtk-driver -> webkitgtk-webdriver; query the new name first.
+WEBKIT_APT_FULL="$(dpkg-query -W -f='${Version}' webkitgtk-webdriver 2>/dev/null \
+  || dpkg-query -W -f='${Version}' webkit2gtk-driver 2>/dev/null || echo "")"
 WEBKIT_VER="$(printf '%s' "$WEBKIT_APT_FULL" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' || echo "")"
 WKWD_BANNER="$(WebKitWebDriver --version 2>&1 | head -1 || echo "unknown")"
 
@@ -96,7 +98,7 @@ if [ -z "$TAURI_DRIVER_VERSION" ]; then
 fi
 
 echo "  tauri-driver     : ${TAURI_DRIVER_VERSION:-unknown}"
-echo "  webkit2gtk-driver: ${WEBKIT_APT_FULL:-unknown}  (parsed: ${WEBKIT_VER:-unknown})"
+echo "  webkit driver pkg: ${WEBKIT_APT_FULL:-unknown}  (parsed: ${WEBKIT_VER:-unknown})"
 echo "  WebKitWebDriver  : ${WKWD_BANNER}"
 echo "───────────────────────────────────────────────────────────────────────────────────────"
 

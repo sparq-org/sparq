@@ -38,11 +38,12 @@ libfuzzer-sys = "0.4"
 sparq-core = { path = "../crates/sparq-core", features = ["mmap", "parallel", "jsonld"] }
 sparq-engine = { path = "../crates/sparq-engine" }
 # SHACL validation under test (bead sq-o4pi). Opt-in crate (the sparq-reason isolation
-# pattern). Used by the `validate_shacl` target. Like every entry here it is a
+# pattern). Used by `validate_shacl` and the opt-in `parse_sparql_rl` parser target.
+# Like every entry here it is a
 # package-wide dependency — Cargo deps are not scoped per [[bin]] target — but it stays
 # out of the workspace default build because this fuzz crate is excluded from the root
 # workspace (see the header note). [OPUS-4.8]
-sparq-shacl = { path = "../crates/sparq-shacl" }
+sparq-shacl = { path = "../crates/sparq-shacl", features = ["sparql-rl"] }
 # sparq-jsonld: the native W3C JSON-LD 1.1 document pipeline (bead sq-oy1f.46). The
 # `jsonld_pipeline` fuzz target exercises Json::parse + expand + flatten_expanded
 # directly. Published = false (scaffold phase), path dep resolves in the fuzz crate's
@@ -227,6 +228,13 @@ bench = false
 [[bin]]
 name = "wac_fail_closed"
 path = "fuzz_targets/wac_fail_closed.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_sparql_rl"
+path = "fuzz_targets/parse_sparql_rl.rs"
 test = false
 doc = false
 bench = false

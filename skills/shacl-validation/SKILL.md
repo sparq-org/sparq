@@ -83,6 +83,13 @@ cargo run -p sparq-shacl --example validate -- data.ttl shapes.ttl
 cargo run -p sparq-shacl --example validate -- data.ttl shapes.ttl --turtle
 ```
 
+## SPARQL-RL (opt-in)
+
+The default-off `sparql-rl` feature exposes parsing, inScope/inUse checks,
+stratification and `infer`/`infer_with_limits`. Inference returns only new
+triples and uses one incremental working graph; IMPORTS is refused. It adds no
+dependencies and is independent of `shacl-af`. See the [API, semantics and limits](references/sparql-rl.md).
+
 ## Key APIs
 
 Top-level functions (`sparq_shacl::…`):
@@ -500,17 +507,27 @@ let g = sparq_shacl::load_turtle_with_base(&text, &format!("file://{path}")).unw
 
 ## Advanced features and validation details
 
+The node-expression evaluation APIs are available in both feature states.
+`eval_node_expression_result(data, shapes, expr, focus, &scope)` returns
+`Result<Vec<Term>, String>`: an empty vector is a successful empty output, while
+`Err` signals an evaluation failure. The existing `eval_node_expression` and
+`eval_node_expression_with_scope` wrappers return `None` on failure. Output lists
+preserve order and duplicates where the operator does; they are not universally
+deduplicated. Custom expression bodies and SPARQL function calls use the same
+evaluator during validation and rule execution. Evaluated list arguments retain
+their RDF values; named arguments remain expressions.
+
 See [Advanced Features](references/advanced-features.md) for SHACL-AF rules,
 SHACL 1.2 inference rules and declared rule entailment, node-expression APIs and graph scopes, and [validation details](references/validation-details.md)
 for constraint coverage, prerequisites and conformance ratchets. The 1.2 rule
 executor rejects unsupported processors anywhere among the shapes graph's rules
 and rule sets, including unselected and deactivated nodes and included sets.
 
-- **SHACL-AF numeric node expressions preserve exact digits.** With `shacl-af`,
-  `min`, `max` and `orderBy` share the range constraints' any-length exact
-  integer/decimal comparison and refine mixed floating ties by exact value,
-  matching engine numeric sorting. `min`/`max` retain the first member on equal
-  values and keep NaN unordered; `orderBy` sorts NaN first in ascending order.
+- **Numeric node expressions preserve exact digits in both feature states.**
+  `min`, `max` and `orderBy` use the shared SPARQL term ordering, with any-length
+  exact integer/decimal comparison and exact refinement of mixed floating ties.
+  NaN is least in this order; extrema retain the first member on equal values.
+  `orderBy` uses the first output of each key expression.
   `sum` adds through the bounded exact decimal tower: integer-only sums stay
   `xsd:integer`, a decimal
   operand produces `xsd:decimal`, and float/double operands promote as in engine

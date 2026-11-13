@@ -145,10 +145,7 @@ fn is_reserved(uri: &str) -> bool {
 
 /// The named graph of `graph` whose name is the IRI `iri`, if any.
 fn named_graph<'a>(graph: &'a Graph, iri: &str) -> Option<&'a Graph> {
-    graph.named().iter().find_map(|(name, g)| match name {
-        Term::NamedNode(node) if node.as_str() == iri => Some(g),
-        _ => None,
-    })
+    graph.named_graph(&Term::NamedNode(oxrdf::NamedNode::new_unchecked(iri)))
 }
 
 #[cfg(test)]
