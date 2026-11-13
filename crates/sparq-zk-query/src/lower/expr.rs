@@ -242,13 +242,37 @@ pub fn promote(a: LaneType, b: LaneType, division: bool) -> LaneType {
     }
 }
 
-/// Lower BIND for computed boolean, integer and decimal results.
+// Existing cell edges retain RDF identity, including when their runtime type
+// has no computed lexical serializer. IF/COALESCE preserve this representation
+// only when all value arms already carry cells.
+fn retains_cell(expr: &Expr) -> bool {
+    match expr {
+        Expr::Variable { .. } | Expr::Constant(_) => true,
+        Expr::Call {
+            op: ExprOp::UnaryPlus,
+            args,
+        } => args.first().is_some_and(retains_cell),
+        Expr::Call {
+            op: ExprOp::If,
+            args,
+        } => args.len() == 3 && args[1..].iter().all(retains_cell),
+        Expr::Call {
+            op: ExprOp::Coalesce,
+            args,
+        } => !args.is_empty() && args.iter().all(retains_cell),
+        _ => false,
+    }
+}
+
+/// Lower BIND for existing RDF cells and admitted computed result types.
 pub fn lower_bind(expr: &Expr) -> Result<TypedDag, Refusal> {
     let mut dag = lower(expr)?;
-    if !matches!(
-        dag.nodes[dag.root].ty,
-        LaneType::Boolean | LaneType::Integer | LaneType::Decimal | LaneType::Term
-    ) {
+    if !retains_cell(expr)
+        && !matches!(
+            dag.nodes[dag.root].ty,
+            LaneType::Boolean | LaneType::Integer | LaneType::Decimal | LaneType::Term
+        )
+    {
         return Err(refuse(
             "BIND",
             "computed result type is outside this term-construction bucket",
