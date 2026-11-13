@@ -108,7 +108,7 @@ pub struct JsonLdOptions {
     /// `frameExpansion` — expand in framing mode (default `false`).
     pub frame_expansion: bool,
     /// `extractAllScripts` — extract every `application/ld+json` script from an HTML input
-    /// (default `false`).
+    /// (default `false`; HTML loading requires the opt-in `html` Cargo feature).
     pub extract_all_scripts: bool,
     /// Framing `@embed` flag (default [`EmbedFlag::Once`]).
     pub embed: EmbedFlag,

@@ -520,9 +520,7 @@ pub const SUITES: &[Suite] = &[
         // registry and the runner's `assert!` read ONE number (no textual drift).
         ratchet_floor: crate::floors::to_rdf::FLOOR,
         floor_basis: "pass",
-        note: "JSON-LD → RDF through the real oxjsonld parse path (jsonld feature); \
-               compact + frame + expand + flatten are all now gated lanes (html + \
-               remote-doc remain the not-implemented buckets)",
+        note: "JSON-LD 1.1 → RDF through the native sparq-jsonld processor; legacy 1.0-only entries retain the oxjsonld path; HTML and remote documents have separate ratchets",
     },
     Suite {
         label: "W3C JSON-LD 1.1 fromRdf",
@@ -664,6 +662,32 @@ pub const SUITES: &[Suite] = &[
                node-map ∘ named-graph fold) + json_ld_equal document-level comparator \
                (sq-oy1f.26; re-pin 50→46 from the RDF-writer oracle — the 4 drop is \
                inherited native-expand gaps owned by sq-oy1f.37, not flatten bugs)",
+    },
+    Suite {
+        label: "W3C JSON-LD 1.1 html",
+        family: "W3C JSON-LD",
+        runner: Runner::FeatureGatedCrateTest {
+            krate: "sparq-conformance",
+            target: "jsonld_suite",
+            feature: "jsonld-suite",
+        },
+        ci_job: "jsonld-conformance",
+        ratchet_floor: crate::floors::html::FLOOR,
+        floor_basis: "pass",
+        note: "native HTML/XHTML script extraction; HTML toRdf uses sparq-jsonld; one pinned expected-success entry contradicts the no-script loading error",
+    },
+    Suite {
+        label: "W3C JSON-LD 1.1 remote-doc",
+        family: "W3C JSON-LD",
+        runner: Runner::FeatureGatedCrateTest {
+            krate: "sparq-conformance",
+            target: "jsonld_suite",
+            feature: "jsonld-suite",
+        },
+        ci_job: "jsonld-conformance",
+        ratchet_floor: crate::floors::remote_doc::FLOOR,
+        floor_basis: "pass",
+        note: "native URL expansion through manifest-driven local responses, including redirects, media types, and context links",
     },
     // sq-tmsd6 — the SolidLab ODRL Test Suite, wired as a crate-local
     // decision-parity ratchet in sparq-policy (mirrors the Solid WAC/ACP pattern:

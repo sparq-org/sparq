@@ -1,119 +1,93 @@
 # sparq-jsonld
 
-A native, **dependency-free** W3C **[JSON-LD 1.1]** document pipeline for sparq —
-Context Processing, Expansion, Flattening, Compaction, Framing, and RDF
-(de)serialization operating on JSON trees, not on a lossy RDF projection.
+A native W3C [JSON-LD 1.1] document pipeline for sparq: Context Processing,
+Expansion, Flattening, Compaction, Framing, and RDF conversion over JSON trees.
+It has zero mandatory dependencies and forbids unsafe code.
 
 [JSON-LD 1.1]: https://www.w3.org/TR/json-ld11/
-
-> Build-out status reconciled in `sq-ci15w`; implementation provenance remains
-> recorded on the individual algorithms. (`sq-ghdfw`) Re-verified against the
-> tree: `to_rdf` and `api` are the only remaining stubs.
-> Epic `sq-oy1f` (design record `research/jsonld-1.1-design.md`).
 
 ## 🚀 Quickstart
 
 ```rust
-use sparq_jsonld::{Json, JsonLdError, JsonLdErrorCode, JsonLdOptions};
-use sparq_jsonld::{DocumentLoader, NoopLoader};
+use sparq_jsonld::{expand, Json, JsonLdOptions, NoopLoader};
 
-// The dependency-free JSON value model shared by the whole pipeline.
-let mut node = Json::obj();
-node.set("@id", Json::Str("http://example.org/a".into()));
-let mut out = String::new();
-node.write(&mut out);
-assert_eq!(out, r#"{"@id":"http://example.org/a"}"#);
-
-// Processing options carry the spec defaults.
-let opts = JsonLdOptions::default();
-assert!(opts.compact_arrays);
-
-// The DEFAULT loader is fail-closed: no ambient network.
-let err: JsonLdError = NoopLoader.load_document("https://ex/ctx").unwrap_err();
-assert_eq!(err.code(), JsonLdErrorCode::LoadingDocumentFailed);
+let input = Json::parse(r#"{"https://example.org/name":"Alice"}"#)?;
+let expanded = expand(&input, &JsonLdOptions::default(), &NoopLoader)?;
+let mut output = String::new();
+expanded.write(&mut output);
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 ## ✨ Features
 
-- **`Json` AST** — a minimal, insertion-order-preserving JSON value type (no
-  `serde_json`). Moved here from `sparq-engine`'s JSON-LD writer so the whole
-  pipeline shares one value type; the engine re-exports it (public API preserved).
-- **Error registry** — `JsonLdErrorCode` is the full W3C JSON-LD 1.1 error-code
-  set as a closed enum whose `as_str()` is the **exact** spec string, so the
-  conformance suite's `expectErrorCode` negative tests become assertable.
-- **Processing options** — `JsonLdOptions` models `base`, `processingMode`,
-  `expandContext`, `rdfDirection`, `compactArrays`, `ordered`, the framing flags,
-  and more, once, with the specification's defaults.
-- **Deny-by-default loading** — `DocumentLoader` dereferences remote `@context` /
-  `@import` / documents **only** through an explicit loader. The default
-  `NoopLoader` refuses every load (`loading document failed`); `FsLoader` maps URL
-  prefixes to trusted local fixtures. The network `HttpLoader` (with an SSRF
-  allowlist) is a later, opt-in feature.
+- `Json` is an insertion-order-preserving JSON AST with a strict parser and
+  writer. The engine re-exports this shared value type.
+- `JsonLdErrorCode` carries the W3C error registry; `as_str()` returns the exact
+  specification string for negative-test assertions.
+- `JsonLdOptions` carries specification defaults for base, processing mode,
+  expansion contexts, compaction, direction encoding, and framing.
+- `expand` implements scoped contexts, container maps, keyword aliases,
+  `@nest`, `@reverse`, `@included`, and JSON literals.
+- `compact::compact` and `compact_expanded` implement document compaction and
+  value compaction. Ambiguous absolute IRIs raise `IRI confused with prefix`.
+- `flatten` returns expanded flattened output. `flatten::flatten_with_context`
+  optionally compacts it while retaining the graph envelope and honoring
+  property-level `compact_arrays`.
+- `node_map::try_generate_node_map` rejects conflicting indexes. Fallible
+  flattening, framing, and RDF conversion use this validation; the existing
+  infallible `generate_node_map` and `flatten_expanded` helpers have no error return.
+- `frame::frame` implements frame matching, embedding, defaults, named graphs
+  and validation. The matching and compaction halves are separately callable.
+- `from_rdf::from_rdf` converts the crate-local `RdfQuad`/`RdfTerm` model to
+  expanded JSON-LD, including RDF lists, JSON literals and native types.
+- `to_rdf::to_rdf` expands JSON-LD and converts it to that RDF model, including
+  named graphs, lists, canonical scalar/JSON literals, `expand_context`, both
+  `rdf_direction` encodings and optional generalized RDF.
+
+### Document loading
+
+`DocumentLoader` supplies all remote documents, contexts and imports. The default
+`NoopLoader` refuses loading; the processor contains no HTTP client. `FsLoader`
+maps URL prefixes to trusted local fixture directories.
+
+An absolute IRI carried as `Json::Str` is remote input for expansion and operations
+that expand. `RemoteDocument` supplies raw text, final document URL, content type,
+context URL and optional profile. The loader handles redirects, status errors,
+alternate selection and multiple context links. The processor applies context
+links for JSON media types other than `application/ld+json`; it ignores them for
+JSON-LD and HTML/XHTML. Unsupported types and invalid JSON raise
+`loading document failed`. Missing content type preserves the JSON-LD default.
+
+### Optional HTML extraction
+
+The `html` Cargo feature is **off by default**. It uses html5ever's tokenizer and tree builder for
+HTML document order and script-data rules, and quick-xml for XHTML. The default JSON and lean wasm
+builds do not link these dependencies.
+
+Loaded `text/html` and `application/xhtml+xml` documents select the first JSON-LD
+script by default. `extract_all_scripts` defaults to false; true merges all scripts
+and flattens their outer arrays. A percent-decoded URL fragment selects a matching
+script id regardless of that option. The first base element supplies the extracted
+content's base, resolved against the final document URL or explicit base fallback.
+
+Missing targets or scripts raise `loading document failed`; extracting all scripts
+from a document with none returns an empty array. Invalid script JSON raises
+`invalid script element`. Comment wrappers are not stripped. HTML character
+references inside script data remain literal; XHTML uses XML references and CDATA.
 
 ### Opt-in by construction
 
-Nothing in the default library build of `sparq-core` / `sparq-engine` or the default
-wasm artifact depends on this crate. `sparq-engine` pulls it in only behind its
-off-by-default `serialize-rdf` feature (which the `sparq-cli` / `sparq-server`
-binaries enable through their default-on `jsonld` feature); the crate has **zero mandatory
-dependencies**, is `#![forbid(unsafe_code)]`, and adds no default dependency
-anywhere.
-
-### Build-out status
-
-Shipped: `Json` AST, error registry, options, loader trait, **Context Processing**
-(`context`), and document-level **Expansion** (`expand::expand`) — scoped contexts,
-container maps, `@nest`, `@reverse`, `@included`, `@json`, keyword aliases (beads
-`sq-oy1f.24`/`sq-oy1f.25`). Bead `sq-90mu3` adds the compaction-side companions:
-
-- **Inverse Context Creation** (`InverseContext` / `ActiveContext::inverse_context`)
-  — §4.3: maps every IRI to the best term per (container, type/language), tie-broken
-  shortest-first then lexicographic.
-- **IRI Compaction** (`compact_iri`) — §7.1: keyword aliases, term lookup via inverse
-  context, vocab-relative suffix, `prefix:suffix` compact IRIs, base-relative paths.
-- **Term Selection** (internal to `context::inverse`) — §7.2: the container ×
-  preferred-value walk, consumed by `compact_iri` and by the document Compaction
-  Algorithm (bead `sq-oy1f.27`, since landed — see below).
-
-Bead `sq-oy1f.26` adds **Node Map Generation** (`generate_node_map`, §7.2) with a
-deterministic `_:bN` blank-node issuer, and the document-level **Flattening Algorithm**
-(`flatten`, §7.1 = expand ∘ node-map ∘ named-graph fold, sorted by `@id`, empty nodes
-dropped). The `flatten` conformance lane runs the native document oracle.
-
-Bead `sq-oy1f.28` adds **Serialize RDF as JSON-LD** (`from_rdf::from_rdf`, §8.1): an RDF
-dataset (the crate-local `RdfTerm`/`RdfQuad` model — still zero deps) becomes the expanded
-document, with `rdfDirection` in both modes, `@json` literals (strict parse, `invalid JSON
-literal` on malformed input), `rdf:List` → `@list` reconstruction (nested lists included;
-malformed/shared chains stay plain nodes), and `useNativeTypes`/`useRdfType` via
-`FromRdfOptions`. The `fromRdf` conformance lane runs this native path document-level.
-
-Bead `sq-oy1f.27` adds the document-level **Compaction Algorithm** + **Value
-Compaction** (`compact::compact` / `compact::compact_expanded`): scoped
-(property/type) contexts with previous-context reversion, container reshaping
-(`@list`, `@language`/`@index`/`@id`/`@type` maps, the `@graph` container forms),
-`@nest`, `@reverse` redistribution, keyword aliasing, and the `compactArrays` /
-`compactToRelative` / `ordered` options. The `compact` conformance lane compares
-against the W3C **expected** documents (the normative oracle; see
-`sparq-conformance`'s `floors::compact` for the honest fail/skip buckets). Bead `sq-gzsky`
-turned the `expand`/`compact` **negative lanes** ON — each `NegativeEvaluationTest` passes iff
-the exact `expectErrorCode` is raised, which is what makes the closed [`JsonLdErrorCode`](src/error.rs) enum load-bearing — and fixed seven spec divergences it surfaced.
-
-Beads `sq-oy1f.27` / `.29` add the document-level **Framing Algorithm**
-(`frame::frame` / `frame::frame_expanded`): frame matching and value patterns,
-`@embed`, `@explicit` / `@default`, named graphs, list re-emission, and framing error
-validation. Its pinned W3C framing lane passes all 92 cases against the normative
-document oracle; that complete lane is not a blanket conformance claim for remote
-loading, HTML extraction, or other JSON-LD surfaces.
-
-Only `to_rdf` and `api` remain documented stubs. The crate is published to crates.io
-as part of `sparq-engine`'s dependency closure.
+Consumers control whether they link this crate. The engine uses it behind the
+default-off `serialize-rdf` feature, enabled by the native binaries' default-on
+`jsonld` feature. Enabling those consumer features does not enable `html`.
+The high-level `api` module remains a documented facade placeholder.
 
 ## 📚 Learn more
 
-- Design record: `research/jsonld-1.1-design.md` (epic `sq-oy1f`).
+- Usage and loader examples: `skills/jsonld/SKILL.md` and its references.
+- Conformance floors: `crates/sparq-conformance/src/floors/`.
 - JSON-LD 1.1 API: <https://www.w3.org/TR/json-ld11-api/>
 - JSON-LD 1.1 Framing: <https://www.w3.org/TR/json-ld11-framing/>
-- Data-format serialization surface: `skills/data-formats/SKILL.md`.
 
 ## License
 

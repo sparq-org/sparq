@@ -1,4 +1,4 @@
-//! sq-oy1f.40 — the LIB-SIDE single source of truth for the six W3C
+//! sq-oy1f.40 — the LIB-SIDE single source of truth for the eight W3C
 //! JSON-LD 1.1 conformance-lane ratchet FLOORS (`toRdf`, `fromRdf`, `expand`,
 //! `compact`, `flatten`, `frame`).
 //!
@@ -13,7 +13,7 @@
 //! registry `ratchet_floor`, and the `ci.yml` grep gate) each spelled the same
 //! number and could silently disagree until a guard caught it AFTER the fact.
 //!
-//! Moving the six floors HERE — into the library the test binary AND the scoreboard
+//! Moving the eight floors HERE — into the library the test binary AND the scoreboard
 //! both depend on — makes the runner's `assert!` and the registry's `ratchet_floor`
 //! read the SAME `const` at COMPILE TIME. They cannot drift because there is only
 //! one number. The `ci.yml` `jsonld-conformance` job greps each floor from
@@ -40,3 +40,6 @@ pub mod from_rdf;
 pub mod to_rdf;
 
 pub mod rdf12;
+
+pub mod html;
+pub mod remote_doc;

@@ -24,7 +24,7 @@ unset skips the RDF 1.2 ratchet); `SPARQ_RDF_CANON_ROOT` (default vendored tests
 self-skip offline; the vendored RDFC fixtures are required.
 Withdrawn RDF entries are omitted. JSON-LD entries with `option.specVersion` or `option.processingMode`
 equal to `json-ld-1.0` are omitted as not applicable to the 1.1 processor. Other skips, optional `requires`,
-HTML, remote documents and unreadable fixtures fail. Syntax C14N compares shipping writer bytes;
+HTML and remote documents run through the native processor and virtual manifest responses; unreadable fixtures fail. Syntax C14N compares shipping writer bytes;
 Eval compares the same output by dataset isomorphism. Local JSON-LD ratchet accounting is unchanged.
 
 **License:** [MIT](../../LICENSE).

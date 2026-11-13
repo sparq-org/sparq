@@ -12,12 +12,8 @@
 //! by `@id`, drops empty `{ "@id": … }`-only nodes, and returns the flattened **expanded**
 //! document — an array of node objects.
 //!
-//! Post-flatten **compaction** against a caller `@context` (the `flatten(input, context)`
-//! form that produces the `{ "@context": …, "@graph": [ … ] }` shape) is the document-level
-//! Compaction Algorithm, delivered by its own bead (`sq-oy1f.27`); until it lands,
-//! [`flatten()`](fn@flatten) emits the expanded flattened form only, and the conformance
-//! lane SKIPs the single suite case that supplies a compaction context (recorded in the
-//! flatten floor, not counted as a pass or a fail).
+//! [`flatten_with_context`] composes native compaction over that output, retaining the
+//! graph envelope while compacting property arrays according to the options.
 //!
 //! Spec: <https://www.w3.org/TR/json-ld11-api/#flattening-algorithm>.
 
@@ -39,7 +35,7 @@ use crate::options::JsonLdOptions;
 ///
 /// This is the un-compacted form. The compacted `flatten(input, context)` shape
 /// (`{ "@context": …, "@graph": [ … ] }`) is produced by composing the document-level
-/// Compaction Algorithm over this output (bead `sq-oy1f.27`).
+/// Compaction Algorithm over this output through [`flatten_with_context`].
 ///
 /// (sq-oy1f.26)
 pub fn flatten(
@@ -48,7 +44,41 @@ pub fn flatten(
     loader: &dyn DocumentLoader,
 ) -> Result<Json, JsonLdError> {
     let expanded = expand(input, options, loader)?;
-    Ok(flatten_expanded(&expanded))
+    Ok(flatten_node_map(crate::node_map::try_generate_node_map(&expanded)?))
+}
+
+/// Flatten and optionally compact against `context`, retaining the API's graph envelope.
+/// Property arrays still follow `compact_arrays`; a null context returns expanded output.
+pub fn flatten_with_context(
+    input: &Json,
+    context: Option<&Json>,
+    options: &JsonLdOptions,
+    loader: &dyn DocumentLoader,
+) -> Result<Json, JsonLdError> {
+    if let Json::Str(url) = input {
+        if crate::context::iri::is_absolute_iri(url) {
+            return crate::context::budget::with_budget(|| {
+                let (expanded, document_url) = crate::expand::expand_remote(url, options, loader)?;
+                let flattened =
+                    flatten_node_map(crate::node_map::try_generate_node_map(&expanded)?);
+                let mut options = options.clone();
+                if options.base.is_none() && options.compact_to_relative {
+                    options.base = Some(document_url);
+                }
+                match context.filter(|c| !c.is_null()) {
+                    Some(context) => {
+                        crate::compact::compact_flattened(&flattened, context, &options, loader)
+                    }
+                    None => Ok(flattened),
+                }
+            });
+        }
+    }
+    let flattened = flatten(input, options, loader)?;
+    match context.filter(|c| !c.is_null()) {
+        Some(context) => crate::compact::compact_flattened(&flattened, context, options, loader),
+        None => Ok(flattened),
+    }
 }
 
 /// **Flattening** over an already-expanded document (§7.1 steps 2–5). Splits out so callers
@@ -58,7 +88,10 @@ pub fn flatten(
 /// (sq-oy1f.26)
 pub fn flatten_expanded(expanded: &Json) -> Json {
     // §7.1 step 1–2: build the node map from the expanded input.
-    let node_map = generate_node_map(expanded);
+    flatten_node_map(generate_node_map(expanded))
+}
+
+fn flatten_node_map(node_map: crate::NodeMap) -> Json {
 
     // §7.1 step 3: fold every NON-default graph into its node in the default graph, under an
     // `@graph` member holding that graph's nodes sorted by @id (empty nodes dropped).

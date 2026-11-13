@@ -276,8 +276,8 @@
       "floor_basis": "pass",
       "is_extension": false,
       "label": "W3C JSON-LD 1.1 toRdf",
-      "note": "JSON-LD → RDF through the real oxjsonld parse path (jsonld feature); compact + frame + expand + flatten are all now gated lanes (html + remote-doc remain the not-implemented buckets)",
-      "ratchet_floor": 413,
+      "note": "JSON-LD 1.1 → RDF through the native sparq-jsonld processor; legacy 1.0-only entries retain the oxjsonld path; HTML and remote documents have separate ratchets",
+      "ratchet_floor": 454,
       "runner": {
         "crate": "sparq-conformance",
         "feature": "jsonld-suite",
@@ -309,7 +309,7 @@
       "is_extension": false,
       "label": "W3C JSON-LD 1.1 compact",
       "note": "native document-level Compaction Algorithm (sparq-jsonld), compared against the W3C EXPECTED compacted document (json_ld_equal — the normative document oracle); NegativeEvaluationTests RUN against the manifest expectErrorCode since sq-gzsky (a wrong code is a FAIL)",
-      "ratchet_floor": 243,
+      "ratchet_floor": 244,
       "runner": {
         "crate": "sparq-conformance",
         "feature": "jsonld-suite",
@@ -357,7 +357,39 @@
       "is_extension": false,
       "label": "W3C JSON-LD 1.1 flatten",
       "note": "native sparq_jsonld::flatten() (Flattening Algorithm §7.1 = expand ∘ node-map ∘ named-graph fold) + json_ld_equal document-level comparator (sq-oy1f.26; re-pin 50→46 from the RDF-writer oracle — the 4 drop is inherited native-expand gaps owned by sq-oy1f.37, not flatten bugs)",
-      "ratchet_floor": 53,
+      "ratchet_floor": 55,
+      "runner": {
+        "crate": "sparq-conformance",
+        "feature": "jsonld-suite",
+        "kind": "feature-gated-crate-test",
+        "target": "jsonld_suite"
+      }
+    },
+    {
+      "ci_job": "jsonld-conformance",
+      "command": "cargo test -p sparq-conformance --features jsonld-suite --test jsonld_suite",
+      "family": "W3C JSON-LD",
+      "floor_basis": "pass",
+      "is_extension": false,
+      "label": "W3C JSON-LD 1.1 html",
+      "note": "native HTML/XHTML script extraction; HTML toRdf uses sparq-jsonld; one pinned expected-success entry contradicts the no-script loading error",
+      "ratchet_floor": 49,
+      "runner": {
+        "crate": "sparq-conformance",
+        "feature": "jsonld-suite",
+        "kind": "feature-gated-crate-test",
+        "target": "jsonld_suite"
+      }
+    },
+    {
+      "ci_job": "jsonld-conformance",
+      "command": "cargo test -p sparq-conformance --features jsonld-suite --test jsonld_suite",
+      "family": "W3C JSON-LD",
+      "floor_basis": "pass",
+      "is_extension": false,
+      "label": "W3C JSON-LD 1.1 remote-doc",
+      "note": "native URL expansion through manifest-driven local responses, including redirects, media types, and context links",
+      "ratchet_floor": 18,
       "runner": {
         "crate": "sparq-conformance",
         "feature": "jsonld-suite",
@@ -680,8 +712,8 @@
   ],
   "title": "sparq conformance scoreboard",
   "totals": {
-    "conformance_floor_total": 5776,
-    "conformance_suites": 33,
+    "conformance_floor_total": 5887,
+    "conformance_suites": 35,
     "extension_assertion_total": 19708,
     "extension_suites": 11
   }

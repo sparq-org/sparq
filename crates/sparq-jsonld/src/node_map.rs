@@ -159,6 +159,7 @@ impl GraphMap {
 /// preserving first-insertion order of graph names.
 #[derive(Default)]
 pub struct NodeMap {
+    error: Option<crate::JsonLdErrorCode>,
     graphs: Vec<(String, GraphMap)>,
     /// graph name → its position in `graphs`.
     index: FxMap<String, usize>,
@@ -223,6 +224,15 @@ pub fn generate_node_map(element: &Json) -> NodeMap {
         &mut issuer,
     );
     node_map
+}
+
+/// Generate a node map, rejecting conflicting `@index` values for the same node.
+pub fn try_generate_node_map(element: &Json) -> Result<NodeMap, crate::JsonLdError> {
+    let map = generate_node_map(element);
+    if let Some(code) = map.error {
+        return Err(crate::JsonLdError::new(code));
+    }
+    Ok(map)
 }
 
 /// The recursive core (§7.2 steps). `active_graph` is the graph currently being built;
@@ -298,6 +308,10 @@ fn node_map_gen(
             }
 
             // Otherwise `element` is a node object (step 5). Determine/mint its @id.
+            if element.get("@id").is_some_and(Json::is_null) {
+                append_value(node_map, active_graph, active_subject, active_property, list, element.clone());
+                return None;
+            }
             let id = node_identifier(members, issuer);
 
             // Add a reference `{ "@id": id }` to the active subject's property (or list)
@@ -504,6 +518,11 @@ fn set_scalar_member(
     key: &str,
     value: Json,
 ) {
+    if node_map.graph(active_graph).and_then(|g| g.get(subject)).and_then(|n| n.get(key))
+        .is_some_and(|existing| *existing != value) {
+        node_map.error = Some(crate::JsonLdErrorCode::ConflictingIndexes);
+        return;
+    }
     node_map
         .graph_mut(active_graph)
         .ensure(subject)

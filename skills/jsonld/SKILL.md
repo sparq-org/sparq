@@ -36,9 +36,10 @@ There are **two** JSON-LD code paths, and it is load-bearing to keep them apart:
 ## Native pipeline — the `sparq-jsonld` crate
 
 `sparq-jsonld` is `#![forbid(unsafe_code)]`, has **zero mandatory dependencies**, and
-is published to crates.io as part of `sparq-engine`'s dependency closure. It has **no cargo feature of
-its own** — it is always compiled when a crate depends on it, so there is no
-"jsonld-off" build of *this* crate; the opt-in gating lives in the consumers (below).
+is published to crates.io as part of `sparq-engine`'s dependency closure.
+Its `html` feature is **off by default** and adds HTML/XHTML script extraction using
+html5ever and quick-xml. JSON document processing has no mandatory dependencies.
+Consumer features below control whether they link this crate.
 
 The value type is the crate's own tiny `Json` AST (no `serde_json`). Parse with
 `Json::parse(&str)`, render with `value.write(&mut String)`. `Json::parse` rejects arrays
@@ -130,10 +131,21 @@ use sparq_jsonld::from_rdf::{from_rdf, FromRdfOptions, RdfQuad, RdfTerm};
 let expanded = from_rdf(&quads, &FromRdfOptions::default())?;
 ```
 
-The **reverse** direction, `to_rdf` (native JSON-LD → RDF), is **not yet implemented**
-in this crate — the `to_rdf` module is a documented stub. To go JSON-LD → RDF today, use
-the CLI/server `jsonld` ingest (the `oxjsonld` parser) or `Graph::load_str(doc,
-"jsonld")` (see `skills/data-formats/SKILL.md`).
+For native JSON-LD → RDF, call `to_rdf::to_rdf(&input, &options, &loader)`.
+It returns `Result<Vec<RdfQuad>, JsonLdError>`, using the same crate-local RDF model.
+It expands first, validates conflicting indexes, and converts named graphs, lists,
+JSON literals and scalar values. `rdf_direction` supports both direction encodings;
+`produce_generalized_rdf` defaults to false and enables blank-node predicates when true.
+The CLI/server and `Graph::load_str(doc, "jsonld")` continue to use oxjsonld.
+
+For compacted flattening, call
+`flatten::flatten_with_context(&input, Some(&context), &options, &loader)`.
+It retains the graph envelope while honoring property-level `compact_arrays`.
+`None` or a JSON null context returns expanded flattened output. `flatten` and
+`to_rdf` reject conflicting indexes with `conflicting indexes`; framing does too.
+`node_map::try_generate_node_map(&expanded)` exposes that validation directly.
+The existing infallible `generate_node_map` and `flatten_expanded` helpers retain
+no error return; use the fallible operations when validating documents.
 
 ### Options and errors
 
@@ -157,8 +169,32 @@ through a `DocumentLoader`. The default `NoopLoader` **refuses every load** and 
 `JsonLdErrorCode::LoadingDocumentFailed`, so merely enabling JSON-LD grants a surface
 **no ambient network**. `FsLoader` maps URL prefixes to **trusted local fixtures** only
 (never attacker-supplied URLs). A network-fetching loader with an SSRF allowlist is a
-planned opt-in (`sq-oy1f.32`) and is **not** in the tree yet — do not assume remote
-context resolution works today.
+planned opt-in (`sq-oy1f.32`) and is **not** in the tree. Applications supply their
+own loader for remote documents and contexts; the processor has no HTTP client.
+An absolute IRI carried as `Json::Str` is loaded as a document by `expand`, and by
+operations that expand their input. Non-IRI string scalars still expand to an empty array.
+
+`RemoteDocument` carries raw `document` text, final `document_url`, `content_type`,
+`context_url`, and optional `profile`. A loader performs redirects, reports HTTP failures,
+selects alternate links, and rejects multiple context link headers with
+`multiple context link headers`. The processor accepts `application/json`, JSON media
+types ending in `+json`, and a missing content type as JSON-LD for compatibility.
+Unsupported types and invalid JSON raise `loading document failed`. Context links apply
+to JSON other than `application/ld+json`; they are ignored for JSON-LD and HTML/XHTML.
+Relative links and remote contexts resolve against the final document URL, even when
+`options.base` overrides the base used for node identifiers.
+
+With `features = ["html"]`, loaded `text/html` and `application/xhtml+xml` documents
+support script extraction. The default selects the first JSON-LD script;
+`extract_all_scripts = true` merges all scripts, flattening their outer arrays.
+A percent-decoded URL fragment selects the matching script `id` regardless of that flag.
+Missing targets, wrong element types, and no script with the default option raise
+`loading document failed`. Invalid script JSON raises `invalid script element`;
+legacy HTML comment wrappers are not stripped. HTML character references inside script
+text remain literal; XHTML uses XML character references and CDATA.
+The first `<base href>` resolves against the final document URL (or explicit base
+fallback) and supplies the base for extracted content. See
+[loader and HTML examples](references/loading.md).
 
 ```rust
 use sparq_jsonld::{DocumentLoader, JsonLdErrorCode, NoopLoader};
@@ -237,31 +273,31 @@ The Python wheel enables JSON-LD **ingest** by default (`sq-oy1f.20`); the docum
 ## Honest conformance status
 
 sparq drives the official `w3c/json-ld-api` and the separate `w3c/json-ld-framing`
-suites through six ratcheted lanes. Each floor is a **MEASURED minimum pass count at the
-pinned suite revision**, may only rise, and **is not a blanket "conformant" claim** —
-below-floor cases are honest, documented divergences, and the denominators include those
-failures plus intentional skips (negatives, JSON-LD-1.0-only, non-inline/remote context):
+suites through eight ratcheted lanes. Floors are measured minimum pass counts at the
+pinned revision and may only rise. They measure algorithm behavior, not HTTP negotiation,
+CLI flags, Python bindings, or wasm bundle contents.
 
-| Lane    | Measured floor | Oracle |
-| ------- | -------------: | ------ |
-| toRdf   | 413 / 467      | oxjsonld RDF-dataset comparison |
-| fromRdf | 52 / 53        | native document comparison + RDF round-trip |
-| expand  | 381 / 385      | native document-level comparison |
-| flatten | 53 / 58        | native document-level comparison |
-| compact | 243 / 246      | native normative document comparison |
-| frame   | 92 / 92        | native normative document comparison (incl. negatives) |
+| Lane | Measured floor | Oracle |
+| ---- | -------------: | ------ |
+| toRdf | 454 / 467 | native RDF dataset comparison for 1.1; legacy oxjsonld for 1.0-only |
+| fromRdf | 52 / 53 | native document comparison + RDF round-trip |
+| expand | 381 / 385 | native document comparison |
+| flatten | 55 / 58 | native document comparison, including context and negative cases |
+| compact | 244 / 246 | native normative document comparison |
+| frame | 92 / 92 | native normative document comparison |
+| html | 49 / 50 | native expand/compact/flatten/toRdf with HTML/XHTML extraction |
+| remote-doc | 18 / 18 | native expansion through virtual manifest responses |
 
-The authoritative constants live in
-`crates/sparq-conformance/src/floors/{to_rdf,from_rdf,expand,flatten,compact,frame}.rs`
-(each `pub const FLOOR: usize`). They measure **algorithm lanes**, not HTTP negotiation,
-CLI option coverage, Python bindings, wasm bundle contents, or GUI controls. A full lane
-(e.g. `frame` at its pinned revision) does **not** elevate the whole surface into an
-unqualified conformance claim. Remote-document loading (`sq-oy1f.32`) and HTML script
-extraction (`sq-oy1f.33`) remain separate, not-yet-implemented lanes and are never
-silently counted here. Reproduce:
+The authoritative constants are in `crates/sparq-conformance/src/floors/`.
+EARL excludes only JSON-LD 1.0-only entries. All other unexecuted entries fail;
+HTML `#tr006` remains a reported failure because its expected empty dataset contradicts
+Process HTML step 4's required loading error when no script exists and
+`extractAllScripts` is false. The HTML failure ceiling is one; remote-doc's is zero.
+The in-memory manifest loader maps suite URLs to local files and models media types,
+status, redirects, context links and alternates without sockets or network access.
+Reproduce after fetching the pinned suites:
 
 ```sh
-scripts/fetch-jsonld-tests.sh && scripts/fetch-jsonld-framing-tests.sh
 cargo test -p sparq-conformance --features jsonld-suite --test jsonld_suite
 ```
 

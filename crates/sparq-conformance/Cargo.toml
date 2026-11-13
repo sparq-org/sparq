@@ -58,7 +58,7 @@ path = "src/bin/notation3tests.rs"
 # back to RDF for the fromRdf semantic-equivalence comparison).
 # sq-kk1mq — also enables dep:sparq-jsonld so the expand lane can call
 # the native expand() algorithm directly instead of going through the RDF writer.
-jsonld-suite = ["sparq-core/jsonld", "sparq-engine/serialize-rdf", "dep:oxjsonld", "dep:sparq-jsonld"]
+jsonld-suite = ["sparq-core/jsonld", "sparq-engine/serialize-rdf", "dep:oxjsonld", "dep:sparq-jsonld", "sparq-jsonld/html"]
 # sq-jocpn — run the whole conformance lane (including the W3C rdf-turtle suite in
 # `turtle_suite.rs`, which parses THROUGH `sparq_core::Graph::parse_to_triples_with_base`) with the
 # native byte-level Turtle parser instead of oxttl. OFF by default; enabling it forwards to

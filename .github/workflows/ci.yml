@@ -1842,7 +1842,7 @@ jobs:
     # sq-oy1f.40: the lib-side single source the runner + scoreboard + the
     # grep gate below all read; the floors in this job's display name are informative,
     # the greps below read the real consts).
-    name: W3C JSON-LD 1.1 conformance (ratchet — toRdf >= 413, fromRdf >= 52, compact >= 228, frame >= 92)
+    name: W3C JSON-LD 1.1 conformance (ratcheted API and framing suites)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -1900,7 +1900,7 @@ jobs:
           done
       - name: Enforce ratchet (pass counts must not regress)
         run: |
-          # sq-oy1f.40 — the six floors are SOURCED from the LIB-SIDE
+          # The eight JSON-LD floors are SOURCED from the LIB-SIDE
           # single source `crates/sparq-conformance/src/floors/<lane>.rs`
           # (`pub const FLOOR: usize = N;`) instead of hard-coded here. That kills
           # the #1463 floor-DRIFT class structurally: the runner's `assert!`, the
@@ -1926,6 +1926,8 @@ jobs:
           FRAME_FLOOR=$(floor_of frame)
           EXPAND_FLOOR=$(floor_of expand)
           FLATTEN_FLOOR=$(floor_of flatten)
+          HTML_FLOOR=$(floor_of html)
+          REMOTE_DOC_FLOOR=$(floor_of remote_doc)
           # sq-shacl-flake (generalized from #1236): distinguish "scoreboard
           # never produced" (an infra/compile flake left the .out with no TOTAL line)
           # from a GENUINE regression, so an empty scoreboard is never mis-reported as
@@ -1948,6 +1950,10 @@ jobs:
           [ -n "$FRAME_PASS" ] && [ "$FRAME_PASS" -ge "$FRAME_FLOOR" ] || { echo "::error::JSON-LD frame regressed below the ratchet (${FRAME_PASS:-?} < $FRAME_FLOOR)"; exit 1; }
           [ -n "$EXPAND_PASS" ] && [ "$EXPAND_PASS" -ge "$EXPAND_FLOOR" ] || { echo "::error::JSON-LD expand regressed below the ratchet (${EXPAND_PASS:-?} < $EXPAND_FLOOR)"; exit 1; }
           [ -n "$FLATTEN_PASS" ] && [ "$FLATTEN_PASS" -ge "$FLATTEN_FLOOR" ] || { echo "::error::JSON-LD flatten regressed below the ratchet (${FLATTEN_PASS:-?} < $FLATTEN_FLOOR)"; exit 1; }
+          HTML_PASS=$(grep -E '^TOTAL html ' jsonld-conformance.out | awk '{print $3}' | head -1)
+          REMOTE_DOC_PASS=$(grep -E '^TOTAL remote-doc ' jsonld-conformance.out | awk '{print $3}' | head -1)
+          [ -n "$HTML_PASS" ] && [ "$HTML_PASS" -ge "$HTML_FLOOR" ] || { echo "::error::JSON-LD HTML regressed below the ratchet"; exit 1; }
+          [ -n "$REMOTE_DOC_PASS" ] && [ "$REMOTE_DOC_PASS" -ge "$REMOTE_DOC_FLOOR" ] || { echo "::error::JSON-LD remote documents regressed below the ratchet"; exit 1; }
       - name: Emit consolidated conformance scoreboard
         # Render the ONE central scoreboard index (all suites + floors across crates)
         # into this job's step summary, so the JSON-LD job surfaces where it sits in

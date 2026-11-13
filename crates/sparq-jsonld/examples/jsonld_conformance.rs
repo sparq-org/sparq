@@ -26,13 +26,10 @@
 //! | flatten   | [`sparq_jsonld::flatten`]        | `json_ld_equal` vs the normative expected doc |
 //! | frame     | [`sparq_jsonld::frame::frame`]   | `json_ld_equal` + exact negative error codes  |
 //! | fromRdf   | [`sparq_jsonld::from_rdf::from_rdf`] | `json_ld_equal` + exact negative error codes |
-//! | toRdf     | — NOT IMPLEMENTED natively       | reported as an explicit gap row, never a fake |
+//! | toRdf     | measured in sparq-conformance    | implementation status only in this example |
 //!
-//! **toRdf honesty note:** `sparq_jsonld::to_rdf` is still the sq-oy1f.23
-//! scaffold (the Deserialization-to-RDF algorithm lands with bead sq-oy1f.30).
-//! The ENGINE's toRdf ingest (via `oxjsonld`) is ratcheted separately in
-//! `sparq-conformance` (`floors::to_rdf`); this native scoreboard reports the
-//! toRdf row as `implemented: false` rather than borrowing the engine number.
+//! **toRdf scope:** native `to_rdf::to_rdf` is implemented and measured in
+//! `sparq-conformance`; this example reports that implementation without a pass rate.
 //!
 //! ## Relationship to the `sparq-conformance` ratchet lane (no drift)
 //!
@@ -41,7 +38,7 @@
 //! floors in `sparq_conformance::floors::<lane>` (sq-oy1f.40). This example
 //! cannot import those consts (the dependency arrow points the other way:
 //! sparq-conformance depends on sparq-jsonld), so the `*_FLOOR` consts below
-//! are documented MIRRORS calibrated at the same suite pin; the full run
+//! are historical minimums calibrated at the same suite pin; the full run
 //! asserts `pass >= FLOOR` (floor semantics — a ratchet rise upstream never
 //! breaks this runner, and a regression below the shared floor fails loudly).
 //! The `fromRdf` oracle here is DOCUMENT-LEVEL ONLY (the sparq-conformance
@@ -103,12 +100,12 @@ const SMOKE_N: usize = 30;
 
 // ── Full-run ratchet floors (pass >= FLOOR) ─────────────────────────────────
 //
-// Documented MIRRORS of `sparq_conformance::floors::<lane>::FLOOR` at suite pin
+// Documented floors, originally mirroring `sparq_conformance::floors::<lane>::FLOOR` at suite pin
 // 8654ac2 (see the module docs for why the const cannot be imported here). The
 // assertion is `>=`, so an upstream ratchet RISE never breaks this runner.
 const EXPAND_FLOOR: usize = 381; // mirrors floors::expand::FLOOR
-const COMPACT_FLOOR: usize = 243; // mirrors floors::compact::FLOOR
-const FLATTEN_FLOOR: usize = 53; // mirrors floors::flatten::FLOOR
+const COMPACT_FLOOR: usize = 244; // mirrors floors::compact::FLOOR
+const FLATTEN_FLOOR: usize = 53; // historical expanded-only floor; conformance also executes context and negative cases
 const FRAME_FLOOR: usize = 92; // mirrors floors::frame::FLOOR
 /// fromRdf floor for THIS runner's document-level-only oracle (calibrated at
 /// the pin by this example, NOT a mirror: the sparq-conformance lane adds a
@@ -911,14 +908,14 @@ fn scoreboard_json(rows: &[Row], mode: &str, frame_suite_present: bool) -> Strin
         o.set("failures", Json::Arr(fails));
         ops.set(r.op, o);
     }
-    // toRdf: the explicit NOT-IMPLEMENTED-natively gap row (honesty invariant).
+    // Native toRdf is measured by the conformance crate, not this example.
     let mut tordf = Json::obj();
-    tordf.set("implemented", Json::Raw("false".to_string()));
+    tordf.set("implemented", Json::Raw("true".to_string()));
+    tordf.set("measured", Json::Raw("false".to_string()));
     tordf.set(
         "note",
         Json::Str(
-            "native Deserialization-to-RDF is the sq-oy1f.30 scaffold; the engine-path toRdf \
-             (oxjsonld) is ratcheted in sparq-conformance floors::to_rdf"
+            "native to_rdf::to_rdf is implemented; its counts are measured in sparq-conformance floors::to_rdf"
                 .to_string(),
         ),
     );
@@ -960,8 +957,7 @@ fn print_human(rows: &[Row], mode: &str) {
         );
     }
     println!(
-        "toRdf      NOT IMPLEMENTED natively (sq-oy1f.30 scaffold); engine-path toRdf is \
-         ratcheted in sparq-conformance"
+        "toRdf      implemented natively; measured in sparq-conformance"
     );
     let failing: usize = rows.iter().map(|r| r.score.failures.len()).sum();
     println!("\nfailing tests ({failing} — complete listing, never elided):");

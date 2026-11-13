@@ -60,14 +60,64 @@ fn expand_inner(
     options: &JsonLdOptions,
     loader: &dyn DocumentLoader,
 ) -> Result<Json, JsonLdError> {
+    if let Json::Str(url) = input {
+        if is_absolute_iri(url) {
+            return expand_remote(url, options, loader).map(|(expanded, _)| expanded);
+        }
+    }
+    expand_document(input, options, loader, None)
+}
+
+pub(crate) fn expand_remote(
+    url: &str,
+    options: &JsonLdOptions,
+    loader: &dyn DocumentLoader,
+) -> Result<(Json, String), JsonLdError> {
+    let (document, remote) = crate::loader::load_parsed(url, options, loader)?;
+    let expanded = expand_document(&document, options, loader, Some(&remote))?;
+    Ok((expanded, remote.document_url))
+}
+
+fn expand_document(
+    input: &Json,
+    options: &JsonLdOptions,
+    loader: &dyn DocumentLoader,
+    remote: Option<&crate::loader::RemoteDocument>,
+) -> Result<Json, JsonLdError> {
+    let document_url = remote
+        .map(|d| d.document_url.as_str())
+        .or(options.base.as_deref());
     // §5.1: initialise the active context from options.base.
-    let mut active_context = ActiveContext::new(options.base.as_deref());
+    let mut active_context = ActiveContext::new(document_url);
+    let html = remote
+        .and_then(|d| d.content_type.as_deref())
+        .is_some_and(|t| {
+            ["text/html", "application/xhtml+xml"].iter().any(|media| {
+                t.split(';')
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .eq_ignore_ascii_case(media)
+            })
+        });
+    if !html
+        && options
+            .base
+            .as_deref()
+            .is_some_and(|base| Some(base) != document_url)
+    {
+        active_context.base_iri = options.base.clone();
+    }
 
     // §5.1 step 6: if expandContext is set, fold it in first. A map carrying an @context
     // entry contributes that entry's value.
     if let Some(ctx) = &options.expand_context {
         let local = ctx.get("@context").unwrap_or(ctx);
-        active_context = active_context.process(local, options.base.as_deref(), loader, options)?;
+        active_context = active_context.process(local, document_url, loader, options)?;
+    }
+    if let Some(url) = remote.and_then(|d| d.context_url.as_ref()) {
+        active_context =
+            active_context.process(&Json::Str(url.clone()), Some(url), loader, options)?;
     }
 
     let ctx = Ctx {
@@ -80,7 +130,7 @@ fn expand_inner(
         &active_context,
         None,
         input,
-        options.base.as_deref(),
+        document_url,
         options.frame_expansion,
         false,
     )?;

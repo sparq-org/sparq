@@ -375,6 +375,8 @@ const LIB_SOURCED_FLOORS: &[&str] = &[
     "W3C JSON-LD 1.1 frame",
     "W3C JSON-LD 1.1 expand",
     "W3C JSON-LD 1.1 flatten",
+    "W3C JSON-LD 1.1 html",
+    "W3C JSON-LD 1.1 remote-doc",
 ];
 
 /// sq-oy1f.40 — the pinned floor VALUES the six lib-sourced JSON-LD
@@ -396,7 +398,7 @@ const LIB_SOURCED_EXPECTED: &[(&str, usize)] = &[
     ("W3C RDF 1.2 N-Triples C14N", 41),
     ("W3C RDF 1.2 N-Quads syntax", 31),
     ("W3C RDF 1.2 N-Quads C14N", 41),
-    ("W3C JSON-LD 1.1 toRdf", 413),
+    ("W3C JSON-LD 1.1 toRdf", 454),
     // sq-oy1f.28 — raised 51 → 52: the lane flipped from the engine-writer
     // round-trip oracle to the native document-level `sparq_jsonld::from_rdf` (§8.1)
     // oracle (normative expected-doc comparison + scoped round-trip + REAL negative
@@ -412,7 +414,7 @@ const LIB_SOURCED_EXPECTED: &[(&str, usize)] = &[
     // NegativeEvaluationTests against the manifest's `expectErrorCode` instead of
     // skipping them (a wrong code is a FAIL). Bumped in the SAME commit as the lib
     // const src/floors/compact.rs::FLOOR (rise-only).
-    ("W3C JSON-LD 1.1 compact", 243),
+    ("W3C JSON-LD 1.1 compact", 244),
     // sq-oy1f.29 — raised 61 → 92: the frame lane moved from the RDF-first
     // framer (`graph_to_jsonld_framed`) to the NATIVE Framing pipeline compared against
     // the W3C EXPECTED document under the stronger normative oracle (see
@@ -436,7 +438,9 @@ const LIB_SOURCED_EXPECTED: &[(&str, usize)] = &[
     // so merging main flips its 7 inherited fails to passes and it now MEASURES 53 pass /
     // 0 fail on the merged tree — a net RISE above the old writer oracle's 50 (union of
     // the native oracle AND main's expand fixes — see src/floors/flatten.rs). Rise-only.
-    ("W3C JSON-LD 1.1 flatten", 53),
+    ("W3C JSON-LD 1.1 flatten", 55),
+    ("W3C JSON-LD 1.1 html", 49),
+    ("W3C JSON-LD 1.1 remote-doc", 18),
 ];
 
 /// sq-oy1f.40 — the registry's six lib-sourced JSON-LD floors carry the
