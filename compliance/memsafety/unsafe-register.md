@@ -160,8 +160,8 @@ re-derived from `scripts/unsafe-gate.py --list`. [OPUS-5]
 
 | File:line | Kind | Invariant relied on | Why sound / how bounded |
 |---|---|---|---|
-| `src/verifier.rs:1296` | `libc::flock(LOCK_EX)` | `fd` is a valid open fd owned by `file` for the call | the `MutexGuard` keeps `file` (hence `fd`) alive; an error fails closed (`return false`). |
-| `src/verifier.rs:1304` | `libc::flock(LOCK_UN)` | same valid, locked fd | unlock helper run on every return path so the advisory lock is never leaked (a leak would deadlock the next caller). |
+| `src/verifier.rs:1172` | `libc::flock(LOCK_EX)` | `fd` is a valid open fd owned by `file` for the call | the `MutexGuard` keeps `file` (hence `fd`) alive; an error fails closed (`return false`). |
+| `src/verifier.rs:1180` | `libc::flock(LOCK_UN)` | same valid, locked fd | unlock helper run on every return path so the advisory lock is never leaked (a leak would deadlock the next caller). |
 | `src/driver.rs:168` | `libc::flock(LOCK_EX)` | the private `NargoCacheLock` exclusively owns the valid open file descriptor across the call | no pointer arguments or descriptor ownership transfer; errors reject, and scope-owned `File` closure releases the lock on return/unwind. Four-process exclusion and real concurrent compilation regressions exercise OS behavior; Miri does not model this external OS lock. |
 
 ### `sparq-bench` — 1 site (peak-RSS measurement; non-shipping bench binary)
