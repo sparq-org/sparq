@@ -44,7 +44,7 @@ pyo3-build-config = "0.29"
 # `extension-module` tells pyo3 NOT to link libpython (the interpreter provides the
 # symbols at import time) — required for manylinux wheels, and it keeps a plain
 # `cargo build -p sparq-py` working without Python development headers.
-pyo3 = { version = "0.29", features = ["abi3-py39", "extension-module"] }
+pyo3 = { version = "0.30", features = ["abi3-py39", "extension-module"] }
 # `mmap` enables Graph::save / Graph::open (the out-of-core persisted-index path).
 sparq-core = { path = "../sparq-core", features = ["mmap"] }
 # sq-11664: enable the same planner/optimizer feature trio the CLI ships
