@@ -1,0 +1,107 @@
+{
+  "baseline_commit": "a46bc3ae7c9f348d4d52e9f63e688104bb0edc3a",
+  "baseline_phase_measurement_image_id": "698921c240f4d51c2a0f14da3e2dbfb6b813b5a461d277f962db5ebd436a0df4",
+  "baseline_production_image_id": "bca6f036281819c63ef04b5a6ff91dffe2d2a62f9f898a4a58392fdae6a5d653",
+  "comparison": {
+    "count_deltas_sha256": "c71dcf0118da77832419341d4b7083dd918c9009e531013dc39b11e8eb41fe40",
+    "counts": "/mnt/project-files/zk/evidence-freeze/count-deltas-fixed.json",
+    "journal_comparison_sha256": "210c7b86fe8900b270b27e4d76a03c03bda719a5927108d4587c8ce5d461e158",
+    "journals": "/mnt/project-files/zk/evidence-freeze/journal-comparison-fixed.json"
+  },
+  "count_reproducibility": {
+    "independent_processes": 3,
+    "record": "/mnt/project-files/zk/evidence-freeze/count-reproducibility-fixed.json",
+    "record_sha256": "dca092f6f7dbfc1806c9ea1973da91be160d91e5fc9ff561c86889c2d862e3d6",
+    "result": "passed",
+    "same_production_and_phase_counts": true,
+    "same_witness_artifact_and_journal_hashes": true,
+    "tested_configurations": 8,
+    "tested_records_per_run": 40
+  },
+  "environment": {
+    "binary_sha256": {
+      "paper_sweep": "c1bb95358176a8e58e30bc50f0a739eeabaac4df8765573380a51763b602a799",
+      "r0vm": "751b9b188d341e8bec5e02060086b7b1dc3f7289e90f726c38589bb6735dd6d7"
+    },
+    "cargo_build_jobs": "2",
+    "environment": "indicative",
+    "executor_only": true,
+    "machine": {
+      "available_cpus": 4,
+      "logical_cpus": 4,
+      "os_release": "PRETTY_NAME=\"Ubuntu 24.04.5 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nVERSION=\"24.04.5 LTS (Noble Numbat)\"\nVERSION_CODENAME=noble\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=noble\nLOGO=ubuntu-logo",
+      "platform": "Linux-6.18.44-fc-v445-x86_64-with-glibc2.39"
+    },
+    "risc0_build_locked": "1",
+    "toolchain": {
+      "guest_rust": "rustc 1.97.0-dev (e638c6cfe 2026-07-15)\nbinary: rustc\ncommit-hash: e638c6cfea1eff5fbbb24a27e60538e3760d21b8\ncommit-date: 2026-07-15\nhost: x86_64-unknown-linux-gnu\nrelease: 1.97.0-dev\nLLVM version: 22.1.6",
+      "host_rust": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.97.1\nLLVM version: 22.1.6",
+      "r0vm": "risc0-r0vm 3.0.6"
+    }
+  },
+  "executor_only": true,
+  "expected_production_image_id": "92aea3e0a1e92cf4d29e316a39da653916cfe99c0dd1ade59e9a6a47ce083195",
+  "freeze_commit": null,
+  "freeze_commit_candidate": "0967474ec3c212ff6c0725d47248a885ddce0390",
+  "freeze_status": "preliminary: fixed-image main counts reproduced; final combined-commit regeneration pending",
+  "generation": {
+    "archives": "Canonical JSON lines without wall-clock fields, deterministic gzip header",
+    "audit_generator": "zk/sparql-evaluator/scripts/paper_executor_audit.py",
+    "finalizer": "/mnt/project-files/zk/evidence-freeze/fixed-records/finalize_records.py",
+    "runner": "/mnt/project-files/zk/evidence-freeze/fixed-records/run_campaign.py",
+    "script_sha256": {
+      "baseline_replay.py": "1c449a72e22fce3bcdba5d55efbbaeb3d5d68d096c0be630f29b8d51df8bd91f",
+      "check_outputs.py": "9385e4f3528c122085b43e46341449949be635ae6e5430062a77bedf88ef2153",
+      "finalize_records.py": "558f1b8fca28caca6fa20a3fb3812a9921360dda3a67526d0f4c0657e983ee8d",
+      "regenerate.sh": "df34f94e18140d95b5c08054d91a32bf4de34e57094c954bb23b1eed1b35a4bb",
+      "run_campaign.py": "9dddf2a324c7afcaa6da507c325681af128a865658da73fa936061456ca495d5"
+    }
+  },
+  "guest_artifact_sha256": "7f274a7bb33eb04208ef77ce2b1af19436bea34f1bd5cc7119178aa120b0a834",
+  "image_change_explanation": "The quoted ID is from the initial pre-merge diagnostic source manifest. Later review changed bounded canonicalization source, and merged main includes intervening core and engine changes. See /mnt/project-files/zk/evidence-freeze/image-provenance-fixed.json; exact per-commit image-delta causality has not been isolated.",
+  "phase_artifact_sha256": "abaa964bbe26b50de0b878a0dc76f3b52a68fdbb674d89779277afbc623bc8ca",
+  "phase_image_equal": false,
+  "phase_image_explanation": "The phase image adds measurement instrumentation and is not the production image.",
+  "phase_measurement_image_id": "b5225118f56d1e9f74d37037dfee2882ce71f8c626869ca6dbe14f17ddc588fd",
+  "production_image_equal": false,
+  "production_image_id": "08eddcafd611443958daee23da73fab05aac5140231d2fa9f1efa0a35e55b2ca",
+  "production_image_matches_reproducibility_change": false,
+  "proofs": 0,
+  "raw_output_directory": "/mnt/project-files/zk/evidence-freeze/fixed-records/candidate-0967474e",
+  "schema": "sparq.zk-paper-executor-freeze-audit.v1",
+  "sets": {
+    "main": {
+      "admissions_rejections_unchanged_from_step1": true,
+      "admitted": 40,
+      "archive_sha256": "0bdb8f5bef7a880c3f781ecb970195a82d495c6e971586937c488b85855a0dc9",
+      "audit": "research/zk-paper-evidence/paper-executor-main-audit.json",
+      "cases": 5,
+      "configurations": 8,
+      "executed": 40,
+      "executor_outcome_changes": 0,
+      "journal_hash_comparisons": 40,
+      "phase_records": 40,
+      "raw_output_sha256": "dad39ba33f0672278ab0af57b4d6d9df9c0f7df52cce2bad0dc99a65fd3fc4ec",
+      "records": 40,
+      "rejected": 0,
+      "repository_records_sha256": "12147d0a4d3fc5c86f57b8bdcbaa324940df29e0354752a42adb4534fba37092"
+    },
+    "sweep": {
+      "admissions_rejections_unchanged_from_step1": true,
+      "admitted": 680,
+      "archive_sha256": "0a02e2c78162a6fab4e67e1a892977463c45345c287ec5115ab6ab380e71c2b4",
+      "audit": "research/zk-paper-evidence/paper-executor-sweep-audit.json",
+      "cases": 52,
+      "configurations": 16,
+      "executed": 638,
+      "executor_outcome_changes": 8,
+      "journal_hash_comparisons": 638,
+      "phase_records": 0,
+      "raw_output_sha256": "45feb61408c96c2a4416494ef87068b5acfaaacf26a68658acedd5806cf8ae21",
+      "records": 832,
+      "rejected": 152,
+      "repository_records_sha256": "08236040985b130d820fda846b86143fefe817ad37da109698f544cfb3202720"
+    }
+  },
+  "source_commit": "0967474ec3c212ff6c0725d47248a885ddce0390"
+}

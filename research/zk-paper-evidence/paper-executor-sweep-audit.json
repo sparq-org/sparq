@@ -1,19 +1,17 @@
 {
   "schema": "sparq.zk-paper-executor-audit.v1",
-  "source": "ad457bf4b8abdc145607cdbc561debd21b1e0875",
-  "source_note": "Harness built from fix/zk-v5-answer-profile at ad457bf4 (PR #6792 stacked on #6791 and #6789); the same deltas were later rebuilt on main as efd8cc7f with byte-identical diffs. The harness and its fixtures land on main with #6791 and #6792. Re-executions of the rejected n=4 runs (paper-executor-sweep-reruns.jsonl.gz) used the same guest image with the harness at efd8cc7f plus its guest_error field: paper_sweep --set sweep --n 4 --only CASE --execute.",
+  "source": "0967474ec3c212ff6c0725d47248a885ddce0390",
+  "source_note": "Preliminary executor-only regeneration on the fixed image. Independent main-set processes matched all recorded counts and witness, artifact and journal identities. This is not the final combined-commit freeze: regenerate after the host-only harness change lands. Raw outputs, repeat checks and step-1 comparisons: /mnt/project-files/zk/evidence-freeze/fixed-records/. See paper-executor-freeze-audit.json for provenance. Repository archives omit wall-clock fields; sweep records carry rejection outcomes directly.",
   "harness": "zk/sparql-evaluator/host/examples/paper_sweep.rs",
   "generator": "zk/sparql-evaluator/scripts/paper_executor_audit.py",
   "set": "sweep",
-  "guest_image_id": "fbf681f7998bf23dabcc54ab0084360de3de8344e7e39a9ab02475ea0e53fd68",
-  "phase_measurement_image_id": "458152dbe6877a4e3ee446cb3301d7bde07251f7380f69ae8e6b86040d3d7238",
+  "guest_image_id": "08eddcafd611443958daee23da73fab05aac5140231d2fa9f1efa0a35e55b2ca",
+  "phase_measurement_image_id": "b5225118f56d1e9f74d37037dfee2882ce71f8c626869ca6dbe14f17ddc588fd",
   "r0vm": "risc0-r0vm 3.0.6",
   "executor_only": true,
   "proofs": 0,
-  "records_sha256": "fda077e464fb4bee5026890964670a318895b5f239fe07e2b19d67fd62df7124",
+  "records_sha256": "08236040985b130d820fda846b86143fefe817ad37da109698f544cfb3202720",
   "records": 832,
-  "reruns_sha256": "4ec781382592887b2c2379a8cba8842744876e0e50034bcbcd7ad0e49cd16f13",
-  "reruns": 80,
   "session_limit_cycles": 33554432,
   "note": "RISC Zero executor runs of the accepted V5 image; user_cycles exclude padding, total_cycles are padded segment cycles. Phase cycles come from the separate phase measurement image and include its instrumentation. Wall-clock fields in the records are from a shared container and are not evidence.",
   "cases": [
@@ -285,18 +283,18 @@
         }
       ],
       "user_cycles": {
-        "median": 8071413,
-        "min": 8008619,
-        "max": 14465989
+        "median": 7663935,
+        "min": 7597116,
+        "max": 13122855
       },
       "total_cycles": {
-        "median": 9437184,
-        "min": 9437184,
-        "max": 16777216
+        "median": 8912896,
+        "min": 8912896,
+        "max": 15204352
       },
       "segments": {
         "median": 9,
-        "max": 16
+        "max": 15
       }
     },
     {
@@ -357,18 +355,18 @@
         }
       ],
       "user_cycles": {
-        "median": 10575018,
-        "min": 10507077,
-        "max": 19787201
+        "median": 9711681,
+        "min": 9644353,
+        "max": 17652069
       },
       "total_cycles": {
-        "median": 12582912,
-        "min": 12058624,
-        "max": 23068672
+        "median": 11534336,
+        "min": 11010048,
+        "max": 20447232
       },
       "segments": {
-        "median": 12,
-        "max": 22
+        "median": 11,
+        "max": 20
       }
     },
     {
@@ -434,18 +432,18 @@
         }
       ],
       "user_cycles": {
-        "median": 27943133.5,
-        "min": 27778211,
-        "max": 28559207
+        "median": 26287192.5,
+        "min": 26160841,
+        "max": 26861331
       },
       "total_cycles": {
-        "median": 31719424.0,
-        "min": 31457280,
-        "max": 32505856
+        "median": 29622272.0,
+        "min": 29392896,
+        "max": 30408704
       },
       "segments": {
-        "median": 31.0,
-        "max": 31
+        "median": 29.0,
+        "max": 29
       }
     },
     {
@@ -520,37 +518,37 @@
         {
           "case": "probe-bnode-fn",
           "rejection": "nondeterministic or RDF 1.2 function is not admitted",
-          "rejection_cause": "session_limit"
+          "rejection_cause": "guest_abort"
         },
         {
           "case": "probe-custom-function",
           "rejection": "custom function is not admitted",
-          "rejection_cause": "session_limit"
+          "rejection_cause": "guest_abort"
         },
         {
           "case": "probe-nested-exists",
           "rejection": "nested EXISTS is not admitted",
-          "rejection_cause": "session_limit"
+          "rejection_cause": "guest_abort"
         },
         {
           "case": "probe-now",
           "rejection": "nondeterministic or RDF 1.2 function is not admitted",
-          "rejection_cause": "session_limit"
+          "rejection_cause": "guest_abort"
         },
         {
           "case": "probe-rand",
           "rejection": "nondeterministic or RDF 1.2 function is not admitted",
-          "rejection_cause": "session_limit"
+          "rejection_cause": "guest_abort"
         },
         {
           "case": "probe-service",
           "rejection": "GRAPH, SERVICE and LATERAL are not admitted",
-          "rejection_cause": "session_limit"
+          "rejection_cause": "guest_abort"
         },
         {
           "case": "probe-triple-term",
           "rejection": "query blank nodes and triple terms are not admitted",
-          "rejection_cause": "session_limit"
+          "rejection_cause": "guest_abort"
         }
       ]
     },
@@ -612,18 +610,18 @@
         }
       ],
       "user_cycles": {
-        "median": 4748304,
-        "min": 4666226,
-        "max": 11172626
+        "median": 4329655,
+        "min": 4262789,
+        "max": 9788582
       },
       "total_cycles": {
-        "median": 6291456,
-        "min": 5767168,
-        "max": 13631488
+        "median": 5275648,
+        "min": 5242880,
+        "max": 11534336
       },
       "segments": {
         "median": 6,
-        "max": 13
+        "max": 11
       }
     },
     {
@@ -684,18 +682,18 @@
         }
       ],
       "user_cycles": {
-        "median": 7328924,
-        "min": 7253357,
-        "max": 16528704
+        "median": 6464042,
+        "min": 6397144,
+        "max": 14404799
       },
       "total_cycles": {
-        "median": 8912896,
-        "min": 8650752,
-        "max": 19398656
+        "median": 7864320,
+        "min": 7602176,
+        "max": 16777216
       },
       "segments": {
-        "median": 9,
-        "max": 19
+        "median": 8,
+        "max": 16
       }
     },
     {
@@ -722,7 +720,7 @@
         {
           "case": "path-zero-or-more",
           "rejection": "V3 table canonicalization rejected",
-          "rejection_cause": "session_limit"
+          "rejection_cause": "guest_abort"
         },
         {
           "case": "probe-bnode-fn",
@@ -761,18 +759,18 @@
         }
       ],
       "user_cycles": {
-        "median": 14701396.0,
-        "min": 14519564,
-        "max": 15300947
+        "median": 13041854.0,
+        "min": 12913348,
+        "max": 13613839
       },
       "total_cycles": {
-        "median": 17825792.0,
-        "min": 17825792,
-        "max": 18350080
+        "median": 15728640.0,
+        "min": 15728640,
+        "max": 16252928
       },
       "segments": {
-        "median": 17.0,
-        "max": 18
+        "median": 15.0,
+        "max": 16
       }
     },
     {
@@ -838,18 +836,18 @@
         }
       ],
       "user_cycles": {
-        "median": 24923744.5,
-        "min": 24770225,
-        "max": 26959988
+        "median": 21439627.0,
+        "min": 21311025,
+        "max": 22911676
       },
       "total_cycles": {
-        "median": 29360128.0,
-        "min": 28835840,
-        "max": 31457280
+        "median": 25165824.0,
+        "min": 25165824,
+        "max": 26738688
       },
       "segments": {
-        "median": 28.0,
-        "max": 30
+        "median": 24.0,
+        "max": 26
       }
     },
     {
@@ -910,18 +908,18 @@
         }
       ],
       "user_cycles": {
-        "median": 7001824,
-        "min": 6934529,
-        "max": 13430343
+        "median": 6957697,
+        "min": 6890886,
+        "max": 12422020
       },
       "total_cycles": {
         "median": 8388608,
         "min": 7864320,
-        "max": 15728640
+        "max": 14680064
       },
       "segments": {
         "median": 8,
-        "max": 15
+        "max": 14
       }
     },
     {
@@ -982,18 +980,18 @@
         }
       ],
       "user_cycles": {
-        "median": 8659407,
-        "min": 8589620,
-        "max": 17859878
+        "median": 8615182,
+        "min": 8548194,
+        "max": 16567398
       },
       "total_cycles": {
         "median": 9961472,
-        "min": 9961472,
-        "max": 20971520
+        "min": 9699328,
+        "max": 18874368
       },
       "segments": {
         "median": 10,
-        "max": 20
+        "max": 18
       }
     },
     {
@@ -1059,17 +1057,17 @@
         }
       ],
       "user_cycles": {
-        "median": 23814424.5,
-        "min": 23683495,
-        "max": 24437891
+        "median": 23636659.0,
+        "min": 23510373,
+        "max": 24208747
       },
       "total_cycles": {
-        "median": 26476544.0,
+        "median": 26214400.0,
         "min": 26214400,
         "max": 27262976
       },
       "segments": {
-        "median": 26.0,
+        "median": 25.0,
         "max": 26
       }
     },
@@ -1136,18 +1134,18 @@
         }
       ],
       "user_cycles": {
-        "median": 30249242.0,
-        "min": 30126746,
-        "max": 32360926
+        "median": 30077283.0,
+        "min": 29948868,
+        "max": 31616806
       },
       "total_cycles": {
         "median": 33554432.0,
-        "min": 33554432,
-        "max": 36175872
+        "min": 33030144,
+        "max": 35127296
       },
       "segments": {
         "median": 32.0,
-        "max": 35
+        "max": 34
       }
     },
     {
@@ -1208,18 +1206,18 @@
         }
       ],
       "user_cycles": {
-        "median": 3721589,
-        "min": 3651604,
-        "max": 10138511
+        "median": 3676960,
+        "min": 3610073,
+        "max": 9141313
       },
       "total_cycles": {
         "median": 4718592,
-        "min": 4456448,
-        "max": 12058624
+        "min": 4325376,
+        "max": 11010048
       },
       "segments": {
         "median": 5,
-        "max": 12
+        "max": 11
       }
     },
     {
@@ -1280,18 +1278,18 @@
         }
       ],
       "user_cycles": {
-        "median": 5380737,
-        "min": 5313849,
-        "max": 14577354
+        "median": 5337153,
+        "min": 5270177,
+        "max": 13289345
       },
       "total_cycles": {
         "median": 6291456,
         "min": 6291456,
-        "max": 17039360
+        "max": 15728640
       },
       "segments": {
         "median": 6,
-        "max": 17
+        "max": 15
       }
     },
     {
@@ -1357,14 +1355,14 @@
         }
       ],
       "user_cycles": {
-        "median": 10589056.5,
-        "min": 10453872,
-        "max": 11214796
+        "median": 10414120.0,
+        "min": 10285570,
+        "max": 10983982
       },
       "total_cycles": {
         "median": 12582912.0,
-        "min": 12582912,
-        "max": 13631488
+        "min": 12058624,
+        "max": 12845056
       },
       "segments": {
         "median": 12.0,
@@ -1434,14 +1432,14 @@
         }
       ],
       "user_cycles": {
-        "median": 17088546.5,
-        "min": 16960630,
-        "max": 19222429
+        "median": 16915347.0,
+        "min": 16789048,
+        "max": 18461205
       },
       "total_cycles": {
-        "median": 19922944.0,
-        "min": 19398656,
-        "max": 22020096
+        "median": 19398656.0,
+        "min": 19136512,
+        "max": 21102592
       },
       "segments": {
         "median": 19.0,

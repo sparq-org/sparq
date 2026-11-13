@@ -1,16 +1,16 @@
 {
   "schema": "sparq.zk-paper-executor-audit.v1",
-  "source": "ad457bf4b8abdc145607cdbc561debd21b1e0875",
-  "source_note": "Harness built from fix/zk-v5-answer-profile at ad457bf4 (PR #6792 stacked on #6791 and #6789); the same deltas were later rebuilt on main as efd8cc7f with byte-identical diffs. The harness and its fixtures land on main with #6791 and #6792.",
+  "source": "0967474ec3c212ff6c0725d47248a885ddce0390",
+  "source_note": "Preliminary executor-only regeneration on the fixed image. Independent main-set processes matched all recorded counts and witness, artifact and journal identities. This is not the final combined-commit freeze: regenerate after the host-only harness change lands. Raw outputs, repeat checks and step-1 comparisons: /mnt/project-files/zk/evidence-freeze/fixed-records/. See paper-executor-freeze-audit.json for provenance. Repository archives omit wall-clock fields; sweep records carry rejection outcomes directly.",
   "harness": "zk/sparql-evaluator/host/examples/paper_sweep.rs",
   "generator": "zk/sparql-evaluator/scripts/paper_executor_audit.py",
   "set": "main",
-  "guest_image_id": "fbf681f7998bf23dabcc54ab0084360de3de8344e7e39a9ab02475ea0e53fd68",
-  "phase_measurement_image_id": "458152dbe6877a4e3ee446cb3301d7bde07251f7380f69ae8e6b86040d3d7238",
+  "guest_image_id": "08eddcafd611443958daee23da73fab05aac5140231d2fa9f1efa0a35e55b2ca",
+  "phase_measurement_image_id": "b5225118f56d1e9f74d37037dfee2882ce71f8c626869ca6dbe14f17ddc588fd",
   "r0vm": "risc0-r0vm 3.0.6",
   "executor_only": true,
   "proofs": 0,
-  "records_sha256": "8c7c0c5f2a2bbf21f59c1257c19e2b09f57991a469d70b2e86ad63c5b79496b8",
+  "records_sha256": "12147d0a4d3fc5c86f57b8bdcbaa324940df29e0354752a42adb4534fba37092",
   "records": 40,
   "session_limit_cycles": 33554432,
   "note": "RISC Zero executor runs of the accepted V5 image; user_cycles exclude padding, total_cycles are padded segment cycles. Phase cycles come from the separate phase measurement image and include its instrumentation. Wall-clock fields in the records are from a shared container and are not evidence.",
@@ -48,18 +48,18 @@
       "executed": 5,
       "over_session_limit": [],
       "user_cycles": {
-        "median": 7154300,
-        "min": 7091746,
-        "max": 7312474
+        "median": 6910214,
+        "min": 6859195,
+        "max": 7054037
       },
       "total_cycles": {
         "median": 8388608,
-        "min": 8388608,
-        "max": 8519680
+        "min": 7864320,
+        "max": 8388608
       },
       "segments": {
         "median": 8,
-        "max": 9
+        "max": 8
       }
     },
     {
@@ -73,18 +73,18 @@
       "executed": 5,
       "over_session_limit": [],
       "user_cycles": {
-        "median": 24243733,
-        "min": 24139684,
-        "max": 25015601
+        "median": 23269230,
+        "min": 23167696,
+        "max": 23880243
       },
       "total_cycles": {
-        "median": 27394048,
-        "min": 27262976,
-        "max": 28311552
+        "median": 26214400,
+        "min": 26214400,
+        "max": 27262976
       },
       "segments": {
-        "median": 27,
-        "max": 27
+        "median": 25,
+        "max": 26
       }
     },
     {
@@ -98,14 +98,14 @@
       "executed": 5,
       "over_session_limit": [],
       "user_cycles": {
-        "median": 3888213,
-        "min": 3833513,
-        "max": 4031118
+        "median": 3635255,
+        "min": 3584145,
+        "max": 3778979
       },
       "total_cycles": {
-        "median": 5242880,
-        "min": 4718592,
-        "max": 5242880
+        "median": 4718592,
+        "min": 4456448,
+        "max": 4718592
       },
       "segments": {
         "median": 5,
@@ -123,18 +123,18 @@
       "executed": 5,
       "over_session_limit": [],
       "user_cycles": {
-        "median": 11125709,
-        "min": 10976376,
-        "max": 11866828
+        "median": 10122424,
+        "min": 10020869,
+        "max": 10733016
       },
       "total_cycles": {
-        "median": 13631488,
-        "min": 13107200,
-        "max": 14680064
+        "median": 12582912,
+        "min": 12058624,
+        "max": 12845056
       },
       "segments": {
-        "median": 13,
-        "max": 14
+        "median": 12,
+        "max": 13
       }
     },
     {
@@ -148,13 +148,13 @@
       "executed": 5,
       "over_session_limit": [],
       "user_cycles": {
-        "median": 6624007,
-        "min": 6568110,
-        "max": 6784232
+        "median": 6576040,
+        "min": 6525045,
+        "max": 6720249
       },
       "total_cycles": {
         "median": 7602176,
-        "min": 7471104,
+        "min": 7405568,
         "max": 7864320
       },
       "segments": {
@@ -173,18 +173,18 @@
       "executed": 5,
       "over_session_limit": [],
       "user_cycles": {
-        "median": 21968326,
-        "min": 21867684,
-        "max": 22725778
+        "median": 21788772,
+        "min": 21687204,
+        "max": 22392965
       },
       "total_cycles": {
-        "median": 24641536,
-        "min": 24379392,
-        "max": 25427968
+        "median": 24182784,
+        "min": 24117248,
+        "max": 25165824
       },
       "segments": {
         "median": 24,
-        "max": 25
+        "max": 24
       }
     },
     {
@@ -198,18 +198,18 @@
       "executed": 5,
       "over_session_limit": [],
       "user_cycles": {
-        "median": 3305383,
-        "min": 3254139,
-        "max": 3466694
+        "median": 3258703,
+        "min": 3207560,
+        "max": 3402863
       },
       "total_cycles": {
         "median": 4194304,
         "min": 4194304,
-        "max": 4325376
+        "max": 4194304
       },
       "segments": {
         "median": 4,
-        "max": 5
+        "max": 4
       }
     },
     {
@@ -223,14 +223,14 @@
       "executed": 5,
       "over_session_limit": [],
       "user_cycles": {
-        "median": 8799346,
-        "min": 8691196,
-        "max": 9550733
+        "median": 8618071,
+        "min": 8516515,
+        "max": 9222014
       },
       "total_cycles": {
         "median": 10485760,
         "min": 10485760,
-        "max": 11534336
+        "max": 11010048
       },
       "segments": {
         "median": 10,
@@ -245,12 +245,12 @@
       "signature_mode": "hidden",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 1395383,
-        "Journal": 573864,
-        "Mapping": 56481,
-        "ProofConfig": 461298,
-        "Query": 666356,
-        "Request": 591366,
+        "Document": 1185989,
+        "Journal": 573976,
+        "Mapping": 56871,
+        "ProofConfig": 421245,
+        "Query": 666065,
+        "Request": 591385,
         "Signature": 3282459,
         "input": 70679
       }
@@ -261,12 +261,12 @@
       "signature_mode": "hidden",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 5493112,
-        "Journal": 573864,
-        "Mapping": 178172,
-        "ProofConfig": 1851199,
-        "Query": 1964560,
-        "Request": 693402,
+        "Document": 4665940,
+        "Journal": 573976,
+        "Mapping": 179678,
+        "ProofConfig": 1687096,
+        "Query": 1965184,
+        "Request": 693421,
         "Signature": 13173703,
         "input": 224711
       }
@@ -277,12 +277,12 @@
       "signature_mode": "revealed",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 1387198,
-        "Journal": 574271,
-        "Mapping": 56693,
-        "ProofConfig": 460599,
-        "Query": 666472,
-        "Request": 591772,
+        "Document": 1185989,
+        "Journal": 574383,
+        "Mapping": 57083,
+        "ProofConfig": 421245,
+        "Query": 666181,
+        "Request": 591791,
         "input": 66148
       }
     },
@@ -292,12 +292,12 @@
       "signature_mode": "revealed",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 5479424,
-        "Journal": 574271,
-        "Mapping": 179424,
-        "ProofConfig": 1848758,
-        "Query": 1964581,
-        "Request": 693805,
+        "Document": 4666104,
+        "Journal": 574383,
+        "Mapping": 180930,
+        "ProofConfig": 1686938,
+        "Query": 1965205,
+        "Request": 693824,
         "input": 206423
       }
     },
@@ -307,12 +307,12 @@
       "signature_mode": "hidden",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 800695,
-        "Journal": 574493,
-        "Mapping": 56198,
-        "ProofConfig": 467533,
-        "Query": 666021,
-        "Request": 592103,
+        "Document": 800701,
+        "Journal": 574605,
+        "Mapping": 56576,
+        "ProofConfig": 424033,
+        "Query": 665730,
+        "Request": 592122,
         "Signature": 3327223,
         "input": 73003
       }
@@ -323,12 +323,12 @@
       "signature_mode": "hidden",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 3149614,
-        "Journal": 574486,
-        "Mapping": 178469,
-        "ProofConfig": 1877520,
-        "Query": 1964400,
-        "Request": 694456,
+        "Document": 3149638,
+        "Journal": 574598,
+        "Mapping": 179957,
+        "ProofConfig": 1698248,
+        "Query": 1965024,
+        "Request": 694475,
         "Signature": 13185192,
         "input": 234025
       }
@@ -339,12 +339,12 @@
       "signature_mode": "revealed",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 800695,
-        "Journal": 578506,
-        "Mapping": 56386,
-        "ProofConfig": 470488,
-        "Query": 666144,
-        "Request": 596116,
+        "Document": 800701,
+        "Journal": 578618,
+        "Mapping": 56764,
+        "ProofConfig": 424033,
+        "Query": 665853,
+        "Request": 596135,
         "input": 68501
       }
     },
@@ -354,12 +354,12 @@
       "signature_mode": "revealed",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 3149778,
-        "Journal": 578506,
-        "Mapping": 179625,
-        "ProofConfig": 1877535,
-        "Query": 1964382,
-        "Request": 698476,
+        "Document": 3149802,
+        "Journal": 578618,
+        "Mapping": 181113,
+        "ProofConfig": 1698090,
+        "Query": 1965006,
+        "Request": 698495,
         "input": 215853
       }
     },
@@ -369,12 +369,12 @@
       "signature_mode": "hidden",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 1395969,
-        "Journal": 573874,
-        "Mapping": 56481,
-        "ProofConfig": 461515,
-        "Query": 697151,
-        "Request": 591371,
+        "Document": 1185989,
+        "Journal": 573986,
+        "Mapping": 56871,
+        "ProofConfig": 421245,
+        "Query": 697177,
+        "Request": 591390,
         "Signature": 3282459,
         "input": 70755
       }
@@ -385,12 +385,12 @@
       "signature_mode": "hidden",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 5466668,
-        "Journal": 573881,
-        "Mapping": 178172,
-        "ProofConfig": 1849625,
-        "Query": 2052773,
-        "Request": 693414,
+        "Document": 4665940,
+        "Journal": 573993,
+        "Mapping": 179678,
+        "ProofConfig": 1687096,
+        "Query": 2053210,
+        "Request": 693433,
         "Signature": 13173703,
         "input": 224794
       }
@@ -401,12 +401,12 @@
       "signature_mode": "revealed",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 1395281,
-        "Journal": 574281,
-        "Mapping": 56693,
-        "ProofConfig": 464865,
-        "Query": 697257,
-        "Request": 591777,
+        "Document": 1185989,
+        "Journal": 574393,
+        "Mapping": 57083,
+        "ProofConfig": 421245,
+        "Query": 697283,
+        "Request": 591796,
         "input": 66224
       }
     },
@@ -416,12 +416,12 @@
       "signature_mode": "revealed",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 5485337,
-        "Journal": 574281,
-        "Mapping": 179424,
-        "ProofConfig": 1851970,
-        "Query": 2052826,
-        "Request": 693810,
+        "Document": 4666104,
+        "Journal": 574393,
+        "Mapping": 180930,
+        "ProofConfig": 1686938,
+        "Query": 2053263,
+        "Request": 693829,
         "input": 206506
       }
     },
@@ -431,12 +431,12 @@
       "signature_mode": "hidden",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 800695,
-        "Journal": 574496,
-        "Mapping": 56198,
-        "ProofConfig": 465938,
-        "Query": 696769,
-        "Request": 592101,
+        "Document": 800701,
+        "Journal": 574608,
+        "Mapping": 56576,
+        "ProofConfig": 424033,
+        "Query": 696795,
+        "Request": 592120,
         "Signature": 3327223,
         "input": 73078
       }
@@ -447,12 +447,12 @@
       "signature_mode": "hidden",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 3149614,
-        "Journal": 574496,
-        "Mapping": 178469,
-        "ProofConfig": 1874373,
-        "Query": 2052728,
-        "Request": 694461,
+        "Document": 3149638,
+        "Journal": 574608,
+        "Mapping": 179957,
+        "ProofConfig": 1698248,
+        "Query": 2053165,
+        "Request": 694480,
         "Signature": 13185192,
         "input": 234108
       }
@@ -463,12 +463,12 @@
       "signature_mode": "revealed",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 800695,
-        "Journal": 578516,
-        "Mapping": 56386,
-        "ProofConfig": 466386,
-        "Query": 696990,
-        "Request": 596121,
+        "Document": 800701,
+        "Journal": 578628,
+        "Mapping": 56764,
+        "ProofConfig": 424033,
+        "Query": 697016,
+        "Request": 596140,
         "input": 68576
       }
     },
@@ -478,12 +478,12 @@
       "signature_mode": "revealed",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 3149778,
-        "Journal": 578516,
-        "Mapping": 179625,
-        "ProofConfig": 1878195,
-        "Query": 2052724,
-        "Request": 698481,
+        "Document": 3149802,
+        "Journal": 578628,
+        "Mapping": 181113,
+        "ProofConfig": 1698090,
+        "Query": 2053161,
+        "Request": 698500,
         "input": 215936
       }
     },
@@ -493,12 +493,12 @@
       "signature_mode": "hidden",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 1388280,
-        "Journal": 578259,
-        "Mapping": 56481,
-        "ProofConfig": 461019,
-        "Query": 876379,
-        "Request": 591391,
+        "Document": 1185989,
+        "Journal": 578371,
+        "Mapping": 56871,
+        "ProofConfig": 421245,
+        "Query": 855348,
+        "Request": 591410,
         "Signature": 3282459,
         "input": 71112
       }
@@ -509,12 +509,12 @@
       "signature_mode": "hidden",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 5484897,
-        "Journal": 578259,
-        "Mapping": 178172,
-        "ProofConfig": 1845603,
-        "Query": 2816208,
-        "Request": 693427,
+        "Document": 4665940,
+        "Journal": 578371,
+        "Mapping": 179678,
+        "ProofConfig": 1687096,
+        "Query": 2670897,
+        "Request": 693446,
         "Signature": 13173703,
         "input": 225272
       }
@@ -525,12 +525,12 @@
       "signature_mode": "revealed",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 1386910,
-        "Journal": 578666,
-        "Mapping": 56693,
-        "ProofConfig": 462104,
-        "Query": 874432,
-        "Request": 591797,
+        "Document": 1185989,
+        "Journal": 578778,
+        "Mapping": 57083,
+        "ProofConfig": 421245,
+        "Query": 855452,
+        "Request": 591816,
         "input": 66581
       }
     },
@@ -540,12 +540,12 @@
       "signature_mode": "revealed",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 5476123,
-        "Journal": 578666,
-        "Mapping": 179424,
-        "ProofConfig": 1851265,
-        "Query": 2812221,
-        "Request": 693830,
+        "Document": 4666104,
+        "Journal": 578778,
+        "Mapping": 180930,
+        "ProofConfig": 1686938,
+        "Query": 2670468,
+        "Request": 693849,
         "input": 206984
       }
     },
@@ -555,12 +555,12 @@
       "signature_mode": "hidden",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 800695,
-        "Journal": 578881,
-        "Mapping": 56198,
-        "ProofConfig": 468088,
-        "Query": 875699,
-        "Request": 592121,
+        "Document": 800701,
+        "Journal": 578993,
+        "Mapping": 56576,
+        "ProofConfig": 424033,
+        "Query": 855389,
+        "Request": 592140,
         "Signature": 3327223,
         "input": 73436
       }
@@ -571,12 +571,12 @@
       "signature_mode": "hidden",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 3149614,
-        "Journal": 578881,
-        "Mapping": 178469,
-        "ProofConfig": 1871369,
-        "Query": 2816827,
-        "Request": 694481,
+        "Document": 3149638,
+        "Journal": 578993,
+        "Mapping": 179957,
+        "ProofConfig": 1698248,
+        "Query": 2663969,
+        "Request": 694500,
         "Signature": 13185192,
         "input": 234586
       }
@@ -587,12 +587,12 @@
       "signature_mode": "revealed",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 800695,
-        "Journal": 582901,
-        "Mapping": 56386,
-        "ProofConfig": 465814,
-        "Query": 875139,
-        "Request": 596141,
+        "Document": 800701,
+        "Journal": 583013,
+        "Mapping": 56764,
+        "ProofConfig": 424033,
+        "Query": 855593,
+        "Request": 596160,
         "input": 68934
       }
     },
@@ -602,12 +602,12 @@
       "signature_mode": "revealed",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 3149778,
-        "Journal": 582901,
-        "Mapping": 179625,
-        "ProofConfig": 1875631,
-        "Query": 2807464,
-        "Request": 698501,
+        "Document": 3149802,
+        "Journal": 583013,
+        "Mapping": 181113,
+        "ProofConfig": 1698090,
+        "Query": 2663639,
+        "Request": 698520,
         "input": 216414
       }
     },
@@ -617,12 +617,12 @@
       "signature_mode": "hidden",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 1391385,
-        "Journal": 573877,
-        "Mapping": 56481,
-        "ProofConfig": 461477,
-        "Query": 718417,
-        "Request": 591372,
+        "Document": 1185989,
+        "Journal": 573989,
+        "Mapping": 56871,
+        "ProofConfig": 421245,
+        "Query": 715335,
+        "Request": 591391,
         "Signature": 3282459,
         "input": 70793
       }
@@ -633,12 +633,12 @@
       "signature_mode": "hidden",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 5469279,
-        "Journal": 573877,
-        "Mapping": 178172,
-        "ProofConfig": 1844349,
-        "Query": 2150878,
-        "Request": 693408,
+        "Document": 4665940,
+        "Journal": 573989,
+        "Mapping": 179678,
+        "ProofConfig": 1687096,
+        "Query": 2137886,
+        "Request": 693427,
         "Signature": 13173703,
         "input": 224850
       }
@@ -649,12 +649,12 @@
       "signature_mode": "revealed",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 1400617,
-        "Journal": 574284,
-        "Mapping": 56693,
-        "ProofConfig": 459480,
-        "Query": 718620,
-        "Request": 591778,
+        "Document": 1185989,
+        "Journal": 574396,
+        "Mapping": 57083,
+        "ProofConfig": 421245,
+        "Query": 715538,
+        "Request": 591797,
         "input": 66262
       }
     },
@@ -664,12 +664,12 @@
       "signature_mode": "revealed",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 5474163,
-        "Journal": 574284,
-        "Mapping": 179424,
-        "ProofConfig": 1850970,
-        "Query": 2150910,
-        "Request": 693811,
+        "Document": 4666104,
+        "Journal": 574396,
+        "Mapping": 180930,
+        "ProofConfig": 1686938,
+        "Query": 2137918,
+        "Request": 693830,
         "input": 206562
       }
     },
@@ -679,12 +679,12 @@
       "signature_mode": "hidden",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 800695,
-        "Journal": 574499,
-        "Mapping": 56198,
-        "ProofConfig": 467762,
-        "Query": 718073,
-        "Request": 592102,
+        "Document": 800701,
+        "Journal": 574611,
+        "Mapping": 56576,
+        "ProofConfig": 424033,
+        "Query": 714991,
+        "Request": 592121,
         "Signature": 3327223,
         "input": 73116
       }
@@ -695,12 +695,12 @@
       "signature_mode": "hidden",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 3149614,
-        "Journal": 574499,
-        "Mapping": 178469,
-        "ProofConfig": 1876441,
-        "Query": 2150124,
-        "Request": 694462,
+        "Document": 3149638,
+        "Journal": 574611,
+        "Mapping": 179957,
+        "ProofConfig": 1698248,
+        "Query": 2137132,
+        "Request": 694481,
         "Signature": 13185192,
         "input": 234164
       }
@@ -711,12 +711,12 @@
       "signature_mode": "revealed",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 800695,
-        "Journal": 578519,
-        "Mapping": 56386,
-        "ProofConfig": 467789,
-        "Query": 718326,
-        "Request": 596122,
+        "Document": 800701,
+        "Journal": 578631,
+        "Mapping": 56764,
+        "ProofConfig": 424033,
+        "Query": 715244,
+        "Request": 596141,
         "input": 68614
       }
     },
@@ -726,12 +726,12 @@
       "signature_mode": "revealed",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 3149778,
-        "Journal": 578519,
-        "Mapping": 179625,
-        "ProofConfig": 1871758,
-        "Query": 2150116,
-        "Request": 698482,
+        "Document": 3149802,
+        "Journal": 578631,
+        "Mapping": 181113,
+        "ProofConfig": 1698090,
+        "Query": 2137124,
+        "Request": 698501,
         "input": 215992
       }
     },
@@ -741,12 +741,12 @@
       "signature_mode": "hidden",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 1379097,
-        "Journal": 578263,
-        "Mapping": 56481,
-        "ProofConfig": 463768,
-        "Query": 728684,
-        "Request": 591403,
+        "Document": 1185989,
+        "Journal": 578375,
+        "Mapping": 56871,
+        "ProofConfig": 421245,
+        "Query": 728851,
+        "Request": 591422,
         "Signature": 3282459,
         "input": 71403
       }
@@ -757,12 +757,12 @@
       "signature_mode": "hidden",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 5514967,
-        "Journal": 578263,
-        "Mapping": 178172,
-        "ProofConfig": 1847506,
-        "Query": 2059372,
-        "Request": 693439,
+        "Document": 4665940,
+        "Journal": 578375,
+        "Mapping": 179678,
+        "ProofConfig": 1687096,
+        "Query": 2059734,
+        "Request": 693458,
         "Signature": 13173703,
         "input": 225643
       }
@@ -773,12 +773,12 @@
       "signature_mode": "revealed",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 1393387,
-        "Journal": 578670,
-        "Mapping": 56693,
-        "ProofConfig": 460336,
-        "Query": 728887,
-        "Request": 591809,
+        "Document": 1185989,
+        "Journal": 578782,
+        "Mapping": 57083,
+        "ProofConfig": 421245,
+        "Query": 729054,
+        "Request": 591828,
         "input": 66872
       }
     },
@@ -788,12 +788,12 @@
       "signature_mode": "revealed",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 5511784,
-        "Journal": 578670,
-        "Mapping": 179424,
-        "ProofConfig": 1853437,
-        "Query": 2059364,
-        "Request": 693842,
+        "Document": 4666104,
+        "Journal": 578782,
+        "Mapping": 180930,
+        "ProofConfig": 1686938,
+        "Query": 2059726,
+        "Request": 693861,
         "input": 207355
       }
     },
@@ -803,12 +803,12 @@
       "signature_mode": "hidden",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 800695,
-        "Journal": 578885,
-        "Mapping": 56198,
-        "ProofConfig": 467945,
-        "Query": 728340,
-        "Request": 592133,
+        "Document": 800701,
+        "Journal": 578997,
+        "Mapping": 56576,
+        "ProofConfig": 424033,
+        "Query": 728507,
+        "Request": 592152,
         "Signature": 3327223,
         "input": 73716
       }
@@ -819,12 +819,12 @@
       "signature_mode": "hidden",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 3149614,
-        "Journal": 578885,
-        "Mapping": 178469,
-        "ProofConfig": 1871948,
-        "Query": 2059246,
-        "Request": 694493,
+        "Document": 3149638,
+        "Journal": 578997,
+        "Mapping": 179957,
+        "ProofConfig": 1698248,
+        "Query": 2059608,
+        "Request": 694512,
         "Signature": 13185192,
         "input": 234957
       }
@@ -835,12 +835,12 @@
       "signature_mode": "revealed",
       "credentials": 1,
       "phase_cycles": {
-        "Document": 800695,
-        "Journal": 582905,
-        "Mapping": 56386,
-        "ProofConfig": 468148,
-        "Query": 728500,
-        "Request": 596153,
+        "Document": 800701,
+        "Journal": 583017,
+        "Mapping": 56764,
+        "ProofConfig": 424033,
+        "Query": 728667,
+        "Request": 596172,
         "input": 69214
       }
     },
@@ -850,12 +850,12 @@
       "signature_mode": "revealed",
       "credentials": 4,
       "phase_cycles": {
-        "Document": 3149778,
-        "Journal": 582905,
-        "Mapping": 179625,
-        "ProofConfig": 1872585,
-        "Query": 2059208,
-        "Request": 698513,
+        "Document": 3149802,
+        "Journal": 583017,
+        "Mapping": 181113,
+        "ProofConfig": 1698090,
+        "Query": 2059570,
+        "Request": 698532,
         "input": 216743
       }
     }
