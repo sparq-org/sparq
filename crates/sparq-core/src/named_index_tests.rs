@@ -272,7 +272,8 @@ mod durable {
         })]
         #[test]
         fn named_index_survives_save_replay_and_rewrites(actions in prop::collection::vec((0u8..9, 0u8..6), 20..40)) {
-            let tmp = TempDir(std::env::temp_dir().join(format!("sparq-nidx-{}", random_id())));
+            // Canonical, as store paths are compared with the opened directory (Windows short names).
+            let tmp = TempDir(std::fs::canonicalize(std::env::temp_dir()).unwrap().join(format!("sparq-nidx-{}", random_id())));
             Graph::new().save(&tmp.0).unwrap();
             let mut graph = Graph::open(&tmp.0).unwrap();
             let mut model = Model::new();
