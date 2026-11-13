@@ -265,10 +265,11 @@ fn extend_unbound_keeps_mapping() {
         append(append(empty::<4,2>(), [cell(1),unbound()], true), [cell(3),unbound()], true));
 }
 
+fn graph_name()->TermCell {let mut name=cell(9);name.kind=2;name.scope=1;name}
 fn graph(out: Table<4,2>) {
-    crate::ops_closed_graph::graph(two(), append(empty::<1,1>(), [unbound()], true), [0,1], 1, 1, cell(9), out);
+    crate::ops_closed_graph::graph(two(), append(empty::<1,1>(), [unbound()], true), [0,1], 1, 1, graph_name(), out);
 }
-fn graph_expected() -> Table<4,2> {append(append(empty(), [cell(1),cell(9)], true), [cell(3),cell(9)], true)}
+fn graph_expected() -> Table<4,2> {append(append(empty(), [cell(1),graph_name()], true), [cell(3),graph_name()], true)}
 fn scan(out: Table<4,1>) {
     let credentials = [[[cell(8),cell(9),cell(1),unbound()], [cell(8),cell(9),cell(3),unbound()]]];
     crate::ops_closed_substitute::scan::<1,2,2,1,1,4,1>(credentials, [2], 1, [1,2,4],
@@ -382,7 +383,7 @@ fn substitute_padding() {
 
 #[test(should_fail_with = "operator capacity")]
 fn graph_overflow() {
-    crate::ops_closed_graph::graph(two(), append(empty::<1,1>(), [unbound()], true), [0,1], 1, 1, cell(9), empty::<1,2>());
+    crate::ops_closed_graph::graph(two(), append(empty::<1,1>(), [unbound()], true), [0,1], 1, 1, graph_name(), empty::<1,2>());
 }
 #[test(should_fail_with = "operator capacity")]
 fn scan_overflow() {
@@ -411,7 +412,7 @@ fn exists_and_not_exists_choose_different_outer_rows() {
 }
 #[test]
 fn graph_absent_credential_is_empty_even_for_empty_graph_pattern() {
-    crate::ops_closed_graph::seed(append(empty::<1,1>(), [unbound()], true), 0, 0, cell(9), 1, unbound(), empty::<4,1>());
+    crate::ops_closed_graph::seed(append(empty::<1,1>(), [unbound()], true), 0, 0, graph_name(), 1, unbound(), empty::<4,1>());
 }
 #[test]
 fn captured_term_disappears_before_minus_observes_domains() {
@@ -425,7 +426,7 @@ fn capture(out: Table<4,1>) {
     crate::ops_closed_substitute::capture(two(), 0, empty::<1,1>(), false, [0], [1], out);
 }
 fn graph_seed(out: Table<4,1>) {
-    crate::ops_closed_graph::seed(append(empty::<1,1>(), [cell(1)], true), 1, 0, cell(9), 1, unbound(), out);
+    crate::ops_closed_graph::seed(append(empty::<1,1>(), [cell(1)], true), 1, 0, graph_name(), 1, unbound(), out);
 }
 fn context_unit(out: Table<4,1>) {
     crate::ops_closed_substitute::unit(append(empty::<1,1>(), [unbound()], true), out);
@@ -536,7 +537,7 @@ fn context_unit_padding() {
 #[test(should_fail_with = "operator capacity")]
 fn capture_overflow() {crate::ops_closed_substitute::capture(two(), 0, empty::<1,1>(), false, [0], [1], empty::<0,1>());}
 #[test(should_fail_with = "operator capacity")]
-fn graph_seed_overflow() {crate::ops_closed_graph::seed(append(empty::<1,1>(), [unbound()], true), 1, 0, cell(9), 1, unbound(), empty::<0,1>());}
+fn graph_seed_overflow() {crate::ops_closed_graph::seed(append(empty::<1,1>(), [unbound()], true), 1, 0, graph_name(), 1, unbound(), empty::<0,1>());}
 #[test(should_fail_with = "operator capacity")]
 fn context_unit_overflow() {crate::ops_closed_substitute::unit(append(empty::<1,1>(), [unbound()], true), empty::<0,1>());}
 

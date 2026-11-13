@@ -1,0 +1,30 @@
+# Draft query derived from the Solid App Suite catalogue; consumer confirmation pending.
+PREFIX ex:  <https://example.org/solid-suite#>
+PREFIX zkv: <urn:sparq:zk:verified-issuer-placeholder#>   # lane E defines the real predicate
+ASK {
+  {
+    SELECT (SUM(?rec) AS ?recycled) (SUM(?mass) AS ?total) WHERE {
+      ?bom zkv:verifiedIssuer <urn:fictional:recycled-content:owner> .
+      ?a   zkv:verifiedIssuer <urn:fictional:recycled-content:receiver> .
+      GRAPH ?bom { ex:product-1 ex:hasInput ?lot . }
+      GRAPH ?a   { ?lot ex:massGrams ?mass ;
+                        ex:recycledGrams ?rec ;
+                        ex:method ex:audited-by-certifier . }
+      FILTER NOT EXISTS {                # one audit per lot: no second audit graph
+        ?a3 zkv:verifiedIssuer <urn:fictional:recycled-content:receiver> .
+        GRAPH ?a3 { ?lot ex:massGrams ?m3 . }
+        FILTER (?a3 != ?a)
+      }
+    }
+  }
+  FILTER (?total > 0)                    # an empty bill of materials must not pass
+  FILTER (?recycled * 10 >= ?total * 3)
+  ?bom2 zkv:verifiedIssuer <urn:fictional:recycled-content:owner> .
+  FILTER NOT EXISTS {                    # every listed input has an audited statement
+    GRAPH ?bom2 { ex:product-1 ex:hasInput ?l2 . }
+    FILTER NOT EXISTS {
+      ?a2 zkv:verifiedIssuer <urn:fictional:recycled-content:receiver> .
+      GRAPH ?a2 { ?l2 ex:method ex:audited-by-certifier . }
+    }
+  }
+}

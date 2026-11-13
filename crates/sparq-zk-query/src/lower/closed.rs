@@ -12,12 +12,16 @@ use spargebra::algebra::{Expression, GraphPattern};
 pub(super) fn handles(pattern: &GraphPattern, outer: bool) -> bool {
     use GraphPattern as G;
     match pattern {
-        G::LeftJoin { .. }
+        G::Join { .. }
+        | G::LeftJoin { .. }
         | G::Minus { .. }
         | G::Union { .. }
         | G::Extend { .. }
-        | G::Graph { .. } => true,
-        G::Filter { expr, .. } => has_exists(expr),
+        | G::Graph { .. }
+        | G::Group { .. } => true,
+        G::Filter { expr, .. } => {
+            has_exists(expr) || super::closed_arith_standin::has_arithmetic(expr)
+        }
         G::Project { .. } => !outer,
         _ => false,
     }
@@ -57,7 +61,7 @@ impl Builder {
         vars.dedup();
         vars
     }
-    fn closed_predicate(
+    pub(super) fn closed_predicate(
         &mut self,
         e: &Expression,
         input: NodeId,
@@ -83,19 +87,26 @@ impl Builder {
                 }
                 Predicate::Exists(rights)
             }
-            E::Not(a) if has_exists(a) => {
+            E::Not(a) if has_exists(a) || super::closed_arith_standin::has_arithmetic(a) => {
                 Predicate::Not(Box::new(self.closed_predicate(a, input, context, graph)?))
             }
-            E::And(a, b) if has_exists(e) => Predicate::And(
-                Box::new(self.closed_predicate(a, input, context, graph)?),
-                Box::new(self.closed_predicate(b, input, context, graph)?),
-            ),
-            E::Or(a, b) if has_exists(e) => Predicate::Or(
-                Box::new(self.closed_predicate(a, input, context, graph)?),
-                Box::new(self.closed_predicate(b, input, context, graph)?),
-            ),
+            E::And(a, b) if has_exists(e) || super::closed_arith_standin::has_arithmetic(e) => {
+                Predicate::And(
+                    Box::new(self.closed_predicate(a, input, context, graph)?),
+                    Box::new(self.closed_predicate(b, input, context, graph)?),
+                )
+            }
+            E::Or(a, b) if has_exists(e) || super::closed_arith_standin::has_arithmetic(e) => {
+                Predicate::Or(
+                    Box::new(self.closed_predicate(a, input, context, graph)?),
+                    Box::new(self.closed_predicate(b, input, context, graph)?),
+                )
+            }
             _ if has_exists(e) => {
                 return Err(Error::Unsupported("EXISTS in a value expression".into()))
+            }
+            _ if super::closed_arith_standin::has_arithmetic(e) => {
+                Predicate::Arithmetic(self.closed_arithmetic(e)?)
             }
             _ => Predicate::Expression(self.expression(e)?),
         })
@@ -107,7 +118,7 @@ impl Builder {
     ) -> Result<NodeId, Error> {
         self.closed_in(pattern, context, None)
     }
-    fn closed_in(
+    pub(super) fn closed_in(
         &mut self,
         pattern: &GraphPattern,
         context: Option<NodeId>,
@@ -115,6 +126,17 @@ impl Builder {
     ) -> Result<NodeId, Error> {
         use GraphPattern as G;
         match pattern {
+            G::Group { .. } if context.is_some() => Err(Error::Unsupported(
+                "correlated GROUP BY / aggregate substitution".into(),
+            )),
+            G::Group {
+                inner,
+                variables,
+                aggregates,
+            } => {
+                let input = self.closed_in(inner, context, graph)?;
+                self.closed_group(input, variables, aggregates)
+            }
             G::LeftJoin {
                 left,
                 right,
@@ -202,6 +224,10 @@ impl Builder {
                     .collect();
                 self.push(Operator::Project(input), vars)
             }
+            G::Graph { name, inner } if super::closed_graph::supported(inner) => {
+                let selector = self.named_slot(name);
+                self.closed_graph_body(inner, context, &selector)
+            }
             G::Graph { name, inner } => {
                 let selector = self.named_slot(name);
                 let context = match context {
@@ -220,12 +246,7 @@ impl Builder {
                 };
                 let mut output = None;
                 for credential in 0..self.plan.capacity.credentials {
-                    let name = self.parameter(Parameter::Term(
-                        oxrdf::NamedNode::new_unchecked(format!(
-                            "urn:sparq:credential:{credential}"
-                        ))
-                        .into(),
-                    ));
+                    let name = credential;
                     let seed = self.closed_push(
                         C::GraphSeed {
                             context,
@@ -303,11 +324,7 @@ impl Builder {
                     None => self.closed_push(C::Unit { context: c }, vec![]),
                 }
             }
-            G::Join { left, right } if context.is_some() => {
-                let a = self.closed_in(left, context, graph)?;
-                let b = self.closed_in(right, context, graph)?;
-                self.join(a, b)
-            }
+            G::Join { .. } => self.closed_join(pattern, context, graph),
             G::Distinct { inner } if context.is_some() => {
                 let a = self.closed_in(inner, context, graph)?;
                 self.push(Operator::Distinct(a), self.schema(a))

@@ -2,6 +2,10 @@
 
 mod n0;
 mod closed;
+mod closed_group;
+mod closed_graph;
+mod closed_join;
+mod closed_arith_standin;
 
 use crate::{capacity::Bounds, plan::*, Error};
 use spargebra::{algebra::GraphPattern, SparqlParser};

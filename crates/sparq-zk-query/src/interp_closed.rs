@@ -9,7 +9,7 @@ pub(super) fn evaluate(
     node: &Node,
     plan: &Plan,
     tables: &[Table],
-    dataset: &[[Cell; 4]],
+    _dataset: &[[Cell; 4]],
     credentials: &[CredentialCells],
     params: &[Option<Cell>],
 ) -> Result<Vec<Row>, Error> {
@@ -39,6 +39,85 @@ pub(super) fn evaluate(
         (all, row)
     };
     Ok(match op {
+        C::CredentialProfile { literal_types, .. } => {
+            crate::credential_graphs::check_literal_types(*literal_types, credentials)?;
+            vec![vec![]]
+        }
+        C::GraphScan {
+            pattern,
+            selector,
+            context,
+        } => {
+            if context.is_some_and(|c| rows(c).is_empty()) {
+                vec![]
+            } else {
+                let mut output = vec![];
+                for (c, data) in credentials.iter().enumerate() {
+                    let name = crate::credential_graphs::name(c as u32)?;
+                    let captured = context
+                        .and_then(|id| {
+                            rows(id).first().map(|r| match selector {
+                                Slot::Variable(v) => lookup(schema(id), r, *v),
+                                Slot::Parameter(p) => params[*p as usize].expect("graph selector"),
+                            })
+                        })
+                        .unwrap_or_else(|| match selector {
+                            Slot::Parameter(p) => params[*p as usize].expect("selector"),
+                            _ => Cell::default(),
+                        });
+                    if captured.bound && !captured.same_term(name) {
+                        continue;
+                    }
+                    let ctxvars = context.map(schema).unwrap_or(&[]);
+                    let ctxrow = context.and_then(|id| rows(id).first().map(Vec::as_slice));
+                    let mut found = crate::credential_graphs::scan(
+                        pattern,
+                        vars,
+                        ctxrow,
+                        ctxvars,
+                        (Some(c as u32), false),
+                        credentials,
+                        params,
+                    )?;
+                    if let Slot::Variable(v) = selector {
+                        if !captured.bound {
+                            let col = vars.iter().position(|a| a == v).expect("graph column");
+                            found.retain_mut(|r| {
+                                let compatible = !r[col].bound || r[col].same_term(name);
+                                r[col] = name;
+                                compatible
+                            });
+                        }
+                    }
+                    let _ = data;
+                    output.extend(found);
+                }
+                output
+            }
+        }
+        C::DatasetScan { pattern } => crate::credential_graphs::scan(
+            pattern,
+            vars,
+            None,
+            &[],
+            (None, true),
+            credentials,
+            params,
+        )?,
+        C::Group {
+            input,
+            keys,
+            aggregates,
+        } => {
+            crate::interp_closed_group_plan::evaluate(
+                &tables[*input as usize],
+                schema(*input),
+                keys,
+                aggregates,
+                plan.bounds().rows_per_table as usize,
+            )?
+            .rows
+        }
         C::Union { left, right } => [*left, *right]
             .into_iter()
             .flat_map(|id| {
@@ -180,7 +259,7 @@ pub(super) fn evaluate(
             name,
             selector,
         } => {
-            let graph = params[*name as usize].expect("graph name");
+            let graph = crate::credential_graphs::name(*name)?;
             let selected = match selector {
                 Slot::Parameter(p) => params[*p as usize].expect("graph selector"),
                 Slot::Variable(v) => rows(*context)
@@ -202,7 +281,7 @@ pub(super) fn evaluate(
             name,
             selector,
         } => {
-            let graph = params[*name as usize].expect("graph name");
+            let graph = crate::credential_graphs::name(*name)?;
             let mut output = vec![];
             if let Some(c) = rows(*context).first() {
                 for row in rows(*input) {
@@ -234,54 +313,19 @@ pub(super) fn evaluate(
             context,
             credential,
         } => {
-            let mut output = vec![];
-            if let Some(c) = rows(*context).first() {
-                let mut named = vec![];
-                if let Some(id) = credential {
-                    if let Some(c) = credentials.get(*id as usize) {
-                        let mut seen = BTreeSet::new();
-                        named.extend(
-                            c.quads
-                                .iter()
-                                .filter(|q| {
-                                    seen.insert(std::array::from_fn::<_, 3, _>(|i| q[i].identity()))
-                                })
-                                .copied(),
-                        );
-                    }
-                }
-                let source = if credential.is_some() {
-                    named.as_slice()
-                } else {
-                    dataset
-                };
-                for q in source {
-                    let mut row = vec![Cell::default(); vars.len()];
-                    let mut matches = true;
-                    for (p, s) in pattern.iter().enumerate() {
-                        match s {
-                            Slot::Parameter(id) => {
-                                matches &= q[p].same_term(params[*id as usize].expect("parameter"))
-                            }
-                            Slot::Variable(v) => {
-                                let outer = lookup(schema(*context), c, *v);
-                                if outer.bound {
-                                    matches &= q[p].same_term(outer);
-                                } else {
-                                    let col =
-                                        vars.iter().position(|x| x == v).expect("scan column");
-                                    matches &= !row[col].bound || row[col].same_term(q[p]);
-                                    row[col] = q[p];
-                                }
-                            }
-                        }
-                    }
-                    if matches {
-                        output.push(row);
-                    }
-                }
+            if rows(*context).is_empty() {
+                vec![]
+            } else {
+                crate::credential_graphs::scan(
+                    pattern,
+                    vars,
+                    rows(*context).first().map(Vec::as_slice),
+                    schema(*context),
+                    (*credential, crate::credential_graphs::is_profile(plan)),
+                    credentials,
+                    params,
+                )?
             }
-            output
         }
         C::Filter {
             input,
@@ -309,6 +353,7 @@ fn predicate_value(
     tables: &[Table],
 ) -> Result<(bool, bool), Error> {
     Ok(match p {
+        Predicate::Arithmetic(e) => e.evaluate(vars, row, params)?,
         Predicate::Expression(e) => eval(e, vars, row, params)?.ebv()?,
         Predicate::Exists(ids) => (!tables[ids[index] as usize].rows.is_empty(), false),
         Predicate::Not(a) => {

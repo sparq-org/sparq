@@ -1,5 +1,5 @@
-//! One named graph for each credential; graph names use the public parameter lane.
-//! Authentication of these identifiers is supplied by the credential-suite adapter.
+//! One named graph per credential, named by its canonical credential-scoped blank node.
+//! The authenticated profile constrains credential order through the suite adapter.
 use crate::table::{TermCell, Table, empty, append, canonicalize, check_table, assert_table, same_term};
 use crate::ops_closed_common::{get, project_row};
 pub fn seed<let C: u32, let R: u32, let V: u32>(
@@ -8,7 +8,7 @@ pub fn seed<let C: u32, let R: u32, let V: u32>(
 ) {
     check_table(context); assert(context.len <= 1, "capture cardinality");
     crate::table::check_cell(name); crate::table::check_cell(constant);
-    assert(name.bound & (name.kind == 1), "graph name");
+    assert(name.bound & (name.kind == 2), "graph name");
     let captured = get(context.rows[0], capture);
     let selected = if captured.bound {captured} else {constant};
     let active = (context.len > 0) & (credential < credential_count) & (!selected.bound | same_term(selected, name));
@@ -19,7 +19,7 @@ pub fn graph<let A: u32, let C: u32, let R: u32, let VA: u32, let VC: u32, let V
     name: TermCell, out: Table<R, V>,
 ) {
     check_table(input); check_table(context); crate::table::check_cell(name);
-    assert(name.bound & (name.kind == 1), "graph name");
+    assert(name.bound & (name.kind == 2), "graph name");
     assert(context.len <= 1, "capture cardinality"); assert(target <= V, "graph column");
     let mut expected = empty();
     let captured = get(context.rows[0], capture);

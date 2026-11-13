@@ -6,15 +6,44 @@ use crate::plan::{Expr, NodeId, Slot, Var};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Predicate {
     Expression(Expr),
+    Arithmetic(crate::closed_arith_standin::Comparison),
     Exists(Vec<NodeId>),
     Not(Box<Predicate>),
     And(Box<Predicate>, Box<Predicate>),
     Or(Box<Predicate>, Box<Predicate>),
 }
 
+/// Aggregates read a variable column; expression operands belong to lane D.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GroupAggregate {
+    pub variable: Var,
+    pub kind: crate::interp_closed_group::AggregateKind,
+    pub operand: Option<Var>,
+    pub distinct: bool,
+}
+
 /// New closed operators extend this enum without changing core dispatch again.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ClosedOperator {
+    CredentialProfile {
+        lexical_capacity: u32,
+        literal_capacity: u32,
+        literal_types: u8,
+        issuers: Vec<(u32, u32)>,
+    },
+    GraphScan {
+        pattern: [Slot; 3],
+        selector: Slot,
+        context: Option<NodeId>,
+    },
+    DatasetScan {
+        pattern: [Slot; 3],
+    },
+    Group {
+        input: NodeId,
+        keys: Vec<Var>,
+        aggregates: Vec<GroupAggregate>,
+    },
     LeftJoin {
         left: NodeId,
         right: NodeId,
@@ -76,6 +105,9 @@ pub enum ClosedOperator {
 impl ClosedOperator {
     pub fn inputs(&self) -> Vec<NodeId> {
         match self {
+            Self::GraphScan { context, .. } => context.iter().copied().collect(),
+            Self::CredentialProfile { .. } | Self::DatasetScan { .. } => vec![],
+            Self::Group { input, .. } => vec![*input],
             Self::LeftJoin {
                 left,
                 right,
@@ -119,6 +151,59 @@ impl ClosedOperator {
     pub(crate) fn canonical_bytes(&self) -> Vec<u8> {
         let mut w = Writer(vec![]);
         match self {
+            Self::CredentialProfile {
+                lexical_capacity,
+                literal_capacity,
+                literal_types,
+                issuers,
+            } => {
+                w.byte(14);
+                w.id(*lexical_capacity);
+                w.id(*literal_capacity);
+                w.byte(*literal_types);
+                w.id(issuers.len() as u32);
+                for (a, b) in issuers {
+                    w.id(*a);
+                    w.id(*b);
+                }
+            }
+            Self::GraphScan {
+                pattern,
+                selector,
+                context,
+            } => {
+                w.byte(13);
+                w.optional(*context);
+                w.slot(selector);
+                for s in pattern {
+                    w.slot(s);
+                }
+            }
+            Self::DatasetScan { pattern } => {
+                w.byte(12);
+                for s in pattern {
+                    w.slot(s);
+                }
+            }
+            Self::Group {
+                input,
+                keys,
+                aggregates,
+            } => {
+                w.byte(11);
+                w.id(*input);
+                w.id(keys.len() as u32);
+                for key in keys {
+                    w.id(*key);
+                }
+                w.id(aggregates.len() as u32);
+                for a in aggregates {
+                    w.id(a.variable);
+                    w.byte(a.kind as u8);
+                    w.optional(a.operand);
+                    w.byte(u8::from(a.distinct));
+                }
+            }
             Self::LeftJoin {
                 left,
                 right,
@@ -224,7 +309,7 @@ impl ClosedOperator {
 impl Predicate {
     fn inputs(&self, ids: &mut Vec<NodeId>) {
         match self {
-            Self::Expression(_) => (),
+            Self::Expression(_) | Self::Arithmetic(_) => (),
             Self::Exists(rights) => ids.extend(rights),
             Self::Not(a) => a.inputs(ids),
             Self::And(a, b) | Self::Or(a, b) => {
@@ -300,6 +385,10 @@ impl Writer {
     }
     fn predicate(&mut self, p: &Predicate) {
         match p {
+            Predicate::Arithmetic(e) => {
+                self.byte(5);
+                self.0.extend(e.canonical_bytes());
+            }
             Predicate::Expression(e) => {
                 self.byte(0);
                 self.expr(e);

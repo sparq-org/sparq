@@ -420,7 +420,7 @@ fn div_small(w: Word, divisor: u64) -> (Word, u64) {
     (out, remainder as u64)
 }
 
-fn key_lexical(key: Word, decimal: bool) -> Result<String, Error> {
+pub(crate) fn key_lexical(key: Word, decimal: bool) -> Result<String, Error> {
     if key[..2] != [0; 2] {
         return Err(Error::Capacity("aggregate numeric range".into()));
     }

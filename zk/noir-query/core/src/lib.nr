@@ -25,3 +25,11 @@ pub mod ops_closed_group;
 pub mod ops_closed_order;
 mod ops_closed_group_tests;
 mod ops_closed_order_tests;
+
+pub mod ops_closed_numeric_standin;
+pub mod ops_closed_group_plan;
+pub mod ops_closed_dataset;
+pub mod ops_closed_arith_standin;
+mod ops_closed_plan_tests;
+pub mod ops_closed_opening;
+pub mod ops_closed_issuer_standin;

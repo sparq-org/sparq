@@ -20,24 +20,32 @@
     {
       "id": "aggregate_distinct",
       "spec": "https://www.w3.org/TR/sparql11-query/#defn_aggCount",
-      "status": "not_attempted",
-      "positive_cases": [],
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "aggregate-count-distinct-unbound"
+      ],
       "rejection_cases": [],
       "guest_proof_evidence": "not_asserted"
     },
     {
       "id": "aggregate_empty",
       "spec": "https://www.w3.org/TR/sparql11-query/#aggregateExample",
-      "status": "not_attempted",
-      "positive_cases": [],
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "aggregate-empty-count"
+      ],
       "rejection_cases": [],
       "guest_proof_evidence": "not_asserted"
     },
     {
       "id": "aggregates",
       "spec": "https://www.w3.org/TR/sparql11-query/#defn_aggMin",
-      "status": "not_attempted",
-      "positive_cases": [],
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "aggregate-min-max",
+        "aggregate-average-value",
+        "aggregate-sample-unambiguous"
+      ],
       "rejection_cases": [],
       "guest_proof_evidence": "not_asserted"
     },
@@ -186,8 +194,10 @@
     {
       "id": "group_having",
       "spec": "https://www.w3.org/TR/sparql11-query/#aggregates",
-      "status": "not_attempted",
-      "positive_cases": [],
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "aggregate-group-having"
+      ],
       "rejection_cases": [],
       "guest_proof_evidence": "not_asserted"
     },
@@ -1184,43 +1194,36 @@
     },
     {
       "id": "exists-correlated-filter",
-      "status": "refused",
-      "refusal": "arithmetic expression ?n + \"10\"^^<http://www.w3.org/2001/XMLSchema#integer> is not yet supported by the query method"
+      "status": "not_attempted"
     },
     {
       "id": "aggregate-group-having",
-      "status": "refused",
-      "refusal": "GROUP BY / aggregate / HAVING is not yet supported by the query method"
+      "status": "passing"
     },
     {
       "id": "aggregate-empty-count",
-      "status": "refused",
-      "refusal": "GROUP BY / aggregate / HAVING is not yet supported by the query method"
+      "status": "passing"
     },
     {
       "id": "aggregate-count-distinct-unbound",
-      "status": "refused",
-      "refusal": "GROUP BY / aggregate / HAVING is not yet supported by the query method"
+      "status": "passing"
     },
     {
       "id": "aggregate-min-max",
-      "status": "refused",
-      "refusal": "GROUP BY / aggregate / HAVING is not yet supported by the query method"
+      "status": "passing"
     },
     {
       "id": "aggregate-average-value",
-      "status": "refused",
-      "refusal": "GROUP BY / aggregate / HAVING is not yet supported by the query method"
+      "status": "passing"
     },
     {
       "id": "aggregate-sample-unambiguous",
-      "status": "refused",
-      "refusal": "GROUP BY / aggregate / HAVING is not yet supported by the query method"
+      "status": "passing"
     },
     {
       "id": "aggregate-group-concat-unambiguous",
       "status": "refused",
-      "refusal": "GROUP BY / aggregate / HAVING is not yet supported by the query method"
+      "refusal": "GROUP_CONCAT lexical opening required is not yet supported by the query method"
     },
     {
       "id": "subquery-project-scope",
@@ -1355,7 +1358,7 @@
     {
       "id": "numeric-promotion",
       "status": "refused",
-      "refusal": "arithmetic expression \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> + \"2.5\"^^<http://www.w3.org/2001/XMLSchema#decimal> is not yet supported by the query method"
+      "refusal": "lane D integer arithmetic operands is not yet supported by the query method"
     },
     {
       "id": "numeric-divide",
@@ -1534,8 +1537,7 @@
     },
     {
       "id": "not-exists-correlated-filter",
-      "status": "refused",
-      "refusal": "arithmetic expression ?n + \"10\"^^<http://www.w3.org/2001/XMLSchema#integer> is not yet supported by the query method"
+      "status": "not_attempted"
     },
     {
       "id": "exists-filter-only-outer-variable",
@@ -1570,7 +1572,7 @@
     {
       "id": "reject-exists-aggregate",
       "status": "refused",
-      "refusal": "GROUP BY / aggregate / HAVING is not yet supported by the query method"
+      "refusal": "correlated GROUP BY / aggregate substitution is not yet supported by the query method"
     },
     {
       "id": "reject-exists-ordered-slice",
