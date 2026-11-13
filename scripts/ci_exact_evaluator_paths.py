@@ -15,6 +15,7 @@ EXACT_PREFIXES = (
     "crates/sparq-jsonld/",
     "vendor/smallstr-shim/", "vendor/spargebra/", "vendor/spargebra-shim/", "vendor/zk-sdk/", ".cargo/",
     "rust-toolchain",
+    ".github/actions/zk-exact-setup/",
 )
 EXACT_FILES = {
     "Cargo.toml", "Cargo.lock", ".github/workflows/zk-exact-evaluator.yml",
@@ -29,16 +30,13 @@ EXACT_FILES = {
     "bench/differential-divergences.json", "crates/sparq-bench/src/fuzz.rs",
     ".github/workflows/zk-toolchain.yml",
 }
-# The pull_request trigger narrows to zk-specific inputs: an engine, manifest or lockfile change
-# is checked after merge by the push trigger (the full set above), so the many engine PRs don't
-# each queue a proof run on this advisory lane. The in-job classifier still uses the full set.
-# sparq-canon feeds the zk digests (a host and model dependency) and sparq-query-protocol is a
-# host dependency, so both stay; the engine fixtures are compiled into zk tests with pinned
-# case counts. The evaluator's own Cargo.lock sits under zk/sparql-evaluator/.
+# Pull requests cover engine, core and substrate as well as the evaluator inputs.
+# Root workspace manifests and locks retain their broader push-trigger coverage.
 PR_PREFIXES = (
     "zk/sparql-evaluator/", "bench/zk-bindings/", "crates/sparq-canon/",
+    "crates/sparq-engine/", "crates/sparq-core/", "crates/sparq-substrate/",
     "crates/sparq-query-protocol/", "vendor/spargebra/", "vendor/spargebra-shim/",
-    "vendor/zk-sdk/", ".cargo/", "rust-toolchain",
+    "vendor/zk-sdk/", ".cargo/", "rust-toolchain", ".github/actions/zk-exact-setup/",
 )
 PR_FILES = (EXACT_FILES - {"Cargo.toml", "Cargo.lock"}) | {
     "crates/sparq-engine/tests/fixtures/builtin_edges.json",
@@ -46,6 +44,11 @@ PR_FILES = (EXACT_FILES - {"Cargo.toml", "Cargo.lock"}) | {
     "crates/sparq-engine/tests/fixtures/temporal_lexical.json",
 }
 SCOPES = ("exact-evaluator",)
+# On pull requests these dependencies need the executor check alone. Other events
+# retain the full evaluator input set for both jobs.
+EXECUTOR_ONLY_PR_PREFIXES = (
+    "crates/sparq-engine/", "crates/sparq-core/", "crates/sparq-substrate/",
+)
 
 
 def relevant_path(path: str, scope: str = "exact-evaluator") -> bool:
@@ -54,15 +57,16 @@ def relevant_path(path: str, scope: str = "exact-evaluator") -> bool:
     return path.startswith(EXACT_PREFIXES) or path in EXACT_FILES
 
 
-def requires_execution(event: str, base: str, head: str, scope: str = "exact-evaluator") -> bool:
-    """Only a successful, explicit irrelevant diff permits skipping execution."""
+def execution_requirements(event: str, base: str, head: str,
+                           scope: str = "exact-evaluator") -> tuple[bool, bool]:
+    """Return executor/proof requirements, failing closed on uncertain diffs."""
     if scope not in SCOPES:
         raise ValueError(f"unknown selection scope: {scope!r}")
     if event not in {"pull_request", "merge_group", "push"}:
-        return True
+        return True, True
     if not all(re.fullmatch(r"[0-9a-fA-F]{40}", sha) and set(sha) != {"0"}
                for sha in (base, head)):
-        return True
+        return True, True
     try:
         subprocess.run(
             ["git", "fetch", "--no-tags", "--depth=1", "origin", base, head],
@@ -74,10 +78,21 @@ def requires_execution(event: str, base: str, head: str, scope: str = "exact-eva
         ).stdout
         # Git's -z output must be complete; ambiguous/truncated output runs tests.
         if diff and not diff.endswith(b"\0"):
-            return True
-        return any(relevant_path(os.fsdecode(path), scope) for path in diff.split(b"\0") if path)
+            return True, True
+        paths = [os.fsdecode(path) for path in diff.split(b"\0") if path]
+        required = any(relevant_path(path, scope) for path in paths)
+        proof_required = required
+        if event == "pull_request":
+            proof_required = any(relevant_path(path, scope) and
+                                 not path.startswith(EXECUTOR_ONLY_PR_PREFIXES) for path in paths)
+        return required, proof_required
     except (OSError, subprocess.SubprocessError):
-        return True
+        return True, True
+
+
+def requires_execution(event: str, base: str, head: str, scope: str = "exact-evaluator") -> bool:
+    """Whether the diff requires the executor check."""
+    return execution_requirements(event, base, head, scope)[0]
 
 
 def main() -> None:
@@ -85,7 +100,7 @@ def main() -> None:
     parser.add_argument("--scope", choices=SCOPES, default="exact-evaluator",
                         help="job whose inputs are classified (default: exact-evaluator)")
     scope = parser.parse_args().scope
-    required = requires_execution(
+    required, proof_required = execution_requirements(
         os.environ.get("GITHUB_EVENT_NAME", ""),
         os.environ.get("EXACT_BASE_SHA", ""),
         os.environ.get("EXACT_HEAD_SHA", ""),
@@ -93,6 +108,7 @@ def main() -> None:
     )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
         output.write(f"required={str(required).lower()}\n")
+        output.write(f"proof_required={str(proof_required).lower()}\n")
     print(f"{scope} execution required." if required else
           f"Successful diff classification found no {scope} inputs changed.")
 

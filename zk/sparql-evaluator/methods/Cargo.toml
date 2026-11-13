@@ -13,13 +13,14 @@ default = []
 authenticated-rdf = []
 # Also build the measurement-only V5 image with per-phase cycle reporting and
 # generate SPARQ_AUTHRDF_PHASES_GUEST_{ELF,ID}. Never a production image.
+# Also builds the separate canonicalisation regression image.
 phase-cycles = ["authenticated-rdf"]
 
 [build-dependencies]
 risc0-build = { version = "=3.0.6", features = ["unstable"] }
 risc0-binfmt = "=3.0.5"
 
-# Both guest workspaces. This crate's `build.rs` builds them, not risc0-build's
-# `embed_methods`; `guest-authrdf` is built only with `authenticated-rdf`.
+# Guest workspaces are built by this crate's `build.rs`, not `embed_methods`.
+# `guest-authrdf` needs `authenticated-rdf`; `guest-canon` needs `phase-cycles`.
 [package.metadata.risc0]
-methods = ["guest", "guest-authrdf"]
+methods = ["guest", "guest-authrdf", "guest-canon"]
