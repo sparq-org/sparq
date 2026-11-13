@@ -1045,6 +1045,8 @@ jobs:
           ./scripts/fetch-conformance.sh
           RDF_TESTS_PIN=7b5afb91857a9c282c03d2e45d3f76485797c901 \
             crates/sparq-conformance/earl-report.sh rdf12 "$RUNNER_TEMP/rdf12-earl" --fetch-only
+          N3_TESTS_PIN=1d29dea774d3e5a97883ebbc8ab033a176ac11b5 \
+            crates/sparq-conformance/earl-report.sh n3 "$RUNNER_TEMP/n3-earl" --fetch-only
       - name: Run conformance suites
         # --bin is REQUIRED: the crate now ships three binaries
         # (sparq-conformance + sparq-inference-conformance + the consolidated
@@ -1097,6 +1099,13 @@ jobs:
           python3 scripts/tests/test_earl_report_runner.py
           SPARQ_RDF12_ROOT="$RUNNER_TEMP/rdf12-earl/suites/rdf-tests/rdf/rdf12" \
             cargo test --profile release-fast -p sparq-conformance --test rdf12_syntax -- --nocapture
+      - name: RDF/XML, Semantics, RDF 1.1 and N3 report ratchets
+        env:
+          SPARQ_RDF_TESTS_ROOT: ${{ runner.temp }}/rdf12-earl/suites/rdf-tests
+          SPARQ_N3_ROOT: ${{ runner.temp }}/n3-earl/suites/N3
+        run: |
+          cargo test --profile release-fast -p sparq-conformance --test earl_suites -- --nocapture
+          cargo test --profile release-fast -p sparq-conformance --features rdfxml --test earl_suites -- --nocapture
       - name: Consolidated conformance scoreboard (all suites + floors)
         # sq-ncvq.16: surface the ONE central index of every conformance
         # ratchet across crates (SPARQL + inference + SHACL + GeoSPARQL) at the top

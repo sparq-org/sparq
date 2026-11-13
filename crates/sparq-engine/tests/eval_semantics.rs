@@ -1153,7 +1153,7 @@ mod numeric_raw_whitespace_consistency {
 /// (sq-74oy4 + sq-6b1lj) FAST-PATH ⟺ SLOW-PATH numeric agreement.
 ///
 /// The numeric cache / sargable FILTER / `JKey::Num` value-join FAST path and the exact
-/// general evaluator SLOW path (`values_equal`/`value_compare_strict` → `Num::of_literal`)
+/// general evaluator SLOW path (`values_equal`/`value_compare_strict`, including exact lexicals)
 /// must return the SAME answer for `=`, `<`, `>` over padded / per-datatype-ill-formed /
 /// well-formed lexicals across `xsd:integer`/`double`/`decimal`/`float`. The two beads pin:
 ///   * Raw whitespace-PADDED numeric lexicals are invalid on every value
@@ -1165,7 +1165,7 @@ mod numeric_raw_whitespace_consistency {
 /// Method: each case runs against a graph WITH the fast path (sargable numeric pushdown
 /// enabled) and a graph carrying a high-precision decimal that DISABLES sargable numeric
 /// pushdown (`Graph::has_decimal_needing_exact_comparison` → the exact general comparison path), and
-/// asserts identical results — AND against the `of_literal` reference expectation.
+/// asserts identical results against the validated lexical/value expectations.
 mod numeric_fast_slow_path_agreement {
     use super::*;
 
@@ -1244,24 +1244,22 @@ mod numeric_fast_slow_path_agreement {
     }
 
     #[test]
-    fn invalid_or_out_of_capacity_numerics_are_excluded_by_value_filters() {
-        // Datatype-invalid lexicals and valid out-of-capacity values both
-        // produce native expression errors in this lane. These FILTER results
-        // do not identify representation overflow with normative lexical invalidity.
-        for (obj, why) in [
-            ("\"1.5\"^^xsd:integer", "fraction on an integer"),
-            ("\"1E2\"^^xsd:integer", "exponent on an integer"),
-            ("\"1E2\"^^xsd:decimal", "exponent on a decimal"),
+    fn numeric_validation_and_wide_comparison_agree_on_both_paths() {
+        // Invalid datatype lexicals are expression errors. Valid exact values
+        // beyond the arithmetic tower still compare by their numeric value.
+        for (obj, why, greater_than_lower) in [
+            ("\"1.5\"^^xsd:integer", "fraction on an integer", 0),
+            ("\"1E2\"^^xsd:integer", "exponent on an integer", 0),
+            ("\"1E2\"^^xsd:decimal", "exponent on a decimal", 0),
             // Valid 40-digit integer / decimal: beyond the native i128 lane.
             // This is a representation limit, not an invalid datatype lexical.
-            ("\"9999999999999999999999999999999999999999\"^^xsd:integer", "i128-overflow integer"),
-            ("\"9999999999999999999999999999999999999999.5\"^^xsd:decimal", "i128-overflow decimal"),
+            ("\"9999999999999999999999999999999999999999\"^^xsd:integer", "i128-overflow integer", 1),
+            ("\"9999999999999999999999999999999999999999.5\"^^xsd:decimal", "i128-overflow decimal", 1),
         ] {
             assert_eq!(filter_rows(obj, "?o < 999999"), 0, "{obj} < … excluded ({why})");
-            assert_eq!(filter_rows(obj, "?o > -999999"), 0, "{obj} > … excluded ({why})");
+            assert_eq!(filter_rows(obj, "?o > -999999"), greater_than_lower, "{obj} > lower bound ({why})");
             assert_eq!(filter_rows(obj, "?o = 100"), 0, "{obj} = … excluded ({why})");
-            // BOUND(?o) remains true: neither lexical rejection nor representation
-            // limits erase the original RDF term from the graph.
+            // BOUND(?o) remains true independently of numeric validity or capacity.
             let bound = query(
                 &graph_with(obj, false),
                 "SELECT ?s WHERE { ?s <http://ex/v> ?o FILTER(BOUND(?o)) }",

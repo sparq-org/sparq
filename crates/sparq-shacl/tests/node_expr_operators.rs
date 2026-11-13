@@ -125,6 +125,159 @@ fn min_max_pick_extremes_and_empty_on_non_numeric() {
     assert!(eval(&data, &shapes, "mnNN", &f).is_empty());
 }
 
+#[test]
+fn sum_keeps_exact_digits_and_promotes_numeric_types() {
+    let data = g("");
+    let shapes = g(r#"
+        ex:Decl
+          ex:ints [ shnex:sum ( 9007199254740992 1 ) ] ;
+          ex:wide [ shnex:sum ( 9223372036854775808 1 ) ] ;
+          ex:decs [ shnex:sum ( 0.123456789012345678 0.000000000000000001 ) ] ;
+          ex:mixed [ shnex:sum ( 9007199254740992 1.0 ) ] ;
+          ex:double [ shnex:sum ( 1.0 "2"^^xsd:double ) ] ;
+          ex:float [ shnex:sum ( 1 "2"^^xsd:float ) ] ;
+          ex:invalid [ shnex:sum ( "1.5"^^xsd:integer "128"^^xsd:byte " 2"^^xsd:decimal 7 ) ] ;
+          ex:capacity [ shnex:sum ( 340282366920938463463374607431768211456000 1 ) ] .
+    "#);
+    for (name, value, datatype) in [
+        ("ints", "9007199254740993", "integer"),
+        ("wide", "9223372036854775809", "integer"),
+        ("decs", "0.123456789012345679", "decimal"),
+        ("mixed", "9007199254740993.0", "decimal"),
+        ("double", "3.0E0", "double"),
+        ("float", "3.0E0", "float"),
+        ("invalid", "7", "integer"),
+    ] {
+        let actual = eval(&data, &shapes, name, &iri("a"));
+        assert_eq!(lexes(&actual), [value], "{name}");
+        assert_eq!(one_dt(&actual), format!("{XSD}{datatype}"), "{name}");
+    }
+    assert!(eval(&data, &shapes, "capacity", &iri("a")).is_empty());
+}
+
+#[test]
+fn min_max_keep_exact_digits() {
+    let data = g("");
+    let shapes = g(r#"
+        ex:Decl
+          ex:mn [ shnex:min ( 9007199254740993 9007199254740992 ) ] ;
+          ex:mx [ shnex:max ( 0.123456789012345678 0.123456789012345679 ) ] ;
+          ex:hugeMin [ shnex:min ( 340282366920938463463374607431768211456001 340282366920938463463374607431768211456000 ) ] ;
+          ex:hugeMax [ shnex:max ( 340282366920938463463374607431768211456000 340282366920938463463374607431768211456001 ) ] ;
+          ex:mixedMin [ shnex:min ( 9007199254740993 "9007199254740992"^^xsd:double ) ] ;
+          ex:mixedMax [ shnex:max ( "9007199254740992"^^xsd:double 9007199254740993 ) ] ;
+          ex:floatMin [ shnex:min ( "0.1"^^xsd:float 0.1 ) ] ;
+          ex:floatMax [ shnex:max ( 0.1 "0.1"^^xsd:float ) ] ;
+          ex:wideMixedMin [ shnex:min ( 340282366920938463463374607431768211456001 "340282366920938463463374607431768211456000"^^xsd:double ) ] ;
+          ex:wideMixedMax [ shnex:max ( "340282366920938463463374607431768211456000"^^xsd:double 340282366920938463463374607431768211456001 ) ] ;
+          ex:equalMin [ shnex:min ( "01"^^xsd:integer 1.0 ) ] ;
+          ex:equalMax [ shnex:max ( "01"^^xsd:integer 1.0 ) ] ;
+          ex:firstMinNaN [ shnex:min ( "NaN"^^xsd:double 1 ) ] ;
+          ex:lastMinNaN [ shnex:min ( 1 "NaN"^^xsd:double ) ] ;
+          ex:firstMaxNaN [ shnex:max ( "NaN"^^xsd:double 1 ) ] ;
+          ex:lastMaxNaN [ shnex:max ( 1 "NaN"^^xsd:double ) ] .
+    "#);
+    for (name, expected) in [
+        ("mn", "9007199254740992"),
+        ("mx", "0.123456789012345679"),
+        ("hugeMin", "340282366920938463463374607431768211456000"),
+        ("hugeMax", "340282366920938463463374607431768211456001"),
+    ] {
+        assert_eq!(
+            lexes(&eval(&data, &shapes, name, &iri("a"))),
+            [expected],
+            "{name}"
+        );
+    }
+    for (name, value, datatype) in [
+        ("mixedMin", "9007199254740992", "double"),
+        ("mixedMax", "9007199254740993", "integer"),
+        ("floatMin", "0.1", "decimal"),
+        ("floatMax", "0.1", "float"),
+        (
+            "wideMixedMin",
+            "340282366920938463463374607431768211456000",
+            "double",
+        ),
+        (
+            "wideMixedMax",
+            "340282366920938463463374607431768211456001",
+            "integer",
+        ),
+        ("equalMin", "01", "integer"),
+        ("equalMax", "01", "integer"),
+        ("firstMinNaN", "NaN", "double"),
+        ("lastMinNaN", "1", "integer"),
+        ("firstMaxNaN", "NaN", "double"),
+        ("lastMaxNaN", "1", "integer"),
+    ] {
+        let actual = eval(&data, &shapes, name, &iri("a"));
+        assert_eq!(lexes(&actual), [value], "{name}");
+        assert_eq!(one_dt(&actual), format!("{XSD}{datatype}"), "{name}");
+    }
+}
+
+#[test]
+fn order_by_keeps_exact_digits_and_selects_least_key() {
+    let data = g(r#"
+        ex:hi ex:key 9007199254740994, 9007199254740993 .
+        ex:lo ex:key 9007199254740992 .
+        ex:multi ex:key 9007199254740994, 9007199254740991 .
+        ex:dbl ex:key "9007199254740992"^^xsd:double .
+        ex:hugeHi ex:key 340282366920938463463374607431768211456001 .
+        ex:hugeLo ex:key 340282366920938463463374607431768211456000 .
+        ex:hugeFloat ex:key "340282366920938463463374607431768211456000"^^xsd:double .
+        ex:nan ex:key "NaN"^^xsd:double .
+        ex:inf ex:key "INF"^^xsd:double .
+        ex:negInf ex:key "-INF"^^xsd:double .
+    "#);
+    let shapes = g(r#"
+        ex:Decl
+          ex:asc [ shnex:nodes ( ex:hi ex:lo ) ; shnex:orderBy [ sh:path ex:key ] ] ;
+          ex:desc [ shnex:nodes ( ex:lo ex:hi ) ; shnex:orderBy [ sh:path ex:key ] ; shnex:desc true ] ;
+          ex:least [ shnex:nodes ( ex:lo ex:multi ) ; shnex:orderBy [ sh:path ex:key ] ] ;
+          ex:mixed [ shnex:nodes ( ex:hi ex:dbl ) ; shnex:orderBy [ sh:path ex:key ] ] ;
+          ex:huge [ shnex:nodes ( ex:hugeHi ex:hugeLo ex:hugeFloat ) ; shnex:orderBy [ sh:path ex:key ] ] ;
+          ex:hugeDesc [ shnex:nodes ( ex:hugeLo ex:hugeFloat ex:hugeHi ) ; shnex:orderBy [ sh:path ex:key ] ; shnex:desc true ] ;
+          ex:specials [ shnex:nodes ( ex:hugeHi ex:inf ex:nan ex:negInf ex:hugeLo ) ; shnex:orderBy [ sh:path ex:key ] ] .
+    "#);
+    assert_eq!(
+        eval(&data, &shapes, "asc", &iri("a")),
+        [iri("lo"), iri("hi")]
+    );
+    assert_eq!(
+        eval(&data, &shapes, "desc", &iri("a")),
+        [iri("hi"), iri("lo")]
+    );
+    assert_eq!(
+        eval(&data, &shapes, "least", &iri("a")),
+        [iri("multi"), iri("lo")]
+    );
+    assert_eq!(
+        eval(&data, &shapes, "mixed", &iri("a")),
+        [iri("dbl"), iri("hi")]
+    );
+    // This double is the exact lower integer; the extra unit remains ordered.
+    assert_eq!(
+        eval(&data, &shapes, "huge", &iri("a")),
+        [iri("hugeLo"), iri("hugeFloat"), iri("hugeHi")]
+    );
+    assert_eq!(
+        eval(&data, &shapes, "hugeDesc", &iri("a")),
+        [iri("hugeHi"), iri("hugeLo"), iri("hugeFloat")]
+    );
+    assert_eq!(
+        eval(&data, &shapes, "specials", &iri("a")),
+        [
+            iri("nan"),
+            iri("negInf"),
+            iri("hugeLo"),
+            iri("hugeHi"),
+            iri("inf")
+        ]
+    );
+}
+
 /// `count` returns the cardinality of its argument set as an `xsd:integer`
 /// (duplicates counted; `count` does NOT dedup).
 #[test]

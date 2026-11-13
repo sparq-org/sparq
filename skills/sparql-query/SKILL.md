@@ -169,7 +169,12 @@ arithmetic. See [exact temporal scope](../zk-query-proofs/references/exact-tempo
 `strict_numeric_capacity: true` rejects unsupported numeric consumers as
 a sticky whole-query capacity failure; it is `false` by default. It retains the
 `i64` integer and `i128` decimal lanes, including the existing bounded decimal
-division precision, while refusing overflow fallback to floating point.
+division precision, while refusing arithmetic overflow fallback to floating point.
+Relational comparisons (`=`, `!=`, `<`, `<=`, `>`, `>=`) between well-formed
+integer/decimal values and `ORDER BY` use exact lexical comparison when the
+bounded numeric fast path cannot represent or align the values. They accept
+mantissas beyond `i128` in both capacity modes; this does not expand arithmetic.
+Other scalar comparisons retain their checked numeric capacity failures.
 Direct RDF output, valid unary plus, `isNumeric` and `sameTerm` preserve large
 lexicals without asserting arithmetic support. Numeric EBV separately classifies
 validated integer/decimal digits exactly, without a floating-point conversion.
@@ -773,13 +778,17 @@ SPARQL Update `USING` identity behavior.
   A single-pattern `?v OP const` numeric FILTER normally uses the f64 `numerics` cache.
   `sparq_core::decimal_needs_exact_comparison` declines this path for more than
   `f64::DIGITS` significant digits or a nonzero decimal whose image is zero/subnormal
-  (below `f64::MIN_POSITIVE`). Zero remains safe. Constants use that predicate directly;
-  `Graph::has_decimal_needing_exact_comparison()` memoizes it over cached decimal terms
-  using existing numeric images and invalidates it on dictionary growth. The former
-  `has_high_precision_decimal()` name remains as a deprecated forwarding alias.
-  An unsafe operand takes the exact evaluator, matching BIND for `=`/`<`/`>`/`<=`/`>=`.
-  The graph decision is conservative: one unsafe
-  decimal disables numeric pushdown across that graph; ordinary stores retain it.
+  (below `f64::MIN_POSITIVE`). Zero remains safe. Constants use the string predicate;
+  `Graph::has_decimal_needing_exact_comparison()` uses cached images and also flags
+  every uncached valid integer/decimal literal, including values beyond arithmetic
+  capacity. The former `has_high_precision_decimal()` name remains as a deprecated alias.
+  Forks inherit the packed verdict and scanned dictionary watermark. A safe graph
+  eagerly checks only appended IDs after a write, including UPDATE and transactions;
+  unknown memos stay lazy and unsafe verdicts remain sticky. An unsafe operand takes
+  the exact evaluator, matching BIND for `=`/`<`/`>`/`<=`/`>=`. The graph decision is
+  conservative: one unsafe term disables numeric pushdown across that graph;
+  ordinary stores retain it.
+
 - **`SELECT *`** never exposes blank-node "variables" (`_:x` in a pattern is an existential var).
 - **Non-deterministic builtins** (`sq-98w7z.1`) — `NOW()` is **query-constant** per SPARQL 1.1
   §17.4.5.1: every evaluation within one execution (across rows, parallel workers, `EXISTS`

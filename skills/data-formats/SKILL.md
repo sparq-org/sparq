@@ -35,12 +35,21 @@ whitespace. This includes the
 range of `xsd:byte` and unsigned integer types. It does not impose the evaluator's
 finite mantissa capacity. `numeric_cache_value` can return `None` for a valid large
 number; a missing cache value is not a datatype-validity result.
+`Graph::has_decimal_needing_exact_comparison()` also flags uncached valid integer/decimal
+literals, so numeric FILTER pushdown defers to exact evaluation rather than
+excluding them. Cached high-precision decimals still set this graph-wide guard;
+ill-typed literals and floating NaN do not. Forks inherit the gate's memo and its
+scanned dictionary watermark. Appending terms to a graph proved safe checks only
+the new IDs; an unsafe verdict remains sticky because dictionary terms linger
+after deletion and compaction.
 
 `sparq_core::decimal_needs_exact_comparison(lexical)` conservatively flags plain
 decimals with more than `f64::DIGITS` significant digits or a nonzero value whose
 cached image is zero/subnormal (below `f64::MIN_POSITIVE`). Zero remains safe.
 `Graph::has_decimal_needing_exact_comparison()` memoizes that decision over cached
-decimal terms using their existing numeric images; dictionary growth invalidates it.
+decimal terms using their existing numeric images. Its packed memo also covers
+uncached valid exact numerics; forks inherit the scanned prefix and safe graphs
+eagerly classify only appended IDs.
 `has_high_precision_decimal()` remains as a deprecated forwarding alias.
 The engine uses the same predicate for FILTER
 constants and declines numeric pushdown when either side needs exact comparison.
