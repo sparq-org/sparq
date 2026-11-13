@@ -388,3 +388,10 @@ The engine's `ebv_dialects` tests cover label retention, declarations in comment
 and literals, explicit conflicts, nested evaluation and metadata-preserving
 integration paths. This is local API plumbing for scoped EBV rules, not a full
 SPARQL 1.2 implementation or an upstream audit claim.
+
+## 13. Ordered parser collections on the zkVM target
+
+On `target_os = "zkvm"`, private parser maps use `BTreeMap`. Parser sets use
+a fixed-key hasher because oxrdf blank nodes do not implement `Ord`.
+This avoids host-seeded hash initialization during guest parsing.
+Native builds retain the upstream collection types and public parser signatures.

@@ -7,6 +7,7 @@
 mod api;
 mod canon;
 mod counter;
+mod dataset;
 mod error;
 
 pub use api::{

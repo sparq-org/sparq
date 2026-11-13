@@ -43,6 +43,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without spending the input enumeration allowance again. Group writes meter
   only documents read by accepted WAC controls.
 
+- **sparq-lws-core:** embedded and HTTP read plans bound query depth for long
+  paths. Short walks use balanced constant-graph branches; longer walks retain
+  the VALUES plan. Embedded reads retain one actor snapshot; both clients retain
+  metadata validation and candidate order.
+
 - **sparq-lws-core:** metadata writes, resource deletes, containment removals and
   append/fold publication use fenced HTTP updates. Resource deletion detaches its
   parent edge in the same write.
