@@ -15,6 +15,7 @@ pub struct TrustMember {
 }
 
 /// Presence enables holder binding. An absent issuer list selects all issuers.
+/// A present issuer list must be nonempty; omit holder binding to require no keys.
 #[derive(Clone, Debug, Default)]
 pub struct HolderBinding {
     pub issuers: Option<Vec<NamedNode>>,
@@ -186,6 +187,9 @@ pub fn derive(input: &PolicyInput) -> Result<PublicPolicy, Error> {
         issuers: Some(issuers),
     }) = &input.holder_binding
     {
+        if issuers.is_empty() {
+            return Err(Error::Invalid("empty holder issuer list".into()));
+        }
         if issuers.len() > 4 {
             return Err(Error::Capacity("holder issuer list".into()));
         }
@@ -331,8 +335,10 @@ mod tests {
         let mut expected = baseline;
         expected[2] = number(1);
         assert_eq!(public_words(&holder).unwrap(), expected);
-        holder.holder_binding.as_mut().unwrap().issuers = Some(vec![]);
+        holder.holder_binding.as_mut().unwrap().issuers = Some(vec![iri("urn:test:issuer")]);
         expected[3] = number(1);
+        expected[4] = number(1);
+        expected[5] = issuer_encoding(&iri("urn:test:issuer")).unwrap();
         assert_eq!(public_words(&holder).unwrap(), expected);
         let mut status = base.clone();
         status.accepted_snapshots = Some(snapshots(&[1], true));
@@ -375,11 +381,9 @@ mod tests {
         let mut all = base.clone();
         all.holder_binding = Some(HolderBinding::default());
         assert_ne!(public_words(&base).unwrap(), public_words(&all).unwrap());
-        let mut empty = all.clone();
-        empty.holder_binding.as_mut().unwrap().issuers = Some(vec![]);
-        assert_ne!(public_words(&all).unwrap(), public_words(&empty).unwrap());
         let mut listed = all.clone();
         listed.holder_binding.as_mut().unwrap().issuers = Some(vec![iri("urn:test:issuer")]);
+        assert_ne!(public_words(&all).unwrap(), public_words(&listed).unwrap());
         let mut other = listed.clone();
         other.holder_binding.as_mut().unwrap().issuers = Some(vec![iri("urn:test:other-issuer")]);
         assert_ne!(
@@ -453,6 +457,16 @@ mod tests {
             issuer_encoding(&iri("did:web:Issuer.example")).unwrap(),
             issuer_encoding(&iri("did:web:issuer.example")).unwrap()
         );
+    }
+
+    #[test]
+    fn empty_holder_issuer_list_is_refused_by_name() {
+        let mut request = input();
+        request.holder_binding = Some(HolderBinding {
+            issuers: Some(vec![]),
+        });
+        assert!(matches!(public_words(&request), Err(Error::Invalid(reason))
+            if reason == "empty holder issuer list"));
     }
 
     #[test]
