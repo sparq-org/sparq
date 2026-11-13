@@ -281,3 +281,6 @@ structural tests/join_gates.rs::a_joins_member_is_resolved_in_the_verify_loop_fr
 structural tests/support/v2_members.rs::uncompiled_v2_shapes_are_refused_through_verify_manifest
 structural tests/support/v2_members.rs::v2_join_pairings_are_checked_through_verify_manifest
 structural tests/support/v2_members.rs::v2_scan_pairings_are_checked_through_verify_manifest
+
+live src/result/method_predicates.rs::live_method_bound_integer_and_date_predicates
+structural src/result/method_predicates.rs::full_width_legacy_presentations_retain_a_named_refusal

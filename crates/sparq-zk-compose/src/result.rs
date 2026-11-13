@@ -12,6 +12,8 @@
 //!
 //! Private integer predicates retain lexical-to-value binding and accept only
 //! canonical nonnegative `xsd:integer` values through [`MAX_PRIVATE_INTEGER`].
+//! A hidden canonical timezone-free `xsd:date` predicate opens the same literal
+//! bytes used to derive its Gregorian comparison key.
 //! Public predicates run in the independent verifier. An all-public predicate
 //! query selects the member without any numeric predicate circuitry.
 
@@ -67,6 +69,7 @@ mod proof_bindings;
 enum NumericContract {
     Unsigned(PrivateIntegerCapacity),
     Signed,
+    Date,
     // beadzkp-15.1: opt-in version four; unsigned public filters only.
     PublicPattern,
 }
@@ -74,7 +77,7 @@ enum NumericContract {
 impl NumericContract {
     fn profile(self) -> NumericProfile {
         match self {
-            Self::Unsigned(_) | Self::PublicPattern => NumericProfile::Unsigned,
+            Self::Unsigned(_) | Self::Date | Self::PublicPattern => NumericProfile::Unsigned,
             Self::Signed => NumericProfile::Signed,
         }
     }
@@ -91,6 +94,7 @@ impl NumericContract {
         match self {
             Self::Unsigned(_) => matches!(version, 1 | 2 | BOUND_VERSION),
             Self::Signed => version == signed::VERSION,
+            Self::Date => version == BOUND_VERSION,
             Self::PublicPattern => version == PUBLIC_PATTERN_VERSION,
         }
     }
@@ -118,6 +122,7 @@ impl NumericContract {
             }
             Self::Unsigned(capacity) => package(credentials, filters, capacity, depth),
             Self::Signed => signed::package(credentials, filters, depth),
+            Self::Date => date_package(credentials, filters, depth),
             Self::PublicPattern => public_pattern_package(credentials, filters, depth),
         }?;
         require_method_bound_or_opt_in(selected, admit_unbound_legacy)
@@ -134,13 +139,15 @@ impl NumericContract {
             Self::Unsigned(PrivateIntegerCapacity::TwoDigits),
             Self::Unsigned(PrivateIntegerCapacity::FullU64),
             Self::Signed,
+            Self::Date,
             Self::PublicPattern,
         ];
-        let mut covered = [false; 3];
+        let mut covered = [false; 4];
         for contract in &all {
             match contract {
                 Self::Unsigned(_) => covered[0] = true,
                 Self::Signed => covered[1] = true,
+                Self::Date => covered[3] = true,
                 Self::PublicPattern => covered[2] = true,
             }
         }
@@ -630,9 +637,8 @@ impl ResultPolicy {
 
 /// The METHOD-BOUND member for a capacity bucket, or a named refusal.
 ///
-/// Only the two `(K, 0, 10)` buckets have a `result_v5_*` member so far; every
-/// other bucket is refused rather than silently issued through a method-unbound
-/// legacy member. The remaining capacity points are tracked on sq-j506.
+/// Hidden integer predicates use the full-width members at every status depth.
+/// Predicate-free members retain their existing shallow status capacity.
 fn bound_package(
     credentials: usize,
     hidden_filters: usize,
@@ -650,11 +656,45 @@ fn bound_package(
     match (credentials, bits, depth) {
         (1, 0, 10) => Ok(("result_v5_k1_n16_p3_r4_f0_d10", BOUND_VERSION)),
         (2, 0, 10) => Ok(("result_v5_k2_n16_p3_r4_f0_d10", BOUND_VERSION)),
+        (1, 64, 10) => Ok(("result_v5_k1_n16_p3_r4_f2_i64_d10", BOUND_VERSION)),
+        (1, 64, 17) => Ok(("result_v5_k1_n16_p3_r4_f2_i64_d17", BOUND_VERSION)),
+        (1, 64, 20) => Ok(("result_v5_k1_n16_p3_r4_f2_i64_d20", BOUND_VERSION)),
+        (2, 64, 10) => Ok(("result_v5_k2_n16_p3_r4_f2_i64_d10", BOUND_VERSION)),
+        (2, 64, 17) => Ok(("result_v5_k2_n16_p3_r4_f2_i64_d17", BOUND_VERSION)),
+        (2, 64, 20) => Ok(("result_v5_k2_n16_p3_r4_f2_i64_d20", BOUND_VERSION)),
         _ => Err(reject(
             "no method-bound successful-result member at this capacity bucket; \
-issue at one or two credentials with no private predicate and status depth 10, \
+use full-width capacity for hidden integers or a supported public-predicate bucket, \
 or take the written-down ResultPolicy::admit_unbound_legacy downgrade",
         )),
+    }
+}
+
+fn date_package(
+    credentials: usize,
+    filters: usize,
+    depth: u32,
+) -> Result<(&'static str, u32), ResultError> {
+    match (credentials, filters, depth) {
+        (1, 1, 10) => Ok(("result_v5_k1_n16_p3_r4_f1_date_d10", BOUND_VERSION)),
+        (2, 1, 10) => Ok(("result_v5_k2_n16_p3_r4_f1_date_d10", BOUND_VERSION)),
+        _ => Err(reject(
+            "no method-bound xsd:date member at this capacity bucket",
+        )),
+    }
+}
+
+fn unsigned_contract(
+    capacity: PrivateIntegerCapacity,
+    query: &DisclosureQuery,
+) -> Result<NumericContract, ResultError> {
+    if crate::planner::date::hidden_date(query).map_err(|e| reject(e.to_string()))? {
+        if capacity != PrivateIntegerCapacity::FullU64 {
+            return Err(reject("xsd:date member requires full key capacity"));
+        }
+        Ok(NumericContract::Date)
+    } else {
+        Ok(NumericContract::Unsigned(capacity))
     }
 }
 
@@ -775,6 +815,12 @@ fn public_statement(
     policy: &ResultPolicy,
     nonce: &VerifierNonce,
 ) -> Result<PublicStatement, ResultError> {
+    if matches!(p.version, 1 | 2) && !policy.admit_unbound_legacy {
+        return Err(reject(
+            "no method-bound successful-result member verifies a method-unbound legacy presentation; \
+use ResultPolicy::admit_unbound_legacy for already-issued material",
+        ));
+    }
     // beadzkp-15.1: dispatch uses only the public version; the
     // specialized pattern is then re-derived from the query, never the witness.
     let contract = if p.version == PUBLIC_PATTERN_VERSION {
@@ -783,7 +829,10 @@ fn public_statement(
         }
         NumericContract::PublicPattern
     } else {
-        NumericContract::Unsigned(p.integer_capacity)
+        unsigned_contract(
+            p.integer_capacity,
+            &DisclosureQuery::parse(&p.query).map_err(|e| reject(e.to_string()))?,
+        )?
     };
     public_statement_for(p.into(), contract, policy, nonce)
 }
@@ -858,13 +907,11 @@ fn public_statement_for(
         }
         if expected.contains(&filter.variable) {
             for row in &rows {
-                let value = contract
-                    .profile()
-                    .value(&row[&filter.variable])
+                let value = filter.value(contract.profile(), &row[&filter.variable])
                     .ok_or_else(|| {
                         reject(match contract {
-                            NumericContract::Unsigned(_) | NumericContract::PublicPattern => {
-                                "public FILTER operand is not a canonical nonnegative integer"
+                            NumericContract::Unsigned(_) | NumericContract::Date | NumericContract::PublicPattern => {
+                                "public FILTER operand does not match the canonical integer or xsd:date datatype"
                             }
                             NumericContract::Signed => {
                                 "public FILTER operand is not a canonical signed integer"
@@ -946,9 +993,14 @@ fn public_statement_for(
         ("filter_count", json!(hidden_filters.len())),
     ];
     if !hidden_filters.is_empty() {
-        let mut fvars = [1u32; F];
-        let mut ops = [0u32; F];
-        let mut bounds = [0u64; F];
+        let slots = if matches!(contract, NumericContract::Date) {
+            1
+        } else {
+            F
+        };
+        let mut fvars = vec![1u32; slots];
+        let mut ops = vec![0u32; slots];
+        let mut bounds = vec![0u64; slots];
         for (f, &index) in hidden_filters.iter().enumerate() {
             let filter = &query.filters[index];
             fvars[f] = (vars
@@ -1031,7 +1083,8 @@ pub enum WitnessSelection {
 /// Chooses whether to disclose the small private-integer capacity.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum IntegerCapacityPolicy {
-    /// Use the small member when every selected private operand is at most 99.
+    /// Choose the smallest admitted range bucket; method-bound hidden integers
+    /// use full width, while legacy opt-in issuance retains its small bucket.
     #[default]
     Smallest,
     /// Use the full-u64 member for any private predicate, hiding the small bucket.
@@ -1185,6 +1238,8 @@ fn prepare_result_contract(
         return Err(reject("input credentials exceed disclosure planning limit"));
     }
     let mut parsed = parse_numeric_query(query, profile)?;
+    let hidden_date =
+        crate::planner::date::hidden_date(&parsed).map_err(|e| reject(e.to_string()))?;
     let entries = policy.entries()?;
     let status_depth = policy.status_depth()?;
     // beadzkp-15.1: unsupported opt-in shapes reject before search.
@@ -1203,6 +1258,7 @@ fn prepare_result_contract(
             return Err(reject("unsupported public-pattern capacity bucket"));
         }
     }
+    let mut method_refusal = None;
     let eligible: Vec<bool> = credentials
         .iter()
         .map(|c| {
@@ -1245,7 +1301,7 @@ fn prepare_result_contract(
             // The METHOD must authenticate as string-canonical, not merely the
             // signature as valid: a dual-leaf credential's leaves are not the
             // shape this relation proves.
-            authenticate_string_canonical(
+            match authenticate_string_canonical(
                 FoldedMessage::BeforeSelection,
                 policy.admit_unbound_legacy,
                 &c.issuer,
@@ -1253,10 +1309,20 @@ fn prepare_result_contract(
                 &c.graph.commitment,
                 &c.graph.salt,
                 &reference,
-            )
-            .is_ok()
+            ) {
+                Ok(_) => true,
+                Err(error) => {
+                    method_refusal = Some(error);
+                    false
+                }
+            }
         })
         .collect();
+    if !eligible.iter().any(|eligible| *eligible) {
+        if let Some(error) = method_refusal {
+            return Err(error);
+        }
+    }
     let graphs: Vec<_> = credentials.iter().map(|c| c.graph.clone()).collect();
     let admit = |pattern: usize, witness: MembershipRef, triple: &Triple| {
         if !eligible[witness.credential] {
@@ -1269,7 +1335,11 @@ fn prepare_result_contract(
             if let QuerySlot::Variable(v) = &parsed.patterns[pattern][slot] {
                 if !parsed.projection.contains(v) && parsed.filters.iter().any(|f| &f.variable == v)
                 {
-                    return profile.value(term).is_some();
+                    return parsed
+                        .filters
+                        .iter()
+                        .filter(|f| &f.variable == v)
+                        .all(|f| f.value(profile, term).is_some());
                 }
             }
             true
@@ -1377,6 +1447,8 @@ fn prepare_result_contract(
     }
     let integer_capacity = if hidden_filters != 0
         && (matches!(profile, NumericProfile::Signed)
+            || hidden_date
+            || !policy.admit_unbound_legacy
             || needs_wide
             || options.integer_capacity == IntegerCapacityPolicy::HideInU64)
     {
@@ -1386,7 +1458,7 @@ fn prepare_result_contract(
     };
     let contract = match profile {
         _ if public_pattern => NumericContract::PublicPattern,
-        NumericProfile::Unsigned => NumericContract::Unsigned(integer_capacity),
+        NumericProfile::Unsigned => unsigned_contract(integer_capacity, &parsed)?,
         NumericProfile::Signed => NumericContract::Signed,
     };
     let (_, version) =
@@ -1505,7 +1577,9 @@ fn prepare_result_contract(
     let mut values = vec![vec![zero.clone(); V]; R];
     let mut selected_types = [[[0u32; 3]; P]; R];
     let mut selected_hashes = vec![vec![vec![zero; 3]; P]; R];
-    let mut filter_values = [[0u64; F]; R];
+    let filter_slots = if hidden_date { 1 } else { F };
+    let mut filter_values = vec![vec![0u64; filter_slots]; R];
+    let mut date_literals = vec![vec![vec![0u8; 53]; filter_slots]; R];
     let mut memberships = BTreeSet::new();
     for (r, row) in plan.rows.iter().enumerate() {
         let mut bindings = BTreeMap::new();
@@ -1544,10 +1618,10 @@ fn prepare_result_contract(
         for (f, &index) in statement.hidden_filters.iter().enumerate() {
             let filter = &statement.query.filters[index];
             let term = &bindings[&filter.variable];
-            let value = profile.value(term).ok_or_else(|| {
+            let value = filter.value(profile, term).ok_or_else(|| {
                 reject(match profile {
                     NumericProfile::Unsigned => {
-                        "private FILTER operand is not a canonical nonnegative integer"
+                        "private FILTER operand does not match the canonical integer or xsd:date datatype"
                     }
                     NumericProfile::Signed => {
                         "private FILTER operand is not a canonical signed integer"
@@ -1560,6 +1634,9 @@ fn prepare_result_contract(
                 return Err(reject("private FILTER exceeds bounded integer lane"));
             }
             filter_values[r][f] = value;
+            if hidden_date {
+                date_literals[r][f] = term.to_string().into_bytes();
+            }
         }
     }
     fields.extend([
@@ -1582,6 +1659,9 @@ fn prepare_result_contract(
     ]);
     if !statement.hidden_filters.is_empty() {
         fields.push(("filter_values", json!(filter_values)));
+        if hidden_date {
+            fields.push(("date_literals", json!(date_literals)));
+        }
     }
     let toml = fields
         .iter()
@@ -1736,6 +1816,9 @@ fn verify_statement(
         rows: statement.rows,
     })
 }
+
+#[cfg(test)]
+mod method_predicates;
 
 #[cfg(test)]
 mod tests {

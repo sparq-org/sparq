@@ -25,13 +25,15 @@
   "layers": {
     "result": {
       "families": [
+        "result_v5_integer",
+        "result_v5_date",
         "result_v5",
         "result_v4",
         "result_v3",
         "result_v2",
         "result_v1"
       ],
-      "members": 34
+      "members": 42
     },
     "query": {
       "families": [
@@ -61,6 +63,336 @@
     }
   },
   "families": {
+    "result_v5_integer": {
+      "layer": "result",
+      "role": "Method-bound released-result support with full-width hidden unsigned integer predicates and canonical literal binding. Does not establish result completeness or holder identity.",
+      "parameters": [
+        "k",
+        "n",
+        "p",
+        "r",
+        "f",
+        "i",
+        "d"
+      ],
+      "members": [
+        {
+          "member": "result_v5_k1_n16_p3_r4_f2_i64_d10",
+          "params": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64,
+            "d": 10
+          },
+          "circuit_size": 107642
+        },
+        {
+          "member": "result_v5_k1_n16_p3_r4_f2_i64_d17",
+          "params": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64,
+            "d": 17
+          },
+          "circuit_size": 108190
+        },
+        {
+          "member": "result_v5_k1_n16_p3_r4_f2_i64_d20",
+          "params": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64,
+            "d": 20
+          },
+          "circuit_size": 108425
+        },
+        {
+          "member": "result_v5_k2_n16_p3_r4_f2_i64_d10",
+          "params": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64,
+            "d": 10
+          },
+          "circuit_size": 134455
+        },
+        {
+          "member": "result_v5_k2_n16_p3_r4_f2_i64_d17",
+          "params": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64,
+            "d": 17
+          },
+          "circuit_size": 135551
+        },
+        {
+          "member": "result_v5_k2_n16_p3_r4_f2_i64_d20",
+          "params": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64,
+            "d": 20
+          },
+          "circuit_size": 136021
+        }
+      ],
+      "min_circuit_size": 107642,
+      "max_circuit_size": 136021,
+      "scaling": [
+        {
+          "parameter": "d",
+          "from_member": "result_v5_k1_n16_p3_r4_f2_i64_d10",
+          "from_value": 10,
+          "from_circuit_size": 107642,
+          "to_member": "result_v5_k1_n16_p3_r4_f2_i64_d17",
+          "to_value": 17,
+          "to_circuit_size": 108190,
+          "delta_gates": 548,
+          "ratio": 1.0051,
+          "held_fixed": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64
+          }
+        },
+        {
+          "parameter": "d",
+          "from_member": "result_v5_k1_n16_p3_r4_f2_i64_d10",
+          "from_value": 10,
+          "from_circuit_size": 107642,
+          "to_member": "result_v5_k1_n16_p3_r4_f2_i64_d20",
+          "to_value": 20,
+          "to_circuit_size": 108425,
+          "delta_gates": 783,
+          "ratio": 1.0073,
+          "held_fixed": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64
+          }
+        },
+        {
+          "parameter": "d",
+          "from_member": "result_v5_k1_n16_p3_r4_f2_i64_d17",
+          "from_value": 17,
+          "from_circuit_size": 108190,
+          "to_member": "result_v5_k1_n16_p3_r4_f2_i64_d20",
+          "to_value": 20,
+          "to_circuit_size": 108425,
+          "delta_gates": 235,
+          "ratio": 1.0022,
+          "held_fixed": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64
+          }
+        },
+        {
+          "parameter": "d",
+          "from_member": "result_v5_k2_n16_p3_r4_f2_i64_d10",
+          "from_value": 10,
+          "from_circuit_size": 134455,
+          "to_member": "result_v5_k2_n16_p3_r4_f2_i64_d17",
+          "to_value": 17,
+          "to_circuit_size": 135551,
+          "delta_gates": 1096,
+          "ratio": 1.0082,
+          "held_fixed": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64
+          }
+        },
+        {
+          "parameter": "d",
+          "from_member": "result_v5_k2_n16_p3_r4_f2_i64_d10",
+          "from_value": 10,
+          "from_circuit_size": 134455,
+          "to_member": "result_v5_k2_n16_p3_r4_f2_i64_d20",
+          "to_value": 20,
+          "to_circuit_size": 136021,
+          "delta_gates": 1566,
+          "ratio": 1.0116,
+          "held_fixed": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64
+          }
+        },
+        {
+          "parameter": "d",
+          "from_member": "result_v5_k2_n16_p3_r4_f2_i64_d17",
+          "from_value": 17,
+          "from_circuit_size": 135551,
+          "to_member": "result_v5_k2_n16_p3_r4_f2_i64_d20",
+          "to_value": 20,
+          "to_circuit_size": 136021,
+          "delta_gates": 470,
+          "ratio": 1.0035,
+          "held_fixed": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64
+          }
+        },
+        {
+          "parameter": "k",
+          "from_member": "result_v5_k1_n16_p3_r4_f2_i64_d10",
+          "from_value": 1,
+          "from_circuit_size": 107642,
+          "to_member": "result_v5_k2_n16_p3_r4_f2_i64_d10",
+          "to_value": 2,
+          "to_circuit_size": 134455,
+          "delta_gates": 26813,
+          "ratio": 1.2491,
+          "held_fixed": {
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64,
+            "d": 10
+          }
+        },
+        {
+          "parameter": "k",
+          "from_member": "result_v5_k1_n16_p3_r4_f2_i64_d17",
+          "from_value": 1,
+          "from_circuit_size": 108190,
+          "to_member": "result_v5_k2_n16_p3_r4_f2_i64_d17",
+          "to_value": 2,
+          "to_circuit_size": 135551,
+          "delta_gates": 27361,
+          "ratio": 1.2529,
+          "held_fixed": {
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64,
+            "d": 17
+          }
+        },
+        {
+          "parameter": "k",
+          "from_member": "result_v5_k1_n16_p3_r4_f2_i64_d20",
+          "from_value": 1,
+          "from_circuit_size": 108425,
+          "to_member": "result_v5_k2_n16_p3_r4_f2_i64_d20",
+          "to_value": 2,
+          "to_circuit_size": 136021,
+          "delta_gates": 27596,
+          "ratio": 1.2545,
+          "held_fixed": {
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64,
+            "d": 20
+          }
+        }
+      ],
+      "invariances": []
+    },
+    "result_v5_date": {
+      "layer": "result",
+      "role": "Method-bound released-result support with a hidden canonical Gregorian date predicate. The key is derived from the same literal token as its string commitment. Does not establish result completeness or holder identity.",
+      "parameters": [
+        "k",
+        "n",
+        "p",
+        "r",
+        "f",
+        "d"
+      ],
+      "members": [
+        {
+          "member": "result_v5_k1_n16_p3_r4_f1_date_d10",
+          "params": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 1,
+            "d": 10
+          },
+          "circuit_size": 44473
+        },
+        {
+          "member": "result_v5_k2_n16_p3_r4_f1_date_d10",
+          "params": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 1,
+            "d": 10
+          },
+          "circuit_size": 71285
+        }
+      ],
+      "min_circuit_size": 44473,
+      "max_circuit_size": 71285,
+      "scaling": [
+        {
+          "parameter": "k",
+          "from_member": "result_v5_k1_n16_p3_r4_f1_date_d10",
+          "from_value": 1,
+          "from_circuit_size": 44473,
+          "to_member": "result_v5_k2_n16_p3_r4_f1_date_d10",
+          "to_value": 2,
+          "to_circuit_size": 71285,
+          "delta_gates": 26812,
+          "ratio": 1.6029,
+          "held_fixed": {
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 1,
+            "d": 10
+          }
+        }
+      ],
+      "invariances": []
+    },
     "result_v5": {
       "layer": "result",
       "role": "Version 5 support for released SELECT DISTINCT mappings, identical in capacity and public ABI to the version-1 f=0 profile but folding the METHOD-BOUND presentation message, so the issuer signature attests the string-canonical commitment METHOD and not merely the commitment. The scheme digest is a compile-time constant of the relation, not a public input. f=0 only: no private FILTER. Compiled only for k in {1, 2}, n=16, p=3, r=4, d=10. Does not establish result completeness or holder identity.",
@@ -2536,10 +2868,10 @@
     ]
   },
   "summary": {
-    "families": 21,
-    "members": 74,
-    "snapshot_members": 74,
-    "scaling_pairs": 78,
+    "families": 23,
+    "members": 82,
+    "snapshot_members": 82,
+    "scaling_pairs": 88,
     "invariance_facts": 3
   }
 }

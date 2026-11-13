@@ -713,11 +713,14 @@ jobs:
           SPARQ_PUBLIC_PATTERN_EVIDENCE: ${{ runner.temp }}/public-pattern-evidence-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           cargo test -p sparq-zk-compose --features successful-results --lib result:: -- --include-ignored --test-threads=1 --skip result::proof_bindings::run_job
+          python3 bench/zk-compose/scripts/test_remeasure_result_evidence.py
+          python3 bench/zk-compose/scripts/result_method_keys.py --check
           python3 bench/zk-compose/campaigns/test_campaign.py
           cargo test -p sparq-zk-compose --features successful-results --example result_experiment
           cargo test -p sparq-zk-compose --features successful-results --lib driver::
           cd zk/compose
           nargo test --package sparq_zk_compose_core result::
+          nargo test --package sparq_zk_compose_core result_date::
           nargo test --package sparq_zk_compose_core result_integer::
           nargo test --package sparq_zk_compose_core result_signed_integer::
           nargo test --package sparq_zk_compose_core result_public::
