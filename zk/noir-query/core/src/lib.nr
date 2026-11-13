@@ -12,3 +12,4 @@ mod term_bytes;
 mod term_ids;
 pub mod suite_metadata;
 mod suite_metadata_tests;
+mod suite_entry_tests;

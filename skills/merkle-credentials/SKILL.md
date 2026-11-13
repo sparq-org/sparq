@@ -60,12 +60,27 @@ opening first. Access components through the cell's methods. `term::padding()`
 is the only canonical unbound cell; the bound default graph is distinct.
 
 `open_lexical` binds bounded bytes and metadata to a cell's `enc`.
-`recompute_key` performs that opening and checks both class and payload; only it
-produces `KeyCheckedCell`. The datatype-specialized `recompute_key_for` also
+`recompute_key` performs that opening and checks both class and payload. The
+datatype-specialized `recompute_key_for` also
 binds the opened datatype to its expected identifier, so fixed query shapes
 can omit unrelated parsers. Query gadgets must require this type before reading
 value semantics. Lexical capacities are compiled bounds, not truncation rules.
 Use `BoundedVec<u8, L>` and canonical zero backing storage after its length.
+
+`suite_entry::BoundedTermOpening<L, D, G>` lets generated wiring choose lexical,
+datatype and language backing capacities independently. Its runtime lengths stay
+witnesses. `open_bounded_cell(raw, scope)` and
+`open_bounded_quads(raw_quads, scope)` delegate to the existing term constructor
+and check every absent-field and backing-padding byte. The existing
+`TermOpening<L>`, `open_cell` and `open_quads` remain compatible.
+
+`term::open_key_checked(raw, scope, expected_dt)` constructs a literal directly
+from a bounded raw opening and returns `KeyCheckedCell`. It shares the initial
+lexical hash, constrains the opened datatype to `expected_dt`, and recomputes the
+entire key before returning. Pass a fixed pinned datatype identifier, such as
+`suite_constants::DT_INTEGER`, so unrelated parsers fold away. This constructor
+and the recomputation functions produce checked cells only after full lexical
+key recomputation. Absent and nonliteral openings refuse.
 
 `suite::credential_root` receives validated quad cells, leaf-salt witnesses, the
 private tree salt and count. It checks RDF positions, strict ordering, padding,
