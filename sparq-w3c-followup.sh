@@ -1,27 +1,30 @@
 #!/usr/bin/env bash
 # sparq W3C follow-up. Uses your gh login and your forks. Nothing is force-pushed, and every
 # step is skipped if it was already done, so it is safe to run again.
-#   1. Merges sparq #7335 and #7346 (squash, pinned to their reviewed heads).
+#   1. Merges sparq #7335, #7346 and #7361 (squash, pinned to their reviewed heads).
 #   2. Opens one small CI fix PR on each of w3c/rdf-tests, w3c/json-ld-api and w3c/rdf-canon.
 #      Their report-generation workflows pin an exact Ruby patch release that the new
 #      ubuntu-26.04 runners no longer provide, so the check fails on every PR, including ours.
 #   3. Opens two report PRs on w3c/rdf-tests: RDF/XML 1.2, and the RDF 1.1 suites.
 #      (#416 is already approved, so the RDF/XML 1.2 report goes in its own PR instead.)
 set -euo pipefail
+# Portable across macOS and Linux: file edits use perl -pi, not sed -i.
 me="$(gh api user --jq .login)"
 work="$(mktemp -d)"
 src=https://raw.githubusercontent.com/sparq-org/sparq/wip/earl-reports-20261112/earl
 footer=$'\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)'
 
 # --- 1. sparq merges ------------------------------------------------------------------------
-merge() { # merge <pr> <sha> <title>
+merge() { # merge <pr> <sha> <title> [message]
   if [ "$(gh api "repos/sparq-org/sparq/pulls/$1" --jq .merged)" = true ]; then
     echo "sparq #$1 already merged"; return; fi
   gh api -X PUT "repos/sparq-org/sparq/pulls/$1/merge" -f merge_method=squash -f sha="$2" \
-    -f commit_title="$3 (#$1)" -f commit_message="$3" --jq .message
+    -f commit_title="$3 (#$1)" -f commit_message="${4:-$3}" --jq .message
 }
 merge 7335 36a911999fca88c15ab9e2e86e91e3aa674c1cab "test(geo): ratchet the external GeoSPARQL compliance benchmark"
 merge 7346 aa9767cff461125f8e0b6ba5ed1e9bd8df8e64c3 "fix(vc): make the Vercel adapter build on Vercel"
+if [ "$(gh api repos/sparq-org/sparq/pulls/7361 --jq .draft)" = true ]; then gh pr ready 7361 -R sparq-org/sparq; fi
+merge 7361 de97deb33e71e53ba719ac4c19a9f6449481b5f0 "fix(zk): make guest execution reproducible" "Addresses #1591"
 
 # --- helpers --------------------------------------------------------------------------------
 # start <repo> <branch>: returns 1 (skip) if the PR already exists, else clones upstream and branches.
@@ -43,8 +46,8 @@ finish() {
 
 # --- 2. CI fixes ----------------------------------------------------------------------------
 if start rdf-tests ci-ruby-3.4; then
-  sed -i 's/ruby-version: 3\.4\.3$/ruby-version: '"'3.4'"'/' .github/workflows/generate.yml
-  sed -i 's/^ruby "3\.4\.3"$/ruby "~> 3.4.3"/' Gemfile
+  perl -pi -e 's/ruby-version: 3\.4\.3$/ruby-version: \x273.4\x27/' .github/workflows/generate.yml
+  perl -pi -e 's/^ruby "3\.4\.3"$/ruby "~> 3.4.3"/' Gemfile
   finish rdf-tests ci-ruby-3.4 "CI: use the latest Ruby 3.4 patch release" \
 "The report generation workflow pins Ruby 3.4.3. Since \`ubuntu-latest\` moved to ubuntu-26.04, ruby/setup-ruby only provides the latest patch release of each series there, so the workflow fails at setup with \"Unavailable version 3.4.3 for ruby on ubuntu-26.04\". That fails the check on every open PR (for example #415 and #416), and it also stops the gh-pages regeneration on pushes to main.
 
@@ -54,7 +57,7 @@ Separately, the \"Add PR to project\" job fails with \"Bad credentials\". That o
 fi
 
 if start json-ld-api ci-ruby-3.2; then
-  sed -i 's/ruby-version: 3\.2\.2$/ruby-version: '"'3.2'"'/' .github/workflows/generate.yml
+  perl -pi -e 's/ruby-version: 3\.2\.2$/ruby-version: \x273.2\x27/' .github/workflows/generate.yml
   finish json-ld-api ci-ruby-3.2 "CI: use the latest Ruby 3.2 patch release" \
 "The report and manifest generation workflow pins Ruby 3.2.2. Since \`ubuntu-latest\` moved to ubuntu-26.04, ruby/setup-ruby only provides the latest patch release of each series there, so the workflow fails at setup with \"Unavailable version 3.2.2 for ruby on ubuntu-26.04\" on every PR that touches \`reports/\` or \`tests/\` (for example #742).
 
@@ -62,9 +65,9 @@ This asks setup-ruby for \`'3.2'\` (currently 3.2.11). The Gemfile has no Ruby p
 fi
 
 if start rdf-canon ci-ruby-3.4; then
-  sed -i 's/ruby-version: 3\.4\.1$/ruby-version: '"'3.4'"'/' .github/workflows/generate.yml
-  sed -i 's/^      - uses: stefanzweifel\/git-auto-commit-action@v4$/      - uses: stefanzweifel\/git-auto-commit-action@v4\n        if: github.event_name == '"'push'"' || github.event.pull_request.head.repo.full_name == github.repository/' .github/workflows/generate.yml
-  sed -i 's/^ruby "3\.4\.1"$/ruby "~> 3.4.1"/' Gemfile
+  perl -pi -e 's/ruby-version: 3\.4\.1$/ruby-version: \x273.4\x27/' .github/workflows/generate.yml
+  perl -pi -e 's/^(      - uses: stefanzweifel\/git-auto-commit-action\@v4)$/$1\n        if: github.event_name == \x27push\x27 || github.event.pull_request.head.repo.full_name == github.repository/' .github/workflows/generate.yml
+  perl -pi -e 's/^ruby "3\.4\.1"$/ruby "~> 3.4.1"/' Gemfile
   finish rdf-canon ci-ruby-3.4 "CI: use the latest Ruby 3.4 patch release" \
 "The report generation workflow pins Ruby 3.4.1. Since \`ubuntu-latest\` moved to ubuntu-26.04, ruby/setup-ruby only provides the latest patch release of each series there, so the workflow fails at setup with \"Unavailable version 3.4.1 for ruby on ubuntu-26.04\" on every PR that touches \`reports/\` or \`tests/\` (for example #234, #235 and #236).
 
