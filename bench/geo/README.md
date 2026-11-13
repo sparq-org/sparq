@@ -122,19 +122,23 @@ Compliance Benchmark* (ISPRS IJGI 10(7):487, 2021; arXiv:2102.06139) — is scor
 specific artifact: 206 SPARQL queries over the 30 GeoSPARQL 1.0 requirements, each with an
 expected SPARQL-Results-XML answer. It is a **conformance** family, not a timing one: the
 metrics are *correct answers* and a *requirements-weighted compliance %*.
+This is a community benchmark, not OGC certification.
 
 ```sh
-GSB="$(bench/geo/gsb.sh)"                     # gather-only fetch + sha256 pin -> /tmp/gsb
+GSB="$(bash crates/sparq-geo/fetch-geosparql-benchmark.sh)" # returns the pinned checkout
 cargo run --release -p sparq-geo --features geosparql_rewrite,geof_accessors \
-    --example gsb_compliance -- "$GSB"        # TSV per query, then the two metrics
+    --example gsb_compliance -- "$GSB/src/main/resources" # TSV, then the two metrics
 ```
 
-- **Data + queries** — `gsb.sh`, mirroring `geographica.sh`: the upstream tarball is pinned
-  by sha256, the extracted tree is counted before use, and a CACHED extraction is reused only
-  against a recorded proof (the pinned tarball digest plus a content digest of the tree), so a
-  stale or locally edited corpus is re-extracted rather than silently scored — `gsb.sh
-  --self-test` pins that rule. **Never vendored**, for two independent reasons: the upstream
-  is GPL-2.0, and AGENTS.md keeps datasets out of git.
+- **Data + queries** — `crates/sparq-geo/fetch-geosparql-benchmark.sh` is the shared recipe for
+  the example and the ratchet. It checks out the pinned Git commit by default;
+  `GEOSPARQL_BENCHMARK_PIN=HEAD` or another revision overrides it, and
+  `GEOSPARQL_BENCHMARK_DIR` selects an existing checkout without modifying it.
+  Queries, answers and data are under the returned checkout's `src/main/resources`.
+  A clean checkout already at the full pinned commit can be reused offline;
+  mutable refs such as `HEAD` refresh from upstream. Locally changed fixtures and
+  directories without checkout provenance are refused.
+  The external GPL-2.0 corpus is gitignored and never vendored.
 - **System under test** — one sparq GeoSPARQL stack driven uniformly across all 206 queries
   (nothing is special-cased per query): RDF/XML load, `sparq-reason` RDFS materialisation,
   the `geof:` registry with `geof_accessors`, and a query entry point. The last two are
@@ -145,15 +149,12 @@ cargo run --release -p sparq-geo --features geosparql_rewrite,geof_accessors \
   §3.7.
 - **Scoring** — reproduces the benchmark's own weighting (each requirement `1/30`, split
   over its query groups, a 4-query serialisation group splitting `1/3, 1/3, 1/6, 1/6`) and
-  its own comparator (ordered rows; `geo:wktLiteral` whitespace-stripped and lower-cased;
-  `geo:gmlLiteral` put through the **bounded** XML normaliser `canonical_xml`; any
-  `-alternative-N.srx` accepted). That normaliser states exactly which formatting
-  differences it folds, and errors — so the literal is compared verbatim rather than as a
-  partial parse — on the malformed / DTD / PI / comment cases it does not model. It is
-  deliberately NOT claimed to be XML C14N: the corpus is a gather-only download, so no
-  differential test against the upstream canonicaliser can run from this tree. The scoring
-  table and comparator carry unit tests that run under a plain `cargo test --all-features`
-  — no download needed to know the harness scores correctly.
+  its own comparator, shared with the ratchet: ordered variables and rows; WKT
+  space/newline removal, trimming and lowercasing; GML canonicalization without
+  comments; and sequential `-alternative-N.srx` answers. XML character-data
+  whitespace, numeric lexical forms and geometry serialization differences remain
+  significant. Invalid GML is compared verbatim. The scoring table and comparator
+  have corpus-free tests under `cargo test -p sparq-geo --all-features`.
 - **Triage** — `GSB_DEBUG=<query-id-prefix>` dumps the rewritten query plus actual-vs-expected
   result sets for the matching failures. Every non-passing requirement in the recorded run
   was triaged this way before being written down as a gap.
