@@ -1,0 +1,6 @@
+# HTML/XHTML extraction is off by default; this leg executes its hermetic loader tests.
+- name: "sparq-jsonld (html)"
+  crate: "sparq-jsonld"
+  features: "html"
+  test: true
+  tier: test
