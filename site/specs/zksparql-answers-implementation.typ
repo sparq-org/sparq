@@ -163,114 +163,121 @@ Verifiers"); a later version of the data model should reuse it.
 
 = Draft: Noir query credential statement method <sec-impl-noir-draft>
 
-#strong[Draft — step one of two. Not an available proof method.]
+#strong[Draft — integration part A. Not an available proof method.]
 The proposed identifier is `urn:sparq:vcq:method:noir-query:v1`. The statement amendment is
-@sec-impl-envelope-draft. The source at this step contains isolated envelope gadgets and
-hand-built term-cell tests, with explicitly marked suite and request stand-ins. It does not
+@sec-impl-envelope-draft. The envelope is registered in the real core package alongside the suite and compiler
+operators. Its fixtures include hand-built cells and a complete suite-message opening.
+Authenticated metadata and stored-policy integration remain explicitly marked stand-ins. It does not
 produce an answers-data-model presentation. This method is research grade, not externally
 audited; its description states a proposed contract, not established assurance.
 
 == Evidence, query scope and trust
 
 The proposed evidence is a publicly verifiable UltraHonk zero-knowledge proof over one Noir
-program generated from the verifier's query and compiled capacities. The method targets
-complete bounded SELECT, ASK (including false) and CONSTRUCT answers over the credential
-named graphs and their default merge, under simple entailment. Absence is relative to the
-selected input dataset; the data model's closed-world qualifications apply even for an agreed
-commitment. Agreement authenticates which dataset was selected, not world completeness.
+program generated from the verifier's query and compiled capacities. The method targets complete
+bounded SELECT, ASK (including false) and CONSTRUCT answers over the credential named graphs and
+their default merge, under simple entailment. Absence is relative to the selected input dataset;
+the data model's closed-world qualifications apply even for an agreed commitment. Agreement
+authenticates which dataset was selected, not world completeness.
 
 The target excludes SERVICE, FROM, FROM NAMED, DESCRIBE, evaluation-time and environment
 functions (NOW, RAND, UUID, STRUUID and argument-free BNODE), RDF triple terms, and REGEX or
-REPLACE forms outside the admitted bounded expression profile. Property-path closure must
-fit its compiled depth. Numeric and lexical operations must fit the exact admitted value and
-byte capacities. An overflow, unsupported datatype, expression, cardinality or time precision
-is a refusal, never rounding, truncation or substitution. This is the target fragment; this
-step provides no executed query coverage or generated-program integration. Admission must
-follow the actual coverage manifest as subsequent lanes supply it.
+REPLACE forms outside the admitted bounded expression profile. Property-path closure must fit
+its compiled depth. Numeric and lexical operations must fit the exact admitted value and byte
+capacities. An overflow, unsupported datatype, expression, cardinality or time precision is a
+refusal, never rounding, truncation or substitution. This is the target fragment; this step
+provides no executed query coverage or generated-program integration. Admission must follow the
+actual coverage manifest as subsequent lanes supply it.
 
 The verifier must trust its issuer-to-key authorization data, authenticated and
-freshness-curated status snapshots, clock and durable one-time challenge store; the suite's
-term and signature encodings; the correctness of lowering, operator gadgets and generated
-program; the pinned compiler and backend; and the proof system's assumptions and reference
-string provenance. Both parties derive the plan and verification key from the request.
-The holder refuses an entry whose key differs from its independently derived key. The verifier
-uses its stored query and domain, never a query or key chosen by the presentation. Trust in
-these components is required in addition to any issuer claims about the world.
+freshness-curated status snapshots, clock and durable one-time challenge store; the suite's term
+and signature encodings; the correctness of lowering, operator gadgets and generated program;
+the pinned compiler and backend; and the proof system's assumptions and reference string
+provenance. Both parties derive the plan and verification key from the request. The holder
+refuses an entry whose key differs from its independently derived key. The verifier uses its
+stored query and domain, never a query or key chosen by the presentation. Trust in these
+components is required in addition to any issuer claims about the world.
 
 == Statement, layout and disclosures
 
 The target public statement binds the complete request digest, dataset commitment, chosen
-signature mode and canonical released result.
-The draft canonical statement is the UTF-8 method identifier framed by a big-endian byte
-length, then the request digest and dataset commitment as exact digest bytes, an agreed-input
-boolean byte, a signature-mode byte, the result digest, and a big-endian count followed by
-length-framed revealed signed messages (an empty collection in hidden mode). Framing words
-are four-byte unsigned integers. Boolean bytes are zero or one; mode tags are zero for hidden
-and one for revealed. The result digest is SHA-256 of JCS result JSON for SELECT/ASK or
-RDFC canonical UTF-8 for CONSTRUCT. Query-order choices follow the canonical term order
-below. Exact digest bytes become two big-endian unsigned limbs in the circuit without
-modular reduction. The final descriptor must fix the same layout and test vectors on both
-sides before admission. Public parameters derived from that same
-request include the trusted-key-set digest, accepted-snapshot-set digest, requirement flags,
-validity time, query constants, slice indices and capacities. A plan hash identifies the query
-structure, capacities and encoding version. The verifier reconstructs these values from its
-stored request; publishing a digest is not itself enforcing the requirements it describes.
+signature mode and canonical released result. The proposed admission statement is the UTF-8
+method identifier framed by a big-endian byte length, then the request digest and dataset
+commitment as exact digest bytes, an agreed-input boolean byte, a signature-mode byte, the
+result digest, and a big-endian count followed by length-framed revealed signed messages (an
+empty collection in hidden mode). Framing words are four-byte unsigned integers. Boolean bytes
+are zero or one; mode tags are zero for hidden and one for revealed. The result digest is
+SHA-256 of JCS result JSON for SELECT/ASK or RDFC canonical UTF-8 for CONSTRUCT. Query-order
+choices follow the canonical term order below. Exact digest bytes become two big-endian unsigned
+limbs in the circuit without modular reduction. The final descriptor must fix the same layout
+and test vectors on both sides before admission. This is a proposed admission frame. The current
+compiler primitive uses its separate supplied-cell profile: request digest bytes, input
+commitment bytes, signature-mode byte, credential/quad/row bounds, term parameters, index
+parameters, released result and a statement binding, in that order, as defined in
+`statement::Layout` and `ops_core_statement`. Part A does not change that layout or claim that
+its generated circuits already run the credential envelope. Public parameters derived from that
+same request include the trusted-key-set digest, accepted-snapshot-set digest, requirement
+flags, validity time, inclusive `earliestCreated` freshness bound, holder issuer scope, query
+constants, slice indices and capacities. A plan hash identifies the query structure, capacities
+and encoding version. The verifier reconstructs these values from its stored request; publishing
+a digest is not itself enforcing the requirements it describes.
 
 Hidden mode keeps credential messages, issuer selections, holder keys and signatures, status
 indices and paths, selected snapshots, individual bound-presence flags and all intermediate
-tables private. Each selected issuer must still satisfy the authorization-set relation.
-The query can disclose an issuer or a credential field, and a singleton trust set can identify
-an issuer without projecting it. Revealed mode would additionally disclose issuer keys,
-signatures, messages and the number of credentials; its integration belongs to step two.
+tables private. Each selected issuer must still satisfy the authorization-set relation. The
+query can disclose an issuer or a credential field, and a singleton trust set can identify an
+issuer without projecting it. Revealed mode would additionally disclose issuer keys, signatures,
+messages and the number of credentials; its integration belongs to step two.
 
 The verification key and plan identify the compiled credential, quad, intermediate-row,
-lexical-byte, numeric and path-depth buckets. These are public upper bounds, chosen from
-request bounds, not assertions of actual private cardinalities. The released result exposes
-its size and duplicates, and any query-selected identifiers. A public key-set or snapshot-set
-digest can distinguish verifier policies. Fresh presentation-local graph names avoid a
-persistent graph identifier; stable selected values can still link answers. Canonical term
-order fixes choices left open by SPARQL, including unordered slices, SAMPLE and GROUP_CONCAT
-ordering in admitted profiles.
+lexical-byte, numeric and path-depth buckets. These are public upper bounds, chosen from request
+bounds, not assertions of actual private cardinalities. The released result exposes its size and
+duplicates, and any query-selected identifiers. A public key-set or snapshot-set digest can
+distinguish verifier policies. Fresh presentation-local graph names avoid a persistent graph
+identifier; stable selected values can still link answers. Canonical term order fixes choices
+left open by SPARQL, including unordered slices, SAMPLE and GROUP_CONCAT ordering in admitted
+profiles.
 
 The holder service needs a consent and query-history decision before repeated or related
-requests, across domains when practical. Comparing results can reveal facts neither answer
-alone states. This step does not implement that service decision. Agreed commitments and
-reused presentation salts are linkable; revealed signatures remain stable. Hidden mode and
-fresh salts do not eliminate linkage through the result, policy, bucket or query choices.
+requests, across domains when practical. Comparing results can reveal facts neither answer alone
+states. This step does not implement that service decision. Agreed commitments and reused
+presentation salts are linkable; revealed signatures remain stable. Hidden mode and fresh salts
+do not eliminate linkage through the result, policy, bucket or query choices.
 
 == Draft encodings and present boundary
 
 The proposed `verificationKey` is the exact backend verification-key byte file, carried as the
-data model's multibase base64url byte string without padding. It is opaque bytes, not a
-sequence of host-endian words, and its byte identity is checked against independent plan
-compilation under the pinned toolchain. An encoding change gets a new method identifier.
+data model's multibase base64url byte string without padding. It is opaque bytes, not a sequence
+of host-endian words, and its byte identity is checked against independent plan compilation
+under the pinned toolchain. An encoding change gets a new method identifier.
 
 `parameters` is JCS JSON with required `planHash`, `encodingProfile`, `capacities` and
 `toolchain` members. `planHash` is a multibase SHA-256 digest of the canonical plan bytes;
 `encodingProfile` names the final suite/term, statement and snapshot profiles. `capacities`
-names all the public buckets above. `toolchain` pins the compiler and backend versions.
-There are no implicit capacity or profile defaults. The accepted request carries the trust
-and snapshot digests and requirement values as defined in the amendment. Their exact wire
-context, plan version and digest encodings are integration decisions for step two; the local
-stand-ins are not these encodings and cannot be sent as a method descriptor.
+names all the public buckets above. `toolchain` pins the compiler and backend versions. There
+are no implicit capacity or profile defaults. The accepted request carries the trust and
+snapshot digests and requirement values as defined in the amendment. The draft context defines
+the new request terms and the amendment fixes policy-root ordering, padding and minimal depth.
+Admission still requires the integrated plan and digest encodings; the local stand-ins are not
+these encodings and cannot be sent as a method descriptor.
 
 The draft `proofValue` encoding is a length-prefixed evidence frame: an unsigned big-endian
-length followed by the backend proof bytes, then an unsigned big-endian length followed by
-the backend public-input bytes. Both lengths are four-byte unsigned integers, with the public-input payload consisting
-of canonical big-endian field elements. Declared lengths must equal the remaining framed
-payloads and fit the request bound. The verifier requires exact consumption with no trailing bytes, enforces the
-presentation bound before decoding, and compares the entire public-input sequence against its
-reconstruction. No key, source program or private diagnostic is carried in that frame. The
-frame and statement byte vectors must be checked against the generated ABI in step two;
-there is no interoperable proof encoding in this step.
+length followed by the backend proof bytes, then an unsigned big-endian length followed by the
+backend public-input bytes. Both lengths are four-byte unsigned integers, with the public-input
+payload consisting of canonical big-endian field elements. Declared lengths must equal the
+remaining framed payloads and fit the request bound. The verifier requires exact consumption
+with no trailing bytes, enforces the presentation bound before decoding, and compares the entire
+public-input sequence against its reconstruction. No key, source program or private diagnostic
+is carried in that frame. The frame and statement byte vectors must be checked against the
+generated ABI in step two; there is no interoperable proof encoding in this step.
 
-Dataset commitment and revealed signature integration are reserved for step two. No
-cross-method equality with the zkVM commitment is claimed here. Equality requires identical
-signed-message bytes, ordering, presentation salt and commitment algorithm on both methods;
-the revised suite and final adapter determine whether those premises hold. A verifier must
-not reuse an agreed commitment across methods before that comparison is fixed and tested.
-The shared `QueryMethod` admission and stored-request/challenge-store adapter are also step
-two work under the programme issues. This draft adds no alternate nonce store.
+Dataset commitment and revealed signature integration are reserved for step two. No cross-method
+equality with the zkVM commitment is claimed here. Equality requires identical signed-message
+bytes, ordering, presentation salt and commitment algorithm on both methods; the revised suite
+and final adapter determine whether those premises hold. A verifier must not reuse an agreed
+commitment across methods before that comparison is fixed and tested. The shared `QueryMethod`
+admission and stored-request/challenge-store adapter are also step two work under the programme
+issues. This draft adds no alternate nonce store.
 
 The method registry's `entry_status` enumeration has no draft value. This step therefore does
 not register an executable or proposed adapter in `research/vc-query-methods.json`.
@@ -278,39 +285,63 @@ not register an executable or proposed adapter in `research/vc-query-methods.jso
 = Draft amendment: implementation boundary <sec-impl-envelope-draft>
 
 The answers-data-model amendment proposes credential named graphs, a method-asserted
-`vcq:verifiedIssuer` triple, `holderBinding`, `statusPolicy` with accepted snapshot digests and
-an explicit missing-status option, and `validityTime`. These are draft terms requiring a
-versioned context. Existing methods retain their declared semantics until they opt into this
-profile. This step changes no published vocabulary or transport adapter.
+`vcq:verifiedIssuer` triple, `holderBinding` with an optional `issuer` collection,
+`earliestCreated`, `statusPolicy` with accepted snapshot digests and an explicit missing-status
+option, and `validityTime`. Existing methods retain their declared semantics until they opt into
+this profile. The proposal vocabulary and context now include the draft `verifiedIssuer`,
+`holderBinding` and `earliestCreated` terms. The transport adapter is unchanged.
 
-`zk/noir-query/core/src/envelope.nr` uses complete credential quad arrays with the design's
-term cells and padding. Property reads count every matching quad; a presence flag is computed,
-not supplied. All credential-root status entries must be covered. Unsupported shapes and
-multiple values where the profile requires a singleton are refused. The graph builder emits
-the complete named graph and default copies plus the verified-issuer assertion, leaving the
-cross-credential set merge and query evaluation to the operator integration.
+`zk/noir-query/core/src/envelope.nr` uses complete credential quad arrays with the design's term
+cells and padding. Property reads count every matching quad; a presence flag is computed, not
+supplied. All credential-root status entries must be covered. Unsupported shapes and multiple
+values where the profile requires a singleton are refused. The graph builder emits the complete
+named graph and default copies plus the verified-issuer assertion, and the envelope set-merge
+helper collapses duplicate default triples while preserving every credential named graph.
+Compiler query integration remains separate.
 
-Suite opening, RDF term and key encodings, temporal-key recomputation, and stored-request
-normalization are marked stand-ins. The holder relation verifies a Schnorr signature over the
-entire supplied request digest; the local request-binding fixture includes query, domain,
-challenge and all policy values. Status binds list identifier, purpose, length, compiled tree
-depth and root in an accepted snapshot digest and proves the credential's actual index clear. Status leaves hash
-the status-leaf domain tag, the boolean bit and a zero field; two-input internal nodes keep
-their distinct arity. The snapshot digest hashes its domain tag followed by list, purpose,
-bit length, depth and root, in that order. Validity endpoints
-are inclusive, with an absent individual bound contributing no comparison and reversed
-bounds refused. When both bounds are absent, the creation instant from suite metadata is
-the inclusive start; unavailable creation metadata refuses a validity request.
-The step-one temporal fixture uses exact whole-second offset keys; finer or wider times need
+The envelope adapts lane A's authenticated term observations to lane B's distinct table
+representation. Its IRI constructor and vocabulary use the suite encoding. The complete suite
+opening recomputes the salted signed message before table conversion. Created instant, Multikey,
+status purpose/index and scoped graph-name metadata still await their authenticated openers.
+Hand-built fixtures continue to use marked metadata transports; they are not admitted credential
+witnesses. Stored-request policy normalization remains a marked local fixture: RDFC
+canonicalization and its SHA-256 digest exist on the host and are not callable from Noir. The
+holder relation verifies a Schnorr signature over the entire supplied request digest; the local
+request-binding fixture includes query, domain, challenge and all policy values, including
+freshness and the holder issuer collection. The batch entry checks this binding before running
+issuer, status, validity and freshness on every credential and holder binding on the required
+issuers. Holder evidence is deduplicated by the full key coordinates; each required key has
+exactly one request signature. The combined fixture covers four credentials and their
+default/named dataset merge, with controls changing each condition on the final credential.
+Status binds list identifier, purpose, length, compiled tree depth and root in an accepted
+snapshot digest and proves the credential's actual index clear. Status leaves hash the
+status-leaf domain tag, the boolean bit and a zero field; two-input internal nodes keep their
+distinct arity. The snapshot digest hashes its domain tag followed by list, purpose, bit length,
+depth and root, in that order. Validity endpoints are inclusive, with an absent individual bound
+contributing no comparison and reversed bounds refused. When both bounds are absent, the
+creation instant from suite metadata is the inclusive start; unavailable creation metadata
+refuses a validity request. Freshness compares the authenticated creation instant with inclusive
+`earliestCreated`; unknown creation refuses only a required check, and absence imposes no
+freshness condition. This does not replace the validity fallback above. The verifier computes
+the bound. The temporal fixture uses exact whole-second offset keys; finer or wider times need
 the suite's checked temporal opening, not a cast or rounding operation.
 
-Vocabulary was checked against the VC Data Model, Bitstring Status List and VC Confidence
-Method editor sources on 2026-11-13, using the exact source URLs recorded in the amendment.
-`confidenceMethod` on a credential subject and the cryptographic-key profile provide the
-holder relation; its Schnorr encoding is specific to this draft. The current VC Data Model
-editor source identifies a later draft than the cited v2.0 Recommendation. The draft retains
-v2.0 validity semantics, including the indefinite-period note, and adopts no new requirements
-from the later version without saying so.
+The accepted-snapshot and trust roots follow the amendment exactly: sort unique canonical
+unsigned field values as thirty-two big-endian bytes, refuse zero members and empty enabled
+sets, pad with zero leaves to the least power of two and reduce adjacent pairs with the
+two-input Poseidon2 hash. A singleton has depth zero. The native helper returns root, depth and
+unique count; capacity does not extend the tree. The default-graph `verifiedIssuer` assertion
+names the same presentation-local graph blank node used by `GRAPH`; its issuer object is an IRI
+with exact trust-member and credential spelling. No IRI normalization is performed, and
+credentials containing the reserved predicate are refused.
+
+Vocabulary was checked against the VC Data Model, Bitstring Status List and VC Confidence Method
+editor sources on 2026-11-13, using the exact source URLs recorded in the amendment.
+`confidenceMethod` on a credential subject and the cryptographic-key profile provide the holder
+relation; its Schnorr encoding is specific to this draft. The current VC Data Model editor
+source identifies a later draft than the cited v2.0 Recommendation. The draft retains v2.0
+validity semantics, including the indefinite-period note, and adopts no new requirements from
+the later version without saying so.
 
 The exact editor documents used, retrieved 2026-11-13, are
 #link("https://raw.githubusercontent.com/w3c/vc-data-model/main/index.html")[VC Data Model],

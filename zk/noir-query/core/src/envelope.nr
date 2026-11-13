@@ -1,11 +1,13 @@
 //! Draft credential statement gadgets. Research grade; not externally audited.
 //! No production descriptor or answers-data-model presentation is defined here.
-use compose_core::hashes::{commit_fold, h2, h3, h4, h5};
-pub use compose_core::issuer::Point;
+use crate::suite_constants::{DT_DATETIME, DT_INTEGER, DT_STRING, SUITE_ID};
+use compose::hashes::{commit_fold, h2, h3, h4, h5};
+use std::collections::bounded_vec::BoundedVec;
+pub use compose::issuer::Point;
 use crate::table::{append, canonicalize, check_cell, empty, equal_cell, same_term, Table, unbound};
-use compose_core::issuer::schnorr_verify;
+use compose::issuer::schnorr_verify;
 
-// STAND-IN (lane A): replaced in step 2. Import the authenticated suite cell then.
+// Query-table representation; authenticated suite cells cross the adapter below.
 pub use crate::table::TermCell;
 
 pub struct Signature {
@@ -52,36 +54,92 @@ pub struct Vocabulary {
     pub assertion_method: Field,
     pub suite: Field,
 }
-// STAND-IN (lane A): replaced in step 2. Synthetic encodings, not W3C term hashes.
-pub fn stand_in_vocabulary() -> Vocabulary {
-    Vocabulary {
-        rdf_type: 101,
-        vc_type: 102,
-        issuer: 103,
-        subject: 104,
-        confidence: 105,
-        multikey: 106,
-        public_key: 107,
-        credential_status: 108,
-        status_entry: 109,
-        status_list: 110,
-        status_index: 111,
-        status_purpose: 112,
-        status_size: 113,
-        revocation: 114,
-        suspension: 115,
-        valid_from: 116,
-        valid_until: 117,
-        verified_issuer: 118,
-        integer_dt: 119,
-        time_dt: 120,
-        key_dt: 121,
-        assertion_method: 122,
-        suite: 123,
-        string_dt: 124,
+/// Copy authenticated suite observations into the query-table representation.
+/// A bound suite default graph becomes the table's absent graph-name cell.
+pub fn from_suite_cell(cell: crate::term::TermCell) -> TermCell {
+    if !cell.bound() | (cell.kind() == 0) {
+        if !cell.bound() {
+            cell.assert_padding();
+        }
+        unbound()
+    } else {
+        TermCell {
+            bound: cell.bound(),
+            kind: cell.kind(),
+            enc: cell.enc(),
+            key_class: cell.key_class(),
+            key: cell.key(),
+            dt: cell.datatype(),
+            lang: cell.language(),
+            scope: cell.credential(),
+        }
     }
 }
-// STAND-IN (lane A): replaced in step 2. A supplied field identifier, not an IRI opening.
+/// Authenticated lexical constructor, using the suite's term encoding.
+pub fn iri_bytes<let L: u32>(bytes: [u8; L]) -> TermCell {
+    from_suite_cell(crate::term::open_term(
+        1,
+        BoundedVec::<u8, L>::from_array(bytes),
+        BoundedVec::<u8, 0>::new(),
+        BoundedVec::<u8, 0>::new(),
+        [0; 31],
+        0,
+    ))
+}
+pub fn vocabulary() -> Vocabulary {
+    comptime {
+        Vocabulary {
+            rdf_type: iri_bytes("http://www.w3.org/1999/02/22-rdf-syntax-ns#type".as_bytes()).enc,
+            vc_type: iri_bytes("https://www.w3.org/2018/credentials#VerifiableCredential".as_bytes())
+                .enc,
+            issuer: iri_bytes("https://www.w3.org/2018/credentials#issuer".as_bytes()).enc,
+            subject: iri_bytes(
+                "https://www.w3.org/2018/credentials#credentialSubject".as_bytes(),
+            )
+                .enc,
+            confidence: iri_bytes(
+                "https://www.w3.org/2018/credentials#confidenceMethod".as_bytes(),
+            )
+                .enc,
+            multikey: iri_bytes("https://w3id.org/security#Multikey".as_bytes()).enc,
+            public_key: iri_bytes("https://w3id.org/security#publicKeyMultibase".as_bytes()).enc,
+            credential_status: iri_bytes("https://www.w3.org/2018/credentials#credentialStatus"
+                .as_bytes())
+                .enc,
+            status_entry: iri_bytes(
+                "https://www.w3.org/ns/credentials/status#BitstringStatusListEntry".as_bytes(),
+            )
+                .enc,
+            status_list: iri_bytes("https://www.w3.org/ns/credentials/status#statusListCredential"
+                .as_bytes())
+                .enc,
+            status_index: iri_bytes("https://www.w3.org/ns/credentials/status#statusListIndex"
+                .as_bytes())
+                .enc,
+            status_purpose: iri_bytes("https://www.w3.org/ns/credentials/status#statusPurpose"
+                .as_bytes())
+                .enc,
+            status_size: iri_bytes(
+                "https://www.w3.org/ns/credentials/status#statusSize".as_bytes(),
+            )
+                .enc,
+            // Metadata literals below remain fixture values until their openers arrive.
+            revocation: 114,
+            suspension: 115,
+            valid_from: iri_bytes("https://www.w3.org/2018/credentials#validFrom".as_bytes()).enc,
+            valid_until: iri_bytes("https://www.w3.org/2018/credentials#validUntil".as_bytes()).enc,
+            verified_issuer: iri_bytes("https://w3id.org/sparq/vcq#verifiedIssuer".as_bytes()).enc,
+            integer_dt: DT_INTEGER,
+            time_dt: DT_DATETIME,
+            string_dt: DT_STRING,
+            key_dt: iri_bytes("https://w3id.org/security#multibase".as_bytes()).enc,
+            assertion_method: iri_bytes("https://w3id.org/security#assertionMethod".as_bytes()).enc,
+            suite: SUITE_ID,
+        }
+    }
+}
+/// Reference to an already encoded IRI in a query table. Source cells must
+/// originate in the suite opening; this helper authenticates no supplied bytes.
 pub fn iri(enc: Field) -> TermCell {
     TermCell { bound: true, kind: 1, enc, key_class: 0, key: 0, dt: 0, lang: 0, scope: 0 }
 }
@@ -107,14 +165,14 @@ pub fn stand_in_key_cell(pk: Point) -> TermCell {
         enc: h3(0x454b4559, pk.x, pk.y),
         key_class: 0,
         key: 0,
-        dt: stand_in_vocabulary().key_dt,
+        dt: vocabulary().key_dt,
         lang: 0,
         scope: 0,
     }
 }
 // STAND-IN (lane A): replaced in step 2. W3C statusPurpose is a string literal.
 pub fn stand_in_purpose(suspended: bool) -> TermCell {
-    let v = stand_in_vocabulary();
+    let v = vocabulary();
     TermCell {
         bound: true,
         kind: 3,
@@ -135,16 +193,16 @@ pub fn stand_in_index(value: u64) -> TermCell {
     TermCell {
         bound: true,
         kind: 3,
-        enc: h3(0x45494e44, stand_in_vocabulary().string_dt, value as Field),
+        enc: h3(0x45494e44, vocabulary().string_dt, value as Field),
         key_class: 0,
         key: 0,
-        dt: stand_in_vocabulary().string_dt,
+        dt: vocabulary().string_dt,
         lang: 0,
         scope: 0,
     }
 }
-// STAND-IN (lane A): replaced in step 2. No authenticated relation from these
-// cells/root/key to signed_message exists in this step.
+// STAND-IN (lane A): replaced in step 2. Metadata transport for fixture callers.
+// Suite callers use open_suite_credential; root/method/creation metadata awaits openers.
 pub struct Credential<let N: u32> {
     pub quads: [[TermCell; 4]; N],
     pub len: u32,
@@ -158,7 +216,7 @@ pub struct Credential<let N: u32> {
 // STAND-IN (lane A): replaced in step 2. Structural opening, not authentication.
 // The actual opening must authenticate every cell, count, root, key and message.
 pub fn stand_in_open_credential<let N: u32>(c: Credential<N>) {
-    let v = stand_in_vocabulary();
+    let v = vocabulary();
     assert(c.len <= N, "credential capacity");
     check_cell(c.root);
     check_cell(c.created_at);
@@ -252,7 +310,7 @@ pub fn merkle_root<let D: u32>(leaf: Field, member: Membership<D>) -> Field {
 }
 // Binds issuer identity, verification method, suite, assertion authorization and key.
 pub fn trusted_key_leaf(issuer: TermCell, method: TermCell, pk: Point) -> Field {
-    let v = stand_in_vocabulary();
+    let v = vocabulary();
     h5(
         KEY_SET_LEAF,
         issuer.enc,
@@ -268,7 +326,7 @@ pub fn check_issuer<let N: u32, let K: u32>(
     membership: Membership<K>,
 ) -> TermCell {
     stand_in_open_credential(c);
-    let (_, issuer) = required_property(c, c.root, stand_in_vocabulary().issuer);
+    let (_, issuer) = required_property(c, c.root, vocabulary().issuer);
     assert(
         issuer.bound
             & (issuer.kind == 1)
@@ -301,8 +359,12 @@ pub fn check_holder<let N: u32>(
     pk: Point,
     sig: Signature,
 ) {
+    check_holder_key(c, pk);
+    verify_signature(pk, sig, holder_message(request_digest));
+}
+pub fn check_holder_key<let N: u32>(c: Credential<N>, pk: Point) {
     stand_in_open_credential(c);
-    let v = stand_in_vocabulary();
+    let v = vocabulary();
     let (_, subject) = required_property(c, c.root, v.subject);
     assert(subject.kind != 3, "subject node kind");
     let (_, key_node) = required_property(c, subject, v.confidence);
@@ -310,7 +372,6 @@ pub fn check_holder<let N: u32>(
     assert(contains(c, key_node, v.rdf_type, iri(v.multikey)), "holder key type");
     let (_, key) = required_property(c, key_node, v.public_key);
     assert(equal_cell(key, stand_in_key_cell(pk)), "holder key binding");
-    verify_signature(pk, sig, holder_message(request_digest));
 }
 // STAND-IN (lane A): replaced in step 2. Bind a value to its synthetic typed term.
 fn stand_in_checked_number(cell: TermCell, dt: Field) -> u64 {
@@ -358,7 +419,7 @@ pub fn check_status<let N: u32, let D: u32, let A: u32>(
     evidence: [StatusEvidence<D, A>; N],
 ) {
     stand_in_open_credential(c);
-    let v = stand_in_vocabulary();
+    let v = vocabulary();
     assert(D <= 32, "status tree depth");
     let mut tree_capacity: Field = 1;
     for _ in 0..D {
@@ -410,7 +471,7 @@ pub fn check_status<let N: u32, let D: u32, let A: u32>(
 }
 pub fn check_validity<let N: u32>(c: Credential<N>, now: u64) {
     stand_in_open_credential(c);
-    let v = stand_in_vocabulary();
+    let v = vocabulary();
     let (has_from, from) = property(c, c.root, v.valid_from);
     let (has_until, until) = property(c, c.root, v.valid_until);
     let mut start: u64 = 0;
@@ -435,11 +496,16 @@ pub fn check_validity<let N: u32>(c: Credential<N>, now: u64) {
 pub struct RequestPolicy {
     pub trusted_root: Field,
     pub holder_required: bool,
+    pub holder_issuers_present: bool,
+    pub holder_issuers: [TermCell; 4],
+    pub holder_issuer_count: u32,
     pub status_required: bool,
     pub allow_missing_status: bool,
     pub accepted_snapshots: Field,
     pub validity_required: bool,
     pub now: u64,
+    pub freshness_required: bool,
+    pub earliest_created: u64,
 }
 // STAND-IN (lane B): replaced in step 2. Local fixture, NOT RDFC/SHA-256.
 // Query, domain, challenge and every policy field enter; both digest limbs are kept.
@@ -457,13 +523,21 @@ pub fn stand_in_request_digest(
             challenge,
             policy.trusted_root,
             policy.holder_required as Field,
+            policy.holder_issuers_present as Field,
+            policy.holder_issuer_count as Field,
+            policy.holder_issuers[0].enc,
+            policy.holder_issuers[1].enc,
+            policy.holder_issuers[2].enc,
+            policy.holder_issuers[3].enc,
             policy.status_required as Field,
             policy.allow_missing_status as Field,
             policy.accepted_snapshots,
             policy.validity_required as Field,
             policy.now as Field,
+            policy.freshness_required as Field,
+            policy.earliest_created as Field,
         ],
-        11,
+        19,
     );
     let bits: [bool; 254] = digest.to_le_bits();
     let mut low: u128 = 0;
@@ -487,7 +561,7 @@ pub fn check_envelope<let N: u32, let K: u32, let D: u32, let A: u32>(
     status: [StatusEvidence<D, A>; N],
 ) -> TermCell {
     let issuer = check_issuer(c, policy.trusted_root, issuer_sig, issuer_path);
-    if policy.holder_required {
+    if holder_applies(issuer, policy) {
         check_holder(c, digest, holder_pk, holder_sig);
     }
     if policy.status_required {
@@ -501,9 +575,10 @@ pub fn check_envelope<let N: u32, let K: u32, let D: u32, let A: u32>(
     if policy.validity_required {
         check_validity(c, policy.now);
     }
+    check_freshness(c, policy.freshness_required, policy.earliest_created);
     issuer
 }
-// Exact per-credential layout; cross-credential merge/dedup is operator integration.
+// Exact per-credential layout; merge_datasets supplies the cross-credential set merge.
 // STAND-IN (lane B): replaced in step 2. Generated wiring passes check_issuer's
 // return directly here; this isolated layout helper is not issuer authentication.
 pub fn credential_dataset<let N: u32, let O: u32>(
@@ -512,7 +587,7 @@ pub fn credential_dataset<let N: u32, let O: u32>(
     digest: [u128; 2],
 ) -> Table<O, 4> {
     stand_in_open_credential(c);
-    let (_, claimed_issuer) = required_property(c, c.root, stand_in_vocabulary().issuer);
+    let (_, claimed_issuer) = required_property(c, c.root, vocabulary().issuer);
     assert(equal_cell(issuer, claimed_issuer), "dataset issuer binding");
     let graph = stand_in_graph_name(digest, c.credential_index);
     let mut out = empty::<O, 4>();
@@ -523,7 +598,7 @@ pub fn credential_dataset<let N: u32, let O: u32>(
     }
     out = append(
         out,
-        [graph, iri(stand_in_vocabulary().verified_issuer), issuer, unbound()],
+        [graph, iri(vocabulary().verified_issuer), issuer, unbound()],
         true,
     );
     canonicalize(out)
@@ -546,4 +621,238 @@ pub fn stand_in_graph_name(digest: [u128; 2], index: u32) -> TermCell {
         lang: 0,
         scope: index + 1,
     }
+}
+
+/// Freshness is separate from validity; the verifier supplies the inclusive bound.
+/// STAND-IN (lane A): replaced in step 2. created_at awaits its authenticated opener.
+pub fn check_freshness<let N: u32>(c: Credential<N>, required: bool, earliest: u64) {
+    stand_in_open_credential(c);
+    if required {
+        assert(c.created_at.bound, "creation time unavailable");
+        assert(
+            stand_in_checked_number(c.created_at, vocabulary().time_dt) >= earliest,
+            "before earliestCreated",
+        );
+    }
+}
+
+pub fn holder_applies(issuer: TermCell, policy: RequestPolicy) -> bool {
+    assert(policy.holder_issuer_count <= 4, "holder issuer capacity");
+    assert(
+        policy.holder_issuers_present | (policy.holder_issuer_count == 0),
+        "holder issuer presence",
+    );
+    let mut listed = false;
+    for i in 0..4 {
+        let item = policy.holder_issuers[i];
+        if i < policy.holder_issuer_count {
+            assert(item.bound & equal_cell(item, iri(item.enc)), "holder issuer IRI");
+            if i > 0 {
+                assert(
+                    crate::term::field_lt(policy.holder_issuers[i - 1].enc, item.enc),
+                    "holder issuer order",
+                );
+            }
+            listed = listed | same_term(issuer, item);
+        } else {
+            assert(equal_cell(item, unbound()), "holder issuer padding");
+        }
+    }
+    policy.holder_required & (!policy.holder_issuers_present | listed)
+}
+
+pub struct HolderEvidence {
+    pub pk: Point,
+    pub sig: Signature,
+}
+/// Require one evidence slot for each distinct required key, with no spare slots.
+/// Metadata binding still uses the explicitly marked Multikey opener above.
+pub fn check_holders<let C: u32, let N: u32>(
+    credentials: [Credential<N>; C],
+    policy: RequestPolicy,
+    digest: [u128; 2],
+    slots: [u32; C],
+    evidence: [HolderEvidence; C],
+) {
+    let mut used = [false; C];
+    for i in 0..C {
+        let (_, issuer) =
+            required_property(credentials[i], credentials[i].root, vocabulary().issuer);
+        if holder_applies(issuer, policy) {
+            assert(slots[i] < C, "holder evidence slot");
+            check_holder_key(credentials[i], evidence[slots[i]].pk);
+            used[slots[i]] = true;
+        }
+    }
+    for i in 0..C {
+        assert(evidence[i].sig.present == used[i], "holder evidence coverage");
+        if used[i] {
+            for j in 0..i {
+                assert(
+                    !used[j]
+                        | (evidence[i].pk.x != evidence[j].pk.x)
+                        | (evidence[i].pk.y != evidence[j].pk.y),
+                    "duplicate holder key",
+                );
+            }
+            verify_signature(evidence[i].pk, evidence[i].sig, holder_message(digest));
+        }
+    }
+}
+
+/// STAND-IN (lane B): replaced in step 2. RDFC is host-side, not callable here.
+/// This entry constrains policy and digest together before checking credentials.
+pub fn check_requested_envelope<let C: u32, let N: u32, let K: u32, let D: u32, let A: u32>(
+    credentials: [Credential<N>; C],
+    context: [Field; 3],
+    digest: [u128; 2],
+    policy: RequestPolicy,
+    signatures: [Signature; C],
+    issuers: [Membership<K>; C],
+    holders: [HolderEvidence; C],
+    slots: [u32; C],
+    status: [[StatusEvidence<D, A>; N]; C],
+) -> [TermCell; C] {
+    assert(
+        digest == stand_in_request_digest(context[0], context[1], context[2], policy),
+        "request binding",
+    );
+    let mut verified = [unbound(); C];
+    for i in 0..C {
+        let mut individual = policy;
+        individual.holder_required = false;
+        verified[i] = check_envelope(
+            credentials[i],
+            digest,
+            individual,
+            signatures[i],
+            issuers[i],
+            holders[0].pk,
+            holders[0].sig,
+            status[i],
+        );
+    }
+    check_holders(credentials, policy, digest, slots, holders);
+    verified
+}
+
+/// Sort unsigned canonical field bytes, collapse duplicates, pad with zero to
+/// the least power of two, and reduce with h2. Empty sets and zero members refuse.
+/// Sorting and hashes dominate; capacity never changes the minimal tree root.
+pub fn canonical_set_root<let N: u32>(members: [Field; N], count: u32) -> (Field, u32, u32) {
+    std::static_assert((N > 0) & ((N & (N - 1)) == 0), "set capacity power of two");
+    assert((count > 0) & (count <= N), "set count");
+    let mut sorted = members;
+    for i in 0..N {
+        if i < count {
+            assert(sorted[i] != 0, "zero set member");
+        } else {
+            assert(sorted[i] == 0, "set input padding");
+        }
+    }
+    for _ in 0..N {
+        for i in 0..N - 1 {
+            if (i + 1 < count) & crate::term::field_lt(sorted[i + 1], sorted[i]) {
+                let value = sorted[i];
+                sorted[i] = sorted[i + 1];
+                sorted[i + 1] = value;
+            }
+        }
+    }
+    let mut row = [0; N];
+    let mut unique: u32 = 0;
+    for i in 0..N {
+        if (i < count) & ((i == 0) | (sorted[i] != sorted[if i > 0 { i - 1 } else { 0 }])) {
+            row[unique] = sorted[i];
+            unique = unique + 1;
+        }
+    }
+    let mut root = row[0];
+    let mut width = N;
+    let mut covered: u32 = 1;
+    let mut depth: u32 = 0;
+    let mut selected_depth: u32 = 0;
+    for _ in 0..N {
+        if width > 1 {
+            for i in 0..N / 2 {
+                if i < width / 2 {
+                    row[i] = h2(row[2 * i], row[2 * i + 1]);
+                }
+            }
+            width = width / 2;
+            covered = covered * 2;
+            depth = depth + 1;
+            if (unique > covered / 2) & (unique <= covered) {
+                root = row[0];
+                selected_depth = depth;
+            }
+        }
+    }
+    (root, selected_depth, unique)
+}
+
+/// Complete RDF set merge: collapse shared default triples while preserving
+/// each credential's named graph and its one verified-issuer assertion.
+pub fn merge_datasets<let C: u32, let I: u32, let O: u32>(
+    datasets: [Table<I, 4>; C],
+) -> Table<O, 4> {
+    std::static_assert((C > 0) & (I > 0), "dataset merge capacity");
+    for c in 0..C {
+        crate::table::check_table(datasets[c]);
+    }
+    let mut out = empty::<O, 4>();
+    let mut cursors = [0; C];
+    let mut previous = [unbound(); 4];
+    let mut has_previous = false;
+    // Multiway merge over sorted complete inputs. Every round consumes one row;
+    // adjacent equality collapses duplicates without re-sorting the combined table.
+    for _ in 0..C * I {
+        let mut found = false;
+        let mut chosen = [unbound(); 4];
+        let mut source: u32 = 0;
+        for c in 0..C {
+            if cursors[c] < datasets[c].len {
+                let row = datasets[c].rows[cursors[c]];
+                if !found | crate::table::row_less(row, chosen) {
+                    chosen = row;
+                    source = c;
+                }
+                found = true;
+            }
+        }
+        if found {
+            let duplicate = has_previous & crate::table::same_row(previous, chosen);
+            out = append(out, chosen, !duplicate);
+            previous = chosen;
+            has_previous = true;
+            cursors[source] = cursors[source] + 1;
+        }
+    }
+    for c in 0..C {
+        assert(cursors[c] == datasets[c].len, "dataset merge coverage");
+    }
+    out
+}
+
+/// Recompute the complete salted suite message and copy only opened terms into
+/// the table. Metadata remains the marked transport until its openers arrive.
+/// STAND-IN (lane A): replaced in step 2. Bind root, method and created_at metadata.
+pub fn open_suite_credential<let N: u32>(
+    quads: [[crate::term::TermCell; 4]; N],
+    salts: [Field; N],
+    salt: Field,
+    count: u32,
+    config: [u128; 2],
+    mut metadata: Credential<N>,
+) -> Credential<N> {
+    metadata.signed_message =
+        crate::suite::open_credential_revealed(quads, salts, salt, count, config);
+    metadata.len = count;
+    for i in 0..N {
+        for j in 0..4 {
+            metadata.quads[i][j] = from_suite_cell(quads[i][j]);
+        }
+    }
+    stand_in_open_credential(metadata);
+    metadata
 }

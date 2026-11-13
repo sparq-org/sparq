@@ -77,3 +77,11 @@ vcq:result a rdf:Property ; rdfs:domain vcq:QueryAnswerPresentation ; rdfs:range
   rdfs:comment "A SELECT or ASK result as a SPARQL 1.2 Query Results JSON document."@en .
 vcq:resultGraph a rdf:Property ; rdfs:domain vcq:QueryAnswerPresentation ; rdfs:label "result graph"@en ;
   rdfs:comment "A CONSTRUCT result, as a named graph."@en .
+
+# Draft credential statement profile; implementing methods require admission.
+vcq:verifiedIssuer a rdf:Property ; rdfs:range rdfs:Resource ; rdfs:label "verified issuer"@en ;
+  rdfs:comment "Draft: a default-graph assertion from a presentation-local credential graph blank node to the issuer IRI whose trust-set key verified that credential. The issuer spelling matches the trust member and credential exactly. Input credentials using this predicate are refused."@en .
+vcq:holderBinding a rdf:Property ; rdfs:domain vcq:QueryRequest ; rdfs:label "holder binding"@en ;
+  rdfs:comment "Draft: a holder-key requirement with an optional vcq:issuer RDF list. Omission of the list means all trusted issuers; an explicitly empty list requires no keys. Exactly one request-digest signature is required per distinct required holder key."@en .
+vcq:earliestCreated a rdf:Property ; rdfs:domain vcq:QueryRequest ; rdfs:range xsd:dateTime ; rdfs:label "earliest created"@en ;
+  rdfs:comment "Draft: the inclusive lower bound on every credential's authenticated creation instant, separate from validity. Unknown creation refuses this requirement; absence imposes no freshness condition. The request digest covers the bound."@en .

@@ -5,7 +5,7 @@ use envelope_core::envelope::{
     credential_dataset, holder_message, iri, Membership, merkle_root, Point, property,
     RequestPolicy, Signature, Snapshot, snapshot_digest, stand_in_index, stand_in_key_cell,
     stand_in_number, stand_in_open_credential, stand_in_purpose, stand_in_request_digest,
-    stand_in_vocabulary, status_leaf, StatusEvidence, TermCell, trusted_key_leaf,
+    status_leaf, StatusEvidence, TermCell, trusted_key_leaf, vocabulary,
 };
 use envelope_core::table::{check_table, equal_cell, same_term, Table, unbound};
 
@@ -42,7 +42,7 @@ fn q(s: u32, p: Field, o: TermCell) -> [TermCell; 4] {
     [iri(s as Field), iri(p), o, unbound()]
 }
 fn base() -> Credential<16> {
-    let v = stand_in_vocabulary();
+    let v = vocabulary();
     let mut quads = [[unbound(); 4]; 16];
     quads[0] = q(1, v.rdf_type, iri(v.vc_type));
     quads[1] = q(1, v.issuer, iri(900));
@@ -59,7 +59,7 @@ fn base() -> Credential<16> {
 }
 fn holder() -> Credential<16> {
     let mut c = base();
-    let v = stand_in_vocabulary();
+    let v = vocabulary();
     c.quads[2] = q(1, v.subject, iri(2));
     c.quads[3] = q(2, v.confidence, iri(3));
     c.quads[4] = q(3, v.rdf_type, iri(v.multikey));
@@ -69,7 +69,7 @@ fn holder() -> Credential<16> {
 }
 fn validity() -> Credential<16> {
     let mut c = base();
-    let v = stand_in_vocabulary();
+    let v = vocabulary();
     c.quads[2] = q(1, v.valid_from, stand_in_number(100, v.time_dt));
     c.quads[3] = q(1, v.valid_until, stand_in_number(200, v.time_dt));
     c.len = 4;
@@ -77,7 +77,7 @@ fn validity() -> Credential<16> {
 }
 fn status() -> Credential<16> {
     let mut c = base();
-    let v = stand_in_vocabulary();
+    let v = vocabulary();
     c.quads[2] = q(1, v.credential_status, iri(4));
     c.quads[3] = q(4, v.rdf_type, iri(v.status_entry));
     c.quads[4] = q(4, v.status_list, iri(800));
@@ -155,11 +155,16 @@ fn policy(c: Credential<16>) -> RequestPolicy {
     RequestPolicy {
         trusted_root: issuer_root(c),
         holder_required: true,
+        holder_issuers_present: false,
+        holder_issuers: [unbound(); 4],
+        holder_issuer_count: 0,
         status_required: true,
         allow_missing_status: false,
         accepted_snapshots: policy_root(),
         validity_required: true,
         now: 150,
+        freshness_required: false,
+        earliest_created: 0,
     }
 }
 
@@ -264,11 +269,7 @@ fn holder_other_high_digest_limb_refused() {
 #[test(should_fail_with = "property cardinality")]
 fn holder_ambiguous_key_refused() {
     let mut c = holder();
-    c.quads[6] = q(
-        3,
-        stand_in_vocabulary().public_key,
-        stand_in_key_cell(key(2)),
-    );
+    c.quads[6] = q(3, vocabulary().public_key, stand_in_key_cell(key(2)));
     c.len = 7;
     check_holder(c, [10, 20], key(1), no_sig());
 }
@@ -396,8 +397,8 @@ fn status_multibit_refused() {
     let mut c = status();
     c.quads[7] = q(
         4,
-        stand_in_vocabulary().status_size,
-        stand_in_number(2, stand_in_vocabulary().integer_dt),
+        vocabulary().status_size,
+        stand_in_number(2, vocabulary().integer_dt),
     );
     c.len = 8;
     check_status(c, policy_root(), false, evidence());
@@ -407,8 +408,8 @@ fn status_explicit_single_bit_accepted() {
     let mut c = status();
     c.quads[7] = q(
         4,
-        stand_in_vocabulary().status_size,
-        stand_in_number(1, stand_in_vocabulary().integer_dt),
+        vocabulary().status_size,
+        stand_in_number(1, vocabulary().integer_dt),
     );
     c.len = 8;
     check_status(c, policy_root(), false, evidence());
@@ -456,7 +457,7 @@ fn status_extra_evidence_refused() {
 #[test]
 fn all_status_entries_checked() {
     let mut c = status();
-    let v = stand_in_vocabulary();
+    let v = vocabulary();
     c.quads[7] = q(1, v.credential_status, iri(5));
     c.quads[8] = q(5, v.rdf_type, iri(v.status_entry));
     c.quads[9] = q(5, v.status_list, iri(800));
@@ -470,7 +471,7 @@ fn all_status_entries_checked() {
 #[test(should_fail_with = "status evidence coverage")]
 fn second_status_entry_cannot_be_omitted() {
     let mut c = status();
-    c.quads[7] = q(1, stand_in_vocabulary().credential_status, iri(5));
+    c.quads[7] = q(1, vocabulary().credential_status, iri(5));
     c.len = 8;
     check_status(c, policy_root(), false, evidence());
 }
@@ -511,13 +512,13 @@ fn absent_lower_bound_accepted() {
 #[test]
 fn equal_bounds_valid_at_that_instant() {
     let mut c = validity();
-    c.quads[3][2] = stand_in_number(100, stand_in_vocabulary().time_dt);
+    c.quads[3][2] = stand_in_number(100, vocabulary().time_dt);
     check_validity(c, 100);
 }
 #[test(should_fail_with = "validity bounds reversed")]
 fn reversed_bounds_refused() {
     let mut c = validity();
-    c.quads[3][2] = stand_in_number(99, stand_in_vocabulary().time_dt);
+    c.quads[3][2] = stand_in_number(99, vocabulary().time_dt);
     check_validity(c, 100);
 }
 #[test(should_fail_with = "typed number opening")]
@@ -537,8 +538,8 @@ fn validity_duplicate_upper_bound_refused() {
     let mut c = validity();
     c.quads[4] = q(
         1,
-        stand_in_vocabulary().valid_until,
-        stand_in_number(300, stand_in_vocabulary().time_dt),
+        vocabulary().valid_until,
+        stand_in_number(300, vocabulary().time_dt),
     );
     c.len = 5;
     check_validity(c, 150);
@@ -677,7 +678,7 @@ fn input_named_graph_refused() {
 #[test(should_fail_with = "reserved issuer predicate")]
 fn input_method_assertion_refused() {
     let mut c = base();
-    c.quads[2] = q(1, stand_in_vocabulary().verified_issuer, iri(900));
+    c.quads[2] = q(1, vocabulary().verified_issuer, iri(900));
     c.len = 3;
     stand_in_open_credential(c);
 }
@@ -697,7 +698,7 @@ fn another_credential_blank_scope_refused() {
 #[test]
 fn exact_absence_read_covers_all_rows() {
     let c = base();
-    let (present, cell) = property(c, c.root, stand_in_vocabulary().valid_until);
+    let (present, cell) = property(c, c.root, vocabulary().valid_until);
     assert(!present);
     assert(equal_cell(cell, unbound()));
 }
@@ -705,7 +706,7 @@ fn exact_absence_read_covers_all_rows() {
 // Hand-built GRAPH + verifiedIssuer pin at the dataset boundary, before query integration.
 fn pinned_fact<let R: u32>(d: Table<R, 4>, fact: Field, issuer: Field) -> bool {
     let mut found = false;
-    let v = stand_in_vocabulary();
+    let v = vocabulary();
     for i in 0..R {
         for j in 0..R {
             found = found
@@ -772,7 +773,7 @@ fn dataset_capacity_refused() {
 #[test]
 fn envelope_all_requirements_accepted() {
     let mut c = holder();
-    let v = stand_in_vocabulary();
+    let v = vocabulary();
     let st = status();
     for i in 0..5 {
         c.quads[6 + i] = st.quads[2 + i];
@@ -802,7 +803,7 @@ fn envelope_all_requirements_accepted() {
 #[test]
 fn additional_credential_types_accepted() {
     let mut c = validity();
-    c.quads[4] = q(1, stand_in_vocabulary().rdf_type, iri(555));
+    c.quads[4] = q(1, vocabulary().rdf_type, iri(555));
     c.len = 5;
     check_validity(c, 150);
 }
@@ -811,8 +812,8 @@ fn unrelated_subject_bounds_do_not_set_credential_period() {
     let mut c = base();
     c.quads[2] = q(
         2,
-        stand_in_vocabulary().valid_until,
-        stand_in_number(100, stand_in_vocabulary().time_dt),
+        vocabulary().valid_until,
+        stand_in_number(100, vocabulary().time_dt),
     );
     c.len = 3;
     check_validity(c, 201);
@@ -820,13 +821,13 @@ fn unrelated_subject_bounds_do_not_set_credential_period() {
 #[test(should_fail_with = "status index binding")]
 fn status_non_decimal_index_cell_refused() {
     let mut c = status();
-    c.quads[6][2] = stand_in_number(1, stand_in_vocabulary().integer_dt);
+    c.quads[6][2] = stand_in_number(1, vocabulary().integer_dt);
     check_status(c, policy_root(), false, evidence());
 }
 #[test(should_fail_with = "typed number opening")]
 fn validity_wrong_datatype_refused() {
     let mut c = validity();
-    c.quads[3][2] = stand_in_number(200, stand_in_vocabulary().integer_dt);
+    c.quads[3][2] = stand_in_number(200, vocabulary().integer_dt);
     check_validity(c, 150);
 }
 #[test(should_fail_with = "holder key type")]
@@ -886,13 +887,13 @@ fn dataset_graph_names_are_request_local() {
 #[test(should_fail_with = "before validFrom")]
 fn absent_bounds_cannot_precede_creation() {
     let mut c = base();
-    c.created_at = stand_in_number(100, stand_in_vocabulary().time_dt);
+    c.created_at = stand_in_number(100, vocabulary().time_dt);
     check_validity(c, 99);
 }
 #[test]
 fn absent_bounds_include_creation_and_have_no_end() {
     let mut c = base();
-    c.created_at = stand_in_number(100, stand_in_vocabulary().time_dt);
+    c.created_at = stand_in_number(100, vocabulary().time_dt);
     check_validity(c, 100);
     check_validity(c, 0xffffffffffffffff);
 }
@@ -901,4 +902,475 @@ fn absent_bounds_with_unknown_creation_refused() {
     let mut c = base();
     c.created_at = unbound();
     check_validity(c, 150);
+}
+
+#[test]
+fn freshness_includes_boundary_second() {
+    let mut c = validity();
+    c.created_at = stand_in_number(100, vocabulary().time_dt);
+    envelope_core::envelope::check_freshness(c, true, 100);
+}
+#[test(should_fail_with = "before earliestCreated")]
+fn freshness_one_second_earlier_refused() {
+    let mut c = validity();
+    c.created_at = stand_in_number(99, vocabulary().time_dt);
+    envelope_core::envelope::check_freshness(c, true, 100);
+}
+#[test(should_fail_with = "creation time unavailable")]
+fn freshness_unknown_creation_refused() {
+    let mut c = validity();
+    c.created_at = unbound();
+    envelope_core::envelope::check_freshness(c, true, 100);
+}
+#[test]
+fn absent_freshness_imposes_nothing() {
+    let mut c = validity();
+    c.created_at = unbound();
+    envelope_core::envelope::check_freshness(c, false, 100);
+    check_validity(c, 150);
+}
+#[test(should_fail_with = "before earliestCreated")]
+fn envelope_freshness_runs_with_explicit_validity_bounds() {
+    let c = validity();
+    let mut p = policy(c);
+    p.holder_required = false;
+    p.status_required = false;
+    p.freshness_required = true;
+    p.earliest_created = 1;
+    let _ = check_envelope(
+        c,
+        [10, 20],
+        p,
+        sign(1, 42),
+        issuer_path(),
+        key(1),
+        no_sig(),
+        no_status(),
+    );
+}
+fn scoped_policy(issuer: TermCell) -> RequestPolicy {
+    let mut p = policy(base());
+    p.holder_issuers_present = true;
+    p.holder_issuer_count = 1;
+    p.holder_issuers[0] = issuer;
+    p.status_required = false;
+    p
+}
+#[test]
+fn unlisted_issuer_without_holder_key_accepted() {
+    let c = base();
+    let p = scoped_policy(iri(902));
+    let _ = check_envelope(
+        c,
+        [10, 20],
+        p,
+        sign(1, 42),
+        issuer_path(),
+        key(1),
+        no_sig(),
+        no_status(),
+    );
+}
+#[test(should_fail_with = "required property absent")]
+fn listed_issuer_without_holder_key_refused() {
+    let c = base();
+    let p = scoped_policy(iri(900));
+    let _ = check_envelope(
+        c,
+        [10, 20],
+        p,
+        sign(1, 42),
+        issuer_path(),
+        key(1),
+        no_sig(),
+        no_status(),
+    );
+}
+fn holder_evidence(secret: Field, digest: [u128; 2]) -> envelope_core::envelope::HolderEvidence {
+    envelope_core::envelope::HolderEvidence {
+        pk: key(secret),
+        sig: sign(secret, holder_message(digest)),
+    }
+}
+fn empty_holder_evidence() -> envelope_core::envelope::HolderEvidence {
+    envelope_core::envelope::HolderEvidence { pk: key(1), sig: no_sig() }
+}
+#[test]
+fn two_credentials_share_one_holder_signature() {
+    envelope_core::envelope::check_holders(
+        [holder(), holder()],
+        policy(holder()),
+        [10, 20],
+        [0, 0],
+        [holder_evidence(1, [10, 20]), empty_holder_evidence()],
+    );
+}
+#[test]
+fn two_distinct_holder_keys_use_two_signatures() {
+    let mut b = holder();
+    b.quads[5][2] = stand_in_key_cell(key(2));
+    envelope_core::envelope::check_holders(
+        [holder(), b],
+        policy(holder()),
+        [10, 20],
+        [0, 1],
+        [holder_evidence(1, [10, 20]), holder_evidence(2, [10, 20])],
+    );
+}
+#[test(should_fail_with = "holder evidence coverage")]
+fn two_distinct_holder_keys_with_one_signature_refused() {
+    let mut b = holder();
+    b.quads[5][2] = stand_in_key_cell(key(2));
+    let mut absent = empty_holder_evidence();
+    absent.pk = key(2);
+    envelope_core::envelope::check_holders(
+        [holder(), b],
+        policy(holder()),
+        [10, 20],
+        [0, 1],
+        [holder_evidence(1, [10, 20]), absent],
+    );
+}
+#[test(should_fail_with = "duplicate holder key")]
+fn repeated_signature_for_the_same_holder_key_refused() {
+    envelope_core::envelope::check_holders(
+        [holder(), holder()],
+        policy(holder()),
+        [10, 20],
+        [0, 1],
+        [holder_evidence(1, [10, 20]), holder_evidence(1, [10, 20])],
+    );
+}
+#[test(should_fail_with = "holder key binding")]
+fn distinct_holder_keys_cannot_share_a_slot() {
+    let mut b = holder();
+    b.quads[5][2] = stand_in_key_cell(key(2));
+    envelope_core::envelope::check_holders(
+        [holder(), b],
+        policy(holder()),
+        [10, 20],
+        [0, 0],
+        [holder_evidence(1, [10, 20]), empty_holder_evidence()],
+    );
+}
+#[test]
+fn explicit_empty_holder_issuer_list_requires_no_keys() {
+    let mut p = scoped_policy(iri(900));
+    p.holder_issuer_count = 0;
+    p.holder_issuers = [unbound(); 4];
+    envelope_core::envelope::check_holders([base()], p, [10, 20], [0], [empty_holder_evidence()]);
+}
+#[test(should_fail_with = "holder issuer padding")]
+fn holder_issuer_list_requires_zero_padding() {
+    let mut p = scoped_policy(iri(900));
+    p.holder_issuers[1] = iri(902);
+    let _ = envelope_core::envelope::holder_applies(iri(900), p);
+}
+#[test]
+fn request_digest_covers_freshness_and_issuer_scope() {
+    let p = policy(base());
+    let d = stand_in_request_digest(10, 20, 30, p);
+    let mut other = p;
+    other.freshness_required = true;
+    assert(d != stand_in_request_digest(10, 20, 30, other));
+    other = p;
+    other.earliest_created = 100;
+    assert(d != stand_in_request_digest(10, 20, 30, other));
+    other = scoped_policy(iri(900));
+    other.status_required = true;
+    assert(d != stand_in_request_digest(10, 20, 30, other));
+    let scoped = stand_in_request_digest(10, 20, 30, other);
+    other.holder_issuers[0] = iri(902);
+    assert(scoped != stand_in_request_digest(10, 20, 30, other));
+}
+#[test(should_fail_with = "request binding")]
+fn envelope_digest_for_policy_a_refuses_policy_b() {
+    let c = base();
+    let mut a = policy(c);
+    a.holder_required = false;
+    a.status_required = false;
+    let digest = stand_in_request_digest(10, 20, 30, a);
+    let mut b = a;
+    b.allow_missing_status = true;
+    // No holder or status check is enabled: refusal must come from request binding.
+    let _ = envelope_core::envelope::check_requested_envelope(
+        [c],
+        [10, 20, 30],
+        digest,
+        b,
+        [sign(1, 42)],
+        [issuer_path()],
+        [empty_holder_evidence()],
+        [0],
+        [no_status()],
+    );
+}
+#[test]
+fn canonical_roots_ignore_member_order_and_duplicates() {
+    let a = trusted_key_leaf(iri(900), iri(901), key(1));
+    let b = trusted_key_leaf(iri(902), iri(903), key(2));
+    let (r, d, n) = envelope_core::envelope::canonical_set_root([a, b, a, 0], 3);
+    let (s, e, m) = envelope_core::envelope::canonical_set_root([b, a], 2);
+    assert((r == s) & (d == e) & (n == m) & (d == 1) & (n == 2));
+    let x = snapshot_digest::<2>(snapshot());
+    let mut other = snapshot();
+    other.root = other.root + 1;
+    let y = snapshot_digest::<2>(other);
+    let (r, _, _) = envelope_core::envelope::canonical_set_root([x, y], 2);
+    let (s, _, _) = envelope_core::envelope::canonical_set_root([y, x], 2);
+    assert(r == s);
+}
+#[test]
+fn canonical_root_has_minimal_depth_zero_padding_and_unsigned_order() {
+    let (root, d, n) = envelope_core::envelope::canonical_set_root([-1, 2, 1, 0], 3);
+    assert((d == 2) & (n == 3) & (root == h2(h2(1, 2), h2(-1, 0))));
+    let (root, d, n) = envelope_core::envelope::canonical_set_root([2, 2, 0, 0], 2);
+    assert((d == 0) & (n == 1) & (root == 2));
+}
+#[test(should_fail_with = "zero set member")]
+fn canonical_set_zero_member_refused() {
+    let _ = envelope_core::envelope::canonical_set_root([0, 1], 2);
+}
+#[test(should_fail_with = "set count")]
+fn canonical_set_empty_refused() {
+    let _ = envelope_core::envelope::canonical_set_root([0, 0], 0);
+}
+#[test(should_fail_with = "set input padding")]
+fn canonical_set_nonzero_padding_refused() {
+    let _ = envelope_core::envelope::canonical_set_root([1, 2], 1);
+}
+#[test]
+fn same_triple_has_one_default_copy_and_each_named_copy() {
+    let a = base();
+    let mut b = base();
+    b.credential_index = 1;
+    let ad = credential_dataset::<16, 5>(a, iri(900), [10, 20]);
+    let bd = credential_dataset::<16, 5>(b, iri(900), [10, 20]);
+    let merged = envelope_core::envelope::merge_datasets::<2, 5, 10>([ad, bd]);
+    check_table(merged);
+    let mut defaults: u32 = 0;
+    let mut named: u32 = 0;
+    for i in 0..10 {
+        if (i < merged.len)
+            & same_term(merged.rows[i][0], a.quads[0][0])
+            & same_term(merged.rows[i][1], a.quads[0][1])
+            & same_term(merged.rows[i][2], a.quads[0][2]) {
+            if merged.rows[i][3].bound {
+                named = named + 1;
+            } else {
+                defaults = defaults + 1;
+            }
+        }
+    }
+    assert((defaults == 1) & (named == 2) & (merged.len == 8));
+}
+fn complete() -> Credential<16> {
+    let mut c = holder();
+    for i in 0..5 {
+        c.quads[6 + i] = status().quads[2 + i];
+    }
+    c.quads[11] = validity().quads[2];
+    c.quads[12] = validity().quads[3];
+    c.len = 13;
+    c.created_at = stand_in_number(100, vocabulary().time_dt);
+    c
+}
+#[test]
+fn four_credentials_enforce_all_conditions_and_merge() {
+    let mut credentials = [complete(); 4];
+    for i in 0..4 {
+        credentials[i].credential_index = i;
+    }
+    let mut p = policy(credentials[0]);
+    p.freshness_required = true;
+    p.earliest_created = 100;
+    let digest = stand_in_request_digest(10, 20, 30, p);
+    let mut e = no_status();
+    e[6].present = true;
+    let verified = envelope_core::envelope::check_requested_envelope(
+        credentials,
+        [10, 20, 30],
+        digest,
+        p,
+        [sign(1, 42); 4],
+        [issuer_path(); 4],
+        [
+            holder_evidence(1, digest),
+            empty_holder_evidence(),
+            empty_holder_evidence(),
+            empty_holder_evidence(),
+        ],
+        [0; 4],
+        [e; 4],
+    );
+    let mut datasets = [envelope_core::table::empty::<27, 4>(); 4];
+    for i in 0..4 {
+        datasets[i] = credential_dataset(credentials[i], verified[i], digest);
+    }
+    let merged = envelope_core::envelope::merge_datasets::<4, 27, 69>(datasets);
+    check_table(merged);
+    // Thirteen shared default triples, their four named copies, four assertions.
+    assert(merged.len == 69);
+}
+fn run_four(last: Credential<16>) {
+    let mut credentials = [complete(); 4];
+    credentials[3] = last;
+    for i in 0..4 {
+        credentials[i].credential_index = i;
+    }
+    let mut p = policy(credentials[0]);
+    p.freshness_required = true;
+    p.earliest_created = 100;
+    let digest = stand_in_request_digest(10, 20, 30, p);
+    let mut e = no_status();
+    e[6].present = true;
+    let _ = envelope_core::envelope::check_requested_envelope(
+        credentials,
+        [10, 20, 30],
+        digest,
+        p,
+        [sign(1, 42); 4],
+        [issuer_path(); 4],
+        [
+            holder_evidence(1, digest),
+            empty_holder_evidence(),
+            empty_holder_evidence(),
+            empty_holder_evidence(),
+        ],
+        [0; 4],
+        [e; 4],
+    );
+}
+#[test(should_fail_with = "issuer authorization set")]
+fn fourth_credential_issuer_is_checked() {
+    let mut c = complete();
+    c.quads[1][2] = iri(902);
+    run_four(c);
+}
+#[test(should_fail_with = "status evidence coverage")]
+fn fourth_credential_status_is_checked() {
+    let mut c = complete();
+    c.quads[6] = q(4, 600, iri(20));
+    run_four(c);
+}
+#[test(should_fail_with = "after validUntil")]
+fn fourth_credential_validity_is_checked() {
+    let mut c = complete();
+    c.quads[12][2] = stand_in_number(149, vocabulary().time_dt);
+    run_four(c);
+}
+#[test(should_fail_with = "before earliestCreated")]
+fn fourth_credential_freshness_is_checked() {
+    let mut c = complete();
+    c.created_at = stand_in_number(99, vocabulary().time_dt);
+    run_four(c);
+}
+#[test(should_fail_with = "holder key binding")]
+fn fourth_credential_holder_is_checked() {
+    let mut c = complete();
+    c.quads[5][2] = stand_in_key_cell(key(2));
+    run_four(c);
+}
+
+fn suite_iri<let L: u32>(text: [u8; L]) -> envelope_core::term::TermCell {
+    envelope_core::term::open_term(
+        1,
+        std::collections::bounded_vec::BoundedVec::<u8, L>::from_array(text),
+        std::collections::bounded_vec::BoundedVec::<u8, 0>::new(),
+        std::collections::bounded_vec::BoundedVec::<u8, 0>::new(),
+        [0; 31],
+        0,
+    )
+}
+#[test]
+fn suite_cells_and_complete_signed_message_reach_the_envelope() {
+    let root = suite_iri("urn:test:credential".as_bytes());
+    let issuer = suite_iri("urn:test:issuer".as_bytes());
+    let method = suite_iri("urn:test:key".as_bytes());
+    let graph = envelope_core::term::open_term(
+        0,
+        std::collections::bounded_vec::BoundedVec::<u8, 0>::new(),
+        std::collections::bounded_vec::BoundedVec::<u8, 0>::new(),
+        std::collections::bounded_vec::BoundedVec::<u8, 0>::new(),
+        [0; 31],
+        0,
+    );
+    let mut quads = [
+        [
+            root,
+            suite_iri("http://www.w3.org/1999/02/22-rdf-syntax-ns#type".as_bytes()),
+            suite_iri(
+                "https://www.w3.org/2018/credentials#VerifiableCredential".as_bytes(),
+            ),
+            graph,
+        ],
+        [root, suite_iri("https://www.w3.org/2018/credentials#issuer".as_bytes()), issuer, graph],
+    ];
+    let a = envelope_core::suite::quad_hash([
+        quads[0][0].enc(),
+        quads[0][1].enc(),
+        quads[0][2].enc(),
+        quads[0][3].enc(),
+    ]);
+    let b = envelope_core::suite::quad_hash([
+        quads[1][0].enc(),
+        quads[1][1].enc(),
+        quads[1][2].enc(),
+        quads[1][3].enc(),
+    ]);
+    if envelope_core::term::field_lt(b, a) {
+        let tmp = quads[0];
+        quads[0] = quads[1];
+        quads[1] = tmp;
+    }
+    let mut metadata = Credential {
+        quads: [[unbound(); 4]; 2],
+        len: 0,
+        root: envelope_core::envelope::from_suite_cell(root),
+        credential_index: 0,
+        verification_method: envelope_core::envelope::from_suite_cell(method),
+        issuer_key: key(1),
+        signed_message: 0,
+        created_at: unbound(),
+    };
+    let salts = [envelope_core::suite::leaf_salt(7, 0), envelope_core::suite::leaf_salt(7, 1)];
+    metadata =
+        envelope_core::envelope::open_suite_credential(quads, salts, 7, 2, [10, 20], metadata);
+    let leaf = trusted_key_leaf(
+        envelope_core::envelope::from_suite_cell(issuer),
+        metadata.verification_method,
+        key(1),
+    );
+    let verified = check_issuer(
+        metadata,
+        leaf,
+        sign(1, metadata.signed_message),
+        Membership { index: 0, siblings: [] },
+    );
+    assert(equal_cell(verified, envelope_core::envelope::from_suite_cell(issuer)));
+    assert(
+        equal_cell(
+            envelope_core::envelope::iri_bytes("urn:test:issuer".as_bytes()),
+            verified,
+        ),
+    );
+}
+
+#[test(should_fail_with = "holder issuer IRI")]
+fn holder_policy_scope_metadata_cannot_change_membership() {
+    let mut p = scoped_policy(iri(900));
+    p.holder_issuers[0].scope = 1;
+    let _ = envelope_core::envelope::holder_applies(iri(900), p);
+}
+#[test(should_fail_with = "holder evidence coverage")]
+fn unused_holder_signature_refused() {
+    let mut p = scoped_policy(iri(902));
+    p.validity_required = false;
+    envelope_core::envelope::check_holders(
+        [base()],
+        p,
+        [10, 20],
+        [0],
+        [holder_evidence(1, [10, 20])],
+    );
 }
