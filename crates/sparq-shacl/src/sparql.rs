@@ -641,6 +641,26 @@ pub(crate) fn expression_bindings(
         .collect())
 }
 
+/// SHACL-AF SPARQL functions return the `result` column, unlike SHACL 1.2
+/// select expressions whose output is the first projected variable.
+pub(crate) fn function_bindings(
+    expr: &PreparedSelectExpr,
+    data: &sparq_core::Graph,
+    bindings: &[Binding],
+) -> Result<Vec<Term>, String> {
+    let bound = pre_bind_select(expr.query.query(), bindings).ok_or("Invalid function bindings")?;
+    let result = crate::functions::query(data, &expr.query.with_query(bound), false)?;
+    let Some(column) = result.vars.iter().position(|v| v.as_str() == "result") else {
+        return Ok(Vec::new());
+    };
+    Ok(crate::view::dedup(
+        result
+            .rows
+            .into_iter()
+            .filter_map(|row| row.get(column).cloned().flatten()),
+    ))
+}
+
 #[cfg(feature = "shacl-af")]
 pub(crate) fn construct_bound(
     data: &sparq_core::Graph,

@@ -10,26 +10,26 @@ Addresses #7326.
 
 ## Measured ratchets
 
-| Runner | Default: pass / fail / skip | `shacl-af`: pass / fail / skip | Pass floor before this pin |
+| Runner | Default: pass / fail / skip | `shacl-af`: pass / fail / skip | Earlier pass floor |
 | --- | ---: | ---: | ---: |
 | `w3c_core` (SHACL 1.0) | 98 / 0 / 0 | 98 / 0 / 0 | 98 |
 | `w3c_core_full_shacl12` | 162 / 0 / 0 | 162 / 0 / 0 | 136 / 137 |
 | `w3c_core_shacl12` (Core node subset) | 55 / 0 / 0 | 55 / 0 / 0 | 44 / 45 |
 | `w3c_sparql_shacl12` | 98 / 0 / 0 | 98 / 0 / 0 | 24 |
 | `w3c_node_expr_constraints` | feature disabled | 8 / 0 / 0 | 2 |
-| `w3c_node_expr` | feature disabled | 123 / 9 / 152 | 63 |
+| `w3c_node_expr` | 272 / 4 / 8 | 272 / 4 / 8 | 123 |
 | `w3c_inference_rules_shacl12` | 0 / 0 / 47 | 47 / 0 / 0 | new runner |
 | `w3c_sparql_rl_shacl12` | 0 / 342 / 0 | 0 / 342 / 0 | new runner |
 | `w3c_sparql` (SHACL 1.0 pre-binding subset) | 14 / 0 / 0 | 14 / 0 / 0 | 13 |
 
 Pass floors equal the measured counts above; no pass floor was lowered.
-The node-expression evaluation failure ceiling is 9. The SPARQL-RL ceiling
+The node-expression evaluation failure ceiling is 4. The SPARQL-RL ceiling
 is 342 in both feature states. All other runners have a failure ceiling of zero.
-The new runners additionally pin their manifest totals and skip ceilings.
-Feature-disabled inference entries emit failed EARL assertions. Of the node-expression runner's
-152 skips, eight are validation entries handled by the separate constraint
-runner; 144 are unsupported expression forms. The EARL sink omits the eight
-entries belonging to the other runner and records unsupported forms as failed.
+The inference and SPARQL-RL runners additionally pin their manifest totals and
+skip ceilings. Feature-disabled inference entries emit failed EARL assertions.
+The node-expression runner's eight skips are validation entries handled by the
+separate constraint runner and omitted from evaluation EARL assertions. Every
+evaluation entry is attempted in both feature states.
 
 ## Closed Core and SPARQL gaps
 
@@ -66,25 +66,40 @@ value node in the `value` scope variable (`expression-002`).
 All entries requested by the Core/SPARQL brief pass at this pin. No requested
 entry is left failing because of a test/spec divergence.
 
-## Remaining node-expression evaluation map
+## Node-expression evaluation
 
-These gaps belong to the separate node-expression workstream. The evaluator
-reports nine mismatches, all under `node-expr/shnex/`:
+The shared evaluator in `node_expr.rs` / `func.rs` now handles all expression
+forms exercised at the pin: named operators, SPARQL function forms, SELECT and
+SPARQL expressions, custom named/list-parameter bodies, argument access,
+conformance checks and constant triple terms. Ordering and extrema use the shared
+SPARQL total-order algorithm with exact numeric and temporal observations.
+It preserves evaluation failures
+through nesting, with SPARQL error handling for functions such as `coalesce`
+and `if`. Named argument expressions use an empty scope when accessed; list
+arguments use the caller's scope before entering the body. SPARQL callbacks use
+this same evaluator and the validation-scoped registry/dataset.
 
-| Entries | Observed gap |
-| --- | --- |
-| `failure-nested-propagates`, `failure-if-condition` | Evaluation failure is consumed by a surrounding operation. |
-| `instancesOf-two-classes`, `instancesOf-expression` | Dynamic/list-valued class input yields no instances. |
-| `max-strings`, `max-dates`, `min-strings`, `min-dates` | Non-numeric extrema yield no output. |
-| `orderBy-iris-before-literals` | Term ordering places literals before IRIs. |
+`w3c_node_expr` has no unsupported evaluation entries. Four entries in
+`node-expr/shnex-sparql` remain failing because the harness compares RDF terms,
+including literal lexical forms:
 
-Unsupported forms comprise 22 `node-expr/custom` entries (list/named parameter
-functions), ten `node-expr/shnex` entries (seven `conformsToShape`,
-`constant-tt`, `failure-list-parameter-multiple-values`, `if-else-only-true`),
-and 112 `node-expr/shnex-sparql` entries. Their individual IDs and diagnostics
-are emitted by `w3c_node_expr`; EARL records all 144 as failed assertions.
-The node-expression brief owns these groups; they are not suppressed by the
-Core/SPARQL ratchets.
+| Entry | Expected decimal lexical | Actual decimal lexical |
+| --- | --- | --- |
+| `ceil-example` | `4.0` | `4` |
+| `floor-example` | `3.0` | `3` |
+| `round-example` | `4.0` | `4` |
+| `seconds-example` | `00` | `0` |
+
+The pinned Node Expressions spec, “Evaluation of SPARQL Function Expressions”,
+requires the corresponding SPARQL function semantics. These results have the
+required `xsd:decimal` datatype and value. Neither that section nor the SPARQL
+function definitions prescribe the particular lexical forms asserted here.
+The runner keeps these term comparisons failing; it does not normalize expected
+or actual literals to hide the differences.
+
+Per-folder evaluation counts are `custom` 22 passed, `shnex` 142 passed, and
+`shnex-sparql` 108 passed / 4 failed. The API is available in both feature states;
+rule execution and expression constraints retain their `shacl-af` feature gate.
 
 ## Inference rules and SPARQL-RL
 
@@ -101,14 +116,15 @@ requirements inherited from included sets.
 SPARQL rule templates bind required/optional parameters through the shared
 algebraic pre-binding machinery. Triple-rule operands default to the focus
 node. The supported strict expression subset propagates failures, including
-path-focus cardinality failures. Conditions include shape-class superclasses.
+path-focus cardinality failures. Custom expression functions called from rule
+queries reuse the shared evaluator. Conditions include shape-class superclasses.
 Expected derived values are frozen at layer entry and removed unless a rule
 also infers them. Temporary triples and their annotations are removed after
 all layers. Declared rule entailments run before validation; strict validation
 returns rule failures through its existing failure channel.
 
-The inference runner visits all 47 manifest entries: 40 pass and one fails in
-the top folder, and all six `rdfs/` entries pass. Without `shacl-af`, all 47
+The inference runner visits all 47 manifest entries: all 41 in the top folder
+and all six `rdfs/` entries pass. Without `shacl-af`, all 47
 entries skip locally and emit failures to EARL. Inferred graphs are compared
 by complete RDF graph isomorphism, including shared blank-node identity and
 nested triple terms. The folder's validation entries expect empty reports;
@@ -148,8 +164,9 @@ guard still rejects incomplete inference-rule outcomes.
 With the pinned suite already present, run each `tests/w3c*.rs` runner with
 `cargo test -p sparq-shacl --test <runner> -- --nocapture`, then repeat with
 `--features shacl-af`. The behavioral guards are in
-[`shacl12_core_sparql.rs`](../crates/sparq-shacl/tests/shacl12_core_sparql.rs)
-and [`shacl12_rules.rs`](../crates/sparq-shacl/tests/shacl12_rules.rs).
+[`shacl12_core_sparql.rs`](../crates/sparq-shacl/tests/shacl12_core_sparql.rs),
+[`shacl12_node_expr.rs`](../crates/sparq-shacl/tests/shacl12_node_expr.rs) and
+[`shacl12_rules.rs`](../crates/sparq-shacl/tests/shacl12_rules.rs).
 Generate reports without fetching an already-present pin using:
 
 ```sh
@@ -158,7 +175,7 @@ SHACL_TESTS_PIN=04ecbb4a5b930f4fa9df6c399ac5c98ccec672c9 \
 ```
 
 The Core and SHACL-SPARQL sections of that SHACL 1.2 report contain 162 and
-98 passed assertions, respectively, with zero failures. Inference rules contribute 47 passed assertions.
-SPARQL-RL is excluded. Node-expression evaluation has 123 passes and
-153 failures (nine mismatches plus 144 unsupported forms); its separate
-constraint runner contributes eight passes.
+98 passed assertions, respectively, with zero failures. Inference rules contribute
+47 passed assertions. SPARQL-RL is excluded. Node-expression evaluation has
+272 passes and four failures; its separate constraint runner contributes eight
+passes.
