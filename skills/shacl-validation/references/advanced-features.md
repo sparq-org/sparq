@@ -128,11 +128,13 @@ API: `apply_rules(data, shapes)`, `apply_rules_with_model(data, shapes, &model)`
 `validate_with_domain(data, shapes, FactDomain)` and
 `validate_with_domain_and_model(data, shapes, &model, FactDomain)` (choose asserted
 facts or the data-plus-inferred closure for validation), the node-expression
-seam `eval_node_expression(data, shapes, expr, focus) -> Option<Vec<Term>>`, and
+seams `eval_node_expression(data, shapes, expr, focus) -> Option<Vec<Term>>`,
+`eval_node_expression_with_scope(data, shapes, expr, focus, &scope)` and
+`eval_node_expression_result(data, shapes, expr, focus, &scope) -> Result<Vec<Term>, String>`, and
 the conformance primitive `conforms(data, shapes, shape_node) -> ConformanceCheck`
-(call `.holds(node)` per focus). A gated W3C harness (`tests/w3c_node_expr.rs`)
-drives the `sht:EvalNodeExpr` suite — all evaluation entries pass; a companion
-harness (`tests/w3c_node_expr_constraints.rs`) drives the suite's two `sht:Validate`
+(call `.holds(node)` per focus). The W3C harness (`tests/w3c_node_expr.rs`)
+drives the `sht:EvalNodeExpr` suite in both feature states; a companion
+harness (`tests/w3c_node_expr_constraints.rs`) drives the suite's eight `sht:Validate`
 entries (`sh:expression` / `sh:nodeByExpression`) end-to-end (both self-skip when
 the suite is not fetched). Because those W3C harnesses self-skip on a fresh
 checkout, the node-expression **function operators** are also pinned by a
@@ -154,3 +156,37 @@ runtime query error) are pinned directly by the in-`src/sparql.rs` unit module
 `VALUES` table lands BELOW the modifier / inside every branch so `$this`/`$value`/
 `$param` stays in scope) and semantically (a real validator over real data yields the
 SHACL-spec-correct conforms/violations).
+
+## SHACL 1.2 node expressions
+
+Standalone evaluation is available without `shacl-af`. That feature still controls
+rule execution and the `sh:expression` / `sh:nodeByExpression` constraints.
+The evaluator supports `sparql:` function forms, `sh:select` / `sh:sparqlExpr`,
+custom `sh:NamedParameterExpressionFunction` and
+`sh:ListParameterExpressionFunction` bodies, `shnex:arg`,
+`shnex:conformsToShape`, and constant triple terms alongside the named operators.
+
+Named custom parameters remain expressions. `shnex:arg` evaluates one with an
+empty variable scope, retaining the current focus. List custom arguments are
+evaluated in the caller's scope before the body runs: each must produce at most
+one node, a failure takes precedence over an empty argument, and the body must
+produce at most one node. An empty supplied argument prevents body application.
+SPARQL functions apply SPARQL error/unbound semantics, including `coalesce`,
+`if`, and the logical operators. Named `shnex:if` permits omitted branches and
+evaluates only the selected branch.
+
+`shnex:pathValues` requires at most one start node; the older SHACL-AF
+`sh:path` with `sh:nodes` retains its multiple-start behavior. Dynamic
+`shnex:instancesOf` inputs may produce several class IRIs and return their
+combined instances without duplicates. Extrema include strings and temporal
+values. `shnex:orderBy` computes the first key value once per input occurrence,
+puts unbound keys first ascending, and retains duplicate input nodes. Ordering and
+extrema use the engine's shared literal-family order, including exact numeric ties
+and exact temporal values with a total timezone order.
+
+SELECT expressions bind the focus as `this` and scope variables by name;
+list-function argument keys become `arg0`, `arg1`, and so on. A scope name of
+`this` or a name that is not a SPARQL variable name produces a failure.
+SPARQL calls reuse the validation-scoped function registry and dataset.
+The fixture-independent guards in `tests/shacl12_node_expr.rs` run in both
+feature states, including custom expression bodies called as SPARQL functions.

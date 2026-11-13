@@ -841,7 +841,6 @@ impl ShapesModel {
     /// seam): the same on-demand inline-shape registration the `sh:expression`
     /// constraint parse does, so a `findFirst`/`matchAll`/`nodesMatching`/
     /// `filterShape` over an anonymous `[ … ]` shape resolves at eval time.
-    #[cfg(feature = "shacl-af")]
     pub(crate) fn register_node_expr_shapes(&mut self, shapes_graph: &Graph, expr: &Term) {
         self.register_expression_shapes(shapes_graph, expr, 0);
     }
@@ -849,7 +848,6 @@ impl ShapesModel {
     /// Walks an expression term registering inline `sh:filterShape` / function
     /// filter shapes (`shnex:`/`sh:` `findFirst`/`matchAll`/`nodesMatching`) as
     /// shapes so they resolve. Depth-bounded against pathological cyclic graphs.
-    #[cfg(feature = "shacl-af")]
     fn register_expression_shapes(&mut self, shapes_graph: &Graph, term: &Term, depth: usize) {
         if depth > 64 || matches!(term, Term::Literal(_)) {
             return;
@@ -883,7 +881,6 @@ impl ShapesModel {
     /// carry no `rdf:type`/target, so they are not roots; this lets the function
     /// registry register such a shape and then check conformance against it.
     /// `None` only if `node` is a literal (literals are never shapes).
-    #[cfg(feature = "shacl-af")]
     pub(crate) fn ensure_shape(&mut self, shapes_graph: &Graph, node: &Term) -> Option<usize> {
         if matches!(node, Term::Literal(_)) {
             return None;

@@ -1,38 +1,8 @@
-//! (sq-mk9n) The SHACL-function registry and the **function-expression
-//! form** of the SHACL-AF node-expression algebra (a child module of
-//! [`crate::rules`], compiled only behind the `shacl-af` feature).
-//!
-//! A *function expression* is a SHACL function applied to operand node
-//! expressions. SHACL 1.2 spells the common operators as predicate-named built-ins
-//! in the `shnex:`/`sh:` namespaces (`shnex:concat`, `shnex:sum`, …); SHACL-AF also
-//! allows a custom `sh:SPARQLFunction` IRI applied to a `sh:list` of arguments
-//! (`[ ex:myFn ( <arg-expr> … ) ]`). This module is the single registry for both:
-//!
-//!   * [`Op`] — the recognised built-in operators, parsed from the operand
-//!     predicates of a blank-node expression.
-//!   * a **custom `sh:SPARQLFunction`** — its declaration (`sh:select` body and
-//!     `sh:parameter` order) is read from the shapes graph and run through the
-//!     SPARQL engine with the evaluated arguments pre-bound.
-//!
-//! An unrecognised function (a blank node carrying none of the built-in operator
-//! predicates and whose head IRI names no declared `sh:SPARQLFunction`) yields
-//! `None` from [`parse`], so the caller drops it leniently — a rule that uses an
-//! unsupported function infers nothing rather than misfiring.
-//!
-//! ## Scope (honest)
-//!
-//! The implemented built-ins are the deterministic operators the SHACL 1.2
-//! node-expression test suite exercises: `concat`, `count`, `sum`, `min`, `max`,
-//! `distinct`, `if`/`then`/`else`, `exists`, `limit`, `offset`, `instancesOf`,
-//! `nodesMatching`, `flatMap`, `findFirst`, `matchAll`, `remove`, `orderBy`,
-//! and `var` (`"focusNode"` is the focus node; any other name resolves against a
-//! caller-supplied variable scope — the W3C suite's `sht:scope-<name>` injection —
-//! else the empty set, matching the `var-unbound` entry). `sh:SPARQLFunction`
-//! custom functions are dispatched through the engine. (sq-u5rxj) the
-//! `shnex:var "bound"` scope-injection entry is now supported via the threaded
-//! [`crate::rules::Scope`].
+//! Named operators, list-parameter SPARQL functions and custom expression bodies.
+//! SPARQL scalar semantics come from the engine; custom argument scopes remain
+//! local to the expression call.
 
-use super::NodeExpr;
+use super::{EvalScope, NodeExpr};
 use crate::model::{sh, ShapesModel};
 use crate::view::{dedup, GraphView};
 use oxrdf::{Literal, NamedNode, Term};
@@ -59,16 +29,18 @@ enum Op {
     Count(Box<NodeExpr>),
     /// `sum E` — numeric sum of `Eval(E)` (empty ⇒ 0).
     Sum(Box<NodeExpr>),
-    /// `min E` / `max E` — the numerically least / greatest of `Eval(E)` (empty
-    /// ⇒ empty). `true` = max.
-    MinMax { arg: Box<NodeExpr>, max: bool },
+    /// `min E` / `max E` under the SPARQL term order (empty ⇒ empty).
+    MinMax {
+        arg: Box<NodeExpr>,
+        max: bool,
+    },
     /// `distinct E` — `Eval(E)` deduplicated by RDF term equality.
     Distinct(Box<NodeExpr>),
     /// `if C ; then T ; else U?` — `Eval(T)` when `Eval(C) = { true }`, else
     /// `Eval(U)` (empty when no `else`).
     If {
         cond: Box<NodeExpr>,
-        then: Box<NodeExpr>,
+        then: Option<Box<NodeExpr>>,
         els: Option<Box<NodeExpr>>,
     },
     /// `exists E` — `{ true }` if `Eval(E)` is non-empty, else `{ false }`.
@@ -82,7 +54,7 @@ enum Op {
         offset: usize,
     },
     /// `instancesOf C` — the SHACL instances of class `C` (subclass closure).
-    InstancesOf(Term),
+    InstancesOf(Box<NodeExpr>),
     /// `nodesMatching S` — every node in the graph that conforms to shape `S`.
     NodesMatching(usize),
     /// `nodes N ; flatMap E` — for each `n` in `Eval(N)`, `Eval(E)` with the
@@ -93,19 +65,23 @@ enum Op {
     },
     /// `findFirst S ; nodes N` — the first node of `Eval(N)` conforming to `S`
     /// (empty if none).
-    FindFirst { nodes: Box<NodeExpr>, shape: usize },
+    FindFirst {
+        nodes: Box<NodeExpr>,
+        shape: usize,
+    },
     /// `matchAll S ; nodes N` — `{ true }` iff every node of `Eval(N)` conforms
     /// to `S` (empty input ⇒ `{ true }`), else `{ false }`.
-    MatchAll { nodes: Box<NodeExpr>, shape: usize },
+    MatchAll {
+        nodes: Box<NodeExpr>,
+        shape: usize,
+    },
     /// `remove R ; nodes N` — `Eval(N)` minus the members of `Eval(R)` (term
     /// equality), order-preserving.
     Remove {
         nodes: Box<NodeExpr>,
         removed: Box<NodeExpr>,
     },
-    /// `nodes N ; orderBy K ; desc?` — `Eval(N)` sorted by the sort key
-    /// `Eval(K, n)` (its least value), ascending (or descending). Nodes with no
-    /// key sort first (ascending).
+    /// Sort nodes by the first key value, with unbound keys first ascending.
     OrderBy {
         nodes: Box<NodeExpr>,
         key: Box<NodeExpr>,
@@ -114,6 +90,19 @@ enum Op {
     /// `var "name"` — `"focusNode"` ⇒ `{ focus }`; any other name resolves against
     /// the caller-supplied [`crate::rules::Scope`] (⇒ empty when absent).
     Var(String),
+    Arg(Term),
+    Custom {
+        body: Term,
+        args: Vec<(Term, Term)>,
+        scalar: bool,
+    },
+    Builtin {
+        name: String,
+        args: Vec<NodeExpr>,
+        query: crate::sparql::PreparedSelectExpr,
+    },
+    Select(crate::sparql::PreparedSelectExpr),
+    ConformsToShape(Vec<NodeExpr>),
     /// A custom `sh:SPARQLFunction`: its SELECT body, parameter order, and the
     /// (already-parsed) argument node expressions to pre-bind.
     Sparql {
@@ -138,6 +127,18 @@ fn has_op(g: &GraphView, subject: &Term, local: &str) -> bool {
 /// when `node` carries no recognised operator predicate and names no declared
 /// `sh:SPARQLFunction` — the lenient-drop contract.
 pub(super) fn parse(g: &GraphView, model: &ShapesModel, node: &Term) -> Option<Func> {
+    if let Some(query) = crate::sparql::expression_query(g, node) {
+        return mk(Op::Select(query));
+    }
+    if let Some(key) = op_object(g, node, "arg") {
+        return mk(Op::Arg(key));
+    }
+    if let Some(head) = op_object(g, node, "conformsToShape") {
+        let args = arguments(g, model, &head)?;
+        return (args.len() == 2).then_some(Func {
+            op: Op::ConformsToShape(args),
+        });
+    }
     // ---- single-argument aggregate / set operators ----
     if let Some(arg) = op_object(g, node, "count") {
         return mk(Op::Count(boxed(g, model, &arg)?));
@@ -164,7 +165,7 @@ pub(super) fn parse(g: &GraphView, model: &ShapesModel, node: &Term) -> Option<F
         return mk(Op::Exists(boxed(g, model, &arg)?));
     }
     if let Some(class) = op_object(g, node, "instancesOf") {
-        return mk(Op::InstancesOf(class));
+        return mk(Op::InstancesOf(boxed(g, model, &class)?));
     }
     if let Some(shape_term) = op_object(g, node, "nodesMatching") {
         let shape = model.by_node(&shape_term)?;
@@ -185,11 +186,14 @@ pub(super) fn parse(g: &GraphView, model: &ShapesModel, node: &Term) -> Option<F
 
     // ---- `if … then … else?` ----
     if let Some(cond) = op_object(g, node, "if") {
-        let then = op_object(g, node, "then")?;
+        let then = op_object(g, node, "then");
         let els = op_object(g, node, "else");
         return mk(Op::If {
             cond: boxed(g, model, &cond)?,
-            then: boxed(g, model, &then)?,
+            then: match then {
+                Some(t) => Some(boxed(g, model, &t)?),
+                None => None,
+            },
             els: match els {
                 Some(e) => Some(boxed(g, model, &e)?),
                 None => None,
@@ -255,11 +259,116 @@ pub(super) fn parse(g: &GraphView, model: &ShapesModel, node: &Term) -> Option<F
         });
     }
 
-    // ---- a custom `sh:SPARQLFunction` IRI applied to `( args… )` ----
-    // SHACL-AF function-expression syntax: `[ <funcIRI> ( <arg> … ) ]` — the
-    // blank node has exactly one predicate, the function IRI, whose object is the
-    // argument list. Only a declared `sh:SPARQLFunction` is dispatched.
+    for (pred, object) in g.predicate_objects(node) {
+        if let Term::NamedNode(iri) = &pred {
+            if let Some(name) = iri.as_str().strip_prefix("http://www.w3.org/ns/sparql#") {
+                let args = arguments(g, model, &object)?;
+                let expression = builtin_expression(name, args.len())?;
+                let query = crate::sparql::PreparedSelectExpr::build_expr("", &expression)?;
+                return mk(Op::Builtin {
+                    name: name.into(),
+                    args,
+                    query,
+                });
+            }
+            if g.instances_of(
+                &NamedNode::new_unchecked(sh("ListParameterExpressionFunction")).into(),
+            )
+            .contains(&pred)
+            {
+                let body = g.object(&pred, &sh("bodyExpression"))?;
+                let args = argument_terms(g, &object)?
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, t)| (Literal::from(i as i64).into(), t))
+                    .collect();
+                return mk(Op::Custom {
+                    body,
+                    args,
+                    scalar: true,
+                });
+            }
+        }
+    }
+    for function in
+        g.instances_of(&NamedNode::new_unchecked(sh("NamedParameterExpressionFunction")).into())
+    {
+        let params = g.objects(&function, &sh("parameter"));
+        let key_matches = params.iter().any(|p| bool_op(g, p, "keyParameter")
+            && matches!(g.object(p, &sh("path")), Some(Term::NamedNode(n)) if g.object(node, n.as_str()).is_some()));
+        if key_matches {
+            let body = g.object(&function, &sh("bodyExpression"))?;
+            let args = params
+                .iter()
+                .filter_map(|p| {
+                    let key = g.object(p, &sh("path"))?;
+                    let Term::NamedNode(n) = &key else {
+                        return None;
+                    };
+                    Some((key.clone(), g.object(node, n.as_str())?))
+                })
+                .collect();
+            return mk(Op::Custom {
+                body,
+                args,
+                scalar: false,
+            });
+        }
+    }
     parse_custom_function(g, model, node)
+}
+
+fn argument_terms(g: &GraphView, object: &Term) -> Option<Vec<Term>> {
+    if object == &NamedNode::new_unchecked(crate::view::RDF_NIL).into()
+        || g.object(object, crate::view::RDF_FIRST).is_some()
+    {
+        g.list_strict(object)
+    } else {
+        Some(vec![object.clone()])
+    }
+}
+
+fn arguments(g: &GraphView, model: &ShapesModel, object: &Term) -> Option<Vec<NodeExpr>> {
+    argument_terms(g, object)?
+        .iter()
+        .map(|t| super::parse_node_expr(g, model, t))
+        .collect()
+}
+
+fn builtin_expression(name: &str, arity: usize) -> Option<String> {
+    let vars: Vec<_> = (0..arity).map(|i| format!("?arg{i}")).collect();
+    let infix = match name {
+        "plus" => Some("+"),
+        "subtract" => Some("-"),
+        "multiply" => Some("*"),
+        "divide" => Some("/"),
+        "equals" | "sameValue" => Some("="),
+        "not-equals" => Some("!="),
+        "less-than" => Some("<"),
+        "less-than-or-equal" => Some("<="),
+        "greater-than" => Some(">"),
+        "greater-than-or-equal" => Some(">="),
+        "logical-and" => Some("&&"),
+        "logical-or" => Some("||"),
+        _ => None,
+    };
+    if let Some(op) = infix {
+        return (arity == 2).then(|| format!("({} {op} {})", vars[0], vars[1]));
+    }
+    let prefix = match name {
+        "unary-plus" => Some("+"),
+        "unary-minus" => Some("-"),
+        "logical-not" => Some("!"),
+        _ => None,
+    };
+    if let Some(op) = prefix {
+        return (arity == 1).then(|| format!("{op}{}", vars[0]));
+    }
+    let function = match name {
+        "encode" => "ENCODE_FOR_URI",
+        other => other,
+    };
+    Some(format!("{function}({})", vars.join(",")))
 }
 
 fn mk(op: Op) -> Option<Func> {
@@ -272,7 +381,7 @@ fn boxed(g: &GraphView, model: &ShapesModel, node: &Term) -> Option<Box<NodeExpr
 
 /// Parses a SHACL list of node expressions; `None` if any member is unsupported.
 fn parse_list(g: &GraphView, model: &ShapesModel, head: &Term) -> Option<Vec<NodeExpr>> {
-    g.list(head)
+    g.list_strict(head)?
         .iter()
         .map(|m| super::parse_node_expr(g, model, m))
         .collect()
@@ -369,44 +478,33 @@ fn sparql_function_decl(g: &GraphView, iri: &NamedNode) -> Option<(String, Vec<S
 }
 
 impl Func {
-    /// Evaluates this function expression against `focus` over `graph`.
     pub(super) fn eval(
         &self,
         graph: &sparq_core::Graph,
         view: &GraphView,
         model: &ShapesModel,
         focus: &Term,
-        scope: &crate::rules::Scope,
-    ) -> Vec<Term> {
-        match &self.op {
-            Op::Concat(members) => members
-                .iter()
-                .flat_map(|m| m.eval(graph, view, model, focus, scope))
-                .collect(),
-            Op::Count(arg) => {
-                let n = arg.eval(graph, view, model, focus, scope).len();
-                vec![int_literal(n as i128)]
+        scope: &EvalScope,
+    ) -> Result<Vec<Term>, String> {
+        let eval = |e: &NodeExpr| e.try_eval(graph, view, model, focus, scope);
+        Ok(match &self.op {
+            Op::Concat(members) => {
+                let mut out = Vec::new();
+                for m in members {
+                    out.extend(eval(m)?);
+                }
+                out
             }
-            Op::Sum(arg) => {
-                let vals = arg.eval(graph, view, model, focus, scope);
-                vec![sum_literal(&vals)]
-            }
-            Op::MinMax { arg, max } => {
-                let vals = arg.eval(graph, view, model, focus, scope);
-                min_max(&vals, *max).into_iter().collect()
-            }
-            Op::Distinct(arg) => dedup(arg.eval(graph, view, model, focus, scope)),
-            Op::Exists(arg) => {
-                let nonempty = !arg.eval(graph, view, model, focus, scope).is_empty();
-                vec![bool_literal(nonempty)]
-            }
+            Op::Count(arg) => vec![int_literal(eval(arg)?.len() as i128)],
+            Op::Sum(arg) => vec![sum_literal(&eval(arg)?)],
+            Op::MinMax { arg, max } => min_max(&eval(arg)?, *max).into_iter().collect(),
+            Op::Distinct(arg) => dedup(eval(arg)?),
+            Op::Exists(arg) => vec![bool_literal(!eval(arg)?.is_empty())],
             Op::If { cond, then, els } => {
-                if is_true_set(&cond.eval(graph, view, model, focus, scope)) {
-                    then.eval(graph, view, model, focus, scope)
-                } else if let Some(e) = els {
-                    e.eval(graph, view, model, focus, scope)
-                } else {
-                    Vec::new()
+                let branch = if is_true_set(&eval(cond)?) { then } else { els };
+                match branch {
+                    Some(e) => eval(e)?,
+                    None => Vec::new(),
                 }
             }
             Op::Slice {
@@ -414,159 +512,236 @@ impl Func {
                 limit,
                 offset,
             } => {
-                let v = nodes.eval(graph, view, model, focus, scope);
-                let after_offset = v.into_iter().skip(*offset);
+                let after = eval(nodes)?.into_iter().skip(*offset);
                 match limit {
-                    Some(k) => after_offset.take(*k).collect(),
-                    None => after_offset.collect(),
+                    Some(k) => after.take(*k).collect(),
+                    None => after.collect(),
                 }
             }
-            Op::InstancesOf(class) => view.instances_of(class),
-            Op::NodesMatching(shape) => {
-                // Every node in the graph that conforms to `shape`. The candidate
-                // set is every subject and object of the data graph.
-                candidate_nodes(view)
-                    .into_iter()
-                    .filter(|n| crate::eval::conforms_node(graph, model, *shape, n))
-                    .collect()
+            Op::InstancesOf(class) => {
+                let classes = eval(class)?;
+                if classes.iter().any(|c| !matches!(c, Term::NamedNode(_))) {
+                    return Err("Class must be an IRI".into());
+                }
+                dedup(classes.iter().flat_map(|c| view.instances_of(c)))
             }
-            Op::FlatMap { nodes, body } => nodes
-                .eval(graph, view, model, focus, scope)
-                .iter()
-                .flat_map(|n| body.eval(graph, view, model, n, scope))
-                .collect(),
-            Op::FindFirst { nodes, shape } => nodes
-                .eval(graph, view, model, focus, scope)
-                .into_iter()
-                .find(|n| crate::eval::conforms_node(graph, model, *shape, n))
-                .into_iter()
-                .collect(),
+            Op::NodesMatching(shape) => {
+                let mut out = Vec::new();
+                for n in candidate_nodes(view) {
+                    if super::conforms(graph, model, *shape, &n)? {
+                        out.push(n);
+                    }
+                }
+                out
+            }
+            Op::FlatMap { nodes, body } => {
+                let mut out = Vec::new();
+                for n in eval(nodes)? {
+                    out.extend(body.try_eval(graph, view, model, &n, scope)?);
+                }
+                out
+            }
+            Op::FindFirst { nodes, shape } => {
+                let mut out = Vec::new();
+                for n in eval(nodes)? {
+                    if super::conforms(graph, model, *shape, &n)? {
+                        out.push(n);
+                        break;
+                    }
+                }
+                out
+            }
             Op::MatchAll { nodes, shape } => {
-                let all = nodes
-                    .eval(graph, view, model, focus, scope)
-                    .iter()
-                    .all(|n| crate::eval::conforms_node(graph, model, *shape, n));
+                let mut all = true;
+                for n in eval(nodes)? {
+                    if !super::conforms(graph, model, *shape, &n)? {
+                        all = false;
+                        break;
+                    }
+                }
                 vec![bool_literal(all)]
             }
             Op::Remove { nodes, removed } => {
-                let drop: std::collections::HashSet<Term> = removed
-                    .eval(graph, view, model, focus, scope)
-                    .into_iter()
-                    .collect();
-                nodes
-                    .eval(graph, view, model, focus, scope)
+                let drop: std::collections::HashSet<_> = eval(removed)?.into_iter().collect();
+                eval(nodes)?
                     .into_iter()
                     .filter(|n| !drop.contains(n))
                     .collect()
             }
             Op::OrderBy { nodes, key, desc } => {
-                let mut v = nodes.eval(graph, view, model, focus, scope);
-                // Sort by the least key value of each node; a node with no key
-                // sorts first (ascending) per the suite's `orderBy-height`.
-                v.sort_by(|a, b| {
-                    let ka = key.eval(graph, view, model, a, scope);
-                    let kb = key.eval(graph, view, model, b, scope);
-                    let ord = cmp_key(&ka, &kb);
+                let mut keyed = Vec::new();
+                for n in eval(nodes)? {
+                    let k = key
+                        .try_eval(graph, view, model, &n, scope)?
+                        .into_iter()
+                        .next();
+                    keyed.push((n, k));
+                }
+                keyed.sort_by(|(_, a), (_, b)| {
+                    let order = cmp_key(a.as_slice(), b.as_slice());
                     if *desc {
-                        ord.reverse()
+                        order.reverse()
                     } else {
-                        ord
+                        order
                     }
                 });
-                v
+                keyed.into_iter().map(|(n, _)| n).collect()
             }
-            // (sq-u5rxj) `var "name"`: `"focusNode"` is the focus node;
-            // any other name resolves against the caller-supplied `scope` (the W3C
-            // suite's `sht:scope-<name>` injection), or the empty set when absent.
             Op::Var(name) => {
                 if name == "focusNode" {
                     vec![focus.clone()]
                 } else {
-                    scope.get(name).cloned().unwrap_or_default()
+                    scope.variables.get(name).cloned().unwrap_or_default()
                 }
+            }
+            Op::Arg(key) => {
+                if let Some(value) = scope.arguments.get(key) {
+                    let expr = super::parse_node_expr(&GraphView::new(&model.source), model, value)
+                        .ok_or("Invalid argument expression")?;
+                    expr.try_eval(graph, view, model, focus, &EvalScope::default())?
+                } else {
+                    Vec::new()
+                }
+            }
+            Op::Custom { body, args, scalar } => {
+                let mut inner = EvalScope::default();
+                let mut empty = false;
+                for (key, value) in args {
+                    let value = if *scalar {
+                        let arg =
+                            super::parse_node_expr(&GraphView::new(&model.source), model, value)
+                                .ok_or("Invalid argument")?;
+                        let value = arg.try_eval(graph, view, model, focus, scope)?;
+                        if value.len() > 1 {
+                            return Err("Function argument has multiple nodes".into());
+                        }
+                        let Some(value) = value.into_iter().next() else {
+                            empty = true;
+                            continue;
+                        };
+                        value
+                    } else {
+                        value.clone()
+                    };
+                    inner.arguments.insert(key.clone(), value);
+                }
+                if empty {
+                    return Ok(Vec::new());
+                }
+                let body = super::parse_node_expr(&GraphView::new(&model.source), model, body)
+                    .ok_or("Invalid function body")?;
+                let out = body.try_eval(graph, view, model, focus, &inner)?;
+                if *scalar && out.len() > 1 {
+                    return Err("Function body has multiple nodes".into());
+                }
+                out
+            }
+            Op::ConformsToShape(args) => {
+                let mut values = Vec::new();
+                let mut empty = false;
+                for arg in args {
+                    let value = eval(arg)?;
+                    if value.len() > 1 {
+                        return Err("Function argument has multiple nodes".into());
+                    }
+                    if let Some(value) = value.into_iter().next() {
+                        values.push(value);
+                    } else {
+                        empty = true;
+                    }
+                }
+                if empty {
+                    return Ok(Vec::new());
+                }
+                let shape = model.by_node(&values[1]).ok_or("Unknown shape")?;
+                vec![bool_literal(super::conforms(
+                    graph, model, shape, &values[0],
+                )?)]
+            }
+            Op::Select(query) => {
+                let mut owned = vec![("this".to_string(), focus.clone())];
+                for (name, values) in &scope.variables {
+                    if name == "this" || oxrdf::Variable::new(name).is_err() {
+                        return Err("Invalid scope variable".into());
+                    }
+                    if values.len() > 1 {
+                        return Err("Scope variable has multiple nodes".into());
+                    }
+                    if let Some(value) = values.first() {
+                        owned.push((name.clone(), value.clone()));
+                    }
+                }
+                for (key, value) in &scope.arguments {
+                    let name = match key {
+                        Term::Literal(l) => format!("arg{}", l.value()),
+                        _ => format!("arg{key}"),
+                    };
+                    if oxrdf::Variable::new(&name).is_err() {
+                        return Err("Invalid argument variable".into());
+                    }
+                    owned.push((name, value.clone()));
+                }
+                let bindings: Vec<_> = owned
+                    .iter()
+                    .map(|(name, value)| (name.as_str(), value))
+                    .collect();
+                crate::sparql::expression_bindings(query, graph, &bindings)?
+            }
+            Op::Builtin { name, args, query } => {
+                let handles_unbound = matches!(
+                    name.as_str(),
+                    "bound" | "coalesce" | "if" | "logical-and" | "logical-or"
+                );
+                let mut owned = Vec::new();
+                let mut empty = false;
+                let mut error = false;
+                for (i, arg) in args.iter().enumerate() {
+                    match eval(arg) {
+                        Ok(v) if v.len() == 1 => {
+                            owned.push((format!("arg{i}"), v.into_iter().next().unwrap()))
+                        }
+                        Ok(v) if v.is_empty() => empty = true,
+                        _ => error = true,
+                    }
+                }
+                if !handles_unbound {
+                    if error {
+                        return Err("SPARQL argument evaluation failed".into());
+                    }
+                    if empty {
+                        return Ok(Vec::new());
+                    }
+                }
+                let bindings: Vec<_> = owned.iter().map(|(n, v)| (n.as_str(), v)).collect();
+                let result = crate::sparql::expression_bindings(query, graph, &bindings)?;
+                if result.is_empty() {
+                    return Err("SPARQL function evaluation failed".into());
+                }
+                result
             }
             Op::Sparql {
                 select,
                 params,
                 args,
-            } => self.eval_sparql_function(graph, view, model, focus, scope, select, params, args),
-        }
-    }
-
-    /// Dispatches a custom `sh:SPARQLFunction`: evaluate each argument to a single
-    /// node (a function argument is scalar), pre-bind the parameter variables via a
-    /// VALUES row, run the SELECT, and return the `?result` column.
-    #[allow(clippy::too_many_arguments)]
-    fn eval_sparql_function(
-        &self,
-        graph: &sparq_core::Graph,
-        view: &GraphView,
-        model: &ShapesModel,
-        focus: &Term,
-        scope: &crate::rules::Scope,
-        select: &str,
-        params: &[String],
-        args: &[NodeExpr],
-    ) -> Vec<Term> {
-        // Each argument must evaluate to exactly one node (SPARQL scalar binding);
-        // if any is empty/multi-valued the function call is undefined ⇒ empty set.
-        let mut bound: Vec<Term> = Vec::with_capacity(params.len());
-        for a in args {
-            let mut vs = a.eval(graph, view, model, focus, scope);
-            if vs.len() != 1 {
-                return Vec::new();
+            } => {
+                let mut owned = Vec::new();
+                for (param, arg) in params.iter().zip(args) {
+                    let value = eval(arg)?;
+                    if value.len() > 1 {
+                        return Ok(Vec::new());
+                    }
+                    if let Some(v) = value.into_iter().next() {
+                        owned.push((param.as_str(), v));
+                    } else {
+                        return Ok(Vec::new());
+                    }
+                }
+                let query = crate::sparql::PreparedSelectExpr::build_select("", select)
+                    .ok_or("Invalid function SELECT")?;
+                let bindings: Vec<_> = owned.iter().map(|(n, v)| (*n, v)).collect();
+                crate::sparql::function_bindings(&query, graph, &bindings)?
             }
-            bound.push(vs.remove(0));
-        }
-        let Some(query) = build_function_query(select, params, &bound) else {
-            return Vec::new();
-        };
-        // `result` is the conventional SHACL function return variable; collect its
-        // bound column across all solution rows (deduplicated).
-        let Ok(res) = sparq_engine::query(graph, &query) else {
-            return Vec::new();
-        };
-        let Some(col) = res.vars.iter().position(|v| v.as_str() == "result") else {
-            return Vec::new();
-        };
-        dedup(
-            res.rows
-                .iter()
-                .filter_map(|row| row.get(col).and_then(|c| c.clone())),
-        )
-    }
-}
-
-/// Wraps a `sh:select` body so the parameter variables are pre-bound to the
-/// evaluated arguments through a `VALUES` row, returning a runnable SELECT. `None`
-/// if any argument has no SPARQL ground form (a blank node).
-fn build_function_query(select: &str, params: &[String], args: &[Term]) -> Option<String> {
-    // Strip an outer `SELECT … WHERE { … }` we cannot reliably; instead inject a
-    // VALUES table before the final `}` of the body (the SELECT's WHERE group),
-    // exactly as the rule CONSTRUCT path pre-binds `$this`.
-    let vars: String = params.iter().map(|p| format!("?{p} ")).collect();
-    let mut row = String::new();
-    for a in args {
-        let g = ground(a)?;
-        row.push_str(&g);
-        row.push(' ');
-    }
-    let close = select.rfind('}')?;
-    let mut out = String::with_capacity(select.len() + vars.len() + row.len() + 32);
-    out.push_str(&select[..close]);
-    out.push_str(&format!(" VALUES ({vars}) {{ ({row}) }} "));
-    out.push_str(&select[close..]);
-    Some(out)
-}
-
-/// The SPARQL ground-term form of a node (for a VALUES row); `None` for a blank.
-fn ground(t: &Term) -> Option<String> {
-    match t {
-        Term::NamedNode(n) => Some(format!("<{}>", n.as_str())),
-        Term::Literal(l) => Some(l.to_string()),
-        Term::BlankNode(_) => None,
-        #[allow(unreachable_patterns)]
-        _ => None,
+        })
     }
 }
 
@@ -693,26 +868,14 @@ fn sum_literal(vals: &[Term]) -> Term {
     }
 }
 
-/// The numerically least (or greatest) member; `None` if no numeric member.
+/// MIN/MAX use the same term ordering as ORDER BY.
 fn min_max(vals: &[Term], max: bool) -> Option<Term> {
-    let mut best: Option<(f64, Term)> = None;
-    for v in vals {
-        let Some(n) = numeric(v) else { continue };
-        let take = match &best {
-            None => true,
-            Some((b, _)) => {
-                if max {
-                    n > *b
-                } else {
-                    n < *b
-                }
-            }
-        };
-        if take {
-            best = Some((n, v.clone()));
-        }
+    if max {
+        vals.iter().max_by(|a, b| cmp_term(a, b))
+    } else {
+        vals.iter().min_by(|a, b| cmp_term(a, b))
     }
-    best.map(|(_, t)| t)
+    .cloned()
 }
 
 /// Comparison of two sort keys (each a node set) for `orderBy`: compares the least
@@ -734,22 +897,6 @@ fn least(set: &[Term]) -> Option<&Term> {
     set.iter().min_by(|a, b| cmp_term(a, b))
 }
 
-/// SPARQL ORDER BY-style comparison of two terms: numeric by value, otherwise by
-/// lexical form (stable, total order so the sort is deterministic).
 fn cmp_term(a: &Term, b: &Term) -> std::cmp::Ordering {
-    use std::cmp::Ordering;
-    if let (Some(na), Some(nb)) = (numeric(a), numeric(b)) {
-        return na.partial_cmp(&nb).unwrap_or(Ordering::Equal);
-    }
-    lexical(a).cmp(&lexical(b))
-}
-
-fn lexical(t: &Term) -> String {
-    match t {
-        Term::NamedNode(n) => n.as_str().to_string(),
-        Term::Literal(l) => l.value().to_string(),
-        Term::BlankNode(b) => b.as_str().to_string(),
-        #[allow(unreachable_patterns)]
-        _ => String::new(),
-    }
+    super::order::compare(a, b)
 }

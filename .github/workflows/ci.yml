@@ -1223,11 +1223,11 @@ jobs:
         # primary gate for the 1.2 surface; the scoreboards are captured for the
         # artifact. Run in BOTH feature states — default (SHACL Core + SHACL-SPARQL)
         # and shacl-af (sh:rule / sh:expression / sh:nodeByExpression) — so the
-        # feature-gated entries (e.g. nodeByExpression-001, the node-expr suites)
+        # feature-gated entries (e.g. nodeByExpression-001 and expression constraints)
         # are gated too. A genuine regression trips a runner's own
-        # `assert!(pass >= floor)` / `assert!(gap <= ceiling)`. The w3c_node_expr*
-        # runners are themselves `#[cfg(feature = "shacl-af")]`, so they only
-        # produce a scoreboard in the shacl-af pass (compiled out by default).
+        # `assert!(pass >= floor)` / `assert!(gap <= ceiling)`. Node-expression
+        # evaluation produces a scoreboard in both passes; its separate constraint
+        # runner remains gated by `shacl-af`.
         run: |
           set -uo pipefail
           SHACL12_TESTS="--test w3c_core_full_shacl12 --test w3c_sparql_shacl12 --test w3c_node_expr --test w3c_node_expr_constraints"

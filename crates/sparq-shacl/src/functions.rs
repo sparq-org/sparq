@@ -1,7 +1,7 @@
 //! Query-local SHACL function definitions and processing failures.
 use crate::model::sh;
 use crate::view::GraphView;
-use oxrdf::{Literal, NamedNode, Term};
+use oxrdf::{NamedNode, Term};
 use sparq_core::Graph;
 use sparq_engine::{FunctionRegistry, PreparedQuery, QueryResult};
 use std::cell::{Cell, RefCell};
@@ -18,11 +18,13 @@ struct Context {
     dataset: std::sync::OnceLock<Arc<Graph>>,
     registry: std::sync::OnceLock<FunctionRegistry>,
     failures: std::sync::Mutex<Vec<Term>>,
+    model: std::sync::OnceLock<Arc<crate::ShapesModel>>,
 }
 thread_local! {
     static BINDING_TOKEN: String = oxrdf::BlankNode::default().as_str().to_string();
     static FUNCTION_DEPTH: Cell<usize> = const { Cell::new(0) };
     static CONTEXT: RefCell<Vec<Arc<Context>>> = const { RefCell::new(Vec::new()) };
+    static FAILURE_SCOPES: RefCell<Vec<bool>> = const { RefCell::new(Vec::new()) };
     #[cfg(test)]
     static BUILD_COUNTS: Cell<[u64; 4]> = const { Cell::new([0; 4]) };
 }
@@ -82,6 +84,7 @@ pub(crate) fn with_validation<T>(
         dataset: std::sync::OnceLock::new(),
         registry: std::sync::OnceLock::new(),
         failures: std::sync::Mutex::new(Vec::new()),
+        model: std::sync::OnceLock::new(),
     });
     let registry = build_registry(Some(&context), functions);
     context.registry.set(registry).ok().unwrap();
@@ -93,11 +96,40 @@ pub(crate) fn with_validation<T>(
 }
 
 pub(crate) fn record_failure(node: &Term) {
-    CONTEXT.with(|c| {
-        if let Some(ctx) = c.borrow().last() {
-            ctx.failures.lock().unwrap().push(node.clone());
+    let captured = FAILURE_SCOPES.with(|scopes| {
+        if let Some(failed) = scopes.borrow_mut().last_mut() {
+            *failed = true;
+            true
+        } else {
+            false
         }
     });
+    if !captured {
+        CONTEXT.with(|c| {
+            if let Some(ctx) = c.borrow().last() {
+                ctx.failures.lock().unwrap().push(node.clone());
+            }
+        });
+    }
+}
+
+pub(crate) fn check_failures<T>(f: impl FnOnce() -> T) -> Result<T, String> {
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            FAILURE_SCOPES.with(|scopes| {
+                scopes.borrow_mut().pop();
+            });
+        }
+    }
+    FAILURE_SCOPES.with(|scopes| scopes.borrow_mut().push(false));
+    let _guard = Guard;
+    let result = f();
+    if FAILURE_SCOPES.with(|scopes| *scopes.borrow().last().unwrap()) {
+        Err("Shape validation failed".into())
+    } else {
+        Ok(result)
+    }
 }
 
 pub(crate) fn messages(node: &Term) -> Vec<Term> {
@@ -185,6 +217,7 @@ fn build_registry(context: Option<&Arc<Context>>, functions: Vec<Term>) -> Funct
             if iri.as_str() == BLANK {
                 continue;
             }
+            let parsed_body = std::sync::OnceLock::new();
             let context = Arc::downgrade(context);
             registry.register(iri.as_str().to_string(), move |args| {
                 struct DepthGuard;
@@ -216,7 +249,16 @@ fn build_registry(context: Option<&Arc<Context>>, functions: Vec<Term>) -> Funct
                 }
                 let body = shapes.object(&function, &sh("bodyExpression")).ok_or("Missing function body")?;
                 let result = with_context(&context, || {
-                    eval_body(&context.source, context.data.as_ref().unwrap(), &body, &function, args, 0)
+                    let model = context.model.get_or_init(|| {
+                        let mut model = crate::ShapesModel::parse(&context.source);
+                        for [_, _, expr] in shapes.triples(None, Some(&sh("bodyExpression")), None) {
+                            model.register_node_expr_shapes(&context.source, &expr);
+                        }
+                        Arc::new(model)
+                    });
+                    let parsed = parsed_body.get_or_init(|| crate::node_expr::parse_node_expr(&shapes, model, &body));
+                    crate::node_expr::eval_function_body(model, context.data.as_ref().unwrap(),
+                        parsed.as_ref().ok_or("Invalid function body")?, &function, args)
                 })?;
                 match result.as_slice() {
                     [one] => Ok(one.clone()),
@@ -228,54 +270,29 @@ fn build_registry(context: Option<&Arc<Context>>, functions: Vec<Term>) -> Funct
     registry
 }
 
-fn eval_body(
-    source: &Graph,
-    data: &Graph,
-    expr: &Term,
-    focus: &Term,
-    args: &[Term],
-    depth: usize,
-) -> Result<Vec<Term>, String> {
-    if depth >= 64 {
-        return Err("Recursive function expression".into());
-    }
-    if matches!(expr, Term::NamedNode(_) | Term::Literal(_)) {
-        return Ok(vec![expr.clone()]);
-    }
-    let shapes = GraphView::new(source);
-    if let Some(Term::Literal(index)) = shapes.object(expr, &format!("{SHNEX}arg")) {
-        let index = index.value().parse::<usize>().map_err(|e| e.to_string())?;
-        return Ok(args.get(index).cloned().into_iter().collect());
-    }
-    for op in ["count", "instancesOf"] {
-        if let Some(operand) = shapes.object(expr, &format!("{SHNEX}{op}")) {
-            let values = eval_body(source, data, &operand, focus, args, depth + 1)?;
-            return if op == "count" {
-                Ok(vec![Literal::from(values.len() as i64).into()])
-            } else {
-                let view = GraphView::new(data);
-                Ok(crate::view::dedup(
-                    values.iter().flat_map(|v| view.instances_of(v)),
-                ))
-            };
-        }
-    }
-    if let Some(prepared) = crate::sparql::expression_query(&shapes, expr) {
-        let mut owned = vec![("this".to_string(), focus.clone())];
-        owned.extend(
-            args.iter()
-                .enumerate()
-                .map(|(i, a)| (format!("arg{i}"), a.clone())),
-        );
-        let bindings: Vec<_> = owned.iter().map(|(n, t)| (n.as_str(), t)).collect();
-        return crate::sparql::expression_bindings(&prepared, data, &bindings);
-    }
-    Err("Unsupported custom function body expression".into())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nested_expression_failures_can_be_handled_without_changing_validation_failures() {
+        let data = Graph::new();
+        let node = NamedNode::new_unchecked("urn:failure").into();
+        let (_, failures) = with_validation(&data, &data, || {
+            record_failure(&node);
+            assert_eq!(check_failures(|| 7).unwrap(), 7);
+            assert!(check_failures(|| record_failure(&node)).is_err());
+            assert_eq!(
+                check_failures(|| {
+                    assert!(check_failures(|| record_failure(&node)).is_err());
+                    42
+                })
+                .unwrap(),
+                42
+            );
+        });
+        assert_eq!(failures, vec![node]);
+    }
 
     #[test]
     fn validation_builds_once_for_many_per_focus_queries() {

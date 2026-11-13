@@ -172,8 +172,7 @@ pub(crate) fn count_focus_nodes(data: &Graph, shapes: &ShapesModel) -> usize {
 /// SHACL-AF rules module uses this to evaluate `sh:condition` gating: a rule
 /// fires for a focus node only when it conforms to every condition shape. Reuses
 /// the full constraint validator (Core + sh:sparql + nested shapes), so a
-/// condition may be any shape. Gated to the feature so it adds nothing when off.
-#[cfg(feature = "shacl-af")]
+/// condition may be any shape. Node expressions also use this validation primitive.
 pub(crate) fn conforms_node(data: &Graph, shapes: &ShapesModel, sid: usize, node: &Term) -> bool {
     let mut v = Validator::new(data, shapes);
     v.conforms(node, sid)

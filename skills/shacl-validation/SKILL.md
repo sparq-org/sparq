@@ -500,8 +500,17 @@ let g = sparq_shacl::load_turtle_with_base(&text, &format!("file://{path}")).unw
 
 ## Advanced features and validation details
 
+The node-expression evaluation APIs are available in both feature states.
+`eval_node_expression_result(data, shapes, expr, focus, &scope)` returns
+`Result<Vec<Term>, String>`: an empty vector is a successful empty output, while
+`Err` signals an evaluation failure. The existing `eval_node_expression` and
+`eval_node_expression_with_scope` wrappers return `None` on failure. Output lists
+preserve order and duplicates where the operator does; they are not universally
+deduplicated. Custom expression bodies and SPARQL function calls use the same
+evaluator during validation.
+
 See [Advanced Features](references/advanced-features.md) for rules, node-expression
-APIs and graph scopes, and [validation details](references/validation-details.md)
+forms, argument scopes and graph scopes, and [validation details](references/validation-details.md)
 for constraint coverage, prerequisites and conformance ratchets.
 
 ## See also
