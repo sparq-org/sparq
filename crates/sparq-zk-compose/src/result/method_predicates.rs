@@ -169,6 +169,19 @@ fn date_query_admission_preserves_datatype_and_scope() {
     .unwrap_err()
     .to_string();
     assert!(error.contains("xsd:dateTime FILTER"), "{error}");
+    for lexical in ["01", "+1", "-1", " 1", "1 ", "", "18446744073709551616"] {
+        let literal = Literal::new_typed_literal(
+            lexical,
+            NamedNode::new("http://www.w3.org/2001/XMLSchema#integer").unwrap(),
+        );
+        let error = DisclosureQuery::parse(&query(">=", &literal.to_string()))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("canonical nonnegative integer FILTER bound"),
+            "{lexical:?}: {error}"
+        );
+    }
     let q = "SELECT DISTINCT ?person WHERE { { ?person <urn:p> ?x FILTER(?age <= \"2024-02-29\"^^<http://www.w3.org/2001/XMLSchema#date>) } ?person <urn:age> ?age }";
     assert!(DisclosureQuery::parse(q)
         .unwrap_err()

@@ -187,7 +187,7 @@ impl DisclosureQuery {
         collect_patterns(inner, &mut patterns, numeric)?;
         let filters = match numeric {
             NumericProfile::Signed => signed::collect_filters(inner)?,
-            NumericProfile::Unsigned => date::collect_filters(inner)?,
+            NumericProfile::Unsigned => date::collect_filters(sparql)?,
         };
         let query = Self {
             kind,

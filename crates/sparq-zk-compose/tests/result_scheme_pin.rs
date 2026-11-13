@@ -353,40 +353,62 @@ fn the_message_substitution_actually_changes_the_relation() {
 /// substituting only the method-bound entry point and contract version.
 #[test]
 fn hidden_integer_members_retain_the_legacy_relation() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../zk/compose");
-    for k in [1, 2] {
-        for depth in [10, 17, 20] {
-            let suffix = format!("k{k}_n16_p3_r4_f2_i64_d{depth}");
-            let legacy =
-                std::fs::read_to_string(root.join(format!("result_v2_{suffix}/src/main.nr")))
-                    .unwrap();
-            let bound =
-                std::fs::read_to_string(root.join(format!("result_v5_{suffix}/src/main.nr")))
-                    .unwrap();
-            let body = |source: &str| source[source.find("fn main(").unwrap()..].to_owned();
-            let expected = body(&legacy)
-                .replace("result_check::<", "result_check_m5::<")
-                .replace("64, 2>", "64, 5>");
-            assert_ne!(
-                body(&legacy),
-                expected,
-                "the substitution must change the statement"
-            );
-            assert_eq!(expected, body(&bound), "member relation differs: {suffix}");
-            assert!(bound.contains("use sparq_zk_compose_core::result_m5::result_check_m5;"));
-            assert!(!bound.contains("::{result_check,"));
-            let globals = |source: &str| {
-                source
-                    .lines()
-                    .filter(|l| l.starts_with("global "))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            };
-            assert_eq!(
-                globals(&legacy),
-                globals(&bound),
-                "capacity constants differ: {suffix}"
-            );
-        }
+    let members = [
+        (
+            "k1_n16_p3_r4_f2_i64_d10",
+            include_str!("../../../zk/compose/result_v2_k1_n16_p3_r4_f2_i64_d10/src/main.nr"),
+            include_str!("../../../zk/compose/result_v5_k1_n16_p3_r4_f2_i64_d10/src/main.nr"),
+        ),
+        (
+            "k1_n16_p3_r4_f2_i64_d17",
+            include_str!("../../../zk/compose/result_v2_k1_n16_p3_r4_f2_i64_d17/src/main.nr"),
+            include_str!("../../../zk/compose/result_v5_k1_n16_p3_r4_f2_i64_d17/src/main.nr"),
+        ),
+        (
+            "k1_n16_p3_r4_f2_i64_d20",
+            include_str!("../../../zk/compose/result_v2_k1_n16_p3_r4_f2_i64_d20/src/main.nr"),
+            include_str!("../../../zk/compose/result_v5_k1_n16_p3_r4_f2_i64_d20/src/main.nr"),
+        ),
+        (
+            "k2_n16_p3_r4_f2_i64_d10",
+            include_str!("../../../zk/compose/result_v2_k2_n16_p3_r4_f2_i64_d10/src/main.nr"),
+            include_str!("../../../zk/compose/result_v5_k2_n16_p3_r4_f2_i64_d10/src/main.nr"),
+        ),
+        (
+            "k2_n16_p3_r4_f2_i64_d17",
+            include_str!("../../../zk/compose/result_v2_k2_n16_p3_r4_f2_i64_d17/src/main.nr"),
+            include_str!("../../../zk/compose/result_v5_k2_n16_p3_r4_f2_i64_d17/src/main.nr"),
+        ),
+        (
+            "k2_n16_p3_r4_f2_i64_d20",
+            include_str!("../../../zk/compose/result_v2_k2_n16_p3_r4_f2_i64_d20/src/main.nr"),
+            include_str!("../../../zk/compose/result_v5_k2_n16_p3_r4_f2_i64_d20/src/main.nr"),
+        ),
+    ];
+    for (suffix, legacy, bound) in members {
+        let body = |source: &str| source[source.find("fn main(").unwrap()..].to_owned();
+        let expected = body(legacy)
+            .replace("result_check::<", "result_check_m5::<")
+            .replace("64, 2>", "64, 5>");
+        assert_ne!(
+            body(legacy),
+            expected,
+            "the substitution must change the statement"
+        );
+        assert_eq!(expected, body(bound), "member relation differs: {suffix}");
+        assert!(bound.contains("use sparq_zk_compose_core::result_m5::result_check_m5;"));
+        assert!(!bound.contains("::{result_check,"));
+        let globals = |source: &str| {
+            source
+                .lines()
+                .filter(|l| l.starts_with("global "))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        assert_eq!(
+            globals(legacy),
+            globals(bound),
+            "capacity constants differ: {suffix}"
+        );
     }
 }
