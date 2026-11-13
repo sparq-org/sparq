@@ -252,7 +252,7 @@ fn pushed_down_temporal_filters_match_the_exact_comparison() {
 fn datetime_accessors_read_validated_components() {
     let graph = Graph::load_str("", "ntriples").unwrap();
     for (lexical, expected) in [
-        ("-0044-03-15T12:30:05.250+01:00", ["-44", "3", "15", "12", "30", "5.250"]),
+        ("-0044-03-15T12:30:05.250+01:00", ["-44", "3", "15", "12", "30", "5.25"]),
         ("2023-12-31T24:00:00Z", ["2024", "1", "1", "0", "0", "0"]),
         // XSD 1.1 year zero: a leap year, reached from 1 BCE's last midnight.
         ("-0001-12-31T24:00:00Z", ["0", "1", "1", "0", "0", "0"]),

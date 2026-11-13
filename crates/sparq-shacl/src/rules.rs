@@ -942,7 +942,7 @@ fn build_construct_with_this(construct: &str, focus: &Term) -> Option<String> {
 
 /// The focus nodes of shape `sid` (its target nodes) over `view`. Mirrors the
 /// validator's own target selection so rules and constraints agree on targets.
-fn focus_nodes(view: &GraphView, model: &ShapesModel, sid: usize) -> Vec<Term> {
+pub(crate) fn focus_nodes(view: &GraphView, model: &ShapesModel, sid: usize) -> Vec<Term> {
     use crate::model::Target;
     let mut out: Vec<Term> = Vec::new();
     for t in &model.shapes[sid].targets {

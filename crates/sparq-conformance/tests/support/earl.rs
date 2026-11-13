@@ -56,8 +56,11 @@ fn outcome_sink_is_opt_in_and_appends() {
     let _ = std::fs::remove_file(&path);
     let child = || {
         let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        // Runners can be included as nested modules by differential test binaries.
+        let module = module_path!().split_once("::").unwrap().1;
+        let test = format!("{module}::outcome_sink_is_opt_in_and_appends");
         command
-            .args(["--exact", "earl::outcome_sink_is_opt_in_and_appends"])
+            .args(["--exact", &test])
             .env(CHILD, "1")
             .env_remove("SPARQ_EARL_OUT");
         command

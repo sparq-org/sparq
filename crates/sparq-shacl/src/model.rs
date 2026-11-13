@@ -414,6 +414,8 @@ pub struct Shape {
 
 /// All shapes parsed from a shapes graph, indexed densely (cycle-safe).
 pub struct ShapesModel {
+    #[cfg(feature = "shacl-af")]
+    pub(crate) rule_entailment: bool,
     pub shapes: Vec<Shape>,
     pub(crate) source: Graph,
     by_node: FxHashMap<Term, usize>,
@@ -508,6 +510,8 @@ impl ShapesModel {
         let mut m = ShapesModel {
             shapes: Vec::new(),
             source: shapes_graph.fork(),
+            #[cfg(feature = "shacl-af")]
+            rule_entailment: false,
             by_node: FxHashMap::default(),
             targeted: Vec::new(),
             sparql: Vec::new(),
@@ -528,18 +532,21 @@ impl ShapesModel {
         // recorded as a failure (surfaced by `validate_strict`).
         m.components = discover_components(&g, &mut m.pre_binding_failures);
 
-        // (sq-c1v3e) `sh:entailment` (SHACL §1.5): a processor that does
-        // not support a declared entailment regime MUST signal a failure (§3.4).
-        // This engine supports NO entailment regime (data graphs are validated
-        // as-asserted; SHACL-AF rule inference is a separate opt-in surface), so
-        // EVERY `sh:entailment` declaration is recorded — the strict channel
-        // fails, the lenient channel validates the asserted graph as before.
+        // Unsupported entailment declarations remain strict failures. With
+        // shacl-af, recognized SHACL 1.2 rule regimes execute before validation.
         for [s, _, o] in g.triples(None, Some(&sh("entailment")), None) {
+            #[cfg(feature = "shacl-af")]
+            if o == Term::NamedNode(oxrdf::NamedNode::new_unchecked(sh("RulesEntailment")))
+                || g.is_instance_of(&o, &Term::NamedNode(oxrdf::NamedNode::new_unchecked(sh("RuleSet"))))
+            {
+                m.rule_entailment = true;
+                continue;
+            }
             m.record_ill_formed(
                 &s,
                 "entailment",
                 format!(
-                    "unsupported entailment regime {} (this processor supports none)",
+                    "unsupported entailment regime {}",
                     o
                 ),
             );

@@ -40,7 +40,7 @@ let inf = sparq_shacl::apply_rules(&data, &shapes);   // -> sparq_shacl::Inferen
 let expanded: Graph = sparq_shacl::expand(&data, &shapes);
 
 // Or select the validation fact domain directly. These APIs are also gated by
-// `shacl-af`; the existing `validate` function remains asserted-only.
+// `shacl-af`; `validate` also honors explicitly declared SHACL 1.2 rule entailment.
 use sparq_shacl::{validate_with_domain, FactDomain};
 let asserted = validate_with_domain(&data, &shapes, FactDomain::Asserted);
 let closure = validate_with_domain(&data, &shapes, FactDomain::AssertedPlusInferred);
@@ -154,3 +154,55 @@ runtime query error) are pinned directly by the in-`src/sparql.rs` unit module
 `VALUES` table lands BELOW the modifier / inside every branch so `$this`/`$value`/
 `$param` stays in scope) and semantically (a real validator over real data yields the
 SHACL-spec-correct conforms/violations).
+
+## SHACL 1.2 Inference Rules
+
+With `shacl-af`, `sparq_shacl::rules12::apply_rules(data, shapes, rule_set)`
+returns `Result<Inference, String>`. `None` selects the default rule set (all
+rules); `Some(&rule_set_iri)` selects that set and its transitive
+`sh:includesRuleSet` members. The existing `apply_rules` and `expand` APIs retain
+SHACL-AF behavior, including its property value rules.
+
+Known follow-up under #7326: reduce the new executor's schedule and snapshot
+bookkeeping overhead. On a matched monotonic workload it is materially slower
+than the legacy SHACL-AF executor; the APIs have different scheduling contracts.
+
+The 1.2 entry point supports global and shape rules, SPARQL rule templates
+with required/optional parameters, `sh:TripleRule` operands defaulting to the
+focus node, `sh:condition` including shape-class superclasses, deactivation,
+`sh:layer`, `sh:order` and `sh:runOnce`. Numeric layers/orders use exact decimal
+comparison. Each order group reads one snapshot; its results become visible
+to higher orders. Run-once rules execute before iterating rules in each layer,
+with overlapping shape targets deduplicated per rule. Each layer reaches a
+fixpoint before the next layer starts. A rule set's SPARQL rules share one
+`NOW()` value. Only triples absent from the base graph are returned.
+
+`sh:expectedPredicate` materializes property `sh:values`/`sh:defaultValue`
+triples once at the start of each layer. They remain visible within that layer
+and are returned only when independently inferred by a rule. Temporary triples
+marked through `sh:tempTriple true` and their annotations are removed after all
+layers. Input graphs are never modified.
+
+The strict expression subset supports constants, `sh:this`, empty/list
+expressions, path values, `shnex:count`, single-IRI `shnex:instancesOf`,
+`sparql:multiply`, `sh:select` and `sh:sparqlExpr`. Unsupported expressions,
+rule types/processors, invalid queries and expression/query failures return
+`Err`. Processor requirements are checked on every rule and rule set in the
+shapes graph before selection or deactivation, including requirements inherited
+from included sets. No custom processor values are currently supported; omit
+`sh:ruleProcessor` to use the default algorithm. The iteration limit applies
+separately to each layer and returns `Err` when exhausted.
+
+With the feature on, validation automatically runs declared
+`sh:entailment sh:RulesEntailment` or named `sh:RuleSet` regimes. Multiple regimes
+are combined into one schedule. `validate_strict` reports rule failures as
+errors; `validate` exposes them as processing-failure diagnostics. Without the
+feature these entailment regimes remain unsupported. No declaration means
+validation uses the supplied data as before.
+
+`w3c_inference_rules_shacl12` compares complete inferred graphs by isomorphism
+and separately checks validation reports and expected failures.
+`w3c_sparql_rl_shacl12` reports all listed entries as failures because the
+SPARQL-RL language processor is unavailable; unsupported negative tests do not
+count as successful rejections. This census remains separate from the SHACL 1.2
+EARL report, which excludes `tests/sparql-rl` until a processor exists.

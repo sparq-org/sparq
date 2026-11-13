@@ -488,6 +488,10 @@ let masked = masked_graph(&contacts, &scope);
 
 The [SolidLab conformance runner and invocation](references/conformance.md) exercise the real parse and evaluation paths. The parser differential target also runs the existing policy tests, their generated inputs and fetched conformance policies against the frozen main parser.
 
+After fetching the pinned suite, `bash crates/sparq-policy/earl-report.sh` writes
+`target/earl/sparq-odrl-earl.ttl` and a results table. Reports include unsupported
+cases as failures and measure the documented decision projection.
+
 ## Learn more
 
 - Crate README: [`crates/sparq-policy/README.md`](../../crates/sparq-policy/README.md)
