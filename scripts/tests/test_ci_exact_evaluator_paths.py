@@ -2,6 +2,7 @@
 
 import importlib.util
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -112,6 +113,84 @@ def completed(stdout=b""):
 
 
 class ExactEvaluatorSelection(unittest.TestCase):
+    def test_proof_and_reproducibility_jobs_are_separate_and_classification_gated(self):
+        workflow = (ROOT / ".github/workflows/zk-exact-evaluator.yml").read_text()
+        jobs = dict(re.findall(r"^  ([\w-]+):\n(.*?)(?=^  [\w-]+:\n|\Z)",
+                               workflow.split("jobs:\n", 1)[1], re.M | re.S))
+        self.assertIn("exact-evaluator", jobs)
+        self.assertIn("guest-reproducibility", jobs)
+        self.assertIn("\npermissions:\n  contents: read\n", workflow)
+        for name in ("exact-evaluator", "guest-reproducibility"):
+            with self.subTest(job=name):
+                job = jobs[name]
+                header = job.split("    steps:\n", 1)[0]
+                self.assertNotIn("needs:", header)
+                self.assertNotIn("permissions:", header)
+                self.assertNotIn("continue-on-error:", job)
+                self.assertEqual([line.strip() for line in header.splitlines()
+                                  if line.strip().startswith("if:")], [
+                    "if: github.event_name != 'pull_request' || github.event.pull_request.draft != true",
+                ])
+                steps = job.split("\n      - ")[1:]
+                by_name = {step.splitlines()[0].removeprefix("name: "): step for step in steps}
+                self.assertIn("Classify exact-evaluator inputs (fail closed)", by_name)
+                self.assertIn("Require explicit classification output", by_name)
+                classify = by_name["Classify exact-evaluator inputs (fail closed)"]
+                self.assertIn("\n        id: changes\n", classify)
+                self.assertIn("\n        run: python3 scripts/ci_exact_evaluator_paths.py\n", classify)
+                self.assertIn("EXACT_BASE_SHA: ${{ steps.merge_parent.outputs.sha || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}", classify)
+                self.assertIn("EXACT_HEAD_SHA: ${{ steps.merge_parent.outputs.sha && github.sha || github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}", classify)
+                require = by_name["Require explicit classification output"]
+                self.assertEqual([line.strip() for line in require.splitlines()[1:]
+                                  if line.strip()], [
+                    "env:", "EXECUTION_REQUIRED: ${{ steps.changes.outputs.required }}",
+                    "run: |", 'case "$EXECUTION_REQUIRED" in', "true|false) ;;",
+                    '*) echo "Missing or invalid exact-evaluator classification" >&2; exit 1 ;;',
+                    "esac",
+                ])
+                self.assertLess(steps.index(classify), steps.index(require))
+                for step in steps:
+                    title = step.splitlines()[0]
+                    if title.startswith("uses: actions/checkout@") or title in (
+                        "name: Classify exact-evaluator inputs (fail closed)",
+                        "name: Require explicit classification output",
+                    ):
+                        expected = []
+                    elif title == "name: Resolve pull request merge parent":
+                        expected = ["if: github.event_name == 'pull_request'"]
+                    elif title == "name: Successful irrelevant-diff classification":
+                        expected = ["if: steps.changes.outputs.required == 'false'"]
+                    elif "uses: actions/upload-artifact@" in step:
+                        expected = ["if: always() && steps.changes.outputs.required == 'true'"]
+                    else:
+                        expected = ["if: steps.changes.outputs.required == 'true'"]
+                        self.assertLess(steps.index(require), steps.index(step))
+                    self.assertEqual([line.strip() for line in step.splitlines()
+                                      if line.startswith("        if:")], expected, title)
+                self.assertIn("persist-credentials: false", steps[0])
+                self.assertIn("fetch-depth: 2", steps[0])
+                for action in re.findall(r"^\s+(?:- )?uses: (\S+)", job, re.M):
+                    self.assertRegex(action, r"^[\w-]+/[\w-]+@[0-9a-f]{40}$")
+                install = by_name["Install checksum-pinned RISC Zero binaries and guest Rust"]
+                for digest in ("615d961bfb81d318db5071d7548389c850e324ac7f421c075176daf26082a60a",
+                               "100b597d605b706bec94e1d32bfaaf5851df8d75173f986d4b56a3e90916be53"):
+                    self.assertIn(digest, install)
+                self.assertEqual(install.count("| sha256sum --check --strict"), 2)
+                self.assertIn("rustup show active-toolchain", by_name["Activate pinned host Rust"])
+                self.assertIn("save-if: ${{ github.ref == 'refs/heads/main' }}", job)
+        proof, repeat = jobs["exact-evaluator"], jobs["guest-reproducibility"]
+        self.assertIn("\n    timeout-minutes: 120\n", proof)
+        self.assertIn("\n    timeout-minutes: 90\n", repeat)
+        self.assertIn("key: zk-exact-evaluator-risc0-3.0.6-rust-1.97.0", proof)
+        self.assertIn("key: zk-guest-reproducibility-risc0-3.0.6-rust-1.97.0", repeat)
+        self.assertNotIn("sparq-guest-determinism", proof)
+        self.assertNotIn("ci_exact_evaluator_evidence.py", repeat)
+        self.assertIn("ci_exact_evaluator_evidence.py", proof)
+        self.assertEqual(repeat.count("python3 zk/sparql-evaluator/scripts/guest_determinism.py --output"), 1)
+        self.assertIn("name: guest-reproducibility-${{ github.sha }}-${{ github.run_attempt }}", repeat)
+        self.assertIn("path: ${{ runner.temp }}/sparq-guest-determinism", repeat)
+        self.assertIn("if-no-files-found: error", repeat)
+
     def test_workflow_always_creates_the_gate_and_checks_classification(self):
         workflow = (Path(__file__).parents[2] / ".github/workflows/zk-exact-evaluator.yml").read_text()
         self.assertIn("  merge_group:\n    types: [checks_requested]", workflow)
@@ -130,13 +209,15 @@ class ExactEvaluatorSelection(unittest.TestCase):
                          classifier_globs(selector.PR_PREFIXES, selector.PR_FILES))
         self.assertEqual(trigger_paths(workflow, "merge_group"), [])
 
-    def test_pull_request_inputs_are_a_zk_only_subset(self):
+    def test_pull_request_inputs_cover_guest_dependency_crates(self):
         self.assertLessEqual(set(selector.PR_PREFIXES), set(selector.EXACT_PREFIXES))
         for path in selector.PR_FILES:
             self.assertTrue(selector.relevant_path(path), path)
             self.assertTrue((ROOT / path).is_file(), path)
         for path in ("crates/sparq-engine/src/exec.rs", "crates/sparq-core/Cargo.toml",
-                     "Cargo.lock", "Cargo.toml"):
+                     "crates/sparq-substrate/src/join.rs"):
+            self.assertTrue(path.startswith(selector.PR_PREFIXES), path)
+        for path in ("Cargo.lock", "Cargo.toml"):
             self.assertFalse(path.startswith(selector.PR_PREFIXES) or path in selector.PR_FILES,
                              path)
 

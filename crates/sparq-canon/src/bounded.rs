@@ -53,17 +53,22 @@ pub fn issue_quads_bounded_with<D: Digest>(
     dataset: &[Quad],
     limits: &CanonicalizationLimits,
 ) -> Result<HashMap<String, String>, CanonError> {
-    let quads = prepare(dataset, limits)?;
-    let issued = crate::rdfc::issue_quads_with::<D>(
-        &quads,
-        &crate::rdfc::CanonicalizationOptions {
-            hndq_call_limit: Some(limits.max_hndq_calls),
-        },
-    )
-    .map_err(|error| CanonError::Canonicalization(error.to_string()))?;
+    #[cfg(not(target_os = "zkvm"))]
+    {
+        let quads = prepare(dataset, limits)?;
+        let issued = crate::rdfc::issue_quads_with::<D>(
+            &quads,
+            &crate::rdfc::CanonicalizationOptions {
+                hndq_call_limit: Some(limits.max_hndq_calls),
+            },
+        )
+        .map_err(|error| CanonError::Canonicalization(error.to_string()))?;
+        Ok(issued)
+    }
     #[cfg(target_os = "zkvm")]
-    let issued = issued.into_iter().collect();
-    Ok(issued)
+    {
+        issue_bounded_guest::<D>(dataset, limits).map(|issued| issued.into_iter().collect())
+    }
 }
 
 /// Issues bounded RDFC-1.0 labels into an ordered map.
@@ -83,15 +88,23 @@ pub fn issue_quads_bounded_ordered_with<D: Digest>(
     }
     #[cfg(target_os = "zkvm")]
     {
-        let quads = prepare(dataset, limits)?;
-        crate::rdfc::issue_quads_with::<D>(
-            &quads,
-            &crate::rdfc::CanonicalizationOptions {
-                hndq_call_limit: Some(limits.max_hndq_calls),
-            },
-        )
-        .map_err(|error| CanonError::Canonicalization(error.to_string()))
+        issue_bounded_guest::<D>(dataset, limits)
     }
+}
+
+#[cfg(target_os = "zkvm")]
+fn issue_bounded_guest<D: Digest>(
+    dataset: &[Quad],
+    limits: &CanonicalizationLimits,
+) -> Result<WorkMap<String, String>, CanonError> {
+    let quads = prepare(dataset, limits)?;
+    crate::rdfc::issue_quads_with::<D>(
+        &quads,
+        &crate::rdfc::CanonicalizationOptions {
+            hndq_call_limit: Some(limits.max_hndq_calls),
+        },
+    )
+    .map_err(|error| CanonError::Canonicalization(error.to_string()))
 }
 
 fn capacity(message: &str) -> CanonError {

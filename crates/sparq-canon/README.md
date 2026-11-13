@@ -36,8 +36,8 @@ let map = sparq_canon::issued_identifiers(&[q]).unwrap();  // issuer map
 - **Single-graph API** — `canonicalize_triples` / `canonicalize_graph_content`
   return a `CanonicalGraph` (sorted canonical N-Quads lines + re-parsed canonical triples) — what the ZK
   per-graph commitment pipeline consumes (`leaf_index = line index`).
-- **Explicit work bounds** — `canonicalize_quads_bounded_with` / `issue_quads_bounded_with` add `CanonicalizationLimits`
-  (quads, input/output bytes, HNDQ calls, a conservative permutation bound); exhaustion rejects.
+- **Explicit work bounds** — `canonicalize_quads_bounded_with`, `issue_quads_bounded_with` and `issue_quads_bounded_ordered_with`
+  add `CanonicalizationLimits` (quads, input/output bytes, HNDQ calls, a conservative permutation bound); exhaustion rejects.
 - **Fail-closed on poison graphs** — RDFC-1.0's pathological blow-ups hit the HNDQ call-limit guard
   (`CanonError::Canonicalization`). RDF 1.2 triple terms and directional literals (`"…"@en--ltr`) are outside
   RDFC-1.0: the standard paths fail closed with `CanonError::TripleTerm` / `CanonError::DirectionalLiteral`

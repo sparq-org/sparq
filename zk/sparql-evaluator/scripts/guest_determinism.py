@@ -8,6 +8,7 @@ are errors, never reasons to skip the check.
 """
 
 import argparse
+import inspect
 import json
 import os
 from pathlib import Path
@@ -126,15 +127,25 @@ def canonical_differential(output, binary, runtime):
     validate_observations(observations, len(canonical_inputs()), (0,))
 
 
+def startup_request(calls, words, guest_pc, init_range):
+    """Permit only the SDK initialization request in the decoded guest image."""
+    return (calls == 1 and words == 4 and type(guest_pc) is int
+            and isinstance(init_range, (list, tuple)) and len(init_range) == 2
+            and init_range[0] <= guest_pc < init_range[1])
+
+
 # Rust's Result return value uses a hidden result pointer on this pinned
 # x86-64 binary. The final slice argument is at rsp+8 (pointer), rsp+16 (words).
 # Refuse any other ABI/handler shape instead of silently observing nothing.
 DEBUGGER = r'''
-import gdb, hashlib, json, subprocess
+import gdb, hashlib, json, struct, subprocess, tempfile
 calls = 0
 error = None
 exit_code = None
 entropy_digest = None
+guest_pc = None
+init_range = None
+artifact_digest = None
 
 def exited(event):
     global exit_code
@@ -155,15 +166,60 @@ class Completed(gdb.FinishBreakpoint):
 
 class Random(gdb.Breakpoint):
     def stop(self):
-        global calls, error
+        global calls, error, guest_pc
         calls += 1
         words = int(gdb.parse_and_eval('*(unsigned long*)($rsp+16)'))
-        if calls != 1 or words != 4:
+        # SyscallContext is passed in r8/r9. Verify the pinned get_pc accessor
+        # before following its read-only pointer/field layout; never call into
+        # the inferior from a breakpoint callback.
+        context = int(gdb.parse_and_eval('$r8'))
+        vtable = int(gdb.parse_and_eval('$r9'))
+        accessor = int(gdb.parse_and_eval(f'*(unsigned long*)({vtable}+24)'))
+        if bytes(gdb.selected_inferior().read_memory(accessor, 10)).hex() != '488b078b8060030000c3':
+            error = "unsupported guest PC accessor"
+            return True
+        executor = int(gdb.parse_and_eval(f'*(unsigned long*){context}'))
+        guest_pc = int(gdb.parse_and_eval(f'*(unsigned int*)({executor}+0x360)'))
+        if not startup_request(calls, words, guest_pc, init_range):
             error = "unexpected guest randomness request"
             return True
         pointer = int(gdb.parse_and_eval('*(unsigned long*)($rsp+8)'))
         Completed(pointer, words * 4)
         return False
+
+class Binary(gdb.Breakpoint):
+    def stop(self):
+        global error, init_range, artifact_digest
+        try:
+            pointer = int(gdb.parse_and_eval('$rsi'))
+            size = int(gdb.parse_and_eval('$rdx'))
+            if not 16 <= size <= 64 * 1024 * 1024:
+                raise ValueError("unsupported program binary size")
+            blob = bytes(gdb.selected_inferior().read_memory(pointer, size))
+            if blob[:8] != b'R0BF\x01\x00\x00\x00':
+                raise ValueError("unsupported program binary header")
+            offset = 12 + struct.unpack_from('<I', blob, 8)[0]
+            length = struct.unpack_from('<I', blob, offset)[0]
+            user = blob[offset + 4:offset + 4 + length]
+            if len(user) != length or user[:4] != b'\x7fELF':
+                raise ValueError("missing user ELF")
+            with tempfile.NamedTemporaryFile() as elf:
+                elf.write(user)
+                elf.flush()
+                table = subprocess.check_output(['nm', '-S', '-C', elf.name], text=True)
+            matches = [line.split() for line in table.splitlines()
+                       if line.endswith(' risc0_zkvm::guest::env::init')]
+            if len(matches) != 1 or len(matches[0]) != 4:
+                raise ValueError("missing unique guest initialization symbol")
+            start, length = (int(value, 16) for value in matches[0][:2])
+            if not length:
+                raise ValueError("empty guest initialization symbol")
+            init_range = (start, start + length)
+            artifact_digest = hashlib.sha256(blob).hexdigest()
+            return False
+        except Exception as failure:
+            error = str(failure)
+            return True
 
 symbols = subprocess.check_output(["nm", "--defined-only", gdb.current_progspace().filename], text=True)
 names = [line.split()[-1] for line in symbols.splitlines()
@@ -171,12 +227,20 @@ names = [line.split()[-1] for line in symbols.splitlines()
          and "SysRandom" in line and "syscall" in line and "CALLSITE" not in line]
 if len(names) != 1:
     raise RuntimeError("expected the pinned executor's unique SysRandom handler")
-Random(names[0], internal=True)
+Random("*" + names[0], internal=True)
+decoders = [line.split()[-1] for line in symbols.splitlines()
+            if len(line.split()) == 3 and line.split()[1] in ('t', 'T')
+            and 'ProgramBinary' in line and line.split()[-1].endswith('6decode')]
+if len(decoders) != 1:
+    raise RuntimeError("expected the pinned program binary decoder")
+Binary("*" + decoders[0], internal=True)
 
 def finish():
     with open(COUNTERS, "a") as output:
         output.write(json.dumps({"startup_pattern": SEED, "randomness_calls": calls,
                                  "startup_entropy_sha256": entropy_digest,
+                                 "guest_pc": guest_pc, "init_range": init_range,
+                                 "artifact_sha256": artifact_digest,
                                  "exit_code": exit_code, "error": error}) + "\n")
     if error is not None or calls != 1 or exit_code != 0:
         gdb.execute("quit 1")
@@ -194,6 +258,9 @@ def validate_observations(observations, per_sample, samples):
             or not row.get("startup_entropy_sha256") for row in observed
         ):
             raise ValueError("guest randomness invariant failed")
+        if any(not startup_request(1, 4, row.get("guest_pc"), row.get("init_range"))
+               or not row.get("artifact_sha256") for row in observed):
+            raise ValueError("randomness request is not in guest initialization")
         actual = {row["startup_entropy_sha256"] for row in observed}
         if len(actual) != 1:
             raise ValueError("startup reply changed within a sample")
@@ -204,7 +271,8 @@ def validate_observations(observations, per_sample, samples):
 
 def wrapper(directory, runtime, seed, counters):
     observer = directory / "observer.py"
-    observer.write_text(f"SEED = {seed!r}\nCOUNTERS = {str(counters)!r}\n" + DEBUGGER)
+    observer.write_text(f"SEED = {seed!r}\nCOUNTERS = {str(counters)!r}\n"
+                        + inspect.getsource(startup_request) + "\n" + DEBUGGER)
     commands = directory / "observer.gdb"
     commands.write_text(
         "set pagination off\nset confirm off\nset debuginfod enabled off\n"
@@ -227,8 +295,28 @@ def wrapper(directory, runtime, seed, counters):
     return driver
 
 
+def exact_differential(output, binary, runtime):
+    counters = output / "exact-randomness.jsonl"
+    previous = None
+    with tempfile.TemporaryDirectory(prefix="sparq-exact-determinism-") as tmp:
+        for seed in SAMPLES:
+            driver = wrapper(Path(tmp), runtime, seed, counters)
+            raw = output / f"exact-{seed}.jsonl"
+            with raw.open("w") as stdout:
+                subprocess.run([str(binary)], stdout=stdout, check=True,
+                               env=dict(os.environ, RISC0_SERVER_PATH=str(driver)))
+            records = [json.loads(line) for line in raw.open()]
+            if len(records) != 2 or {row["version"] for row in records} != {1, 2}:
+                raise ValueError("incomplete production exact-image entry coverage")
+            if previous is not None:
+                compare(previous, records)
+            previous = records
+    validate_observations([json.loads(line) for line in counters.open()], 2, SAMPLES)
+
+
 def run(output, binary, runtime):
     output.mkdir(parents=True, exist_ok=False)
+    exact_differential(output, binary.with_name("exact_determinism"), runtime)
     previous = {}
     counters = output / "randomness.jsonl"
     with tempfile.TemporaryDirectory(prefix="sparq-guest-determinism-") as tmp:
@@ -257,6 +345,7 @@ def run(output, binary, runtime):
         "samples": len(SAMPLES), "records": {key: len(rows) for key, rows in previous.items()},
         "randomness_calls_per_execution": 1, "application_randomness_calls": 0,
         "startup_entropy_varied": True, "result": "execution_repeats_passed",
+        "production_exact_versions": [1, 2],
         "rejected_cases": "identical aborts; the SDK returns no session counts or journal",
     }, indent=2) + "\n")
 
@@ -274,7 +363,8 @@ def main():
     if binary is None:
         subprocess.run(["cargo", "build", "--locked", "--manifest-path", str(MANIFEST),
                         "-p", "sparq-proved-evaluator", "--features", "phase-cycles",
-                        "--example", "paper_sweep", "--example", "canon_differential"], check=True)
+                        "--example", "paper_sweep", "--example", "canon_differential",
+                        "--example", "exact_determinism"], check=True)
         metadata = json.loads(subprocess.check_output(["cargo", "metadata", "--no-deps", "--format-version", "1", "--manifest-path", str(MANIFEST)]))
         binary = Path(metadata["target_directory"]) / "debug/examples/paper_sweep"
     # Preserve the caller's writable mount path rather than resolving it to a

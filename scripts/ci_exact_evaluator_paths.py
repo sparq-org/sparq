@@ -29,14 +29,11 @@ EXACT_FILES = {
     "bench/differential-divergences.json", "crates/sparq-bench/src/fuzz.rs",
     ".github/workflows/zk-toolchain.yml",
 }
-# The pull_request trigger narrows to zk-specific inputs: an engine, manifest or lockfile change
-# is checked after merge by the push trigger (the full set above), so the many engine PRs don't
-# each queue a proof run on this advisory lane. The in-job classifier still uses the full set.
-# sparq-canon feeds the zk digests (a host and model dependency) and sparq-query-protocol is a
-# host dependency, so both stay; the engine fixtures are compiled into zk tests with pinned
-# case counts. The evaluator's own Cargo.lock sits under zk/sparql-evaluator/.
+# Pull requests cover engine, core and substrate as well as the evaluator inputs.
+# Root workspace manifests and locks retain their broader push-trigger coverage.
 PR_PREFIXES = (
     "zk/sparql-evaluator/", "bench/zk-bindings/", "crates/sparq-canon/",
+    "crates/sparq-engine/", "crates/sparq-core/", "crates/sparq-substrate/",
     "crates/sparq-query-protocol/", "vendor/spargebra/", "vendor/spargebra-shim/",
     "vendor/zk-sdk/", ".cargo/", "rust-toolchain",
 )

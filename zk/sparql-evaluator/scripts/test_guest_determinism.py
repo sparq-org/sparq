@@ -1,6 +1,7 @@
 import copy
 import json
 from pathlib import Path
+import re
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -23,7 +24,10 @@ def record():
 class GuestDeterminismTests(unittest.TestCase):
     def test_evidence_workflow_requires_the_executor_gate(self):
         workflow = (gate.ROOT / ".github/workflows/zk-exact-evaluator.yml").read_text()
-        job = workflow.split("  exact-evaluator:\n", 1)[1]
+        jobs = dict(re.findall(r"^  ([\w-]+):\n(.*?)(?=^  [\w-]+:\n|\Z)",
+                               workflow.split("jobs:\n", 1)[1], re.M | re.S))
+        self.assertIn("guest-reproducibility", jobs)
+        job = jobs["guest-reproducibility"]
         self.assertNotIn("continue-on-error:", job)
         header = job.split("    steps:\n", 1)[0]
         self.assertEqual([line.strip() for line in header.splitlines()
@@ -36,8 +40,8 @@ class GuestDeterminismTests(unittest.TestCase):
         self.assertEqual(len(matches), 1)
         lines = [line.strip() for line in matches[0].splitlines()
                  if line.strip() and not line.strip().startswith("#")]
-        self.assertEqual(lines[1], "if: steps.changes.outputs.required == 'true'")
-        self.assertEqual(lines[2:], [
+        self.assertEqual(lines[1:3], ["timeout-minutes: 60", "if: steps.changes.outputs.required == 'true'"])
+        self.assertEqual(lines[3:], [
             "run: |", "set -euo pipefail", "sudo apt-get update",
             "sudo apt-get install --yes gdb binutils",
             "python3 -m unittest discover -s zk/sparql-evaluator/scripts -p 'test_guest_determinism.py'",
@@ -57,6 +61,7 @@ class GuestDeterminismTests(unittest.TestCase):
         self.assertEqual(len(gate.SAMPLES), 5)
         self.assertEqual(len(set(gate.SAMPLES)), 5)
         rows = [{"startup_pattern": seed, "startup_entropy_sha256": str(seed),
+                 "guest_pc": 150, "init_range": [100, 200], "artifact_sha256": "guest",
                  "randomness_calls": 1, "error": None, "exit_code": 0} for seed in gate.SAMPLES]
         gate.validate_observations(rows, 1, gate.SAMPLES)
         for field, value in (("startup_entropy_sha256", "constant"), ("randomness_calls", 2),
@@ -72,6 +77,35 @@ class GuestDeterminismTests(unittest.TestCase):
         repeated[1]["startup_entropy_sha256"] = "changed-within-sample"
         with self.assertRaisesRegex(ValueError, "within a sample"):
             gate.validate_observations(repeated, 2, gate.SAMPLES)
+
+    def test_first_randomness_request_must_come_from_guest_initialization(self):
+        self.assertTrue(gate.startup_request(1, 4, 150, (100, 200)))
+        for count, words, pc, bounds in ((1, 4, 99, (100, 200)),
+                                        (1, 4, 200, (100, 200)),
+                                        (2, 4, 150, (100, 200)),
+                                        (1, 3, 150, (100, 200)),
+                                        (1, 4, None, (100, 200)),
+                                        (1, 4, 150, None)):
+            with self.subTest(count=count, words=words, pc=pc, bounds=bounds):
+                self.assertFalse(gate.startup_request(count, words, pc, bounds))
+
+    def test_production_exact_image_requires_both_entry_versions(self):
+        def incomplete(command, **kwargs):
+            kwargs["stdout"].write('{"version": 1}\n')
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.object(gate, "wrapper", return_value=Path("unused-runtime")), \
+                patch.object(gate.subprocess, "run", side_effect=incomplete):
+            with self.assertRaisesRegex(ValueError, "entry coverage"):
+                gate.exact_differential(Path(tmp), Path("unused-example"), Path("unused-runtime"))
+
+    def test_repeat_entry_executes_production_exact_stage(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.object(gate, "exact_differential") as exact, \
+                patch.object(gate, "wrapper", side_effect=RuntimeError("paper stage reached")):
+            output, binary, runtime = Path(tmp) / "output", Path("paper_sweep"), Path("runtime")
+            with self.assertRaisesRegex(RuntimeError, "paper stage reached"):
+                gate.run(output, binary, runtime)
+            exact.assert_called_once_with(output, binary.with_name("exact_determinism"), runtime)
 
     def test_changed_corpus_membership_requires_review(self):
         with tempfile.TemporaryDirectory() as tmp:
