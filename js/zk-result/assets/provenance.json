@@ -3,8 +3,7 @@
   "uncommittedSourceChanges": true,
   "toolchain": {
     "nargo": "1.0.0-beta.21",
-    "bb": "5.0.0-nightly.20260324",
-    "wasmBindgen": "0.2.122"
+    "bb": "5.0.0-nightly.20260324"
   },
   "members": [
     {
@@ -21,30 +20,5 @@
       "acirSha256": "47273d4ed64ea7aee74f16549175231211eefa65edabecb0c2dfcf305c297d9d",
       "vkSha256": "f516ad7a18a86419cc0ad8b92a8479267965cdc7a9f3de27091a3df02cc093d1"
     }
-  ],
-  "crs": {
-    "bn254_g1.dat": {
-      "source": "https://crs.aztec-cdn.foundation/g1.dat",
-      "sha256": "9fd9fad54cfdc61ec309e818fe7bbddad1ca7dde72cc9b1afd126b744f887078"
-    },
-    "bn254_g2.dat": {
-      "source": "https://crs.aztec-cdn.foundation/g2.dat",
-      "sha256": "01797bfc4de5a96f0e516a9ea4537d18786dc30cb991aca4274c95822b69c32f"
-    }
-  },
-  "host": {
-    "sparq_zk_result_wasm_bg.wasm": "43cd9220a41c40888a4ddd2988f9d73565733e7ee845f494c41018a9a024c8f6",
-    "sparq_zk_result_wasm.cjs": "1ccc5df5f22cd0fc23f5e9d29208a542bfc7d98772d584d6d836496be38c4031"
-  },
-  "hostSourceFiles": {
-    "crates/sparq-zk-result-wasm/src/lib.rs": "1a4f62f1d6ca4fa190e5257f5bdc1e4beb190db7735914758851c26f4081d0de",
-    "crates/sparq-zk-result-wasm/build.rs": "d917dad02dc692f1eb0b98d773d9a55d652d56eee15f0f1ec5689a7292eaca28",
-    "crates/sparq-zk-result-wasm/Cargo.toml": "92f584b87f1cebf3d13de6a9735c9ce673a7b688f1bfc3ba569aa970a11ee8f1",
-    "crates/sparq-zk-compose/src/result.rs": "3b09d190d4cb079b5384524febcd22258af8f7ee86dff11c199951a74f9bc238",
-    "crates/sparq-zk-compose/src/result/signed.rs": "bb2c9bb813fdce398c02c106560a0171aefab40d4ff96cc6ac3433a5b9bd7044",
-    "crates/sparq-zk-compose/src/nonce.rs": "8a5c6447d9be306e8867c319474fc283f24cbcddf93b6c97e2f9fb3d7c79d93d",
-    "crates/sparq-zk-compose/src/verifier_wasm.rs": "3630be1990e9592dc043e2de23bdf8502984f623ee8fb34990fba024bc2ddd5f",
-    "Cargo.lock": "eda385aab4ea846a05265db03a9137674e58f72b03f2c93894f87c64f88a18c7",
-    ".cargo/config.toml": "7e774dbbf635846929748cc9bd08dae2db8b4f947f2961ae28cdb875c092e171"
-  }
+  ]
 }

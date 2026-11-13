@@ -1,2 +1,3 @@
-!wasm/
-!wasm/**
+/wasm/
+/assets/crs/
+/.host-*/

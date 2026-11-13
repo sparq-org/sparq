@@ -12,10 +12,10 @@ before(async () => {
   Object.assign(two, await prove(two));
 });
 const check = (source = one, changes = {}) => verify({ expectedQuery: source.query, presentation: source.presentation, policy: source.policy, nonce: source.nonce, seenNonces: new Set(), ...changes });
-async function refused(changes, reason) {
+async function refused(changes, reason, source = one) {
   let reads = 0, adds = 0;
   const seenNonces = { has() { reads++; return false; }, add() { adds++; } };
-  const result = await check(one, { ...changes, seenNonces });
+  const result = await check(source, { ...changes, seenNonces });
   assert.equal(result.verified, false);
   assert.deepEqual(result.released, []);
   assert.match(result.reason, reason);
@@ -125,4 +125,26 @@ test('missing proof rejects with the native missing-proof reason', async () => {
 test('partial proof fields reject before the cryptographic backend', async () => {
   const presentation = structuredClone(one.presentation); presentation.proof.pop();
   await refused({ presentation }, /^malformed proof encoding$/);
+});
+
+
+test('proof length must match the selected member before cryptographic verification', async () => {
+  for (const source of [one, two]) {
+    const shorter = structuredClone(source.presentation);
+    shorter.proof.splice(-32);
+    await refused({ presentation: shorter }, /^malformed proof encoding$/, source);
+    const longer = structuredClone(source.presentation);
+    longer.proof.push(...new Array(32).fill(0));
+    await refused({ presentation: longer }, /^malformed proof encoding$/, source);
+  }
+});
+
+test('invalid member proof-length metadata rejects before statement reconstruction', async () => {
+  const path = new URL('../assets/members.json', import.meta.url);
+  const original = readFileSync(path);
+  try {
+    const table = JSON.parse(original); table[0].proofBytes = -32;
+    writeFileSync(path, JSON.stringify(table));
+    await refused({ expectedQuery: 'wrong request' }, /^canonical member or VK rejected$/);
+  } finally { writeFileSync(path, original); }
 });

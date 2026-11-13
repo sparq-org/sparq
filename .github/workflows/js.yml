@@ -269,7 +269,16 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: js/zk-result/package-lock.json
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install pinned binding generator
+        run: |
+          bindgen_version="$(python3 -c 'import tomllib; print(next(p["version"] for p in tomllib.load(open("Cargo.lock", "rb"))["package"] if p["name"] == "wasm-bindgen"))')"
+          cargo install wasm-bindgen-cli --version "=$bindgen_version" --locked -j 2
       - name: Install pinned package dependencies
         run: npm ci --prefix js/zk-result --ignore-scripts
+      - name: Build host bindings and fetch pinned CRS
+        run: node js/zk-result/scripts/build.mjs
       - name: Exercise the bundled package without network access
-        run: python3 js/zk-result/scripts/offline.py node --test --test-concurrency=1 js/zk-result/test/result.test.js
+        run: python3 js/zk-result/scripts/offline.py node --test --test-concurrency=1 js/zk-result/test/*.test.js

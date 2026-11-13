@@ -23,7 +23,8 @@ The relying party supplies its expected query, issuer trust list, authenticated
 status snapshots and fresh CSPRNG nonce. A caller-owned synchronous `has`/`add`
 nonce store is consulted only after canonical-key, statement and proof checks
 succeed. Persist and coordinate that store outside the library. Failed verification
-releases no rows.
+releases no rows. Proof encoding must match the selected member's fixed wire
+length before cryptographic verification.
 
 Use bounded positive `SELECT DISTINCT` basic graph patterns with projected
 canonical integer predicates and IRI/literal pattern constants. Unsupported
@@ -40,4 +41,12 @@ private.
 See the [package API and policy shapes](../../js/zk-result/README.md) and the
 [successful-result contract](../zk-query-proofs/references/successful-results.md).
 The shared registry is `js/zk-result/assets/members.json`; adding a supported
-member requires its compiled ACIR, canonical VK and registry entry.
+member requires its compiled ACIR, canonical VK and registry entry, including
+its fixed `proofBytes` wire length.
+
+A source checkout generates ignored host bindings and pinned CRS with
+`node js/zk-result/scripts/build.mjs`. This development step uses Cargo and the
+matching binding generator, downloads the CRS and checks committed length and
+SHA-256 pins. It does not invoke the circuit toolchain. Member regeneration is a
+separate `node js/zk-result/scripts/build-circuits.mjs` step; rerun the host build
+afterward. Consumer tarballs already contain all generated runtime files.

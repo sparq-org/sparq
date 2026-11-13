@@ -18,7 +18,8 @@
     "wasm",
     "test",
     "README.md",
-    "scripts/offline.py"
+    "scripts/offline.py",
+    "scripts/crs.mjs"
   ],
   "scripts": {
     "test": "node --test --test-concurrency=1 test/*.test.js"

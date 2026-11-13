@@ -17,7 +17,8 @@ function canonicalMembers() {
   const table = parse(readFileSync(new URL('members.json', assets), 'utf8'));
   const members = new Map();
   for (const entry of table) {
-    if (members.has(entry.member) || !/^result_v5_[a-z0-9_]+$/.test(entry.member)) {
+    if (members.has(entry.member) || !/^result_v5_[a-z0-9_]+$/.test(entry.member) ||
+        !Number.isSafeInteger(entry.proofBytes) || entry.proofBytes <= 0 || entry.proofBytes % 32) {
       throw new Error('canonical member or VK rejected');
     }
     if (!/^[a-z0-9_]+\.vk$/.test(entry.vk) || !/^[a-z0-9_]+\.json$/.test(entry.acir)) {
@@ -85,6 +86,7 @@ export async function prove({ query, credentials, policy, nonce }) {
     const vk = await prover.getVerificationKey(proofOptions);
     if (!Buffer.from(vk).equals(member.vk)) throw new Error('canonical member or VK rejected');
     const proof = await prover.generateProof(witness, proofOptions);
+    if (proof.proof.length !== member.proofBytes) throw new Error('proof length differs from canonical member');
     if (proof.publicInputs.length !== statement.publicInputs.length ||
         proof.publicInputs.some((v, i) => BigInt(v) !== BigInt(statement.publicInputs[i]))) {
       throw new Error('public-input serialization differs from circuit ABI');
@@ -114,7 +116,7 @@ export async function verify({ expectedQuery, presentation, policy, nonce, seenN
   const member = members.get(statement.member);
   if (!member) return { verified: false, released: [], reason: 'canonical member or VK rejected' };
   if (!presentation.proof.length) return { verified: false, released: [], reason: 'statement rejected: missing proof' };
-  if (presentation.proof.length % 32) return { verified: false, released: [], reason: 'malformed proof encoding' };
+  if (presentation.proof.length !== member.proofBytes) return { verified: false, released: [], reason: 'malformed proof encoding' };
   let valid;
   try {
     const api = await backend();

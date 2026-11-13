@@ -31,7 +31,8 @@ and serialize consumption across processes in the application's shared store.
 
 `verify` checks canonical registry entries and verification-key hashes first,
 then independently reconstructs the statement from the expected query and policy,
-then checks the proof against those public inputs. It consumes the nonce after
+then requires the member's exact proof length and checks the proof against those
+public inputs. It consumes the nonce after
 those checks succeed. Rejection returns no released rows. A reason describes
 canonical-key, statement, proof-encoding, cryptographic-proof, replay or store failure.
 
@@ -75,20 +76,31 @@ The CRS comes from the official CDN documented by the pinned bb.js package,
 The runtime uses bb.js's `crsPath` option and initializes the synchronous WASM API
 with the bundled capacity, avoiding the asynchronous constructor's unrelated
 larger default allocation. Missing or incorrectly sized CRS files reject locally.
-Artifact identities and source URLs are recorded in `assets/provenance.json`.
+Download lengths and SHA-256 digests are pinned in `assets/crs.pins.json`. The
+host build rejects a short, overlong or mismatched download. Circuit identities
+are recorded in `assets/provenance.json`; generated host identities and source
+URLs are recorded in `wasm/provenance.json`.
 Runtime circuit JSON omits debug source maps; its compiled bytecode and ABI are
 unchanged.
 
 `assets/members.json` is the registry shared with the Rust build. A new supported
-member needs its compiled ACIR, canonical VK and a table entry. Refresh the CRS if
+member needs its compiled ACIR, canonical VK and a table entry including its
+fixed `proofBytes` wire length for the pinned ZK verifier target. Refresh the CRS if
 its capacity requires more points. The Rust build embeds canonical VK hashes from
 that registry; the verifier derives the selected member independently through the
 shared relation. Do not edit circuit sources or substitute keys during packaging.
 
-For development, `scripts/build.mjs` rebuilds artifacts using the repository's
-pinned native tools and the matching wasm-bindgen CLI. Consumers use the shipped
+For development, `node scripts/build.mjs` builds the wasm32 host with Cargo,
+runs the matching wasm-bindgen CLI and downloads and verifies the pinned CRS.
+This host step requires no circuit compiler or native proving backend. Generated
+`wasm/` and `assets/crs/` files are ignored and built in CI; npm tarballs include
+them. The host step leaves committed circuit artifacts unchanged.
+
+Only when regenerating members, run `node scripts/build-circuits.mjs` with the
+repository's pinned circuit toolchain, then rerun the host step. It refreshes the
+committed ACIR, canonical keys and circuit provenance. Consumers use the shipped
 artifacts. Run `npm test` for behavioral tests. On Linux,
-`python3 scripts/offline.py node --test --test-concurrency=1 test/result.test.js`
-enforces network isolation using the system seccomp library. CI exercises the
-bundled package this way. The proof exchange example in
+`python3 scripts/offline.py node --test --test-concurrency=1 test/*.test.js`
+enforces network isolation using the system seccomp library. CI builds the host
+and runs these tests offline. The proof exchange example in
 `crates/sparq-zk-result-wasm/examples/crosscheck.rs` is separate manual evidence.
