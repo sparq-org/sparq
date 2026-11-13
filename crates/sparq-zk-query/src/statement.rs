@@ -31,6 +31,7 @@ pub struct Statement {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Layout {
     pub rows: usize,
+    pub credentials: usize,
     pub variables: usize,
     pub parameters: usize,
     pub indices: usize,
@@ -41,6 +42,7 @@ impl Layout {
     pub fn new(plan: &Plan) -> Self {
         Self {
             rows: plan.capacity().rows_per_table as usize,
+            credentials: plan.capacity().credentials as usize,
             variables: plan.result_schema().abi_width(),
             parameters: plan
                 .parameters()
@@ -74,6 +76,49 @@ impl Layout {
             ),
             ("statement_binding", Abi::Field),
         ]
+    }
+    fn groups_authenticated(&self) -> Vec<(&'static str, Abi)> {
+        let mut groups = self.groups();
+        groups.insert(groups.len() - 1, ("issuer_root", Abi::Field));
+        groups.insert(
+            groups.len() - 1,
+            (
+                "credential_quad_bounds",
+                Abi::array(Abi::UInt(32), self.credentials),
+            ),
+        );
+        groups
+    }
+    pub fn declarations_authenticated(&self) -> String {
+        self.groups_authenticated()
+            .iter()
+            .map(|(name, ty)| format!("    {name}: pub {},\n", ty.noir()))
+            .collect()
+    }
+    pub fn reconstruct_authenticated(
+        &self,
+        plan: &Plan,
+        statement: &Statement,
+        issuer_root: Word,
+    ) -> Result<Vec<Word>, Error> {
+        if statement.signature_mode != 1 {
+            return Err(Error::Unsupported("hidden suite signature mode".into()));
+        }
+        crate::credential::field(issuer_root)?;
+        let mut fixture = statement.clone();
+        fixture.signature_mode = 0;
+        let mut words = self.reconstruct(plan, &fixture, &crate::credential::SuiteEncoder)?;
+        words.pop();
+        words[64] = number(1);
+        words.push(issuer_root);
+        let mut bounds = plan.credential_quad_bounds();
+        bounds.resize(self.credentials, 0);
+        words.extend(bounds.into_iter().map(|n| number(u64::from(n))));
+        words.push(binding(&words)?);
+        Ok(words)
+    }
+    pub fn audit_authenticated_artifact(&self, artifact: &serde_json::Value) -> Result<(), Error> {
+        self.audit_groups(artifact, self.groups_authenticated())
     }
     pub fn declarations(&self) -> String {
         self.groups()
@@ -169,6 +214,13 @@ impl Layout {
     }
     /// Check the locally compiled ABI against the declaration schema.
     pub fn audit_artifact(&self, artifact: &serde_json::Value) -> Result<(), Error> {
+        self.audit_groups(artifact, self.groups())
+    }
+    fn audit_groups(
+        &self,
+        artifact: &serde_json::Value,
+        expected: Vec<(&str, Abi)>,
+    ) -> Result<(), Error> {
         let parameters = artifact["abi"]["parameters"]
             .as_array()
             .ok_or_else(|| Error::Invalid("compiled ABI parameters".into()))?;
@@ -176,7 +228,6 @@ impl Layout {
             .iter()
             .filter(|p| p["visibility"] == "public")
             .collect();
-        let expected = self.groups();
         if public.len() != expected.len() {
             return Err(Error::Invalid("public-input ABI shape".into()));
         }
@@ -321,4 +372,66 @@ fn structure(value: &serde_json::Value, expected: &[(&str, Abi)]) -> bool {
                     .zip(expected)
                     .all(|(f, (name, t))| f["name"] == *name && t.matches(&f["type"]))
         })
+}
+
+#[cfg(test)]
+mod literal_tests {
+    use super::*;
+
+    #[test]
+    fn noir_domains_are_literals_equal_to_the_host_domains() {
+        let source = include_str!("../../../zk/noir-query/core/src/ops_core_statement.nr");
+        let declarations: Vec<_> = source
+            .lines()
+            .filter(|line| line.starts_with("global "))
+            .collect();
+        assert_eq!(declarations.len(), 4);
+        for (name, domain, bytes) in [
+            ("STATEMENT_DOMAIN", STATEMENT_DOMAIN, *b"\0NQSTMT1"),
+            ("CREDENTIAL_DOMAIN", CREDENTIAL_DOMAIN, *b"\0NQCELL1"),
+        ] {
+            assert_eq!(domain, u64::from_be_bytes(bytes));
+            let declaration = declarations
+                .iter()
+                .find(|line| line.starts_with(&format!("global {name}:")))
+                .unwrap();
+            let literal = declaration.split_once('=').unwrap().1.trim();
+            assert_eq!(
+                u64::from_str_radix(
+                    literal
+                        .strip_suffix(';')
+                        .unwrap()
+                        .strip_prefix("0x")
+                        .unwrap(),
+                    16
+                )
+                .unwrap(),
+                domain
+            );
+        }
+        for (name, expected) in [
+            ("DATASET_DOMAIN", DATASET_DOMAIN.as_slice()),
+            (
+                "SUITE_DATASET_DOMAIN",
+                crate::credential::DATASET_DOMAIN.as_slice(),
+            ),
+        ] {
+            let declaration = declarations
+                .iter()
+                .find(|line| line.starts_with(&format!("global {name}:")))
+                .unwrap();
+            let literal = declaration.split_once('=').unwrap().1.trim();
+            let bytes: Vec<u8> = literal
+                .strip_suffix(';')
+                .unwrap()
+                .strip_prefix('[')
+                .unwrap()
+                .strip_suffix(']')
+                .unwrap()
+                .split(',')
+                .map(|b| b.trim().parse().unwrap())
+                .collect();
+            assert_eq!(bytes, expected);
+        }
+    }
 }

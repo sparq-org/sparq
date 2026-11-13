@@ -3,8 +3,12 @@ mod fixture_support;
 #[path = "../../sparq-zk-compose/tests/support/mod.rs"]
 mod support;
 
-use fixture_support::{fixture, integer, iri, FixtureEncoder};
+#[path = "support/authenticated.rs"]
+mod authenticated;
+use authenticated::fixture;
+use fixture_support::{integer, iri};
 use sparq_query_protocol::*;
+use sparq_zk_query::credential::SuiteEncoder as FixtureEncoder;
 use sparq_zk_query::{
     answer::Answer,
     capacity::Bounds,
@@ -74,6 +78,24 @@ fn stored(
     })
     .unwrap()
 }
+fn authenticated_request(
+    stored: StoredRequest,
+    bounds: Bounds,
+    key: Vec<u8>,
+) -> Result<Request, Error> {
+    let mut spec = request_spec(&stored);
+    let mut requirements = requirements_spec(&spec.requirements);
+    requirements.source_evidence = Some(SourceEvidence::IssuerAuthenticated);
+    requirements.accepted_suites = vec![id(sparq_zk_query::request::SUITE)];
+    spec.requirements = QueryRequirements::new(requirements).unwrap();
+    Request::new_authenticated(
+        StoredRequest::new(spec).unwrap(),
+        bounds,
+        key,
+        authenticated::issuer_root(),
+    )
+}
+
 #[derive(Default)]
 struct Store(Mutex<HashSet<[u8; 32]>>);
 impl ChallengeStore for Store {
@@ -117,7 +139,7 @@ fn native_proof_reconstructs_inputs_and_consumes_only_after_acceptance() {
         prepared.artifact["bytecode"],
         independently_compiled.artifact["bytecode"]
     );
-    let request = Request::new(
+    let request = authenticated_request(
         stored(&prepared, query, 7, "urn:verifier", None),
         B,
         prepared.verification_key.clone(),
@@ -155,10 +177,10 @@ fn native_proof_reconstructs_inputs_and_consumes_only_after_acceptance() {
     changed.input_commitment[31] ^= 1;
     assert!(check(&changed).is_err());
     let mut changed = presentation.clone();
-    changed.signature_mode = 1;
+    changed.signature_mode = 0;
     assert_eq!(
         check(&changed).unwrap_err(),
-        Error::Unsupported("credential suite opening".into())
+        Error::Unsupported("hidden suite signature mode".into())
     );
     let mut changed = presentation.clone();
     changed.proof[0] ^= 1;
@@ -210,7 +232,7 @@ fn native_proof_reconstructs_inputs_and_consumes_only_after_acceptance() {
     wrong_prepared.descriptor =
         sparq_zk_query::request::descriptor(&wrong_prepared.plan, &wrong_prepared.verification_key)
             .unwrap();
-    let wrong_key = Request::new(
+    let wrong_key = authenticated_request(
         stored(&wrong_prepared, query, 7, "urn:verifier", None),
         B,
         wrong_prepared.verification_key.clone(),
@@ -239,7 +261,7 @@ fn native_proof_reconstructs_inputs_and_consumes_only_after_acceptance() {
         Error::Invalid("verification key mismatch".into())
     );
     let changed_query = "SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x >= 1 && ?x < 2)}";
-    let wrong_request = Request::new(
+    let wrong_request = authenticated_request(
         stored(&prepared, changed_query, 7, "urn:verifier", None),
         B,
         prepared.verification_key.clone(),
@@ -257,7 +279,7 @@ fn native_proof_reconstructs_inputs_and_consumes_only_after_acceptance() {
             || NOW
         )
         .is_err());
-    let other_challenge = Request::new(
+    let other_challenge = authenticated_request(
         stored(&prepared, query, 8, "urn:verifier", None),
         B,
         prepared.verification_key.clone(),
@@ -283,7 +305,7 @@ fn native_proof_reconstructs_inputs_and_consumes_only_after_acceptance() {
         check(&oversized).unwrap_err(),
         Error::Capacity("released result".into())
     );
-    let anchor_request = Request::new(
+    let anchor_request = authenticated_request(
         stored(&prepared, query, 7, "urn:verifier", Some([5; 32])),
         B,
         prepared.verification_key.clone(),
@@ -308,7 +330,7 @@ fn native_proof_reconstructs_inputs_and_consumes_only_after_acceptance() {
     let mut requirements = requirements_spec(&spec.requirements);
     requirements.resources = ResourceBounds::new(4, 1).unwrap();
     spec.requirements = QueryRequirements::new(requirements).unwrap();
-    let small = Request::new(
+    let small = authenticated_request(
         StoredRequest::new(spec).unwrap(),
         B,
         prepared.verification_key.clone(),
@@ -357,29 +379,32 @@ fn n0_native_proofs_match_the_engine_and_refuse_altered_answers() {
         let mut data = vec![];
         let mut vocabulary = vec![];
         for (i, source) in case.sources.iter().enumerate() {
-            let (mut cells, terms) = fixture_support::dataset(source);
-            for q in &mut cells[0].quads {
-                for c in q {
-                    if c.kind == 2 {
-                        c.scope = i as u32 + 1;
-                    }
-                }
-            }
-            data.extend(cells);
+            let (_, terms) = fixture_support::dataset(source);
+            data.push(authenticated::sign(source, i as u64));
             vocabulary.extend(terms);
         }
-        let request = Request::new(
+        let request = authenticated_request(
             stored(&prepared, case.query, index as u8 + 1, "urn:verifier", None),
             bounds,
             prepared.verification_key.clone(),
         )
         .unwrap();
+        let cells = data
+            .iter()
+            .enumerate()
+            .map(|(i, c)| c.cells(i as u32).unwrap())
+            .collect::<Vec<_>>();
         let trace =
-            sparq_zk_query::interp::evaluate(&prepared.plan, &data, &FixtureEncoder).unwrap();
+            sparq_zk_query::interp::evaluate(&prepared.plan, &cells, &FixtureEncoder).unwrap();
         // Slicing uses the method's canonical order; the graph oracle compares
         // the unsliced relation because SPARQL permits other unspecified orders.
         if case.name != "slice" {
-            fixture_support::assert_engine(case.query, &case.sources.join("\n"), &trace.result);
+            fixture_support::assert_engine_with_encoder(
+                case.query,
+                &case.sources.join("\n"),
+                &trace.result,
+                &FixtureEncoder,
+            );
         }
         let start = std::time::Instant::now();
         let presentation = compiler

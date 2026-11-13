@@ -321,7 +321,7 @@ fn filter_keeps_only_non_error_true_roots() {
 fn slice_handles_an_offset_beyond_the_input() { ops_core::slice(two(), 100, false, 0, empty::<4,1>()); }
 
 fn expression_cell(class: u8, key: Field, enc: Field) -> TermCell {
-    TermCell {bound:true, kind:3, enc, key_class:class, key, dt:0, lang:0, scope:0}
+    TermCell {bound:true, kind:3, enc, key_class:class, key: key + class as Field * 0x1000000000000000000000000000000000000000000000000000000000000, dt:0, lang:0, scope:0}
 }
 fn expr_step(op: u8, a: u32, b: u32, parameter: u32, comparison: u8) -> crate::ops_core_expr::Step {
     crate::ops_core_expr::Step {op, a, b, parameter, comparison}
@@ -351,7 +351,7 @@ fn expression_error_lane_cannot_be_forced_low() {
 }
 #[test]
 fn expression_key_comparison_includes_boundaries() {
-    for class in [1,3,4,5,6] {
+    for class in [1,3,4,5,6,8] {
         let a=expression_cell(class,2,11); let b=expression_cell(class,3,12);
         for op in 0..5 {
             let unequal=crate::ops_core_expr::evaluate(Table {rows:[[a]],len:1},[b],

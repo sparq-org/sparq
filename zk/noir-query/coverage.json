@@ -1511,7 +1511,7 @@
     {
       "id": "reject-rdf12-triple-function",
       "status": "refused",
-      "refusal": "BIND / SELECT expression is not yet supported by the query method"
+      "refusal": "TRIPLE is excluded by the query method"
     },
     {
       "id": "reject-rdf12-direction-function",

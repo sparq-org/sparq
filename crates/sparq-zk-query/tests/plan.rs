@@ -107,6 +107,29 @@ fn public_bounds_select_buckets_and_private_counts_only_refuse() {
 }
 
 #[test]
+fn solid_credential_and_quad_buckets_are_public_and_bounded() {
+    for quads in [8, 16, 64] {
+        let bounds = Bounds {
+            credentials: 4,
+            quads_per_credential: quads,
+            rows_per_table: 4,
+        };
+        let capacity = bounds.capacity().unwrap();
+        assert_eq!(capacity.credentials, 4);
+        assert_eq!(capacity.quads_per_credential, quads);
+        assert!(bounds.check_credentials(&[quads as usize; 4]).is_ok());
+        assert!(bounds.check_credentials(&[quads as usize + 1]).is_err());
+        assert!(bounds.check_credentials(&[0; 5]).is_err());
+    }
+    assert!(Bounds {
+        quads_per_credential: 65,
+        ..BOUNDS
+    }
+    .capacity()
+    .is_err());
+}
+
+#[test]
 fn exclusions_and_stage_refusals_are_named() {
     // Exercise check_exclusions through the public lowering path, including nested calls.
     for (query, name, permanent) in [

@@ -33,6 +33,7 @@ pub fn lower(query: &str, bounds: Bounds) -> Result<Plan, Error> {
         plan: Plan {
             bounds,
             capacity,
+            credential_quad_bounds: vec![],
             nodes: vec![],
             parameters: vec![],
             variable_names: vec![],
