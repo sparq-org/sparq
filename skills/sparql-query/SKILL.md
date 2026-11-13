@@ -1262,7 +1262,14 @@ SPARQL Update `USING` identity behavior.
   `sparq-conformance` harness lights it, and the nightly sparq-vs-oxigraph differential fuzzer covers
   the `FILTER(?v = <iri>)` trigger shape ON too since sq-7d3dj.30.13), and a shape that does
   not exactly meet a rewrite's conditions is left **verbatim** (conservative). Note `From<Query>` does
-  NOT rewrite (it takes an already-built algebra as-is). When off, zero rewrite code compiles, the
+  NOT rewrite (it takes an already-built algebra as-is). Prepared execution under
+  `strict_numeric_capacity` or `temporal_year_range` uses the retained original algebra: a
+  bag-equivalent rewrite can otherwise hide a capacity failure by eliminating checked operands.
+  Prepared parameter binding retains both plans; `with_query` evaluates its replacement algebra
+  as supplied. The prepared result cache keys and evaluates the plan selected for those limits;
+  text EXPLAIN ANALYZE uses that plan too. Template rendering retains the original operands for
+  subsequent execution under capacity limits.
+  When off, zero rewrite code compiles, the
   default native + wasm builds are byte-identical, and no new dependencies are added (no `unsafe`).
 - **Equality-FILTER → value join** is the non-default `value-join` cargo feature (bead
   `sq-7d3dj.30.7`; the SP2Bench q05a/q12a star-intersection shape). With it ON, a conjunctive group
