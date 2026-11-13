@@ -9,7 +9,8 @@ JSON-LD expansion runs through `sparq-jsonld`; its expanded output reaches
 
 The issuer key is **test-only**. Generate a dedicated seed for this service,
 never reuse it, and keep it in the environment. `GET /did.json` publishes only
-the public verification method and explicitly marks the document `testOnly`.
+the public verification method and explicitly marks the document `testOnly`,
+using `https://sparq.jeswr.org/ns/vc-api#testOnly` for that context term.
 
 ## Configuration and native startup
 
@@ -46,7 +47,7 @@ return 400 with `verified: false`, empty `checks`/`warnings`, and
 `errors:[ProblemDetails]`, following the VC-API successor's
 [Error Handling](https://w3c.github.io/vcalm/#error-handling) and
 [Verification Errors vs. Warnings](https://w3c.github.io/vcalm/#verification-errors-vs-warnings)
-sections. Each problem has `type: "https://sparq.org/ns/vc-api#ValidationError"`,
+sections. Each problem has `type: "https://sparq.jeswr.org/ns/vc-api#ValidationError"`,
 `title: "ValidationError"`, HTTP `status`, a readable `detail`, and a `message`
 string extension; the top-level body mirrors these problem fields.
 JSON and JSON-LD media types are
@@ -101,11 +102,14 @@ failed proof returns an error. Binding applies to every terminal proof, so this
 profile rejects an issuer proof followed by a different notary's countersignature
 and unordered credential proof sets containing another co-signer.
 
-Inline context-document entries are invalid JSON-LD. Verification has one leniency
-for the fixed AlumniCredential chain in `tests/api-fixtures/previous-proof.json`,
-matching its document ID, types, exact context and two-proof reference shape (a string or singleton-list reference).
-Only its root credential context is unwrapped. Issuance never emits this form;
-other inline context documents are rejected.
+Issuance and verification share a compatibility leniency beyond the JSON-LD 1.1
+context processing algorithm, matching jsonld.js 9.0.0. An inline context-array
+entry containing `@context` is replaced once by that key's object value;
+sibling keys are ignored. A wrapped string, array, null or other non-object entry
+is an error. A direct local context wrapper is resolved first, so its value can
+instead be an object, a context URL or an array. The same processing covers nested
+and scoped contexts and documents loaded from the offline cache. Hashing uses the
+processed contexts; the issued document retains the submitted context spelling.
 Enveloping operations are outside this service's scope.
 
 ## Run the W3C suites on the maintainer's Mac

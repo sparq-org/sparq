@@ -42,5 +42,6 @@ copy; formatting differs, so resource digests differ. The GitHub bytes match the
 pinned suite's positive related-resource digests. Tests check manifest hashes and
 verify credential/presentation signatures with independently reformatted contexts.
 The fixed previous-proof vector contains a nonstandard inline context-document
-entry. An ordinary processor rejects it; only verification of the documented
-vector shape accepts the compatibility form. Issuance remains strict.
+entry. Strict JSON-LD 1.1 processing rejects it. The endpoint applies the general
+jsonld.js 9.0.0 context-document rule on issuance and verification; independent
+credential fixtures exercise that same rule without matching the suite vector.

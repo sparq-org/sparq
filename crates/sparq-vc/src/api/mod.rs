@@ -30,6 +30,8 @@ use model::{require, string};
 
 pub use cache::{OfflineContexts, CONTEXT_FILES};
 
+const VC_API_NAMESPACE: &str = "https://sparq.jeswr.org/ns/vc-api#";
+
 /// A rejected VC-API request or startup configuration.
 #[derive(Debug)]
 pub struct ApiError(String);
@@ -54,7 +56,7 @@ impl ApiError {
         // https://w3c.github.io/vcalm/#verification-errors-vs-warnings
         // Verification errors are RFC 9457 ProblemDetails objects. `message` is an extension.
         let problem = json!({
-            "type": "https://sparq.org/ns/vc-api#ValidationError", "title": "ValidationError",
+            "type": format!("{VC_API_NAMESPACE}ValidationError"), "title": "ValidationError",
             "status": status.as_u16(), "detail": self.0, "message": self.0
         });
         let mut body = problem.clone();
@@ -111,7 +113,7 @@ impl Service {
         let vm = format!("{did}#{multikey}");
         json!({
             "@context": ["https://www.w3.org/ns/did/v1", "https://w3id.org/security/multikey/v1",
-                {"testOnly": "https://sparq.org/ns/vc-api#testOnly"}],
+                {"testOnly": format!("{VC_API_NAMESPACE}testOnly")}],
             "id": did, "testOnly": true,
             "verificationMethod": [{"id": vm, "type": "Multikey", "controller": did,
                 "publicKeyMultibase": multikey}],
@@ -212,14 +214,12 @@ impl Service {
     }
 
     fn verify_credential(&self, credential: &Value, options: &Value) -> Result<(), ApiError> {
-        let mut credential = credential.clone();
-        inline_context_documents(&mut credential);
-        model::validate(&credential, &self.contexts)?;
+        model::validate(credential, &self.contexts)?;
         let issuer = credential["issuer"]
             .as_str()
             .or_else(|| credential["issuer"]["id"].as_str())
             .expect("validated issuer");
-        self.verify_proofs(&credential, options, "assertionMethod", Some(issuer))
+        self.verify_proofs(credential, options, "assertionMethod", Some(issuer))
     }
 
     fn verify_proofs(
@@ -302,7 +302,9 @@ impl Service {
     }
 
     fn canonicalize(&self, value: &Value) -> Result<String, ApiError> {
-        self.check_terms(value, &sparq_jsonld::context::ActiveContext::new(None))?;
+        let mut value = value.clone();
+        inline_context_documents(&mut value)?;
+        self.check_terms(&value, &sparq_jsonld::context::ActiveContext::new(None))?;
         let input =
             LdJson::parse(&value.to_string()).map_err(|_| ApiError::new("invalid JSON-LD"))?;
         let expanded =
@@ -420,34 +422,56 @@ impl Service {
     }
 }
 
-// Verification-only leniency for the fixed AlumniCredential chain vector's
-// context-document entry. Other inline context documents remain invalid JSON-LD.
-fn inline_context_documents(value: &mut Value) {
-    let vector_context = json!([
-        "https://www.w3.org/ns/credentials/v2",
-        {"@context": {
-            "AlumniCredential": "https://www.example.org/AlumniCredential",
-            "alumniOf": "https://www.example.org/alumniOf"
-        }}
-    ]);
-    let vector_id = "urn:uuid:58172aac-d8ba-11ed-83dd-0b3aef56cc33";
-    let previous_id = "urn:uuid:26329423-bec9-4b2e-88cb-a7c7d9dc4544";
-    let is_chain = value
-        .get("proof")
-        .and_then(Value::as_array)
-        .is_some_and(|proofs| {
-            proofs.len() == 2
-                && proofs.iter().any(|p| {
-                    p["previousProof"] == previous_id || p["previousProof"] == json!([previous_id])
-                })
-        });
-    if value["id"] == vector_id
-        && value["type"] == json!(["VerifiableCredential", "AlumniCredential"])
-        && value["@context"] == vector_context
-        && is_chain
-    {
-        value["@context"][1] = vector_context[1]["@context"].clone();
+// jsonld.js 9.0.0 lib/context.js:57-60,148-157 and lib/ContextResolver.js:34-78:
+// resolve direct wrappers, then unwrap each resolved entry once, discarding siblings.
+fn inline_context_documents(value: &mut Value) -> Result<(), ApiError> {
+    fn context(local: &mut Value) -> Result<(), ApiError> {
+        if let Some(inner) = local.as_object_mut().and_then(|o| o.remove("@context")) {
+            // A direct null wrapper is not the resolver's null context entry.
+            require(
+                !inner.is_null(),
+                "JSON-LD context entry must unwrap to an object",
+            )?;
+            *local = inner;
+        }
+        let entries = match local {
+            Value::Array(entries) => entries.as_mut_slice(),
+            entry => std::slice::from_mut(entry),
+        };
+        for entry in entries {
+            if let Some(inner) = entry.as_object_mut().and_then(|o| o.remove("@context")) {
+                require(
+                    inner.is_object(),
+                    "JSON-LD context entry must unwrap to an object",
+                )?;
+                *entry = inner;
+            }
+            if let Some(definitions) = entry.as_object_mut() {
+                for definition in definitions.values_mut() {
+                    inline_context_documents(definition)?;
+                }
+            }
+        }
+        Ok(())
     }
+    match value {
+        Value::Object(object) => {
+            for (key, child) in object {
+                if key == "@context" {
+                    context(child)?;
+                } else if key != "@value" {
+                    inline_context_documents(child)?;
+                }
+            }
+        }
+        Value::Array(values) => {
+            for child in values {
+                inline_context_documents(child)?;
+            }
+        }
+        _ => (),
+    }
+    Ok(())
 }
 
 // JSON-LD 1.1 rdfDirection = i18n-datatype, retaining direction in RDF 1.1

@@ -4,7 +4,7 @@ use std::{collections::BTreeMap, path::Path, sync::Arc};
 
 use sparq_jsonld::{DocumentLoader, JsonLdError, JsonLdErrorCode, RemoteDocument};
 
-use super::ApiError;
+use super::{inline_context_documents, ApiError};
 
 /// Required URL → filename mappings for an offline VC-API cache.
 pub const CONTEXT_FILES: &[(&str, &str)] = &[
@@ -82,13 +82,14 @@ impl OfflineContexts {
 
 impl DocumentLoader for OfflineContexts {
     fn load_document(&self, url: &str) -> Result<RemoteDocument, JsonLdError> {
-        self.bytes(url)
-            .map(|text| RemoteDocument::new(text, url))
-            .map_err(|_| {
-                JsonLdError::with_detail(
-                    JsonLdErrorCode::LoadingDocumentFailed,
-                    "URL is absent from the offline cache",
-                )
-            })
+        let document = (|| {
+            let mut value: serde_json::Value = serde_json::from_str(self.bytes(url)?)
+                .map_err(|_| ApiError::new("invalid JSON in offline context cache"))?;
+            inline_context_documents(&mut value)?;
+            Ok::<_, ApiError>(RemoteDocument::new(value.to_string(), url))
+        })();
+        document.map_err(|error| {
+            JsonLdError::with_detail(JsonLdErrorCode::LoadingDocumentFailed, error.to_string())
+        })
     }
 }

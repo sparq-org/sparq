@@ -311,19 +311,15 @@ async fn previous_proof_suite_vector_and_dependency_order() {
             accepted(status, &body);
         }
     }
-    let mut invalid_context = vc.clone();
-    invalid_context["@context"][1]["discarded"] = "https://example.org/discarded".into();
+    let mut sibling_context = vc.clone();
+    sibling_context["@context"][1]["discarded"] = "https://example.org/discarded".into();
     let (status, body) = post(
         &app,
         "/credentials/verify",
-        json!({"verifiableCredential":invalid_context}),
+        json!({"verifiableCredential":sibling_context}),
     )
     .await;
-    rejected(status, &body);
-    assert!(body["message"]
-        .as_str()
-        .unwrap()
-        .contains("keyword redefinition"));
+    accepted(status, &body);
     let mut changed = vc.clone();
     changed["proof"][0]["proofValue"] = vc["proof"][1]["proofValue"].clone();
     let (status, body) = post(
@@ -668,7 +664,10 @@ async fn route_errors_use_the_same_readable_problem_shape() {
         assert_eq!(body["errors"][0]["detail"], message);
         assert_eq!(body["errors"][0]["status"], expected.as_u16());
         assert_eq!(body["errors"][0]["title"], "ValidationError");
-        assert_eq!(body["type"], "https://sparq.org/ns/vc-api#ValidationError");
+        assert_eq!(
+            body["type"],
+            "https://sparq.jeswr.org/ns/vc-api#ValidationError"
+        );
         assert_eq!(body["errors"][0]["type"], body["type"]);
         assert_eq!(body["verified"], false);
     }
@@ -844,84 +843,194 @@ async fn github_context_bytes_match_the_suite_digests_and_preserve_jsonld() {
 }
 
 #[tokio::test]
-async fn fixed_context_document_leniency_is_verification_only() {
+async fn inline_context_entries_apply_identically_on_issue_and_verify() {
     let app = app();
-    let raw: Value =
-        serde_json::from_str(include_str!("../api-fixtures/previous-proof.json")).unwrap();
-    let text = raw.to_string();
-    let documents = context_documents();
-    let result = oxjsonld::JsonLdParser::new()
-        .for_slice(text.as_bytes())
-        .with_load_document_callback(move |url, _| {
-            Ok(oxjsonld::JsonLdRemoteDocument {
-                document: documents[url].as_bytes().to_vec(),
-                document_url: url.into(),
-            })
-        })
-        .collect::<Result<Vec<_>, _>>();
-    assert!(
-        result.is_err(),
-        "ordinary JSON-LD processing must reject the raw vector context"
-    );
-    let (status, body) = post(
-        &app,
-        "/credentials/verify",
-        json!({"verifiableCredential":raw}),
-    )
-    .await;
-    accepted(status, &body);
-    let mut unsigned = raw.clone();
-    unsigned.as_object_mut().unwrap().remove("proof");
-    let (status, body) = post(&app, "/credentials/issue", json!({"credential":unsigned})).await;
-    rejected(status, &body);
-    assert!(body["message"]
-        .as_str()
-        .unwrap()
-        .contains("keyword redefinition"));
     let signer = TestSigner::new();
-    for changed in ["id", "type", "context", "chain", "count"] {
-        let mut document = raw.clone();
-        document.as_object_mut().unwrap().remove("proof");
-        document["issuer"] = signer.did.clone().into();
-        document["@context"][1] = raw["@context"][1]["@context"].clone();
-        match changed {
-            "id" => document["id"] = "urn:credential:ordinary".into(),
-            "type" => document["type"] = json!(["VerifiableCredential"]),
-            "context" => document["@context"][1]["other"] = "https://example.org/other".into(),
-            _ => (),
+    let mapping = json!({"rating":"https://example.org/rating"});
+    for siblings in [false, true] {
+        let mut plain = credential();
+        plain["id"] = "urn:credential:rating".into();
+        plain["@context"]
+            .as_array_mut()
+            .unwrap()
+            .push(mapping.clone());
+        plain["credentialSubject"]["rating"] = "excellent".into();
+        let mut wrapped = plain.clone();
+        let mut entry = json!({"@context":mapping});
+        if siblings {
+            entry["rating"] = "https://ignored.example/rating".into();
+            entry["@protected"] = "ignored sibling".into();
         }
-        let mut first = signer.proof("assertionMethod");
-        first["id"] = raw["proof"][0]["id"].clone();
-        first = signer.sign(&document, first);
-        let mut terminal = signer.proof("assertionMethod");
-        terminal["created"] = "2023-02-26T22:16:38Z".into();
-        let mut input = document.clone();
-        if changed != "chain" {
-            terminal["previousProof"] = raw["proof"][0]["id"].clone();
-            input["proof"] = json!([first]);
+        wrapped["@context"][1] = entry;
+        let issued = issue(&app, wrapped.clone()).await;
+        assert_eq!(issued["@context"], wrapped["@context"]);
+        // The same signature must verify with either context spelling.
+        let mut equivalent = issued.clone();
+        equivalent["@context"] = plain["@context"].clone();
+        for vc in [issued, equivalent] {
+            let (status, body) = post(
+                &app,
+                "/credentials/verify",
+                json!({"verifiableCredential":vc}),
+            )
+            .await;
+            accepted(status, &body);
         }
-        terminal = signer.sign(&input, terminal);
-        let third = signer.sign(&document, signer.proof("assertionMethod"));
-        document["proof"] = if changed == "count" {
-            json!([first, terminal, third])
-        } else {
-            json!([first, terminal])
-        };
-        document["@context"][1] = json!({"@context":document["@context"][1]});
+        // Sign the ordinary document through an independent expansion implementation.
+        plain["issuer"] = signer.did.clone().into();
+        wrapped["issuer"] = plain["issuer"].clone();
+        wrapped["proof"] = signer.sign(&plain, signer.proof("assertionMethod"));
         let (status, body) = post(
             &app,
             "/credentials/verify",
-            json!({"verifiableCredential":document}),
+            json!({"verifiableCredential":wrapped}),
+        )
+        .await;
+        accepted(status, &body);
+    }
+}
+
+#[tokio::test]
+async fn nested_and_scoped_context_documents_follow_the_resolver_rule() {
+    let app = app();
+    let signer = TestSigner::new();
+    let mapping = json!({"rating":"https://example.org/rating"});
+    for scoped in [false, true] {
+        for direct in [false, true] {
+            let mut plain = credential();
+            plain["issuer"] = signer.did.clone().into();
+            let mut wrapped = plain.clone();
+            let context = if direct {
+                json!({"@context":mapping,"rating":"https://ignored.example/rating"})
+            } else {
+                json!([{"@context":mapping,"rating":"https://ignored.example/rating"}])
+            };
+            if scoped {
+                plain["@context"].as_array_mut().unwrap().push(json!({
+                    "claim":{"@id":"https://example.org/claim","@context":mapping}
+                }));
+                plain["credentialSubject"]["claim"] = json!({"rating":"excellent"});
+                wrapped = plain.clone();
+                wrapped["@context"][1]["claim"]["@context"] = context;
+            } else {
+                plain["credentialSubject"]["@context"] = mapping.clone();
+                plain["credentialSubject"]["rating"] = "excellent".into();
+                wrapped["credentialSubject"] = plain["credentialSubject"].clone();
+                wrapped["credentialSubject"]["@context"] = context;
+            }
+            wrapped["proof"] = signer.sign(&plain, signer.proof("assertionMethod"));
+            let (status, body) = post(
+                &app,
+                "/credentials/verify",
+                json!({"verifiableCredential":wrapped.clone()}),
+            )
+            .await;
+            accepted(status, &body);
+            wrapped.as_object_mut().unwrap().remove("proof");
+            issue(&app, wrapped).await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn resolved_context_entries_require_an_object_after_one_unwrap() {
+    let app = app();
+    let signer = TestSigner::new();
+    let mut plain = credential();
+    plain["issuer"] = signer.did.clone().into();
+    let proof = signer.sign(&plain, signer.proof("assertionMethod"));
+    for inner in [
+        json!("https://www.w3.org/ns/credentials/v2"),
+        json!([]),
+        json!([{}]),
+        Value::Null,
+        json!(7),
+        json!(false),
+        json!({"@context":{"rating":"https://example.org/rating"}}),
+    ] {
+        let mut vc = plain.clone();
+        vc["@context"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"@context":inner}));
+        let (status, body) =
+            post(&app, "/credentials/issue", json!({"credential":vc.clone()})).await;
+        rejected(status, &body);
+        assert!(
+            body["message"].as_str().unwrap().contains("JSON-LD"),
+            "{body}"
+        );
+        vc["proof"] = proof.clone();
+        let (status, body) = post(
+            &app,
+            "/credentials/verify",
+            json!({"verifiableCredential":vc}),
         )
         .await;
         rejected(status, &body);
         assert!(
-            body["message"]
-                .as_str()
-                .unwrap()
-                .contains("keyword redefinition"),
-            "{changed}: {body}"
+            body["message"].as_str().unwrap().contains("JSON-LD"),
+            "{body}"
         );
+    }
+    // A direct wrapper containing null differs from an ordinary null context.
+    let mut vc = plain;
+    vc["credentialSubject"]["@context"] = json!({"@context":null});
+    let (status, body) = post(&app, "/credentials/issue", json!({"credential":vc.clone()})).await;
+    rejected(status, &body);
+    assert_eq!(
+        body["message"],
+        "JSON-LD context entry must unwrap to an object"
+    );
+    vc["proof"] = proof;
+    let (status, body) = post(
+        &app,
+        "/credentials/verify",
+        json!({"verifiableCredential":vc}),
+    )
+    .await;
+    rejected(status, &body);
+    assert_eq!(
+        body["message"],
+        "JSON-LD context entry must unwrap to an object"
+    );
+}
+
+#[tokio::test]
+async fn held_and_direct_context_documents_share_inline_processing() {
+    let signer = TestSigner::new();
+    let mapping = json!({"rating":"https://example.org/rating"});
+    for held in [
+        json!({"@context":mapping}),
+        json!({"@context":[{"@context":mapping}]}),
+    ] {
+        let mut documents = context_documents();
+        documents.insert("urn:held:rating-context".into(), held.to_string());
+        let mut seed = [0; 32];
+        rand_core::OsRng.fill_bytes(&mut seed);
+        let app = router(Service::new(
+            &seed,
+            OfflineContexts::from_documents(documents).unwrap(),
+        ));
+        // Direct local wrappers can resolve a URL or array before entry processing.
+        for inner in [json!("urn:held:rating-context"), json!([mapping])] {
+            let mut plain = credential();
+            plain["issuer"] = signer.did.clone().into();
+            plain["credentialSubject"]["@context"] = mapping.clone();
+            plain["credentialSubject"]["rating"] = "excellent".into();
+            let mut wrapped = plain.clone();
+            wrapped["credentialSubject"]["@context"] = json!({"@context":inner});
+            wrapped["proof"] = signer.sign(&plain, signer.proof("assertionMethod"));
+            let (status, body) = post(
+                &app,
+                "/credentials/verify",
+                json!({"verifiableCredential":wrapped.clone()}),
+            )
+            .await;
+            accepted(status, &body);
+            wrapped.as_object_mut().unwrap().remove("proof");
+            issue(&app, wrapped).await;
+        }
     }
 }
 

@@ -41,3 +41,7 @@ See [the runbook](vercel/README.md) and
 and the separate Vercel adapter. Related-resource digests are checked against
 exact bytes of any document already held in its offline cache; unknown resource
 IDs are signed unchanged and their resource integrity is not checked.
+
+Problem types and the DID document's `testOnly` context term share the namespace
+`https://sparq.jeswr.org/ns/vc-api#`. Issuance and verification apply the same
+jsonld.js context-document compatibility rule described in the usage skill.

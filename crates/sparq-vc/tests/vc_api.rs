@@ -111,7 +111,10 @@ fn rejected(status: StatusCode, body: &Value) {
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert_eq!(body["verified"], false);
     assert!(!body["errors"].as_array().unwrap().is_empty());
-    assert_eq!(body["type"], "https://sparq.org/ns/vc-api#ValidationError");
+    assert_eq!(
+        body["type"],
+        "https://sparq.jeswr.org/ns/vc-api#ValidationError"
+    );
     assert!(body["errors"][0].is_object());
     assert_eq!(body["errors"][0]["type"], body["type"]);
     assert_eq!(body["errors"][0]["title"], "ValidationError");
@@ -404,6 +407,12 @@ async fn offline_contexts_include_nested_references_and_protected_terms() {
     let (status, doc) = request(&app, "GET", "/did.json", String::new(), "application/json").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(doc["testOnly"], true);
+    assert_eq!(
+        doc["@context"][2],
+        json!({
+            "testOnly": "https://sparq.jeswr.org/ns/vc-api#testOnly"
+        })
+    );
     assert!(doc["verificationMethod"][0]
         .get("secretKeyMultibase")
         .is_none());

@@ -30,11 +30,12 @@ retrieve remote contexts or resources.
   and returns the same proof-check result after checking every presentation
   proof and every embedded credential through the credential verifier.
 - Rejections return 400 with `verified:false`, empty `checks`/`warnings`, and
-  `errors:[ProblemDetails]`. Each problem has a URL-valued `type`, `title`, HTTP
+  `errors:[ProblemDetails]`. Each problem has `type: "https://sparq.jeswr.org/ns/vc-api#ValidationError"`, `title`, HTTP
   `status`, readable `detail`, and a `message` string extension. The top-level
   body also exposes that problem's fields for direct error readers.
   Unknown routes return 404 and unsupported methods return 405 with that shape.
-- `GET /did.json` returns a public DID document with `testOnly: true`.
+- `GET /did.json` returns a public DID document with `testOnly: true`, mapped to
+  `https://sparq.jeswr.org/ns/vc-api#testOnly`.
 
 Issue options: `type`, `cryptosuite`, `proofPurpose`, `verificationMethod`,
 `created`, `domain`, `challenge`. Supported identifiers are `DataIntegrityProof`,
@@ -72,12 +73,14 @@ base64url SHA-256); optional `mediaType` is a nonempty string. Contexts use only
 the startup cache. The staged credentials-v2 fixture uses the GitHub context's
 exact bytes; the npm copy has identical JSON-LD content but different digest bytes.
 
-Ordinary inline `{"@context": ...}` context-document entries are invalid JSON-LD.
-Verification makes one compatibility exception for the fixed AlumniCredential
-chain in `tests/api-fixtures/previous-proof.json`, matching its document ID, types,
-exact context and two-proof reference shape (a string or singleton-list reference). Only that root credential context is
-unwrapped. Issuance always uses strict context processing and never emits this
-form. Other inline context documents remain errors.
+Issuance and verification share a compatibility leniency beyond the JSON-LD 1.1
+context processing algorithm, matching jsonld.js 9.0.0. An inline context-array
+entry containing `@context` is replaced once by that key's object value;
+sibling keys are ignored. A wrapped string, array, null or other non-object entry
+is an error. A direct local context wrapper is resolved first, so its value can
+instead be an object, a context URL or an array. The same processing covers nested
+and scoped contexts and documents loaded from the offline cache. Hashing uses the
+processed contexts; the issued document retains the submitted context spelling.
 
 To embed without a listener, use `sparq_vc::api::{router, Service,
 OfflineContexts}`. `OfflineContexts::from_directory(&Path)` loads all
