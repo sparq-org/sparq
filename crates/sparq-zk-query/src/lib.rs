@@ -7,7 +7,9 @@ pub mod credential;
 pub mod credential_graphs;
 pub mod witness_closed;
 pub mod closed_arith_standin;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod driver;
+pub mod envelope_policy;
 pub mod interp;
 pub mod interp_closed_group;
 mod interp_closed_group_plan;
@@ -15,13 +17,16 @@ pub mod interp_closed_order;
 pub mod lower;
 pub mod plan;
 pub mod plan_closed;
+pub mod presentation;
 pub mod request;
 pub mod statement;
 pub mod witness;
 
 /// Lane B's proof lifecycle primitive; lane E supplies the protocol adapter.
 pub mod method {
-    pub use crate::driver::{Compiler, Prepared, Presentation};
+    #[cfg(not(target_arch = "wasm32"))]
+    pub use crate::driver::Compiler;
+    pub use crate::presentation::{Prepared, Presentation};
 }
 
 /// Stable admission and evaluation refusals.
@@ -56,3 +61,7 @@ impl std::fmt::Display for Error {
     }
 }
 impl std::error::Error for Error {}
+
+#[cfg(test)]
+#[path = "../tests/support/mod.rs"]
+mod support;

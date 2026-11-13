@@ -654,7 +654,7 @@ pub fn install_registry(graph: &mut Graph, entries: &[RegistryEntry]) -> Result<
 /// are dropped.
 pub fn read_registry(graph: &Graph) -> Vec<RegistryEntry> {
     let name = Term::NamedNode(NamedNode::new_unchecked(ZK_GRAPH));
-    let Some((_, reg)) = graph.named().iter().find(|(gname, _)| *gname == name) else {
+    let Some(reg) = graph.named_graph(&name) else {
         return Vec::new();
     };
 

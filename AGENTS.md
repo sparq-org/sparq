@@ -30,6 +30,8 @@ Read [`skills/SKILL.md`](skills/SKILL.md) first — it is the router skill that 
 - [`skills/javascript-wasm/SKILL.md`](skills/javascript-wasm/SKILL.md) — the `@sparq-org/sparq` npm package.
 - [`skills/python/SKILL.md`](skills/python/SKILL.md) — the `sparq` Python package.
 - [`skills/merkle-credentials/SKILL.md`](skills/merkle-credentials/SKILL.md) — the internal, research-grade Merkle credential suite family and Noir credential-opening library; externally unaudited.
+- [`skills/zk-result-javascript/SKILL.md`](skills/zk-result-javascript/SKILL.md) — Node successful-result proofs with bundled artifacts; research grade, not externally audited.
+- [`skills/verifiable-aggregate/SKILL.md`](skills/verifiable-aggregate/SKILL.md) — detached research-grade signed-commitment joint count, sum and comparison (Rust / Node WebAssembly).
 - [`skills/vc-api/SKILL.md`](skills/vc-api/SKILL.md) — the opt-in credential HTTP test endpoint and W3C suite runner. See the [Vercel runbook](crates/sparq-vc/vercel/README.md).
 
 The capability surfaces (reasoning — RDFS/OWL-RL/N3 in `sparq-reason` plus the opt-in OWL 2 EL classifier in `sparq-reason-el`, both covered by [`skills/inference/SKILL.md`](skills/inference/SKILL.md) — SHACL, full-text, vector, GeoSPARQL, streaming RSP-QL, RDFC-1.0 dataset canonicalization, ZK query proofs, MPC, GenAI retrieval) each have their own `skills/<surface>/SKILL.md` — the router in [`skills/SKILL.md`](skills/SKILL.md) enumerates them.

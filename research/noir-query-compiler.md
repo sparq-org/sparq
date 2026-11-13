@@ -25,10 +25,11 @@ equal mappings. Scan collapses duplicate triples in the default merge before
 matching a pattern. Blank nodes from separate credentials remain distinct.
 Join implements compatibility on bound shared variables, including VALUES UNDEF.
 
-The initial expression seam carries explicit value and error lanes for key
-comparison, boolean connectives and membership. FILTER retains only a true,
+The expression bridge delegates typed comparison, boolean connectives and
+membership to the shared expression library. It derives scalar values from
+checked suite keys and keeps capacity separate from SPARQL errors. FILTER retains only a true,
 non-error root. Unimplemented operand families receive named refusals rather
-than a different comparison. Expression-library integration uses the same seam.
+than a different comparison. The bridge does not expose equality tokens as lexical openings.
 
 The crate README records the public-input layout. A shared schema in
 `statement::Layout` produces declarations and
@@ -39,8 +40,11 @@ binding absorbs every public word in ABI order through the shared Poseidon spong
 The production opening delegates lexical binding, key recomputation, complete
 credential roots and hidden signatures to the shared suite library. Its private
 issuer membership path uses the existing compose relation and host helpers.
-The verifier-stored issuer root and ordered per-credential quad limits follow the
-result in the public layout. The dataset commitment hashes the ordered signed
+The verifier-stored envelope policy and ordered per-credential quad limits follow
+the result in the public layout. The group carries issuer and snapshot roots,
+canonical holder restrictions, status flags and validity/freshness times. Its
+values enter through the stored request seam; the circuit binds the request
+digest and policy words without rederiving RDF policy. The dataset commitment hashes the ordered signed
 suite messages under a private presentation salt. Operator fixtures retain a
 separate supplied-cell relation without an authentication claim.
 
@@ -53,8 +57,10 @@ refuses a mismatch before evaluating private cells. The verifier uses its stored
 query, key and parameter values, independently encodes the released RDF terms,
 checks dataset agreement and freshness, and consumes the original shared protocol
 challenge last. The authenticated constructor requires the supported suite and issuer-authenticated
-source policy. Unsupported status and holder policies are named refusals.
-Lane E supplies the public adapter and envelope. The structural request constructor
+source policy. Typed envelope properties are admitted and bound to canonical request RDF.
+Enabled policy checks receive a named native refusal until the statement lane's
+consumer is integrated. Lane E supplies the public adapter, canonical trust-root
+construction and envelope consumer. The structural request constructor
 cannot satisfy the authenticated proof path without a stored issuer root.
 
 The cache is indexed by plan shape and invalidated by a fingerprint of the trusted
@@ -80,9 +86,11 @@ The native and WebAssembly compiler experiment agrees on bytecode and independen
 created verification keys for the initial operator programs. The dependency alias
 for SHA differs from its nested module basename so the unmodified WebAssembly
 resolver loads the same tagged source as the native compiler. Domain, datatype
-and suite identifiers are literals checked against Rust computations. Authenticated
-programs are subject to the same comparison before a delivery choice is fixed.
-The delivery package is outside this lane.
+and suite identifiers are literals checked against Rust computations. Operator programs remain subject to the passing-case compiler-agreement ratchet.
+The delivery package uses a catalogue of natively compiled authenticated plans;
+native compile/key determinism remains required. Node derives the plan hash from
+its stored query and refuses an unknown entry or different key. Holder witness,
+proving and verification capacity remain separate acceptance checks.
 
 The admitted table ceiling follows complete native compilation measurements for
 the core operators. A larger join probe did not complete on the lane machine,
@@ -96,3 +104,44 @@ programs declare each credential at its own type and call library assembly gadge
 the generator emits no padding, filtering or authentication constraints inline.
 The credential bucket includes the Solid acceptance paths. A larger quad bucket
 without practical proof evidence is not offered.
+
+The suite adapter uses the authenticated opener's returned table and salted
+message. Creation and verification method enter as private openings, and the
+native message uses the same suite metadata digest. Invalid metadata is a named
+error from the fallible message and dataset-commitment helpers. Presentation-local
+graph identities reuse the suite's request-scoped constructor. Input credentials
+cannot supply the reserved method-generated issuer assertion.
+
+Portable host modules cover plans, lowering, evaluation, generation, requests,
+public-input reconstruction and presentation values. The compiler driver alone
+owns native subprocesses and temporary files. The target-query dataset and native
+capacity acceptance evidence remain integration work; they are not established
+by isolated operator or compiler tests.
+
+Constant membership lists occupy a fixed public term block and carry their active
+length in the index group. Their values and length are erased from the shape;
+the generator emits the indexed expression gadget call. Native controls rebind
+the statement while retaining a trace that would match inactive padding, and
+require the operator relation to refuse it.
+
+Dataset assembly retains complete named copies and original signed counts. Its
+default view merges those facts and the method's issuer assertions; ordinary scans
+deduplicate the merged triples. The Noir representation keeps a parallel graph
+array beside rows and active flags. Issuer terms enter only after the envelope
+layer's trust check. The production method awaits that consumer and graph dispatch;
+the assembly helpers alone do not establish a target-query proof.
+
+The compact opening adapter separates root identities from value consumption.
+Resources omit literal metadata; private literal tags select fixed datatype
+constructors. The identity route retains complete term encodings and canonical
+padding. Comparisons, functions and aggregates require checked lexical input;
+the conservative checked route remains available until read-site integration is
+complete. The authenticated metadata wrapper is shared with the suite and awaits
+its constructor for already opened cells. No practical capacity is inferred from
+the preparatory adapter alone.
+
+String comparisons preserve the distinction between false and a SPARQL error.
+Identity tokens are local to equality between strings of the same datatype.
+Plain/language string pairs and mixed value families use their type classes in
+the shared comparison gadget, with host and native execution controls against
+the engine. The tokens are never lexical inputs to string functions.

@@ -3,7 +3,8 @@
 //! constructor, and is shared when the same opening is used by key recomputation.
 use std::collections::bounded_vec::BoundedVec;
 use poseidon::poseidon2::Poseidon2;
-use crate::suite_constants::{TERM_DOMAIN, DATATYPE_DOMAIN, LANGUAGE_DOMAIN, PACK_BYTES, DT_LANGSTRING, KIND_DEFAULT_GRAPH, KIND_BLANK_NODE, KIND_LITERAL};
+use crate::term_bytes::{BytePacker, check_bytes};
+use crate::suite_constants::{TERM_DOMAIN, DT_LANGSTRING, KIND_DEFAULT_GRAPH, KIND_BLANK_NODE, KIND_LITERAL, DEFAULT_GRAPH_ENC, GRAPH_DOMAIN};
 
 pub struct TermCell {
     bound: bool,
@@ -39,26 +40,10 @@ pub fn padding() -> TermCell {
 /// The byte hash has the same value in every capacity bucket. Zero padding is
 /// checked explicitly because BoundedVec's private backing storage is still ABI data.
 pub fn hash_bytes<let L: u32>(domain: Field, bytes: BoundedVec<u8, L>) -> Field {
-    assert(bytes.len() <= L, "byte capacity");
-    let mut packed: [Field; (L + 30) / 31 + 2] = [0; (L + 30) / 31 + 2];
-    packed[0] = domain;
-    packed[1] = bytes.len() as Field;
-    for i in 0..L {
-        let byte = bytes.get_unchecked(i);
-        if i < bytes.len() { packed[2 + i / PACK_BYTES] = packed[2 + i / PACK_BYTES] * 256 + byte as Field; }
-        else { assert(byte == 0, "non-zero byte padding"); }
-    }
-    Poseidon2::hash(packed, 2 + (bytes.len() + 30) / 31)
-}
-
-fn append<let N: u32, let L: u32>(out: &mut BoundedVec<u8, N>, bytes: BoundedVec<u8, L>) {
-    assert(bytes.len() <= L, "byte capacity");
-    let length = (bytes.len() as Field).to_be_bytes::<4>();
-    for i in 0..4 { out.push(length[i]); }
-    for i in 0..L {
-        if i < bytes.len() { out.push(bytes.get_unchecked(i)); }
-        else { assert(bytes.get_unchecked(i) == 0, "non-zero byte padding"); }
-    }
+    check_bytes(bytes);
+    let mut packed: BytePacker<L> = BytePacker::new(domain, bytes.len());
+    for i in 0..L { packed.push_if(bytes.get_unchecked(i), i < bytes.len()); }
+    packed.finish()
 }
 
 /// Build every component from an opening. Non-literals carry no key or metadata.
@@ -68,32 +53,38 @@ pub fn open_term<let L: u32, let D: u32, let G: u32>(
     language: BoundedVec<u8, G>, key: [u8; 31], credential: u32,
 ) -> TermCell {
     assert(kind <= KIND_LITERAL, "term kind");
-    let mut encoded: BoundedVec<u8, L + D + G + 13> = BoundedVec::new();
+    let length = 1 + if kind == KIND_DEFAULT_GRAPH { 0 } else { 4 + lexical.len() }
+        + if kind == KIND_LITERAL { 8 + datatype.len() + language.len() } else { 0 };
+    let mut encoded: BytePacker<L + D + G + 13> = BytePacker::new(TERM_DOMAIN, length);
     encoded.push(kind);
     if kind == KIND_DEFAULT_GRAPH {
         assert(lexical.len() == 0, "default graph lexical");
-    } else { append(&mut encoded, lexical); }
+    } else { encoded.framed(lexical); }
     let mut key_field: Field = 0;
     for i in 0..31 { key_field = key_field * 256 + key[i] as Field; }
     let mut dt: Field = 0;
     let mut lang: Field = 0;
     if kind == KIND_LITERAL {
         assert(datatype.len() > 0, "literal datatype");
-        append(&mut encoded, datatype);
-        append(&mut encoded, language);
-        dt = hash_bytes(DATATYPE_DOMAIN, datatype);
+        encoded.framed(datatype);
+        encoded.framed(language);
+        check_bytes(datatype);
+        dt = crate::term_ids::datatype(datatype);
+        assert(crate::term_key::class_matches(key[0], dt), "class disagrees with datatype");
+        crate::term_key::check_key_shape(key);
         assert((language.len() > 0) == (dt == DT_LANGSTRING), "language datatype");
-        lang = hash_bytes(LANGUAGE_DOMAIN, language);
+        check_bytes(language);
+        lang = crate::term_ids::language(language);
     } else {
         assert((datatype.len() == 0) & (language.len() == 0) & (key_field == 0), "non-literal metadata");
         // The helpers check backing storage even for an empty opening.
-        let _dt = hash_bytes(DATATYPE_DOMAIN, datatype);
+        check_bytes(datatype);
         assert((language.len() > 0) == (dt == DT_LANGSTRING), "language datatype");
-        let _lang = hash_bytes(LANGUAGE_DOMAIN, language);
+        check_bytes(language);
     }
     // Hashing also canonicalizes storage for default-graph lexical input.
-    let _lexical = hash_bytes(TERM_DOMAIN, lexical);
-    let enc = Poseidon2::hash([kind as Field, hash_bytes(TERM_DOMAIN, encoded), key_field], 3);
+    check_bytes(lexical);
+    let enc = if kind == KIND_DEFAULT_GRAPH { DEFAULT_GRAPH_ENC } else { Poseidon2::hash([kind as Field, encoded.finish(), key_field], 3) };
     TermCell { bound: true, kind, enc, key_class: key[0], key: key_field, dt, lang,
         credential: if kind == KIND_BLANK_NODE { credential } else { 0 } }
 }
@@ -112,7 +103,7 @@ pub fn open_lexical<let L: u32, let D: u32, let G: u32>(
         & (rebuilt.key_class == cell.key_class), "lexical opening differs");
 }
 
-/// Its private payload can only be minted by `recompute_key`.
+/// Its private payload is minted only after lexical key recomputation.
 pub struct KeyCheckedCell { cell: TermCell }
 impl KeyCheckedCell { pub fn cell(self) -> TermCell { self.cell } }
 
@@ -130,10 +121,24 @@ pub fn recompute_key_for<let L: u32, let D: u32, let G: u32>(
     cell: TermCell, lexical: BoundedVec<u8, L>, datatype: BoundedVec<u8, D>, language: BoundedVec<u8, G>, expected_datatype: Field,
 ) -> KeyCheckedCell {
     open_lexical(cell, lexical, datatype, language);
+    check_opened_key(cell, lexical, expected_datatype)
+}
+
+/// Build and check a raw literal with one lexical hash. Pass a fixed datatype
+/// identifier so unrelated value parsers fold away in the generated circuit.
+pub fn open_key_checked<let L: u32, let D: u32, let G: u32>(
+    raw: crate::suite_entry::BoundedTermOpening<L, D, G>, credential: u32, expected_dt: Field,
+) -> KeyCheckedCell {
+    let cell = crate::suite_entry::open_bounded_cell(raw, credential);
+    let lexical = BoundedVec::from_parts_unchecked(raw.lexical, raw.lexical_len);
+    check_opened_key(cell, lexical, expected_dt)
+}
+
+// Only fresh construction or a checked full lexical opening reaches this helper.
+fn check_opened_key<let L: u32>(cell: TermCell, lexical: BoundedVec<u8, L>, expected_datatype: Field) -> KeyCheckedCell {
     assert(cell.kind == KIND_LITERAL, "key requires literal");
     assert(cell.dt == expected_datatype, "datatype specialization differs");
-    let (class, key) = crate::term_key::recompute(lexical, expected_datatype);
-    assert(class == cell.key_class, "class disagrees with datatype");
+    let (_class, key) = crate::term_key::recompute(lexical, expected_datatype);
     assert(key == cell.key, "key disagrees with lexical form");
     KeyCheckedCell { cell }
 }
@@ -147,3 +152,35 @@ pub fn field_lt(a: Field, b: Field) -> bool {
     for i in 0..32 { lt = lt | (equal & (a[i] < b[i])); equal = equal & (a[i] == b[i]); }
     lt
 }
+
+/// Equality includes issuer blank-node scope; metadata hashes are bound by enc.
+pub fn same_term(a: TermCell, b: TermCell) -> bool {
+    (a.bound == b.bound) & (a.enc == b.enc) & (a.kind == b.kind)
+        & (a.credential == b.credential)
+}
+fn fixed_iri(enc: Field) -> TermCell {
+    TermCell { bound: true, kind: 1, enc, key_class: 0, key: 0, dt: 0, lang: 0, credential: 0 }
+}
+/// A synthetic graph name has its own domain and cannot equal an issuer's label.
+/// Request digest and dataset index must be fixed by generated request wiring.
+pub fn credential_graph(request: [u128;2], index: u32) -> TermCell {
+    assert(index < 0xffffffff, "credential scope capacity");
+    TermCell { bound: true, kind: 2,
+        enc: Poseidon2::hash([GRAPH_DOMAIN, request[0] as Field, request[1] as Field, index as Field], 4),
+        key_class: 0, key: 0, dt: 0, lang: 0, credential: index + 1 }
+}
+pub fn iri_rdf_type() -> TermCell { fixed_iri(crate::suite_constants::IRI_RDF_TYPE) }
+pub fn iri_vc_type() -> TermCell { fixed_iri(crate::suite_constants::IRI_VC_TYPE) }
+pub fn iri_valid_from() -> TermCell { fixed_iri(crate::suite_constants::IRI_VALID_FROM) }
+pub fn iri_valid_until() -> TermCell { fixed_iri(crate::suite_constants::IRI_VALID_UNTIL) }
+pub fn iri_issuer() -> TermCell { fixed_iri(crate::suite_constants::IRI_ISSUER) }
+pub fn iri_subject() -> TermCell { fixed_iri(crate::suite_constants::IRI_SUBJECT) }
+pub fn iri_multikey() -> TermCell { fixed_iri(crate::suite_constants::IRI_MULTIKEY) }
+pub fn iri_public_key() -> TermCell { fixed_iri(crate::suite_constants::IRI_PUBLIC_KEY) }
+pub fn iri_credential_status() -> TermCell { fixed_iri(crate::suite_constants::IRI_CREDENTIAL_STATUS) }
+pub fn iri_status_entry() -> TermCell { fixed_iri(crate::suite_constants::IRI_STATUS_ENTRY) }
+pub fn iri_status_list() -> TermCell { fixed_iri(crate::suite_constants::IRI_STATUS_LIST) }
+pub fn iri_status_index() -> TermCell { fixed_iri(crate::suite_constants::IRI_STATUS_INDEX) }
+pub fn iri_status_purpose() -> TermCell { fixed_iri(crate::suite_constants::IRI_STATUS_PURPOSE) }
+pub fn iri_status_size() -> TermCell { fixed_iri(crate::suite_constants::IRI_STATUS_SIZE) }
+pub fn iri_assertion_method() -> TermCell { fixed_iri(crate::suite_constants::IRI_ASSERTION_METHOD) }

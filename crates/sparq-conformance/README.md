@@ -2,12 +2,10 @@
 # sparq-conformance
 
 Internal W3C conformance harness for [sparq](../../README.md), not published.
-`sparq-conformance` runs SPARQL; `sparq-inference-conformance` runs inference;
-`sparq-conformance-scoreboard` indexes all ratchets. Other binaries cover served
-SPARQL Protocol and advisory notation3tests. The `scoreboard` rustdoc documents scope, floors and divergences; `bench/conformance-scoreboard.generated.json` mirrors the registry
-and `tests/scoreboard_export.rs` guards drift. Opt-in lanes include `jsonld-suite`,
-`service`, `http-protocol`, `federation-descriptors` and inference/geo/syntax features.
-Fixtures use `scripts/fetch-conformance.sh` and siblings. Contributing: [`AGENTS.md`](../../AGENTS.md); [grouped-MIN fixture discrepancy](../../docs/upstream-proposals.md#issue-5--sparql11aggregates-agg-min-02-expected-min-changes-the-selected-term).
+`sparq-conformance` runs SPARQL; `sparq-inference-conformance` runs inference; `sparq-conformance-scoreboard` indexes all ratchets. Other binaries cover served SPARQL Protocol and advisory notation3tests.
+The `scoreboard` rustdoc documents scope, floors and divergences; `bench/conformance-scoreboard.generated.json` mirrors the registry and `tests/scoreboard_export.rs` guards drift.
+Opt-in lanes include `jsonld-suite`, `service`, `http-protocol`, `federation-descriptors` and inference/geo/syntax features. Fixtures use `scripts/fetch-conformance.sh` and siblings.
+Contributing: [`AGENTS.md`](../../AGENTS.md); [grouped-MIN fixture discrepancy](../../docs/upstream-proposals.md#issue-5--sparql11aggregates-agg-min-02-expected-min-changes-the-selected-term).
 
 ## EARL reports
 
@@ -21,5 +19,11 @@ missing explicit root or EARL run: fail); `SPARQ_RDF_CANON_ROOT` and `SPARQ_JSON
 `SPARQ_JSONLD_FRAME_ROOT` override the vendored and `tests/w3c` defaults. RDF/XML lanes need the
 `rdfxml` feature (without it every XML entry fails). Skip policy: only withdrawn or upstream-rejected
 entries and JSON-LD 1.0-only entries are omitted; anything not run fails.
+
+The JSON-LD EARL report measures JSON-LD 1.1 API operations via `sparq-jsonld` (expand, compact, flatten, frame, toRdf, fromRdf).
+`sparq-core`'s Graph JSON-LD ingest uses oxjsonld and is not what this report measures. The API report passes 1295 / 1296 applicable entries; its toRdf subset passes 448 / 448.
+The local API toRdf lane includes legacy 1.0-only entries: 454 pass, 11 fail, two skip. A separate non-EARL `TOTAL toRdf-ingest 429 38 0` line runs all 467 toRdf entries through `parse_jsonld_dataset` (Graph acceptance plus oxjsonld canonical dataset, base only, rejection-only negatives), with floor 429 and failure ceiling 38.
+Unsupported options and remote loading are not emulated; no ingest entries are skipped. The ingest ratchet never contributes EARL assertions.
+HTML and remote documents run through the native processor and virtual manifest responses; unreadable fixtures fail. Syntax C14N compares shipping writer bytes; Eval compares the same output by dataset isomorphism.
 
 **License:** [MIT](../../LICENSE).

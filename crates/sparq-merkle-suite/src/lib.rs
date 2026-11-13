@@ -4,7 +4,10 @@
 //! original SHA-256 implementation; the parity test exercises the existing vectors.
 
 pub mod keys;
+pub mod metadata;
 pub mod poseidon;
+#[cfg(feature = "os-random")]
+pub mod random;
 pub mod sha256;
 
 pub use keys::{comparison_key, key_class};

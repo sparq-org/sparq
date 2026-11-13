@@ -7,6 +7,9 @@ pub type Var = u32;
 pub type NodeId = u32;
 pub type ParameterId = u32;
 
+/// Constant membership-list capacity; its active length is a public parameter.
+pub const IN_CAPACITY: usize = 16;
+
 /// An occurrence of a public term constant, or a variable.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Slot {
@@ -33,6 +36,11 @@ pub enum Expr {
     Or(Box<Expr>, Box<Expr>),
     Not(Box<Expr>),
     In(Box<Expr>, Vec<Expr>),
+    InList {
+        value: Box<Expr>,
+        start: ParameterId,
+        count: ParameterId,
+    },
 }
 
 /// Public parameters are separate from the circuit shape.
@@ -193,6 +201,8 @@ impl Plan {
         for n in self.credential_quad_capacities() {
             w.u32(n);
         }
+        w.u32(crate::credential::LEXICAL_CAPACITY as u32);
+        w.u32(crate::credential::ISSUER_DEPTH);
         w.u8(match self.form {
             ResultForm::Select => 0,
             ResultForm::Ask => 1,
@@ -345,6 +355,17 @@ impl Encoding {
                 for b in bs {
                     self.expr(b);
                 }
+            }
+            Expr::InList {
+                value,
+                start,
+                count,
+            } => {
+                self.u8(6);
+                self.expr(value);
+                self.u32(*start);
+                self.u32(*count);
+                self.u32(IN_CAPACITY as u32);
             }
         }
     }

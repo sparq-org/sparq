@@ -721,8 +721,8 @@ fn append_bridged_triples(graph: &mut Graph, new_triples: &[[Term; 3]]) -> Resul
 /// sub-graph dictionary and swap it in (matches `install_auth_view`'s rebuild shape).
 fn extend_named_graph(graph: &mut Graph, name: &str, additions: &[[Term; 3]]) -> Result<(), String> {
     let g_name = Term::NamedNode(NamedNode::new_unchecked(name));
-    let mut terms: Vec<[Term; 3]> = match graph.named().iter().find(|(n, _)| *n == g_name) {
-        Some((_, sub)) => crate::loader::graph_triples(sub),
+    let mut terms: Vec<[Term; 3]> = match graph.named_graph(&g_name) {
+        Some(sub) => crate::loader::graph_triples(sub),
         None => Vec::new(),
     };
     // A one-shot materialization adds a triple or two: a linear scan beats hashing the
@@ -793,8 +793,8 @@ fn install_triples(graph: &mut Graph, name: &str, terms: Vec<[Term; 3]>) -> Resu
 /// The triples currently in a named graph (empty if absent).
 fn named_graph_triples(graph: &Graph, name: &str) -> Vec<[Term; 3]> {
     let g_name = Term::NamedNode(NamedNode::new_unchecked(name));
-    match graph.named().iter().find(|(n, _)| *n == g_name) {
-        Some((_, sub)) => crate::loader::graph_triples(sub),
+    match graph.named_graph(&g_name) {
+        Some(sub) => crate::loader::graph_triples(sub),
         None => Vec::new(),
     }
 }

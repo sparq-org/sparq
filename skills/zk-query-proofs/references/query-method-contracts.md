@@ -146,3 +146,73 @@ subset of the draft: issuer sets, status windows, trust-policy roots, disclosure
 of the evaluation context are not modelled. Adapters owe all of these; the README lists each
 obligation. Because `QueryMethod` implementations are trusted local code, trait compliance is
 not evidence of correctness.
+
+The host compiler modules and presentation values build for WebAssembly; the
+native `method::Compiler` alone owns subprocesses and temporary proof files.
+`Request::plan()` reconstructs the trusted plan and credential limits, while
+`Answer::release` converts its canonical result through the supplied vocabulary.
+`method::Prepared` and `method::Presentation` remain available on both targets.
+
+`statement::EnvelopeInputs` carries the verifier-stored typed envelope policy.
+Admit it with `Request::new_authenticated_with_policy(stored, bounds, key,
+envelope, quad_bounds)` and obtain it through `Request::envelope_inputs()`.
+`Layout::reconstruct_authenticated_with_envelope` and
+`witness::prover_toml_authenticated_with_envelope` consume the same typed group.
+The existing authenticated methods retain the issuer-only profile. Enabled
+holder, status, validity and freshness policies require the statement lane's
+consumer; the current native driver refuses them by name until it is integrated.
+The canonical policy-root module remains a neighbouring-lane integration.
+
+Expression evaluation uses the shared typed gadgets, with a separate capacity
+channel. The generated-query coverage ratchet requires native and WebAssembly
+ABI, bytecode and independently derived key agreement for every passing operator
+program. Authenticated delivery uses the native catalogue and requires native
+compile/key determinism; the Node package refuses unknown plans or changed keys.
+Isolated gadget evidence stays distinct from generated-query and proof evidence.
+
+The credential suite now authenticates proof metadata. `Credential::metadata`,
+`Credential::signed_message` and `credential::dataset_commitment` return `Result`;
+propagate their errors. Witness generation carries creation and verification
+method as private openings and uses the authenticated opener's returned message.
+`credential::credential_graph(request_digest, index)` shares the suite's
+presentation-local graph-name construction. Credentials using the reserved
+`vcq:verifiedIssuer` predicate are refused before dataset assembly.
+
+Constant membership lists use a fixed parameter block and a public active-length
+index, so changing their contents or admitted length preserves plan hash and
+program source. Oversized lists receive the named `IN list` capacity refusal.
+The existing parameter enum and envelope group order are unchanged.
+
+For the closed-world integration, `credential::assemble_dataset` takes complete
+opened credential cells, envelope-authenticated issuer cells and the request
+digest. Its `interp::Dataset` exposes `quads()` and `credential_counts()`;
+`interp::evaluate_dataset` evaluates the default merge while retaining named
+copies for the graph dispatcher. The method-generated issuer assertions occur
+only in the default view. These helpers await production wiring to the envelope
+consumer and graph dispatcher.
+
+The Noir seam is `ops_core_suite::authenticate` followed by the envelope checks
+and `from_authenticated`; inactive slots use `inactive_credential`. This reuses
+the authenticated suite object and its metadata getters. `Dataset` retains
+triple rows and active flags, with a parallel graph-name array.
+`append_verified_issuer` receives an issuer term already checked by the envelope
+and adds its default-only assertion. It does not supply that trust check itself.
+
+`Answer::release` includes canonical boolean terms for computed results, even if
+they were absent from the source vocabulary. Other result terms use the supplied
+vocabulary or the plan's public constants.
+
+The circuit library's `ops_core_profile::open_quads` accepts compact resource and
+object openings and returns suite cells. A private literal tag selects a supported
+fixed datatype for `term::open_key_checked`; resources pass through
+`suite_entry::open_bounded_quads` with empty metadata. The returned cells still
+require the suite's root, count, salt, signature and metadata authentication. This
+helper alone is not a credential verifier.
+`open_identity_quads` supplies the complete identity table for root authentication.
+A comparison, function or aggregate must obtain its value through a checked lexical
+opening; the identity route alone does not provide that value contract.
+
+String equality keeps type errors distinct from false. Term-identity tokens are
+local to same-datatype string equality; mixed string types and value families
+pass through the shared comparison's type classes. These tokens must never be
+used as lexical input by string functions.

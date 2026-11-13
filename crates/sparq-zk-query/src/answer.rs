@@ -58,13 +58,15 @@ impl Answer {
             },
         })
     }
-    pub(crate) fn release(
+    /// Release a canonical RDF answer using the trusted plan and vocabulary.
+    pub fn release(
         value: &ResultValue,
         plan: &Plan,
         vocabulary: &[Term],
         encoder: &impl EncodeTerm,
     ) -> Result<Self, Error> {
         let mut catalog = vocabulary.to_vec();
+        catalog.extend([true, false].map(|value| Term::Literal(oxrdf::Literal::from(value))));
         catalog.extend(plan.parameters().iter().filter_map(|p| {
             if let crate::plan::Parameter::Term(t) = p {
                 Some(t.clone())

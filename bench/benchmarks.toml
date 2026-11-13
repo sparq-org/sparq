@@ -2093,6 +2093,19 @@ records_to  = "stdout"
 featured    = false
 status      = "planning"
 
+[[benchmark]]
+id          = "zk-result-node-contract"
+name        = "Successful-result Node contract — registry stub"
+category    = "zk"
+measures    = "Proof acceptance and verifier rejection controls; no timing claim"
+invoke      = "cd js/zk-result && npm test"
+source      = "crates/sparq-zk-result-wasm/src/lib.rs, js/zk-result/test/result.test.js"
+dataset     = "Synthetic test-issued credential graphs and public predicates"
+quiet_box_sensitive = false
+pinning     = "Package lock and bundled circuit/key registry"
+records_to  = "Node test output"
+featured    = false
+status      = "ok"
 
 [[benchmark]]
 id = "zk-query-contracts"
@@ -2106,4 +2119,17 @@ quiet_box_sensitive = false
 pinning = "source fixtures and pinned Noir toolchain"
 records_to = "test output"
 status = "ok"
+
+[[benchmark]]
+id = "merkle-suite-vectors"
+name = "Merkle credential suite compatibility vectors"
+category = "zk"
+measures = "deterministic term, key, quad, leaf, root and message compatibility"
+invoke = "cargo run -p sparq-merkle-suite --example vectors"
+source = "crates/sparq-merkle-suite/; zk/noir-query/core/"
+dataset = "fixed RDF credential suite vectors"
+quiet_box_sensitive = false
+pinning = "suite constants pinned between Rust and Noir"
+records_to = "stdout"
+status = "diagnostic"
 featured = false

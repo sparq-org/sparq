@@ -16,7 +16,8 @@
 # face repos, which now own their own CI (nargo unit tests + the ieee754 differential
 # oracle). The two jobs that ran those suites here (`nargo-unit-tests`, `differential-ieee754`)
 # were RETIRED with the trees — the face-repo CI is the single source now. This lane keeps
-# ONLY the sparq-specific `forge-suite` (the verifier-soundness estate over crates/sparq-zk*,
+# the sparq-specific `forge-suite` plus the Merkle credential native/Noir checks
+# (the verifier-soundness estate over crates/sparq-zk* and sparq-merkle-suite,
 # which compiles zk/compose — and now transitively fetches the released sparq_ieee754 git dep).
 #
 # sq-3x7dl.14.2: the PROOF-M1 xpath differential oracle lives in its OWN
@@ -61,6 +62,7 @@ on:
     # + ready_for_review so the un-draft moment re-runs this lane.
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
+      - "crates/sparq-merkle-suite/**"
       - "crates/sparq-zk/**"
       - "crates/sparq-zk-compose/**"
       - "crates/sparq-zk-query/**"
@@ -69,9 +71,9 @@ on:
       # zk/xpath trees were externalized to the sparq-org/noir_IEEE754 and
       # sparq-org/noir_XPath face repos (#1599), whose own CI covers their nargo tests
       # and the ieee754 differential oracle. zk/compose is the only in-tree Noir tree that
-      # PROVES anything; zk/dual-leaf-v2 (the DualLeafV2 sentinel/constants mirror, no deps,
-      # imported by no member) is the one other in-tree Noir package and runs its nargo tests
-      # in this lane too.
+      # PROVES anything. This lane also tests the dual-leaf constants library and
+      # the separate credential suite library and ABI fixtures under zk/noir-query.
+      - "zk/noir-query/**"
       - "zk/compose/**"
       - "zk/dual-leaf-v2/**"
       - "bench/zk-compose/campaigns/**"
@@ -89,12 +91,14 @@ on:
   push:
     branches: [main]
     paths:
+      - "crates/sparq-merkle-suite/**"
       - "crates/sparq-zk/**"
       - "crates/sparq-zk-compose/**"
       - "crates/sparq-zk-query/**"
       - "zk/noir-query/**"
       # sq-5reoy: narrowed from zk/** to zk/compose/** (see the pull_request
       # paths note above — the ieee754/xpath trees moved to their face repos, #1599).
+      - "zk/noir-query/**"
       - "zk/compose/**"
       - "zk/dual-leaf-v2/**"
       - "bench/zk-compose/campaigns/**"
@@ -213,7 +217,7 @@ jobs:
               # ZK-relevant paths — SAME set as the pull_request/push paths filter.
               # sq-5reoy: zk/ narrowed to zk/compose/ (ieee754/xpath externalized, #1599).
               if printf '%s\n' "${changed}" | grep -Eq \
-                '^(crates/sparq-zk/|crates/sparq-zk-compose/|crates/sparq-zk-query/|zk/noir-query/|zk/compose/|zk/dual-leaf-v2/|bench/zk-compose/campaigns/|bench/zk-bindings/|crates/sparq-conformance/examples/proof_corpus\.rs$|zk/sparql-evaluator/model/|\.github/workflows/zk-toolchain\.yml$)'; then
+                '^(crates/sparq-merkle-suite/|zk/noir-query/|crates/sparq-zk/|crates/sparq-zk-compose/|zk/compose/|zk/dual-leaf-v2/|bench/zk-compose/campaigns/|bench/zk-bindings/|crates/sparq-conformance/examples/proof_corpus\.rs$|zk/sparql-evaluator/model/|\.github/workflows/zk-toolchain\.yml$|crates/sparq-zk-query/)'; then
                 zk=true
               else
                 zk=false
@@ -476,6 +480,13 @@ jobs:
           nargo test --package scan_v2dl_k1_n16_r4
           nargo test --package join_eq_v2dl_na16_nb16
 
+      - name: Run credential suite native, live witness and Noir unit checks
+        if: steps.changes.outputs.zk == 'true'
+        run: |
+          cargo test -p sparq-merkle-suite -- --test-threads=1
+          cd zk/noir-query/core
+          nargo test
+
       # The DualLeafV2 sentinel/constants mirror (zk/dual-leaf-v2). A separate Nargo
       # package on purpose: every *.nr under zk/compose is sha256-pinned by the
       # bench/zk-compose measurement evidence, whose verifier requires the measured
@@ -691,7 +702,7 @@ jobs:
       # the end of the job is what proves these tests ran.
       - name: Run the default-run live ZK tests (real nargo/bb)
         run: |
-          cargo test -p sparq-zk-compose -p sparq-zk -- --test-threads=1
+          cargo test -p sparq-zk-compose -p sparq-zk -p sparq-zk-query -- --test-threads=1
 
       # Rebuild the immutable foundation separately from the PR candidate.
       # This independently checks the provenance of all four legacy key goldens.
@@ -717,11 +728,14 @@ jobs:
           SPARQ_PUBLIC_PATTERN_EVIDENCE: ${{ runner.temp }}/public-pattern-evidence-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           cargo test -p sparq-zk-compose --features successful-results --lib result:: -- --include-ignored --test-threads=1 --skip result::proof_bindings::run_job
+          python3 bench/zk-compose/scripts/test_remeasure_result_evidence.py
+          python3 bench/zk-compose/scripts/result_method_keys.py --check
           python3 bench/zk-compose/campaigns/test_campaign.py
           cargo test -p sparq-zk-compose --features successful-results --example result_experiment
           cargo test -p sparq-zk-compose --features successful-results --lib driver::
           cd zk/compose
           nargo test --package sparq_zk_compose_core result::
+          nargo test --package sparq_zk_compose_core result_date::
           nargo test --package sparq_zk_compose_core result_integer::
           nargo test --package sparq_zk_compose_core result_signed_integer::
           nargo test --package sparq_zk_compose_core result_public::
@@ -759,11 +773,21 @@ jobs:
       # or workflow level, and on a non-bash `shell:` anywhere in this job. The ledger
       # proves each live body reached the call placed after its assertions; it does
       # not grade what those assertions check.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install the pinned query compiler agreement dependencies
+        run: npm ci --ignore-scripts --prefix zk/noir-query/compiler-agreement
       - name: Run the exact Noir query compiler contracts and corpus ratchet
         run: |
           set -euo pipefail
+          rustup target add wasm32-unknown-unknown
+          cargo check -p sparq-zk-query --target wasm32-unknown-unknown
+          cargo check -p sparq-zk-query --target wasm32-unknown-unknown --features ordered-json
           (cd zk/noir-query/core && nargo check && nargo test)
           (cd zk/noir-query/fixtures/generated_smoke && nargo check && nargo test)
+          python3 scripts/check-noir-dependency-aliases.py
+          node zk/noir-query/compiler-agreement/check.mjs --self-test
           cargo test -p sparq-zk-query -- --include-ignored --test-threads=1
 
       - name: Verify every live ZK test ran

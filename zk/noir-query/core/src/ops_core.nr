@@ -1,13 +1,14 @@
 //! Exact core table relations. Each expected row is constructed inside the gadget.
 
-use crate::table::{TermCell, Table, unbound, same_term, same_row, empty, append, canonicalize, check_table, assert_table, open_credential};
+use crate::table::{TermCell, Table, unbound, same_term, same_row, empty, append, canonicalize, check_table, assert_table, check_credential_cells};
 
 pub struct Dataset<let D: u32> {
     pub rows: [[TermCell; 3]; D],
     pub active: [bool; D],
+    pub graphs: [TermCell; D],
 }
 
-/// Stand-in dataset opening. Suite authentication is supplied by lane A.
+/// Supplied-cell assembly for isolated operator fixtures.
 pub fn open_dataset<let C: u32, let N: u32, let D: u32>(
     credentials: [[[TermCell; 4]; N]; C], counts: [u32; C], credential_count: u32,
     bounds: [u32; 3],
@@ -16,11 +17,11 @@ pub fn open_dataset<let C: u32, let N: u32, let D: u32>(
     assert((bounds[0] > 0) & (bounds[0] <= C), "credential request bound");
     assert((bounds[1] > 0) & (bounds[1] <= N), "quad request bound");
     assert(credential_count <= bounds[0], "credential count");
-    let mut dataset = Dataset {rows: [[unbound(); 3]; D], active: [false; D]};
+    let mut dataset = Dataset {rows: [[unbound(); 3]; D], active: [false; D], graphs: [unbound();D]};
     for c in 0..C {
         assert(counts[c] <= bounds[1], "quad count");
         assert((c < credential_count) | (counts[c] == 0), "credential padding count");
-        open_credential(credentials[c], counts[c], c);
+        check_credential_cells(credentials[c], counts[c], c);
         for n in 0..N {
             dataset.rows[c * N + n] = [credentials[c][n][0], credentials[c][n][1], credentials[c][n][2]];
             dataset.active[c * N + n] = n < counts[c];

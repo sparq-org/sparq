@@ -1,6 +1,5 @@
 {
   "schema": "sparq.exact-original-corpus.v1",
-  "authored_by": "GPT-6",
   "inputs": [
     {
       "path": "zk/sparql-evaluator/fixtures/conformance/cases.json",
@@ -20,9 +19,9 @@
     },
     {
       "path": "zk/sparql-evaluator/fixtures/conformance/numeric-capacity.json",
-      "sha256": "ce6057181771de5864f97cc8d0ddf6592e8b5f5954a2f771d3f5128726d48999",
+      "sha256": "947501a88e1a8f7d5a281b8709e66fc9c9aee1b0fe787346c5dfcd4f8d268788",
       "variables": null,
-      "cases": 21,
+      "cases": 28,
       "original_negative_cases": 21
     },
     {
@@ -42,18 +41,18 @@
     "sha256": "c02005b01f8af02470afa385248b326df3eebfaddf93ccfa1e6954d85b7772a0",
     "overrides": 3
   },
-  "cases": 319,
+  "cases": 326,
   "expected_jobs_per_backend": {
-    "exact_v1": 638,
-    "exact_v2": 638,
-    "exact_v3": 638
+    "exact_v1": 652,
+    "exact_v2": 652,
+    "exact_v3": 652
   },
   "expected_positives_per_backend": {
-    "exact_v1": 502,
-    "exact_v2": 508,
-    "exact_v3": 518
+    "exact_v1": 516,
+    "exact_v2": 522,
+    "exact_v3": 532
   },
-  "scope": "Native only; zero proofs. All original fixture objects and query bytes retained. Includes previously rejected MINUS/nullable originals now carrying their reviewed positive goldens; historical IDs and original objects retained explicitly in historical_promotions. Full W3C suite and execution variants remain separately configured.",
+  "scope": "Native only; zero proofs. All original query/data bytes retained; historical fixture objects are retained in historical_promotions. Includes previously rejected numeric-comparison/ordering and MINUS/nullable originals now carrying their reviewed positive goldens; historical IDs and original objects retained explicitly in historical_promotions. Full W3C suite and execution variants remain separately configured.",
   "historical_promotions": [
     {
       "source_commit": "a1dce9168de3c1fb03cdfed50d8c81f83ffcc232",
@@ -90,6 +89,76 @@
       },
       "current_id": "nullable-path-alternative-absent-constant",
       "interpretation": "Historical profile rejection retained for the old artifact; corrected current profile executes its reviewed positive golden for identical query/data."
+    },
+    {
+      "source_commit": "d03facadfc2d20bf122c30a1dda75e6b35ce43d1",
+      "original_fixture": {
+        "id": "decimal-alignment-overflow",
+        "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (COALESCE(\"0.0000000000000000000000000000000000000001\"^^xsd:decimal < 1, 0) AS ?v) {}",
+        "dataset_ntriples": ""
+      },
+      "current_id": "decimal-alignment-overflow",
+      "interpretation": "Historical numeric capacity rejection retained here; current exact comparison or ordering executes the positive golden for identical query/data. A separate bounded consumer retains typed capacity coverage."
+    },
+    {
+      "source_commit": "d03facadfc2d20bf122c30a1dda75e6b35ce43d1",
+      "original_fixture": {
+        "id": "seconds-numeric-consumer",
+        "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (COALESCE(SECONDS(\"2024-01-01T00:00:00.1234567890123456789012345678901234567890123Z\"^^xsd:dateTime) = 0.0, 0) AS ?v) {}",
+        "dataset_ntriples": ""
+      },
+      "current_id": "seconds-numeric-consumer",
+      "interpretation": "Historical numeric capacity rejection retained here; current exact comparison or ordering executes the positive golden for identical query/data. A separate bounded consumer retains typed capacity coverage."
+    },
+    {
+      "source_commit": "d03facadfc2d20bf122c30a1dda75e6b35ce43d1",
+      "original_fixture": {
+        "id": "stored-false-ask",
+        "query": "ASK {?s ?p ?n FILTER(?n < 0)}",
+        "dataset_ntriples": "<http://ex/s> <http://ex/p> \"9223372036854775808\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+      },
+      "current_id": "stored-false-ask",
+      "interpretation": "Historical numeric capacity rejection retained here; current exact comparison or ordering executes the positive golden for identical query/data. A separate bounded consumer retains typed capacity coverage."
+    },
+    {
+      "source_commit": "d03facadfc2d20bf122c30a1dda75e6b35ce43d1",
+      "original_fixture": {
+        "id": "stored-false-count",
+        "query": "SELECT (COUNT(*) AS ?v) {?s ?p ?n FILTER(?n = 0)}",
+        "dataset_ntriples": "<http://ex/s> <http://ex/p> \"9223372036854775808\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+      },
+      "current_id": "stored-false-count",
+      "interpretation": "Historical numeric capacity rejection retained here; current exact comparison or ordering executes the positive golden for identical query/data. A separate bounded consumer retains typed capacity coverage."
+    },
+    {
+      "source_commit": "d03facadfc2d20bf122c30a1dda75e6b35ce43d1",
+      "original_fixture": {
+        "id": "stored-order",
+        "query": "SELECT ?n {?s ?p ?n} ORDER BY ?n",
+        "dataset_ntriples": "<http://ex/s> <http://ex/p> \"9223372036854775808\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+      },
+      "current_id": "stored-order",
+      "interpretation": "Historical numeric capacity rejection retained here; current exact comparison or ordering executes the positive golden for identical query/data. A separate bounded consumer retains typed capacity coverage."
+    },
+    {
+      "source_commit": "d03facadfc2d20bf122c30a1dda75e6b35ce43d1",
+      "original_fixture": {
+        "id": "stored-topk",
+        "query": "SELECT ?n {?s ?p ?n} ORDER BY ?n LIMIT 1",
+        "dataset_ntriples": "<http://ex/s> <http://ex/p> \"9223372036854775808\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+      },
+      "current_id": "stored-topk",
+      "interpretation": "Historical numeric capacity rejection retained here; current exact comparison or ordering executes the positive golden for identical query/data. A separate bounded consumer retains typed capacity coverage."
+    },
+    {
+      "source_commit": "d03facadfc2d20bf122c30a1dda75e6b35ce43d1",
+      "original_fixture": {
+        "id": "stored-identity-equality",
+        "query": "SELECT ?n {?s ?p ?n FILTER(?n = ?n)}",
+        "dataset_ntriples": "<http://ex/s> <http://ex/p> \"9223372036854775808\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+      },
+      "current_id": "stored-identity-equality",
+      "interpretation": "Historical numeric capacity rejection retained here; current exact comparison or ordering executes the positive golden for identical query/data. A separate bounded consumer retains typed capacity coverage."
     }
   ]
 }

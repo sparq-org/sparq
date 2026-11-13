@@ -262,28 +262,28 @@ fn unused_index_is_zero() { ops_core::check_indices([1], 0); }
 
 fn credential_quad() -> [TermCell; 4] { [iri(1), iri(2), iri(3), unbound()] }
 #[test(should_fail_with = "credential capacity")]
-fn credential_opening_count_is_bounded() { crate::table::open_credential([credential_quad()], 2, 0); }
+fn credential_opening_count_is_bounded() { crate::table::check_credential_cells([credential_quad()], 2, 0); }
 #[test(should_fail_with = "credential padding")]
-fn credential_opening_cannot_hide_quads_in_padding() { crate::table::open_credential([credential_quad()], 0, 0); }
+fn credential_opening_cannot_hide_quads_in_padding() { crate::table::check_credential_cells([credential_quad()], 0, 0); }
 #[test(should_fail_with = "triple bound")]
 fn credential_opening_requires_bound_triple_positions() {
-    let mut quad = credential_quad(); quad[2] = unbound(); crate::table::open_credential([quad], 1, 0);
+    let mut quad = credential_quad(); quad[2] = unbound(); crate::table::check_credential_cells([quad], 1, 0);
 }
 #[test(should_fail_with = "triple positions")]
 fn credential_opening_requires_an_rdf_subject() {
-    let mut quad = credential_quad(); quad[0].kind = 3; crate::table::open_credential([quad], 1, 0);
+    let mut quad = credential_quad(); quad[0].kind = 3; crate::table::check_credential_cells([quad], 1, 0);
 }
 #[test(should_fail_with = "triple positions")]
 fn credential_opening_requires_an_iri_predicate() {
-    let mut quad = credential_quad(); quad[1].kind = 2; quad[1].scope = 1; crate::table::open_credential([quad], 1, 0);
+    let mut quad = credential_quad(); quad[1].kind = 2; quad[1].scope = 1; crate::table::check_credential_cells([quad], 1, 0);
 }
 #[test(should_fail_with = "credential named graph not yet supported")]
 fn credential_opening_refuses_named_graphs() {
-    let mut quad = credential_quad(); quad[3] = iri(4); crate::table::open_credential([quad], 1, 0);
+    let mut quad = credential_quad(); quad[3] = iri(4); crate::table::check_credential_cells([quad], 1, 0);
 }
 #[test(should_fail_with = "credential blank-node scope")]
 fn credential_opening_binds_blank_nodes_to_the_credential() {
-    let mut quad = credential_quad(); quad[0].kind = 2; quad[0].scope = 2; crate::table::open_credential([quad], 1, 0);
+    let mut quad = credential_quad(); quad[0].kind = 2; quad[0].scope = 2; crate::table::check_credential_cells([quad], 1, 0);
 }
 #[test(should_fail_with = "credential request bound")]
 fn dataset_credential_bound_is_positive() {
@@ -321,7 +321,12 @@ fn filter_keeps_only_non_error_true_roots() {
 fn slice_handles_an_offset_beyond_the_input() { ops_core::slice(two(), 100, false, 0, empty::<4,1>()); }
 
 fn expression_cell(class: u8, key: Field, enc: Field) -> TermCell {
-    TermCell {bound:true, kind:3, enc, key_class:class, key: key + class as Field * 0x1000000000000000000000000000000000000000000000000000000000000, dt:0, lang:0, scope:0}
+    let payload = if class == 1 {
+        0x800000000000000000000000000000000000000000000000000000000000 + key * 1000000000000000000
+    } else if (class == 5) | (class == 6) {
+        key * 0x10000000000000000000000000000000000000000000000000000000000
+    } else { key };
+    TermCell {bound:true, kind:3, enc, key_class:class, key: payload + class as Field * 0x1000000000000000000000000000000000000000000000000000000000000, dt:0, lang:0, scope:0}
 }
 fn expr_step(op: u8, a: u32, b: u32, parameter: u32, comparison: u8) -> crate::ops_core_expr::Step {
     crate::ops_core_expr::Step {op, a, b, parameter, comparison}
@@ -352,7 +357,7 @@ fn expression_error_lane_cannot_be_forced_low() {
 #[test]
 fn expression_key_comparison_includes_boundaries() {
     for class in [1,3,4,5,6,8] {
-        let a=expression_cell(class,2,11); let b=expression_cell(class,3,12);
+        let a=expression_cell(class,if class == 5 {0} else {2},11); let b=expression_cell(class,if class == 5 {1} else {3},12);
         for op in 0..5 {
             let unequal=crate::ops_core_expr::evaluate(Table {rows:[[a]],len:1},[b],
                 [expr_step(0,0,0,0,0),expr_step(1,0,0,0,0),expr_step(2,0,1,0,op as u8)]);
@@ -404,7 +409,7 @@ fn expression_cannot_reference_a_future_step() {
 #[test(should_fail_with = "expression opcode")]
 fn expression_refuses_unknown_instructions() {
     let _result=crate::ops_core_expr::evaluate(Table {rows:[[unbound()]],len:1},[unbound()],
-        [expr_step(7,0,0,0,0),expr_step(6,0,0,0,0)]);
+        [expr_step(7,0,0,0,0),expr_step(9,0,0,0,0)]);
 }
 
 #[test(should_fail_with = "operator length")]
@@ -485,4 +490,166 @@ fn overflow_cannot_be_hidden_by_a_full_truncated_output() {
 fn slice_public_indices_do_not_wrap() {
     ops_core::slice(two(),0xffffffff,true,0xffffffff,empty::<4,1>());
     ops_core::slice(two(),0,true,0xffffffff,two());
+}
+
+#[test(should_fail_with = "row request bound")]
+fn request_row_bound_is_positive_even_for_an_empty_table() {
+    ops_core::check_bound(empty::<1,1>(),0);
+}
+
+#[test]
+fn expression_effective_boolean_value_uses_the_suite_key_prefix() {
+    let zero: Field = 0x1800000000000000000000000000000000000000000000000000000000000;
+    let mut numeric=expression_cell(1,0,11);numeric.key=zero;
+    let result=crate::ops_core_expr::evaluate(Table{rows:[[numeric]],len:1},[unbound()],[expr_step(0,0,0,0,0)]);
+    assert(!result[0].value & !result[0].is_error);
+    numeric.key=zero+1;
+    let result=crate::ops_core_expr::evaluate(Table{rows:[[numeric]],len:1},[unbound()],[expr_step(0,0,0,0,0)]);
+    assert(result[0].value & !result[0].is_error);
+    for class in [5,6] {
+        let cell=expression_cell(class,0,11);
+        let result=crate::ops_core_expr::evaluate(Table{rows:[[cell]],len:1},[unbound()],[expr_step(0,0,0,0,0)]);
+        assert(!result[0].value & !result[0].is_error);
+    }
+}
+
+#[test(should_fail_with = "language-tagged effective boolean value not yet supported")]
+fn expression_refuses_pending_language_tagged_ebv() {
+    let mut cell=expression_cell(0,0,11);cell.dt=crate::suite_constants::DT_LANGSTRING;
+    let _result=crate::ops_core_expr::evaluate(Table{rows:[[cell]],len:1},[unbound()],[expr_step(0,0,0,0,0)]);
+}
+
+#[test(should_fail_with = "membership comparison instruction")]
+fn expression_membership_cannot_select_a_different_relation() {
+    let _ = crate::ops_core_expr::evaluate(Table {rows:[[expression_cell(1,0,1)]],len:1},
+        [expression_cell(1,1,2)], [expr_step(0,0,0,0,0),expr_step(1,0,0,0,0),expr_step(6,0,1,0,1)]);
+}
+#[test]
+fn expression_unbound_comparison_keeps_its_error() {
+    let result = crate::ops_core_expr::evaluate(Table {rows:[[unbound()]],len:1},
+        [expression_cell(0x7f,0,1)], [expr_step(0,0,0,0,0),expr_step(1,0,0,0,0),expr_step(2,0,1,0,0)]);
+    assert(!result[0].value & result[0].is_error);
+}
+
+fn bounded_membership(value:TermCell, parameters:[TermCell;16], count:u32) -> ops_core::Boolean {
+    crate::ops_core_expr::evaluate_indexed(Table {rows:[[value]],len:1},parameters,[count],
+        [expr_step(0,0,0,0,0),expr_step(8,0,0,0,0)])[0]
+}
+#[test]
+fn membership_public_length_selects_exactly_the_active_prefix() {
+    let zero=expression_cell(1,0,11);let one=expression_cell(1,1,12);
+    let mut parameters=[zero;16];parameters[0]=one;
+    let empty=bounded_membership(zero,parameters,0);
+    assert(!empty.value & !empty.is_error);
+    let absent=bounded_membership(zero,parameters,1);
+    assert(!absent.value & !absent.is_error);
+    let present=bounded_membership(zero,parameters,2);
+    assert(present.value & !present.is_error);
+    let first=bounded_membership(one,parameters,1);
+    assert(first.value & !first.is_error);
+}
+#[test]
+fn membership_uses_the_final_list_slot() {
+    let mut parameters=[expression_cell(1,0,11);16];
+    parameters[15]=expression_cell(1,7,12);
+    let result=bounded_membership(parameters[15],parameters,16);
+    assert(result.value & !result.is_error);
+}
+#[test]
+fn membership_empty_and_unbound_error_channels_are_distinct() {
+    let parameters=[expression_cell(1,0,11);16];
+    let empty=bounded_membership(unbound(),parameters,0);
+    assert(!empty.value & !empty.is_error);
+    let nonempty=bounded_membership(unbound(),parameters,1);
+    assert(!nonempty.value & nonempty.is_error);
+}
+#[test(should_fail_with = "IN list capacity")]
+fn membership_cannot_claim_more_than_its_list_bucket() {
+    let _=bounded_membership(expression_cell(1,0,11),[expression_cell(1,0,11);16],17);
+}
+#[test(should_fail_with = "IN length parameter")]
+fn membership_length_index_is_checked() {
+    let _=crate::ops_core_expr::evaluate_indexed(Table {rows:[[unbound()]],len:1},[unbound();16],[0],
+        [expr_step(0,0,0,0,0),expr_step(8,0,1,0,0)]);
+}
+#[test(should_fail_with = "IN term parameters")]
+fn membership_term_range_is_checked() {
+    let _=crate::ops_core_expr::evaluate_indexed(Table {rows:[[unbound()]],len:1},[unbound();16],[0],
+        [expr_step(0,0,0,0,0),expr_step(8,0,0,1,0)]);
+}
+#[test(should_fail_with = "IN exact result")]
+fn membership_cannot_release_a_match_from_inactive_padding() {
+    let mut parameters=[expression_cell(1,0,11);16];parameters[0]=expression_cell(1,1,12);
+    let result=bounded_membership(parameters[1],parameters,1);
+    assert(result.value,"IN exact result");
+}
+
+fn mixed_string_equality(a:TermCell,b:TermCell) -> ops_core::Boolean {
+    crate::ops_core_expr::evaluate(Table {rows:[[a]],len:1},[b],
+        [expr_step(0,0,0,0,0),expr_step(1,0,0,0,0),expr_step(2,0,1,0,0)])[0]
+}
+fn plain_string_cell(class:u8) -> TermCell {
+    let mut cell=expression_cell(class,1,11);cell.dt=crate::suite_constants::DT_STRING;cell
+}
+#[test]
+fn expression_plain_and_language_string_equality_uses_its_type_class() {
+    let mut language=expression_cell(0,0,12);
+    language.dt=crate::suite_constants::DT_LANGSTRING;language.lang=7;
+    for plain in [plain_string_cell(6),plain_string_cell(7)] {
+        for pair in [[plain,language],[language,plain]] {
+            let result=mixed_string_equality(pair[0],pair[1]);
+            assert(!result.value & !result.is_error);
+        }
+    }
+}
+#[test]
+fn expression_string_numeric_equality_preserves_type_error() {
+    for plain in [plain_string_cell(6),plain_string_cell(7)] {
+        for pair in [[plain,expression_cell(1,1,12)],[expression_cell(1,1,12),plain]] {
+            let result=mixed_string_equality(pair[0],pair[1]);
+            assert(!result.value & result.is_error);
+        }
+    }
+}
+#[test]
+fn expression_string_date_equality_preserves_type_error() {
+    for plain in [plain_string_cell(6),plain_string_cell(7)] {
+        let result=mixed_string_equality(plain,expression_cell(8,1,12));
+        assert(!result.value & result.is_error);
+    }
+}
+#[test]
+fn expression_string_boolean_equality_preserves_type_error() {
+    let result=mixed_string_equality(plain_string_cell(7),expression_cell(5,1,12));
+    assert(!result.value & result.is_error);
+}
+#[test]
+fn expression_string_iri_equality_is_false_without_error() {
+    let result=mixed_string_equality(plain_string_cell(7),iri(12));
+    assert(!result.value & !result.is_error);
+}
+#[test]
+fn expression_language_string_equality_preserves_term_identity() {
+    let mut a=expression_cell(0,0,11);a.dt=crate::suite_constants::DT_LANGSTRING;a.lang=7;
+    let mut b=a;b.enc=12;
+    let equal=mixed_string_equality(a,a);let different=mixed_string_equality(a,b);
+    assert(equal.value & !equal.is_error);assert(!different.value & !different.is_error);
+}
+
+#[test]
+fn expression_padding_does_not_evaluate_values() {
+    let huge=expression_cell(1,1000000000000000000,11);
+    let result=crate::ops_core_expr::evaluate(empty::<2,1>(),[huge],[expr_step(1,0,0,0,0)]);
+    assert(!result[0].value & result[0].is_error);
+    assert(!result[1].value & result[1].is_error);
+}
+#[test(should_fail_with="expression capacity")]
+fn expression_active_rows_keep_their_value_capacity() {
+    let huge=expression_cell(1,1000000000000000000,11);
+    let _result=crate::ops_core_expr::evaluate(Table {rows:[[unbound()]],len:1},[huge],[expr_step(1,0,0,0,0)]);
+}
+#[test(should_fail_with="expression opcode")]
+fn expression_empty_input_still_checks_its_instruction_structure() {
+    let _result=crate::ops_core_expr::evaluate(empty::<2,1>(),[unbound()],
+        [expr_step(7,0,0,0,0),expr_step(9,0,0,0,0)]);
 }

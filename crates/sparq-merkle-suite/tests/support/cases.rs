@@ -172,6 +172,45 @@ pub fn cases() -> Vec<Case> {
             ));
         }
     }
+    for (dt, left, right) in [
+        ("byte", "127", "128"),
+        ("byte", "-128", "-129"),
+        ("short", "32767", "32768"),
+        ("short", "-32768", "-32769"),
+        ("int", "2147483647", "2147483648"),
+        ("int", "-2147483648", "-2147483649"),
+        ("long", "9223372036854775807", "9223372036854775808"),
+        ("long", "-9223372036854775808", "-9223372036854775809"),
+        ("unsignedByte", "255", "256"),
+        ("unsignedShort", "65535", "65536"),
+        ("unsignedInt", "4294967295", "4294967296"),
+        (
+            "unsignedLong",
+            "18446744073709551615",
+            "18446744073709551616",
+        ),
+        ("nonPositiveInteger", "0", "1"),
+        ("negativeInteger", "-1", "0"),
+        ("nonNegativeInteger", "0", "-1"),
+        ("positiveInteger", "1", "0"),
+        (
+            "dateTime",
+            "2026-01-01T01:00:00+01:00",
+            "2026-01-01T00:00:00Z",
+        ),
+        (
+            "dateTime",
+            "2026-01-01T01:00:00-01:00",
+            "2026-01-01T00:00:00Z",
+        ),
+        (
+            "dateTime",
+            "2026-01-01T00:00:00.001Z",
+            "2026-01-01T00:00:00.002Z",
+        ),
+    ] {
+        literals.push((dt, typed(left, dt), typed(right, dt)));
+    }
     let graph = sparq_core::Graph::new();
     literals
         .into_iter()
@@ -257,12 +296,14 @@ pub fn fixtures() -> std::collections::BTreeMap<(String, usize), Vec<serde_json:
             ),
         ] {
             let len = literal.value().len();
-            let bucket = if len <= 32 {
-                32
-            } else if len <= 128 {
-                128
+            let [short, medium, long] = sparq_merkle_suite::metadata::LEXICAL_BUCKETS;
+            assert!(len <= long);
+            let bucket = if len <= short {
+                short
+            } else if len <= medium {
+                medium
             } else {
-                512
+                long
             };
             let mut bytes = literal.value().as_bytes().to_vec();
             bytes.resize(bucket, 0);

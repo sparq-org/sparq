@@ -1,5 +1,5 @@
 //! Bounded, canonically ordered tables for the research query method.
-//! The term declaration and credential opening below are stand-ins pending lane A.
+//! Cells enter the proof path through the authenticated suite adapter.
 
 pub struct TermCell {
     pub bound: bool,
@@ -109,9 +109,8 @@ pub fn assert_table<let R: u32, let V: u32>(expected: Table<R, V>, out: Table<R,
     for i in 0..R { assert(equal_row(expected.rows[i], out.rows[i]), "operator rows"); }
 }
 
-/// STAND-IN: cells are supplied as given. This does not authenticate credentials.
-/// Replaced by lane A's suite opening before the query method leaves draft.
-pub fn open_credential<let N: u32>(quads: [[TermCell; 4]; N], len: u32, credential_index: u32) {
+/// Validate supplied operator-fixture cells. Authentication is a separate entry point.
+pub fn check_credential_cells<let N: u32>(quads: [[TermCell; 4]; N], len: u32, credential_index: u32) {
     assert(len <= N, "credential capacity");
     for i in 0..N {
         for p in 0..4 {

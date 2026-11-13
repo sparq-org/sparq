@@ -319,3 +319,57 @@ fn graph_single(out: &Json) -> &Json {
         None => out,
     }
 }
+
+#[test]
+fn legacy_property_iri_can_become_a_compact_iri_in_the_frame() {
+    let input = r#"{
+        "@context": {
+            "rel:creator": {"@type": "@id"},
+            "ex": "https://example.com/"
+        },
+        "@id": "ex:asset",
+        "@type": "ex:Asset",
+        "rel:creator": {"ex:name": "John Doe"}
+    }"#;
+    let frame_doc = r#"{
+        "@context": {
+            "rel": "https://example.com/relations/",
+            "rel:creator": {"@type": "@id"},
+            "ex": "https://example.com/"
+        },
+        "@id": "ex:asset",
+        "@type": "ex:Asset",
+        "rel:creator": {}
+    }"#;
+    // Repeat across modes so a cached context cannot hide the mode distinction.
+    for mode in [
+        ProcessingMode::JsonLd10,
+        ProcessingMode::JsonLd11,
+        ProcessingMode::JsonLd10,
+    ] {
+        let mut options = JsonLdOptions::default();
+        options.processing_mode = mode;
+        let result = run_opts(input, frame_doc, &options, &FrameOptions::default());
+        if mode == ProcessingMode::JsonLd11 {
+            assert_eq!(
+                result.unwrap_err().code(),
+                JsonLdErrorCode::IriConfusedWithPrefix
+            );
+        } else {
+            let output = result.expect("legacy property conflict frames successfully");
+            let node = graph_single(&output);
+            assert_eq!(node.get("@id").and_then(Json::as_str), Some("ex:asset"));
+            assert_eq!(node.get("@type").and_then(Json::as_str), Some("ex:Asset"));
+            let creator = node.get("rel:creator").expect("embedded creator");
+            assert!(creator
+                .get("@id")
+                .and_then(Json::as_str)
+                .unwrap()
+                .starts_with("_:"));
+            assert_eq!(
+                creator.get("ex:name").and_then(Json::as_str),
+                Some("John Doe")
+            );
+        }
+    }
+}

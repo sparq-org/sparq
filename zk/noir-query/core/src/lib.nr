@@ -8,6 +8,12 @@ mod term_float;
 mod suite_tests;
 pub mod suite_entry;
 
+mod term_bytes;
+mod term_ids;
+pub mod suite_metadata;
+mod suite_metadata_tests;
+mod suite_entry_tests;
+
 pub mod table;
 pub mod ops_core;
 pub mod ops_core_expr;
@@ -33,3 +39,17 @@ pub mod ops_closed_arith_standin;
 mod ops_closed_plan_tests;
 pub mod ops_closed_opening;
 pub mod ops_closed_issuer_standin;
+
+pub mod expr_term_contract;
+pub mod expr_core;
+pub mod expr_compare;
+pub mod expr_arith;
+mod expr_tests;
+// The pass-two function files are retained but are not wired into this package yet.
+pub mod expr_to_term;
+pub mod expr_open;
+mod expr_binding_tests;
+mod expr_target_tests;
+mod expr_open_tests;
+
+pub mod ops_core_profile;

@@ -1,7 +1,7 @@
 //! Credential-suite adapter. Authentication and term encodings have one source.
 
 use crate::{
-    interp::{Cell, CredentialCells, EncodeTerm, Word},
+    interp::{Cell, CredentialCells, Dataset, EncodeTerm, Word},
     Error,
 };
 use oxrdf::{GraphName, Quad, Term};
@@ -16,6 +16,11 @@ use sparq_zk::{
 pub const ISSUER_DEPTH: u32 = 4;
 /// Opened lexical capacity of the initial query profile.
 pub const LEXICAL_CAPACITY: usize = 32;
+/// Creation and verification-method opening capacities.
+pub const CREATION_CAPACITY: usize = 32;
+pub const METHOD_CAPACITY: usize = 128;
+/// Reserved method-generated issuer assertion predicate.
+pub const VERIFIED_ISSUER: &str = "https://w3id.org/sparq/vcq#verifiedIssuer";
 pub(crate) const DATASET_DOMAIN: &[u8; 16] = b"NQ/SUITE/V1\0\0\0\0\0";
 
 /// Fixed suite encoding for request parameters and released RDF terms.
@@ -62,8 +67,16 @@ impl Credential {
         {
             return Err(Error::Invalid("issuer membership shape".into()));
         }
+        let scope = credential_index
+            .checked_add(1)
+            .ok_or_else(|| Error::Capacity("credential scope".into()))?;
         let mut quads = vec![];
         for quad in self.quads()? {
+            if quad.predicate.as_str() == VERIFIED_ISSUER {
+                return Err(Error::Excluded(
+                    "credential verifiedIssuer assertion".into(),
+                ));
+            }
             if quad.graph_name != GraphName::DefaultGraph {
                 return Err(Error::Unsupported("credential named graph".into()));
             }
@@ -96,7 +109,7 @@ impl Credential {
                     }
                 }
             }
-            let encoded = suite::quad_cells(&quad, credential_index + 1).map_err(suite_error)?;
+            let encoded = suite::quad_cells(&quad, scope).map_err(suite_error)?;
             quads.push([
                 cell(encoded[0].clone()),
                 cell(encoded[1].clone()),
@@ -112,14 +125,22 @@ impl Credential {
             .map(|q| q.map_err(|e| Error::Invalid(e.to_string())))
             .collect()
     }
-    pub fn signed_message(&self) -> Fr {
+    pub fn metadata(&self) -> Result<sparq_merkle_suite::metadata::Metadata, Error> {
+        sparq_merkle_suite::metadata::from_configuration(
+            &self.credential.proof_config,
+            &self.issuer,
+        )
+        .map_err(suite_error)
+    }
+    pub fn signed_message(&self) -> Result<Fr, Error> {
         let config: [u8; 32] = Sha256::digest(self.credential.proof_config.as_bytes()).into();
-        suite::signed_message(
+        Ok(suite::signed_message(
             self.credential.salt,
             self.credential.count,
             self.credential.root,
             &config,
-        )
+            self.metadata()?.digest,
+        ))
     }
     pub fn issuer_root(&self) -> Result<Word, Error> {
         let mut node =
@@ -140,14 +161,77 @@ impl Credential {
     }
 }
 
+/// Presentation-local graph identity from the suite's shared constructor.
+pub fn credential_graph(request_digest: Word, index: u32) -> Result<Cell, Error> {
+    let request = [
+        u128::from_be_bytes(request_digest[..16].try_into().unwrap()),
+        u128::from_be_bytes(request_digest[16..].try_into().unwrap()),
+    ];
+    Ok(cell(
+        sparq_merkle_suite::metadata::graph_name(request, index).map_err(suite_error)?,
+    ))
+}
+
+/// Assemble credential graph views and default issuer assertions.
+/// The envelope supplies issuer cells authenticated against the stored trust set.
+pub fn assemble_dataset(
+    credentials: &[CredentialCells],
+    issuers: &[Cell],
+    request_digest: Word,
+) -> Result<Dataset, Error> {
+    if credentials.len() != issuers.len() {
+        return Err(Error::Invalid("verified issuer count".into()));
+    }
+    let predicate =
+        SuiteEncoder.encode(&oxrdf::NamedNode::new_unchecked(VERIFIED_ISSUER).into())?;
+    let mut quads = vec![];
+    let mut counts = vec![];
+    for (i, (credential, issuer)) in credentials.iter().zip(issuers).enumerate() {
+        issuer.validate()?;
+        if !issuer.bound || issuer.kind != 1 {
+            return Err(Error::Invalid("verified issuer is an IRI".into()));
+        }
+        let graph = credential_graph(
+            request_digest,
+            u32::try_from(i).map_err(|_| Error::Capacity("credential scope".into()))?,
+        )?;
+        counts.push(credential.quads.len());
+        for quad in &credential.quads {
+            for cell in quad {
+                cell.validate()?;
+            }
+            if quad[3].bound {
+                return Err(Error::Unsupported("credential named graph".into()));
+            }
+            if quad[1].enc == predicate.enc {
+                return Err(Error::Excluded(
+                    "credential verifiedIssuer assertion".into(),
+                ));
+            }
+            if quad[..3].iter().any(|c| !c.bound) || quad[0].kind == 3 || quad[1].kind != 1 {
+                return Err(Error::Invalid("RDF triple positions".into()));
+            }
+            if quad[..3]
+                .iter()
+                .any(|c| c.kind == 2 && c.scope != graph.scope)
+            {
+                return Err(Error::Invalid("credential blank-node scope".into()));
+            }
+            quads.push([quad[0], quad[1], quad[2], graph]);
+        }
+        quads.push([graph, predicate, *issuer, Cell::default()]);
+    }
+    Ok(Dataset { quads, counts })
+}
+
 /// Salted commitment to the ordered, authenticated suite messages.
-pub fn dataset_commitment(credentials: &[Credential], salt: Word) -> Word {
+pub fn dataset_commitment(credentials: &[Credential], salt: Word) -> Result<Word, Error> {
     let mut bytes = DATASET_DOMAIN.to_vec();
     bytes.extend(salt);
     for credential in credentials {
-        bytes.extend(suite::field_bytes(credential.signed_message()));
+        bytes.extend(suite::field_bytes(credential.signed_message()?));
     }
-    Sha256::digest(bytes).into()
+    Ok(Sha256::digest(bytes).into())
 }
 
 pub(crate) fn field(word: Word) -> Result<Fr, Error> {

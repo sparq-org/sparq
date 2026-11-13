@@ -131,6 +131,12 @@ differential-smoke = ["sparq-core", "sparq-engine", "sparq-bench"]
 pattern = "zk/sparql-evaluator/fixtures/conformance/raw-literal-whitespace.json"
 crates = ["sparq-engine"]
 
+# The JS result package's compiled circuit artifacts are read by the wasm
+# crate's ABI test (include_str!), so an artifact change re-runs it.
+[[map]]
+pattern = "js/zk-result/assets/**"
+crates = ["sparq-zk-result-wasm"]
+
 [[map]]
 pattern = "AGENTS.md"
 crates = ["sparq-kb"]
@@ -241,6 +247,56 @@ crates = ["sparq-zk-compose"]
 # must re-run sparq-zk-compose.
 [[map]]
 pattern = "zk/compose/compose_core/src/result_m5.nr"
+crates = ["sparq-zk-compose"]
+
+# The hidden-integer wrapper pin reads each member's main.nr with include_str!,
+# so a change to any compared source must re-run sparq-zk-compose.
+[[map]]
+pattern = "zk/compose/result_v2_k1_n16_p3_r4_f2_i64_d10/src/main.nr"
+crates = ["sparq-zk-compose"]
+
+[[map]]
+pattern = "zk/compose/result_v5_k1_n16_p3_r4_f2_i64_d10/src/main.nr"
+crates = ["sparq-zk-compose"]
+
+[[map]]
+pattern = "zk/compose/result_v2_k1_n16_p3_r4_f2_i64_d17/src/main.nr"
+crates = ["sparq-zk-compose"]
+
+[[map]]
+pattern = "zk/compose/result_v5_k1_n16_p3_r4_f2_i64_d17/src/main.nr"
+crates = ["sparq-zk-compose"]
+
+[[map]]
+pattern = "zk/compose/result_v2_k1_n16_p3_r4_f2_i64_d20/src/main.nr"
+crates = ["sparq-zk-compose"]
+
+[[map]]
+pattern = "zk/compose/result_v5_k1_n16_p3_r4_f2_i64_d20/src/main.nr"
+crates = ["sparq-zk-compose"]
+
+[[map]]
+pattern = "zk/compose/result_v2_k2_n16_p3_r4_f2_i64_d10/src/main.nr"
+crates = ["sparq-zk-compose"]
+
+[[map]]
+pattern = "zk/compose/result_v5_k2_n16_p3_r4_f2_i64_d10/src/main.nr"
+crates = ["sparq-zk-compose"]
+
+[[map]]
+pattern = "zk/compose/result_v2_k2_n16_p3_r4_f2_i64_d17/src/main.nr"
+crates = ["sparq-zk-compose"]
+
+[[map]]
+pattern = "zk/compose/result_v5_k2_n16_p3_r4_f2_i64_d17/src/main.nr"
+crates = ["sparq-zk-compose"]
+
+[[map]]
+pattern = "zk/compose/result_v2_k2_n16_p3_r4_f2_i64_d20/src/main.nr"
+crates = ["sparq-zk-compose"]
+
+[[map]]
+pattern = "zk/compose/result_v5_k2_n16_p3_r4_f2_i64_d20/src/main.nr"
 crates = ["sparq-zk-compose"]
 
 # sq-j506: the value-obligation diagnostic tests (crates/sparq-zk-compose/src/
@@ -450,8 +506,25 @@ crates = ["sparq-zk-query"]
 
 [[map]]
 pattern = "zk/compose/compose_core/**"
-readers = ["sparq-zk-query"]
+readers = ["sparq-zk-query", "sparq-merkle-suite"]
 
 [[map]]
 pattern = "zk/dual-leaf-v2/**"
 readers = ["sparq-zk-query"]
+
+# sparq-merkle-suite's parity test compiles the frozen zkVM model's SHA-256 suite
+# source and reads its vectors, so a change to either re-runs the parity test.
+[[map]]
+pattern = "zk/sparql-evaluator/model/src/merkle_suite.rs"
+crates = ["sparq-merkle-suite"]
+
+[[map]]
+pattern = "zk/sparql-evaluator/model/tests/merkle_suite.rs"
+crates = ["sparq-merkle-suite"]
+
+# sparq-merkle-suite's and sparq-zk-query's live tests compile generated programs
+# against compose_core and pass its root to nargo as a path dependency. The directory entry attributes the library root the tests name; the shared readers
+# entry above unions the crate into the run set for every file beneath it.
+[[map]]
+pattern = "zk/compose/compose_core"
+crates = ["sparq-zk-query", "sparq-merkle-suite"]

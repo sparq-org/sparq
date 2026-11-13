@@ -1,4 +1,6 @@
-#[path = "support/mod.rs"]
+#[path = "support/authenticated.rs"]
+mod authenticated;
+#[path = "support/fixture.rs"]
 mod fixture_support;
 #[path = "../../sparq-zk-compose/tests/support/mod.rs"]
 mod support;
@@ -270,8 +272,11 @@ fn seeded_engine_interpreter_and_circuit_differential() {
     let seeds = std::env::var("SPARQ_NOIR_QUERY_SEED")
         .map(|s| vec![s.parse().expect("integer seed")])
         .unwrap_or_else(|_| vec![0, 1, 7, 41, 893, 1201]);
+    let mut workspaces = std::collections::BTreeMap::new();
     for seed in seeds {
-        let (rdf, data, _) = fixture_support::generated_dataset(seed);
+        let (rdf, _, _) = fixture_support::generated_dataset(seed);
+        let credentials = vec![authenticated::sign(&rdf, seed)];
+        let data = vec![credentials[0].cells(0).unwrap()];
         for query in fixture_support::DIFFERENTIAL_QUERIES {
             let plan = lower(
                 query,
@@ -284,11 +289,20 @@ fn seeded_engine_interpreter_and_circuit_differential() {
             .unwrap();
             let trace = evaluate(&plan, &data, &FixtureEncoder).unwrap();
             fixture_support::assert_engine(query, &rdf, &trace.result);
-            let package = generate(&plan).unwrap();
-            let workspace = Workspace::new(&package);
+            let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+            let workspace = workspaces
+                .entry(plan.hash())
+                .or_insert_with(|| Workspace::new(&package));
             let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
-            let input =
-                prover_toml(&plan, &data, &FixtureEncoder, &trace, [7; 32], [3; 32]).unwrap();
+            let input = sparq_zk_query::witness::prover_toml_authenticated(
+                &plan,
+                &credentials,
+                &trace,
+                [7; 32],
+                [3; 32],
+                authenticated::issuer_root(),
+            )
+            .unwrap();
             driver
                 .execute(&input, "differential")
                 .unwrap_or_else(|e| panic!("seed={seed}, {query}: {e}"));
@@ -300,9 +314,15 @@ fn seeded_engine_interpreter_and_circuit_differential() {
                     } else {
                         altered.tables[node].rows.remove(row);
                     }
-                    let input =
-                        prover_toml(&plan, &data, &FixtureEncoder, &altered, [7; 32], [3; 32])
-                            .unwrap();
+                    let input = sparq_zk_query::witness::prover_toml_authenticated(
+                        &plan,
+                        &credentials,
+                        &altered,
+                        [7; 32],
+                        [3; 32],
+                        authenticated::issuer_root(),
+                    )
+                    .unwrap();
                     assert!(
                         driver.execute(&input, "altered_row").is_err(),
                         "seed={seed}, {query}, table={node}, row={row}"
@@ -318,5 +338,171 @@ fn seeded_engine_interpreter_and_circuit_differential() {
             );
         }
     }
+    support::complete(gate);
+}
+
+#[test]
+#[ignore = "requires the pinned native query toolchain"]
+fn constant_membership_length_is_data_and_inactive_values_cannot_match() {
+    use sparq_zk_query::{
+        codegen::generate_operator_fixture,
+        interp::{CredentialCells, ResultValue},
+    };
+    let Some(gate) = support::gate(
+        "constant_membership_length_is_data_and_inactive_values_cannot_match",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
+    let b = Bounds {
+        credentials: 1,
+        quads_per_credential: 4,
+        rows_per_table: 2,
+    };
+    let a = lower("ASK {?s <urn:p> ?x FILTER(?x IN(7,0))}", b).unwrap();
+    let short = lower("ASK {?s <urn:p> ?x FILTER(?x IN(7))}", b).unwrap();
+    let package = generate_operator_fixture(&a).unwrap();
+    assert_eq!(a.hash(), short.hash());
+    assert_eq!(package, generate_operator_fixture(&short).unwrap());
+    let data = vec![CredentialCells {
+        quads: vec![fixture_support::quad(
+            &fixture_support::iri("urn:s"),
+            &fixture_support::iri("urn:p"),
+            &fixture_support::integer(0),
+        )],
+    }];
+    let yes = sparq_zk_query::interp::evaluate(&a, &data, &FixtureEncoder).unwrap();
+    let no = sparq_zk_query::interp::evaluate(&short, &data, &FixtureEncoder).unwrap();
+    assert_eq!(yes.result, ResultValue::Ask(true));
+    assert_eq!(no.result, ResultValue::Ask(false));
+    let workspace = Workspace::new(&package);
+    let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+    for (plan, trace, tag) in [
+        (&a, &yes, "active_suffix"),
+        (&short, &no, "inactive_suffix"),
+    ] {
+        let input = sparq_zk_query::witness::prover_toml(
+            plan,
+            &data,
+            &FixtureEncoder,
+            trace,
+            [7; 32],
+            [3; 32],
+        )
+        .unwrap();
+        driver.execute(&input, tag).unwrap();
+    }
+    // The parameter cells are identical; only the stored list length changes.
+    // Rebind the complete statement while retaining the incompatible old trace.
+    let altered = sparq_zk_query::witness::prover_toml(
+        &short,
+        &data,
+        &FixtureEncoder,
+        &yes,
+        [7; 32],
+        [3; 32],
+    )
+    .unwrap();
+    let error = driver.execute(&altered, "inactive_match").unwrap_err();
+    assert!(error.to_string().contains("operator length"), "{error}");
+    support::complete(gate);
+}
+
+#[test]
+#[ignore = "requires the pinned native query toolchain"]
+fn mixed_string_classes_execute_and_refuse_rebound_wrong_traces() {
+    let Some(gate) = support::gate(
+        "mixed_string_classes_execute_and_refuse_rebound_wrong_traces",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
+    let bounds = Bounds {
+        credentials: 1,
+        quads_per_credential: 4,
+        rows_per_table: 2,
+    };
+    let cases = fixture_support::mixed_string_queries();
+    let traces = cases
+        .iter()
+        .map(|(query, expected)| {
+            let plan = lower(query, bounds).unwrap();
+            let trace = evaluate(&plan, &[], &FixtureEncoder).unwrap();
+            assert_eq!(trace.result, ResultValue::Ask(*expected), "{query}");
+            fixture_support::assert_engine(query, "", &trace.result);
+            (plan, trace)
+        })
+        .collect::<Vec<_>>();
+    let package = generate(&traces[0].0).unwrap();
+    let workspace = Workspace::new(&package);
+    let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+    for (i, (plan, trace)) in traces.iter().enumerate() {
+        assert_eq!(generate(plan).unwrap(), package);
+        let input = prover_toml(plan, &[], &FixtureEncoder, trace, [7; 32], [3; 32]).unwrap();
+        driver.execute(&input, &format!("honest_{i}")).unwrap();
+        let wrong = &traces
+            .iter()
+            .find(|(_, other)| other.result != trace.result)
+            .unwrap()
+            .1;
+        let input = prover_toml(plan, &[], &FixtureEncoder, wrong, [7; 32], [3; 32]).unwrap();
+        let error = driver.execute(&input, &format!("wrong_{i}")).unwrap_err();
+        assert!(error.to_string().contains("operator length"), "{error}");
+    }
+    support::complete(gate);
+}
+
+#[test]
+#[ignore = "requires the pinned native query toolchain"]
+fn inactive_expression_rows_skip_values_but_active_capacity_still_refuses() {
+    let Some(gate) = support::gate(
+        "inactive_expression_rows_skip_values_but_active_capacity_still_refuses",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
+    let bounds = Bounds {
+        credentials: 1,
+        quads_per_credential: 4,
+        rows_per_table: 2,
+    };
+    let query = "ASK {?s <urn:p> ?x FILTER((1000000000000000000 > 0) || true)}";
+    let large = lower(query, bounds).unwrap();
+    let small = lower(&query.replace("1000000000000000000", "1"), bounds).unwrap();
+    let package = generate(&large).unwrap();
+    assert_eq!(package, generate(&small).unwrap());
+    let empty = evaluate(&large, &[], &FixtureEncoder).unwrap();
+    assert_eq!(empty.result, ResultValue::Ask(false));
+    fixture_support::assert_engine(query, "", &empty.result);
+    let workspace = Workspace::new(&package);
+    let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+    driver
+        .execute(
+            &prover_toml(&large, &[], &FixtureEncoder, &empty, [7; 32], [3; 32]).unwrap(),
+            "inactive_values",
+        )
+        .unwrap();
+    let data = vec![sparq_zk_query::interp::CredentialCells {
+        quads: vec![fixture_support::quad(
+            &fixture_support::iri("urn:s"),
+            &fixture_support::iri("urn:p"),
+            &fixture_support::integer(1),
+        )],
+    }];
+    assert!(matches!(
+        evaluate(&large, &data, &FixtureEncoder),
+        Err(sparq_zk_query::Error::Capacity(_))
+    ));
+    let active = evaluate(&small, &data, &FixtureEncoder).unwrap();
+    assert_eq!(active.result, ResultValue::Ask(true));
+    driver
+        .execute(
+            &prover_toml(&small, &data, &FixtureEncoder, &active, [7; 32], [3; 32]).unwrap(),
+            "active_values",
+        )
+        .unwrap();
+    let rebound = prover_toml(&large, &data, &FixtureEncoder, &active, [7; 32], [3; 32]).unwrap();
+    let error = driver.execute(&rebound, "active_capacity").unwrap_err();
+    assert!(error.to_string().contains("expression capacity"), "{error}");
     support::complete(gate);
 }

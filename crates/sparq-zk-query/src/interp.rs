@@ -1,7 +1,7 @@
 //! Exact bounded table evaluation over supplied term cells.
 //!
-//! Credential cells are a stand-in pending the suite lane's `open_credential`.
-//! This module does not authenticate a credential or implement a cryptosuite.
+//! The credential adapter authenticates complete inputs before this reference
+//! evaluator runs; the generated program checks them independently.
 
 #[path = "interp_closed.rs"]
 mod closed;
@@ -91,6 +91,21 @@ pub struct CredentialCells {
     pub quads: Vec<[Cell; 4]>,
 }
 
+/// Complete default and named views. Counts refer to signed input quads.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Dataset {
+    pub(crate) quads: Vec<[Cell; 4]>,
+    pub(crate) counts: Vec<usize>,
+}
+impl Dataset {
+    pub fn quads(&self) -> &[[Cell; 4]] {
+        &self.quads
+    }
+    pub fn credential_counts(&self) -> &[usize] {
+        &self.counts
+    }
+}
+
 pub fn evaluate(
     plan: &Plan,
     credentials: &[CredentialCells],
@@ -109,20 +124,7 @@ pub fn evaluate(
     {
         return Err(Error::Capacity("per-credential quad count".into()));
     }
-    let params: Vec<Option<Cell>> = plan
-        .parameters
-        .iter()
-        .map(|p| match p {
-            Parameter::Term(t) => encoder.encode(t).and_then(|c| {
-                c.validate()?;
-                if !c.bound || c.scope != 0 {
-                    return Err(Error::Invalid("public constant".into()));
-                }
-                Ok(Some(c))
-            }),
-            Parameter::Index(_) => Ok(None),
-        })
-        .collect::<Result<_, _>>()?;
+    let counts = credentials.iter().map(|c| c.quads.len()).collect();
     let mut dataset = vec![];
     let mut seen = BTreeSet::new();
     for (credential_index, credential) in credentials.iter().enumerate() {
@@ -145,6 +147,59 @@ pub fn evaluate(
             if seen.insert(key) {
                 dataset.push(*quad);
             }
+        }
+    }
+    evaluate_dataset(
+        plan,
+        &Dataset {
+            quads: dataset,
+            counts,
+        },
+        encoder,
+    )
+}
+
+/// Evaluate the complete method dataset; ordinary scans use its default merge.
+pub fn evaluate_dataset(
+    plan: &Plan,
+    input_dataset: &Dataset,
+    encoder: &impl EncodeTerm,
+) -> Result<Trace, Error> {
+    plan.bounds.check_credentials(&input_dataset.counts)?;
+    if input_dataset
+        .counts
+        .iter()
+        .zip(plan.credential_quad_bounds())
+        .any(|(n, b)| *n > b as usize)
+    {
+        return Err(Error::Capacity("per-credential quad count".into()));
+    }
+    let params: Vec<Option<Cell>> = plan
+        .parameters
+        .iter()
+        .map(|p| match p {
+            Parameter::Term(t) => encoder.encode(t).and_then(|c| {
+                c.validate()?;
+                if !c.bound || c.scope != 0 {
+                    return Err(Error::Invalid("public constant".into()));
+                }
+                Ok(Some(c))
+            }),
+            Parameter::Index(_) => Ok(None),
+        })
+        .collect::<Result<_, _>>()?;
+    let mut dataset = vec![];
+    let mut seen = BTreeSet::new();
+    for quad in &input_dataset.quads {
+        for cell in quad {
+            cell.validate()?;
+        }
+        if quad[..3].iter().any(|c| !c.bound) || quad[0].kind == 3 || quad[1].kind != 1 {
+            return Err(Error::Invalid("RDF triple positions".into()));
+        }
+        let key = std::array::from_fn::<_, 3, _>(|i| quad[i].identity());
+        if seen.insert(key) {
+            dataset.push(*quad);
         }
     }
     let mut tables: Vec<Table> = vec![];
@@ -211,7 +266,8 @@ pub fn evaluate(
             Operator::Filter(a, e) => {
                 let mut rows = vec![];
                 for row in input(*a) {
-                    let (value, error) = eval(e, schema(*a), row, &params)?.ebv()?;
+                    let (value, error) =
+                        eval(e, schema(*a), row, &params, &plan.parameters)?.ebv()?;
                     if value && !error {
                         rows.push(row.clone());
                     }
@@ -332,7 +388,20 @@ impl Value {
             Self::Boolean(v, e) => (v, e),
             Self::Term(c) if !c.bound || c.kind != 3 => (false, true),
             Self::Term(c) => match c.key_class {
+                0 if c.dt
+                    == sparq_merkle_suite::poseidon::field_bytes(
+                        sparq_merkle_suite::poseidon::hash_bytes(
+                            sparq_merkle_suite::poseidon::DATATYPE_DOMAIN,
+                            b"http://www.w3.org/1999/02/22-rdf-syntax-ns#langString",
+                        ),
+                    ) =>
+                {
+                    return Err(Error::Unsupported(
+                        "language-tagged effective boolean value".into(),
+                    ));
+                }
                 1 => {
+                    check_exact_magnitude(c)?;
                     let mut zero = [0; 32];
                     zero[2] = 0x80;
                     let mut full_zero = zero;
@@ -357,13 +426,37 @@ impl Value {
     }
 }
 
+// Lane D's exact numeric bucket applies equally to the host and circuit.
+fn check_exact_magnitude(c: Cell) -> Result<(), Error> {
+    let mut zero = [0; 32];
+    zero[1] = 1;
+    zero[2] = 0x80;
+    let a = crate::statement::field(c.key)?;
+    let b = crate::statement::field(zero)?;
+    let magnitude = if c.key < zero { b - a } else { a - b };
+    let bytes = sparq_zk::field::field_to_be_bytes_32(&magnitude);
+    if bytes[..18].iter().any(|b| *b != 0) {
+        return Err(Error::Capacity("exact numeric expression range".into()));
+    }
+    Ok(())
+}
+
+fn datatype_id(iri: &[u8]) -> Word {
+    sparq_merkle_suite::poseidon::field_bytes(sparq_merkle_suite::poseidon::hash_bytes(
+        sparq_merkle_suite::poseidon::DATATYPE_DOMAIN,
+        iri,
+    ))
+}
+static STRING_DATATYPE: std::sync::LazyLock<Word> =
+    std::sync::LazyLock::new(|| datatype_id(b"http://www.w3.org/2001/XMLSchema#string"));
+static LANGUAGE_STRING_DATATYPE: std::sync::LazyLock<Word> = std::sync::LazyLock::new(|| {
+    datatype_id(b"http://www.w3.org/1999/02/22-rdf-syntax-ns#langString")
+});
 fn plain_string(c: Cell) -> bool {
-    c.lang == [0; 32]
-        || c.dt
-            == sparq_merkle_suite::poseidon::field_bytes(sparq_merkle_suite::poseidon::hash_bytes(
-                sparq_merkle_suite::poseidon::DATATYPE_DOMAIN,
-                b"http://www.w3.org/2001/XMLSchema#string",
-            ))
+    c.lang == [0; 32] || c.dt == *STRING_DATATYPE
+}
+fn string_cell(cell: Cell) -> bool {
+    cell.kind == 3 && (matches!(cell.key_class, 6 | 7) || cell.dt == *LANGUAGE_STRING_DATATYPE)
 }
 
 fn compare(op: Compare, a: Value, b: Value) -> Result<Value, Error> {
@@ -390,6 +483,11 @@ fn compare(op: Compare, a: Value, b: Value) -> Result<Value, Error> {
     if !a.bound || !b.bound {
         return Ok(Value::Boolean(false, true));
     }
+    for c in [a, b] {
+        if c.kind == 3 && c.key_class == 1 {
+            check_exact_magnitude(c)?;
+        }
+    }
     if a.key_class == 0x7f || b.key_class == 0x7f {
         return Err(Error::Capacity("literal comparison range".into()));
     }
@@ -401,8 +499,8 @@ fn compare(op: Compare, a: Value, b: Value) -> Result<Value, Error> {
             return Err(Error::Unsupported("mixed temporal datatypes".into()));
         }
         if op != Compare::Equal
-            && matches!(a.key_class, 6 | 7)
-            && matches!(b.key_class, 6 | 7)
+            && string_cell(a)
+            && string_cell(b)
             && ((!plain_string(a)) || (!plain_string(b)))
         {
             return Err(Error::Unsupported("language-tagged string ordering".into()));
@@ -413,10 +511,13 @@ fn compare(op: Compare, a: Value, b: Value) -> Result<Value, Error> {
         {
             return Err(Error::Unsupported("mixed timezone comparison".into()));
         }
-        if op == Compare::Equal && matches!(a.key_class, 6 | 7) && matches!(b.key_class, 6 | 7) {
+        if op == Compare::Equal && string_cell(a) && string_cell(b) {
             return Ok(Value::Boolean(a.same_term(b), false));
         }
-        if a.key_class == 7 || b.key_class == 7 {
+        if op == Compare::Equal && (string_cell(a) || string_cell(b)) {
+            return Ok(Value::Boolean(false, true));
+        }
+        if string_cell(a) && string_cell(b) && (a.key_class == 7 || b.key_class == 7) {
             return Err(Error::Unsupported("string comparison capacity".into()));
         }
         if op == Compare::Equal && (a.key_class == 0 || b.key_class == 0) {
@@ -452,7 +553,13 @@ fn compare(op: Compare, a: Value, b: Value) -> Result<Value, Error> {
     Ok(Value::Boolean(false, true))
 }
 
-fn eval(e: &Expr, schema: &[Var], row: &[Cell], params: &[Option<Cell>]) -> Result<Value, Error> {
+fn eval(
+    e: &Expr,
+    schema: &[Var],
+    row: &[Cell],
+    params: &[Option<Cell>],
+    public: &[Parameter],
+) -> Result<Value, Error> {
     Ok(match e {
         Expr::Term(slot) => Value::Term(match slot {
             Slot::Variable(v) => lookup(schema, row, *v),
@@ -460,28 +567,52 @@ fn eval(e: &Expr, schema: &[Var], row: &[Cell], params: &[Option<Cell>]) -> Resu
         }),
         Expr::Compare(op, a, b) => compare(
             *op,
-            eval(a, schema, row, params)?,
-            eval(b, schema, row, params)?,
+            eval(a, schema, row, params, public)?,
+            eval(b, schema, row, params, public)?,
         )?,
         Expr::Not(a) => {
-            let (v, e) = eval(a, schema, row, params)?.ebv()?;
+            let (v, e) = eval(a, schema, row, params, public)?.ebv()?;
             Value::Boolean(!v, e)
         }
         Expr::And(a, b) | Expr::Or(a, b) => {
-            let (a, ae) = eval(a, schema, row, params)?.ebv()?;
-            let (b, be) = eval(b, schema, row, params)?.ebv()?;
+            let (a, ae) = eval(a, schema, row, params, public)?.ebv()?;
+            let (b, be) = eval(b, schema, row, params, public)?.ebv()?;
             if matches!(e, Expr::And(..)) {
                 Value::Boolean(a && b, (ae || be) && !(!a && !ae || !b && !be))
             } else {
                 Value::Boolean(a || b, (ae || be) && !(a && !ae || b && !be))
             }
         }
+        Expr::InList {
+            value,
+            start,
+            count,
+        } => {
+            let Parameter::Index(count) = public[*count as usize] else {
+                return Err(Error::Invalid("IN list length parameter".into()));
+            };
+            if count as usize > crate::plan::IN_CAPACITY {
+                return Err(Error::Capacity("IN list".into()));
+            }
+            let a = eval(value, schema, row, params, public)?;
+            let mut matched = false;
+            let mut error = false;
+            for i in 0..count {
+                let b = params[(*start + i) as usize]
+                    .ok_or_else(|| Error::Invalid("IN term parameter".into()))?;
+                let (v, e) = compare(Compare::Equal, a, Value::Term(b))?.ebv()?;
+                matched |= v && !e;
+                error |= e;
+            }
+            Value::Boolean(matched, error && !matched)
+        }
         Expr::In(a, bs) => {
-            let a = eval(a, schema, row, params)?;
+            let a = eval(a, schema, row, params, public)?;
             let mut matched = false;
             let mut error = false;
             for b in bs {
-                let (v, e) = compare(Compare::Equal, a, eval(b, schema, row, params)?)?.ebv()?;
+                let (v, e) =
+                    compare(Compare::Equal, a, eval(b, schema, row, params, public)?)?.ebv()?;
                 matched |= v && !e;
                 error |= e;
             }
