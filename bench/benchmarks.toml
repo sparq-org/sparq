@@ -1038,6 +1038,20 @@ status      = "planning"
 # ZK — commitment pipeline, trace seam, circuit gate counts, prove/verify
 # =============================================================================
 
+[[benchmark]]
+id          = "zk-v1-numeric-snapshot"
+name        = "Detached evaluator numeric snapshot boundaries"
+category    = "conformance"
+measures    = "correctness: typed numeric capacity and preserved boundary acceptance"
+invoke      = "cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator-model --features graph-results --test v1_numeric_snapshot_bound --test evaluation_causes"
+source      = "zk/sparql-evaluator/model/tests/v1_numeric_snapshot_bound.rs; crate under test zk/sparql-evaluator/model/snapshot-engine/"
+dataset     = "Committed synthetic numeric boundary and conformance fixtures"
+quiet_box_sensitive = false
+pinning     = "V1 numeric consumer patch with exact source-context checks"
+records_to  = "stdout; self-asserting native checks"
+status      = "ok"
+featured    = false
+
 # [OPUS-4.8] sq-5o5.1 — the `source` names crates/sparq-zk/ explicitly because this
 # standalone criterion project links it as a path dependency (bench/zk/Cargo.toml:
 # `sparq-zk = { path = "../../crates/sparq-zk" }`) and measures its commitment

@@ -17,7 +17,7 @@ authenticated-rdf = ["graph-results", "dep:ed25519-dalek"]
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-sparq-engine = { path = "../../../crates/sparq-engine", default-features = false, features = ["regex", "digest"], optional = true }
+sparq-engine = { package = "sparq-v1-snapshot-engine", path = "snapshot-engine", default-features = false, features = ["regex", "digest"], optional = true }
 sparq-core = { path = "../../../crates/sparq-core", default-features = false, optional = true }
 sparq-canon = { path = "../../../crates/sparq-canon", default-features = false, optional = true }
 spargebra = { version = "=0.4.6", features = ["sparql-12", "sep-0006", "sparq-deterministic-paths"], optional = true }
@@ -29,3 +29,7 @@ ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["all
 [[example]]
 name = "proof_bindings"
 required-features = ["evaluate"]
+
+[[example]]
+name = "snapshot_journals"
+required-features = ["graph-results"]

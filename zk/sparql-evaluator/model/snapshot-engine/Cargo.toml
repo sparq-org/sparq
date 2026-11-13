@@ -1,0 +1,48 @@
+[package]
+name = "sparq-v1-snapshot-engine"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+name = "sparq_engine"
+
+[features]
+"regex" = ["dep:regex"]
+"digest" = ["dep:md-5", "dep:sha1", "dep:sha2"]
+"deterministic-blank-nodes" = ["spargebra/sparq-deterministic-blank-nodes"]
+"default" = []
+
+[dependencies]
+"sparq-core" = { "path" = "../../../../crates/sparq-core", "version" = "0.1.8", "default-features" = false }
+"sparq-substrate" = { "path" = "../../../../crates/sparq-substrate", "version" = "0.1.8", "default-features" = false, "features" = ["numeric", "join", "compare"] }
+"oxrdf" = { "version" = "0.3", "features" = ["rdf-12"] }
+"spargebra" = { "package" = "sparq-spargebra", "version" = "0.4.6", "path" = "../../../../vendor/spargebra", "features" = ["sparql-12", "sep-0006"] }
+"oxiri" = "0.2"
+"rustc-hash" = { "version" = "2" }
+"smallvec" = { "version" = "1" }
+"md-5" = { "version" = "0.11", "optional" = true }
+"sha1" = { "version" = "0.11", "optional" = true }
+"sha2" = { "version" = "0.11", "optional" = true }
+
+[dev-dependencies]
+"sparq-core" = { "path" = "../../../../crates/sparq-core", "version" = "0.1.8", "features" = ["mmap", "parallel", "dict-spill"] }
+"rayon" = { "version" = "1" }
+"spargebra" = { "package" = "sparq-spargebra", "version" = "0.4.6", "path" = "../../../../vendor/spargebra", "features" = ["sparql-12", "sep-0006"] }
+"sparq-introspect" = { "path" = "../../../../crates/sparq-introspect", "version" = "0.1.8" }
+"proptest" = "1"
+"ryu" = "1"
+"serde_json" = "1"
+
+[target."cfg(target_os = \"zkvm\")".dependencies]
+"regex" = { "version" = "1", "optional" = true, "default-features" = false, "features" = ["perf", "unicode"] }
+
+[target."cfg(not(target_os = \"zkvm\"))".dependencies]
+"regex" = { "version" = "1", "optional" = true }
+
+[target."cfg(all(not(target_arch = \"wasm32\"), not(target_os = \"zkvm\")))".dependencies]
+"uuid" = { "version" = "1", "features" = ["v4"] }
+
+[lints.rust]
+unexpected_cfgs = { "level" = "warn", "check-cfg" = ["cfg(kani)", "cfg(feature, values(\"default\", \"parallel\", \"regex\", \"digest\", \"deterministic-blank-nodes\", \"cs-planner\", \"persistent-stats\", \"spqcprm2\", \"cs-anchor-incidence\", \"spatial-exact-pushdown\", \"zk\", \"service\", \"service-local\", \"serialize-rdf\", \"streaming-serialization\", \"window-functions\", \"vectorized\", \"dp-planner\", \"cluster-materialize\", \"antijoin-static-decline\", \"result-cache\", \"txn\", \"query-solution\", \"params\", \"templates\", \"explain-json\", \"semijoin-bitmap\", \"yannakakis\", \"algebra-rewrite\", \"value-join\", \"paths\", \"id-filter-fastpath\", \"topk-lazy-strkey\"))"] }

@@ -5,6 +5,18 @@ enabled by the exact-dataset evaluator. It separates a valid RDF numeric lexical
 from a computation the current engine can represent. This is a bounded numeric
 profile, not arbitrary-precision SPARQL arithmetic.
 
+The detached `SparqSparql11SnapshotV1` evaluator restores the numeric consumers
+from before [#7317](https://github.com/sparq-org/sparq/pull/7317) through a private
+model adapter over the current engine sources. The parser and deterministic guest
+implementation remain current; the main engine source files are unchanged.
+Its named `v1_snapshot_numeric_budget` retains the original checked arithmetic,
+cast, comparison and ordering consumers, including decimal scale alignment and
+computed intermediates. V2/V3 and the authenticated-RDF profile inherit these
+numeric consumers. Widening this numeric range belongs to a future dialect/version
+bump. The wider lexical comparisons described below apply to the evolving native
+engine; they do not widen the V1 snapshot. See the
+[snapshot boundary and journal comparison checks](../../../zk/sparql-evaluator/README.md#admitted-profile-and-evidence).
+
 Integer arithmetic consumers use `i64`. Decimal arithmetic consumers use a signed
 `i128` mantissa and checked decimal scale/alignment. Decimal division retains the engine's existing
 precision: exact results terminating within eighteen fractional digits when representable,
@@ -38,8 +50,9 @@ unary plus preserve term identity. Numeric-source casts, including `xsd:string`,
 currently enter the numeric lane and can reject a large literal even when a more
 specialized conversion could decide the result. Exact
 SECONDS output likewise retains all bounded input fraction digits; a later
-arithmetic consumer fails if the result exceeds the decimal lane. Exact
-integer/decimal comparison remains available for those fractional digits.
+arithmetic consumer fails if the result exceeds the decimal lane. The evolving
+native engine can compare those fractional digits exactly; the V1 snapshot keeps
+its original representation and scale-alignment checks when consuming them.
 Default native evaluation retains its existing finite-representation fallback behavior, which
 is a known implementation limitation, not a normative datatype validity rule.
 

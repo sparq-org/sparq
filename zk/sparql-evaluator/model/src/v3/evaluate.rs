@@ -1,6 +1,6 @@
 // Native/guest-shared V3 evaluation; execution evidence is separate.
 use super::*;
-use crate::evaluate::{DatasetProfile, admit_query, ordered, query_budget};
+use crate::evaluate::{DatasetProfile, admit_query, ordered, v1_snapshot_numeric_budget};
 use crate::EvaluationError;
 use sparq_engine::{
     PreparedQuery, QueryFailure, construct_prepared_with_budget_detailed,
@@ -83,7 +83,7 @@ fn evaluate_inner<E: From<Rejected>>(
         admit_query(prepared.query(), DatasetProfile::GraphResults)?;
     }
     let max_rows = request.policy.dataset.max_rows;
-    let budget = query_budget(max_rows);
+    let budget = v1_snapshot_numeric_budget(max_rows);
     let canonical = &request.policy.canonicalization;
     let result = match prepared.query() {
         spargebra::Query::Select { pattern, .. } => {

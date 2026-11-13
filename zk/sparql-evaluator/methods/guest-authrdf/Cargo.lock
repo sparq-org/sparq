@@ -1640,24 +1640,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sparq-engine"
-version = "0.1.8"
-dependencies = [
- "md-5",
- "oxiri",
- "oxrdf 0.3.3",
- "regex",
- "rustc-hash",
- "sha1",
- "sha2 0.11.0",
- "smallvec",
- "sparq-core",
- "sparq-spargebra",
- "sparq-substrate",
- "uuid",
-]
-
-[[package]]
 name = "sparq-proved-evaluator-model"
 version = "0.1.0"
 dependencies = [
@@ -1670,7 +1652,7 @@ dependencies = [
  "spargebra",
  "sparq-canon",
  "sparq-core",
- "sparq-engine",
+ "sparq-v1-snapshot-engine",
 ]
 
 [[package]]
@@ -1694,6 +1676,24 @@ dependencies = [
  "rustc-hash",
  "smallvec",
  "sparq-core",
+]
+
+[[package]]
+name = "sparq-v1-snapshot-engine"
+version = "0.1.0"
+dependencies = [
+ "md-5",
+ "oxiri",
+ "oxrdf 0.3.3",
+ "regex",
+ "rustc-hash",
+ "sha1",
+ "sha2 0.11.0",
+ "smallvec",
+ "sparq-core",
+ "sparq-spargebra",
+ "sparq-substrate",
+ "uuid",
 ]
 
 [[package]]

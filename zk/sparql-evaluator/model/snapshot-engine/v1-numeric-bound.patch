@@ -1,0 +1,78 @@
+@@ -1069,7 +1069,7 @@
+             }
+             let dt = l.datatype();
+             if is_numeric_dt(l) {
+-                LitKind::Num(Num::of_literal(l))
++                LitKind::Num(numeric_capacity::operand(l))
+             } else if dt == xsd::STRING {
+                 LitKind::Str(l.value())
+             } else if dt == xsd::BOOLEAN {
+@@ -1204,6 +1204,9 @@
+ }
+ 
+ fn comparison_num_cmp(a: Num, b: Num) -> Option<Ordering> {
++    if budget::strict_numeric() {
++        return num_compare(a, b);
++    }
+     if let (Some(x), Some(y)) = (a.to_dec(), b.to_dec()) {
+         return x.cmp(y)
+             .or_else(|| cmp_decimal_str(&a.lexical(), &b.lexical()));
+@@ -1215,18 +1218,16 @@
+     cmp_decimal_str(&exact_decimal_lexical(x)?, &exact_decimal_lexical(y)?)
+ }
+ 
+-/// Only two valid exact operands are exempt from arithmetic representation limits.
+-/// Other scalar comparisons retain the existing sticky strict-capacity checks.
++/// V1 snapshot comparisons use the original checked numeric consumers.
++/// This private adapter keeps the shared engine's lenient comparison semantics.
+ fn check_comparison_capacity(x: &Value, y: &Value) {
+     if !budget::strict_numeric() {
+         return;
+     }
+-    let exact = |v: &Value| match comparison_numeric(v) {
+-        Some(n) => n.to_dec().is_some(),
+-        None => beyond_tower_lexical(v).is_some(),
+-    };
+-    if !(exact(x) && exact(y)) {
+-        let _ = (as_numeric(x), as_numeric(y));
++    // V1 snapshot consumers retain the pre-#7317 operand and alignment bounds.
++    // Widening this range belongs to a future dialect/version.
++    if let (Some(a), Some(b)) = (as_numeric(x), as_numeric(y)) {
++        let _ = numeric_capacity::comparable(a, b);
+     }
+ }
+ 
+@@ -1364,7 +1365,7 @@
+ 
+ pub(super) fn as_num(v: &Value) -> Option<f64> {
+     if budget::strict_numeric() && !matches!(v, Value::Bool(_)) {
+-        return comparison_numeric(v).map(Num::f64);
++        return as_numeric(v).map(Num::f64);
+     }
+     match v {
+         Value::Num(n) => Some(n.f64()),
+@@ -1460,6 +1461,12 @@
+         // intransitive at the 2^53 collapse — witness 1 of sq-wjl8i). The relational
+         // `<`/`=` (`cmp_expr`, via `num_compare`) deliberately KEEPS its own semantics; this total
+         // order refines only their ties. Beyond-tower exact values use lexicals below.
++        if budget::strict_numeric() {
++            return match (as_numeric(self), as_numeric(other)) {
++                (Some(a), Some(b)) => numeric_capacity::comparable(a, b).then(|| a.cmp_total(b)),
++                _ => None,
++            };
++        }
+         match (comparison_numeric(self), comparison_numeric(other)) {
+             (Some(a), Some(b)) => {
+                 // Two in-tower decimals whose scale alignment overflows i128 would fall
+@@ -1528,6 +1535,11 @@
+ /// vs a documented extension). Relational `<` / `=` semantics are UNTOUCHED.
+ #[inline]
+ pub(super) fn compare_values(x: &Value, y: &Value) -> Option<Ordering> {
++    if budget::strict_numeric() {
++        if let (Some(a), Some(b)) = (as_numeric(x), as_numeric(y)) {
++            return numeric_capacity::comparable(a, b).then(|| a.cmp_total(b));
++        }
++    }
+     compare_terms(x, y)
+ }
+ 
