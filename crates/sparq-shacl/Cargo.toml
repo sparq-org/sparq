@@ -63,6 +63,9 @@ default = []
 # `sh:sparql` path already depends on (CONSTRUCT for sh:SPARQLRule, ASK for
 # sh:condition gating). See `skills/shacl-validation/SKILL.md` and the crate README.
 shacl-af = []
+# SPARQL 1.2 RL syntax parser. Independent of SHACL-AF; no evaluator yet.
+# Default off: no parser code or additional dependencies in validation/wasm.
+sparql-rl = []
 # sq-v0b8 (#796): SHACL Compact Syntax (SCS) PARSER — text → SHACL
 # shapes triples (the parse direction of the SCS surface; the display direction
 # ships client-side in the site). OPT-IN: a hand-rolled lexer + recursive-descent

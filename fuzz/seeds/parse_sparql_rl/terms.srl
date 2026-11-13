@@ -1,0 +1,3 @@
+PREFIX : <http://example/>
+DATA { << :a :p :b ~:r >> :q <<( :a :p "text"@en--rtl )>> }
+RULE {} WHERE { ?s ^(:p/:q) ?o FILTER(?o NOT IN (1,2)) }

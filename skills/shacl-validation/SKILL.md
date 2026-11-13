@@ -83,6 +83,13 @@ cargo run -p sparq-shacl --example validate -- data.ttl shapes.ttl
 cargo run -p sparq-shacl --example validate -- data.ttl shapes.ttl --turtle
 ```
 
+## SPARQL-RL syntax (opt-in)
+
+The default-off `sparql-rl` feature exposes `sparql_rl::parse(source, base)` and
+its borrowed syntax tree. It adds no dependencies and is independent of
+`shacl-af`. This round supports syntax only; evaluation, well-formedness and
+stratification remain unsupported. See the [API and parser bounds](references/sparql-rl.md).
+
 ## Key APIs
 
 Top-level functions (`sparq_shacl::…`):

@@ -85,10 +85,10 @@ and call `validate_with_model`. CLI: `cargo run -p sparq-shacl --example validat
   `SubjectsOf`/`ObjectsOf` + implicit class targets, the SHACL-1.2 targets
   `sh:targetWhere`/`sh:shape`/`sh:ShapeClass` + SPARQL-valued targets & value nodes
   (`sh:select`/`sh:sparqlExpr`, sq-rnkdh), plus `sh:severity`/`sh:message`/`sh:deactivated`.
-- **SHACL Compact Syntax parser (opt-in `scs`)** — `parse_scs(text, base)` /
-  `parse_scs_to_graph(text, base)` turn a [W3C SHACL Compact Syntax](https://w3c.github.io/shacl/shacl-compact-syntax/)
-  document into the same shapes triples `validate` consumes; round-trips **32/32** of the
-  vendored W3C fixtures graph-isomorphically; zero new deps. Off ⇒ none compiles.
+- **SHACL Compact Syntax parser (opt-in `scs`)** — `parse_scs(text, base)` / `parse_scs_to_graph(text, base)` turn a
+  [W3C SHACL Compact Syntax](https://w3c.github.io/shacl/shacl-compact-syntax/) document into shapes triples `validate` consumes;
+  round-trips **32/32** vendored W3C fixtures graph-isomorphically; zero new deps. Off ⇒ none compiles.
+- **SPARQL-RL syntax (opt-in `sparql-rl`, default off)** — `sparql_rl::parse(source, base)` returns a borrowed tree; evaluation, variable well-formedness and stratification are not implemented. See the usage skill for parser bounds.
 - **Shapes-graph assembly (opt-in `imports`)** — `resolve_shapes_graph`/`resolve_imports`:
   `sh:shapesGraph` + cycle-guarded `owl:imports` closure via a caller-supplied loader. Off ⇒ none compiles.
 

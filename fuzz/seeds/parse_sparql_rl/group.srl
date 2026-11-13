@@ -1,0 +1,6 @@
+PREFIX : <http://example/>
+RULE { ?s :n ?n } WHERE DATA {
+    ?s :p ?o
+    NOT DATA { ?s :blocked true }
+    GROUP BY ?s { ?s :p ?v SET(?w := ?v + 1) } [?n := COUNT(DISTINCT *)]
+}

@@ -27,6 +27,8 @@ pub mod rules12;
 #[cfg(feature = "scs")]
 pub mod scs;
 mod sparql;
+#[cfg(feature = "sparql-rl")]
+pub mod sparql_rl;
 pub mod view;
 
 // (sq-11a) `IllFormedConstruct` records a shapes-graph construct that

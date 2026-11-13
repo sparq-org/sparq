@@ -55,3 +55,9 @@
   crate: "sparq-shacl"
   features: "scs"
   test: true
+
+# The parser, behavioral tests and W3C syntax dispatch are default off.
+- name: "sparq-shacl (sparql-rl)"
+  crate: "sparq-shacl"
+  features: "sparql-rl"
+  test: true
