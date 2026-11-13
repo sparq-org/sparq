@@ -88,7 +88,15 @@
     "result_v3_k2_n16_p3_r4_f2_s64_d17": 135922,
     "result_v3_k2_n16_p3_r4_f2_s64_d20": 136392,
     "result_v4_k1_n16_p3_r4_f0_d10": 31209,
-    "result_v4_k2_n16_p3_r4_f0_d10": 58022
+    "result_v4_k2_n16_p3_r4_f0_d10": 58022,
+    "result_v5_k1_n16_p3_r4_f2_i64_d10": 107642,
+    "result_v5_k1_n16_p3_r4_f2_i64_d17": 108190,
+    "result_v5_k1_n16_p3_r4_f2_i64_d20": 108425,
+    "result_v5_k2_n16_p3_r4_f2_i64_d10": 134455,
+    "result_v5_k2_n16_p3_r4_f2_i64_d17": 135551,
+    "result_v5_k2_n16_p3_r4_f2_i64_d20": 136021,
+    "result_v5_k1_n16_p3_r4_f1_date_d10": 44473,
+    "result_v5_k2_n16_p3_r4_f1_date_d10": 71285
   },
   "_comment_sq_j506_result_v5": "sq-j506 (#7103): the METHOD-BOUND successful-result members. Same statement as the result_v1 f0 member of the same shape, with the credential message h5(ZKSIG_M5, root, salt, reference, SCHEME_STRING_CANONICAL_V1) in place of h4(ZKSIG_C3, root, salt, reference) -- one extra Poseidon2 input per credential, which is the whole delta against the v1 counterpart (k1 32288 -> 32290, k2 59101 -> 59104). Measured with bb gates -s ultra_honk at the baselined toolchain, on the same run in which both v1 counterparts reproduced their committed values exactly. Circuit measurements only; no audited security or end-to-end claim.",
   "_comment_sq_j506_v2_dual_leaf": "sq-j506 (#7103): the V2 DUAL-LEAF component-witnessed members. scan_v2dl_k1_n16_r4 and join_eq_v2dl_na16_nb16 recompute each slot term encoding from witnessed V2 leaf components -- applying the reserved-sentinel band check and the reserved language-tag check at the witnessed component sites -- and then run the UNCHANGED scan_check / join_eq_check bodies, so the delta against their shipped counterparts (scan_k1_n16_r4 5991, join_eq_na16_nb16 7025) is the component recompute and its asserts. Measured with bb gates -s ultra_honk at the pinned toolchain (nargo 1.0.0-beta.21 / bb 5.0.0-nightly.20260324) on linux x86_64, in two runs -- this tree and a clean git-archive export compiled in a cold target dir -- that agreed on both numbers, and in which both shipped counterparts reproduced their committed baselines exactly. Insertions only: no existing baseline moves, because no shipped member source changed. Static circuit size only: not a runtime, soundness or external-audit claim; the verifier remains NOT-yet-sound pending external audit (sq-qhy4).",

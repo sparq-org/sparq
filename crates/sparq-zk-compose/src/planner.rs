@@ -13,7 +13,7 @@
 //! belong in local diagnostics unless the disclosure policy permits them.
 //!
 //! The admitted fragment is SELECT DISTINCT / true ASK with a nonempty positive
-//! BGP, joins, and directly bound canonical nonnegative xsd:integer comparisons.
+//! BGP, joins, and canonical nonnegative integer or timezone-free date comparisons.
 //! Projected blank nodes and query blank-node syntax are rejected; hidden blank
 //! nodes retain per-credential scope during joins. This module is research-grade
 //! and has not been externally audited.
@@ -23,9 +23,9 @@ use oxrdf::{Term, Triple};
 use spargebra::algebra::{Expression, GraphPattern};
 use spargebra::term::{NamedNodePattern, TermPattern};
 use sparq_zk::commit::GraphCommitment;
-use sparq_zk::verify::{fragment_filters, FilterCmp};
 use std::collections::{BTreeMap, BTreeSet};
 
+pub(crate) mod date;
 mod optimize;
 /// Separately admitted canonical signed-integer disclosure planning.
 pub mod signed;
@@ -74,15 +74,38 @@ pub enum QuerySlot {
     Variable(String),
 }
 
-/// A normalized, directly bound integer comparison.
+/// Datatype fixed by the query literal for a comparison key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PredicateDatatype {
+    /// Canonical integer, interpreted by the selected unsigned or signed profile.
+    Integer,
+    /// Canonical timezone-free Gregorian date.
+    Date,
+}
+
+/// A normalized, directly bound comparison.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IntegerFilter {
     /// Variable on the left side of the normalized comparison.
     pub variable: String,
     /// Comparison, with reversed operands normalized by flipping the operator.
     pub op: FilterOp,
-    /// Public canonical nonnegative xsd:integer bound.
+    /// Public integer bound or date key.
     pub bound: u64,
+    /// Datatype independently derived from the query's literal.
+    pub datatype: PredicateDatatype,
+}
+
+impl IntegerFilter {
+    pub(crate) fn value(&self, numeric: NumericProfile, term: &Term) -> Option<u64> {
+        match self.datatype {
+            PredicateDatatype::Integer => numeric.value(term),
+            PredicateDatatype::Date if matches!(numeric, NumericProfile::Unsigned) => {
+                date::canonical_date(term)
+            }
+            PredicateDatatype::Date => None,
+        }
+    }
 }
 
 /// The supported query shape, independently derivable from public query text.
@@ -97,7 +120,7 @@ pub struct DisclosureQuery {
     pub projection: Vec<String>,
     /// Subject, predicate, object slots, in AST traversal order.
     pub patterns: Vec<[QuerySlot; 3]>,
-    /// Conjunctive integer comparisons in AST traversal order.
+    /// Conjunctive integer or date-key comparisons in AST traversal order.
     pub filters: Vec<IntegerFilter>,
 }
 
@@ -164,22 +187,7 @@ impl DisclosureQuery {
         collect_patterns(inner, &mut patterns, numeric)?;
         let filters = match numeric {
             NumericProfile::Signed => signed::collect_filters(inner)?,
-            NumericProfile::Unsigned => fragment_filters(sparql)
-                .map_err(|e| unsupported(&e.to_string()))?
-                .into_iter()
-                .map(|f| IntegerFilter {
-                    variable: f.variable,
-                    op: match f.op {
-                        FilterCmp::Lt => FilterOp::Lt,
-                        FilterCmp::Le => FilterOp::Le,
-                        FilterCmp::Gt => FilterOp::Gt,
-                        FilterCmp::Ge => FilterOp::Ge,
-                        FilterCmp::Eq => FilterOp::Eq,
-                        FilterCmp::Ne => FilterOp::Ne,
-                    },
-                    bound: f.bound,
-                })
-                .collect(),
+            NumericProfile::Unsigned => date::collect_filters(sparql)?,
         };
         let query = Self {
             kind,
@@ -784,7 +792,7 @@ fn find_witness<A: Fn(usize, MembershipRef, &Triple) -> bool>(
         return Ok(query.filters.iter().all(|filter| {
             bindings
                 .get(&filter.variable)
-                .and_then(|v| numeric.value(&v.term))
+                .and_then(|v| filter.value(numeric, &v.term))
                 .is_some_and(|value| integer_comparison(value, filter.op, filter.bound))
         }));
     }
@@ -860,8 +868,8 @@ fn extend_bindings(
         .iter()
         .all(|filter| {
             next.get(&filter.variable).is_none_or(|value| {
-                numeric
-                    .value(&value.term)
+                filter
+                    .value(numeric, &value.term)
                     .is_some_and(|v| integer_comparison(v, filter.op, filter.bound))
             })
         })

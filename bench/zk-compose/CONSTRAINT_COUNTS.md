@@ -17,6 +17,48 @@ Toolchain baselined for these counts: `bb 5.0.0-nightly.20260324`, `nargo 1.0.0-
 
 ## Successful-result circuits (released mapping support)
 
+### `result_v5_integer`
+
+Method-bound released-result support with full-width hidden unsigned integer predicates and canonical literal binding. Does not establish result completeness or holder identity.
+
+| member | parameters | `circuit_size` |
+| --- | --- | --- |
+| `result_v5_k1_n16_p3_r4_f2_i64_d10` | k=1, n=16, p=3, r=4, f=2, i=64, d=10 | 107,642 |
+| `result_v5_k1_n16_p3_r4_f2_i64_d17` | k=1, n=16, p=3, r=4, f=2, i=64, d=17 | 108,190 |
+| `result_v5_k1_n16_p3_r4_f2_i64_d20` | k=1, n=16, p=3, r=4, f=2, i=64, d=20 | 108,425 |
+| `result_v5_k2_n16_p3_r4_f2_i64_d10` | k=2, n=16, p=3, r=4, f=2, i=64, d=10 | 134,455 |
+| `result_v5_k2_n16_p3_r4_f2_i64_d17` | k=2, n=16, p=3, r=4, f=2, i=64, d=17 | 135,551 |
+| `result_v5_k2_n16_p3_r4_f2_i64_d20` | k=2, n=16, p=3, r=4, f=2, i=64, d=20 | 136,021 |
+
+Scaling — pairs differing in exactly one parameter:
+
+| parameter | from | to | held fixed | Δ gates | ratio |
+| --- | --- | --- | --- | --- | --- |
+| `d` | 10 (107,642) | 17 (108,190) | k=1, n=16, p=3, r=4, f=2, i=64 | +548 | 1.0051 |
+| `d` | 10 (107,642) | 20 (108,425) | k=1, n=16, p=3, r=4, f=2, i=64 | +783 | 1.0073 |
+| `d` | 17 (108,190) | 20 (108,425) | k=1, n=16, p=3, r=4, f=2, i=64 | +235 | 1.0022 |
+| `d` | 10 (134,455) | 17 (135,551) | k=2, n=16, p=3, r=4, f=2, i=64 | +1,096 | 1.0082 |
+| `d` | 10 (134,455) | 20 (136,021) | k=2, n=16, p=3, r=4, f=2, i=64 | +1,566 | 1.0116 |
+| `d` | 17 (135,551) | 20 (136,021) | k=2, n=16, p=3, r=4, f=2, i=64 | +470 | 1.0035 |
+| `k` | 1 (107,642) | 2 (134,455) | n=16, p=3, r=4, f=2, i=64, d=10 | +26,813 | 1.2491 |
+| `k` | 1 (108,190) | 2 (135,551) | n=16, p=3, r=4, f=2, i=64, d=17 | +27,361 | 1.2529 |
+| `k` | 1 (108,425) | 2 (136,021) | n=16, p=3, r=4, f=2, i=64, d=20 | +27,596 | 1.2545 |
+
+### `result_v5_date`
+
+Method-bound released-result support with a hidden canonical Gregorian date predicate. The key is derived from the same literal token as its string commitment. Does not establish result completeness or holder identity.
+
+| member | parameters | `circuit_size` |
+| --- | --- | --- |
+| `result_v5_k1_n16_p3_r4_f1_date_d10` | k=1, n=16, p=3, r=4, f=1, d=10 | 44,473 |
+| `result_v5_k2_n16_p3_r4_f1_date_d10` | k=2, n=16, p=3, r=4, f=1, d=10 | 71,285 |
+
+Scaling — pairs differing in exactly one parameter:
+
+| parameter | from | to | held fixed | Δ gates | ratio |
+| --- | --- | --- | --- | --- | --- |
+| `k` | 1 (44,473) | 2 (71,285) | n=16, p=3, r=4, f=1, d=10 | +26,812 | 1.6029 |
+
 ### `result_v5`
 
 Version 5 support for released SELECT DISTINCT mappings, identical in capacity and public ABI to the version-1 f=0 profile but folding the METHOD-BOUND presentation message, so the issuer signature attests the string-canonical commitment METHOD and not merely the commitment. The scheme digest is a compile-time constant of the relation, not a public input. f=0 only: no private FILTER. Compiled only for k in {1, 2}, n=16, p=3, r=4, d=10. Does not establish result completeness or holder identity.
@@ -427,4 +469,4 @@ bench/zk-compose/scripts/constraint_pack.py --write
 bench/zk-compose/scripts/constraint_pack.py --check
 ```
 
-Coverage: 74 of 74 snapshot members across 21 families, 78 single-parameter scaling pairs, 3 invariance facts. The generator **fails** on a snapshot member it cannot classify, so a new circuit family cannot silently drop out of this evaluation.
+Coverage: 82 of 82 snapshot members across 23 families, 88 single-parameter scaling pairs, 3 invariance facts. The generator **fails** on a snapshot member it cannot classify, so a new circuit family cannot silently drop out of this evaluation.
