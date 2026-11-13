@@ -433,6 +433,9 @@ sparq_core::Graph::build_external(reader, "ntriples", Path::new("/data/idx"), 16
 let g = sparq_core::Graph::open(Path::new("/data/idx"))?;   // query with indexes memory-mapped
 ```
 
+On open, small persisted dictionary, cache and permutation files use owned memory;
+larger files remain mapped. This read choice leaves the stored format unchanged.
+
 `g.is_directory_backed()` is `true` for a graph opened this way, or one holding a named graph
 opened this way (updates are written through to the directory), and `false` for a wholly
 in-memory graph or without the `mmap` feature.
