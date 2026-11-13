@@ -59,6 +59,55 @@ cargo build --release -p sparq-lws-core
 Reports land in `conformance/reports/` (`report.html`, `report.ttl` EARL, plus the Karate
 `target/karate-reports/` inside the report dir). The booted server's log is `reports/server.log`.
 
+### Keep the native EARL report
+
+```sh
+CTH_REVISION="$(git -C /path/to/patched/conformance-test-harness rev-parse HEAD)" \
+  bash crates/sparq-lws-core/conformance/run.sh --keep-earl
+```
+
+`--keep-earl [OUT_DIR]` defaults to the workspace's `target/earl`, independently
+of Cargo's build directory. It copies the CTH's Turtle unchanged to
+`sparq-solid-cth-earl.ttl` and writes `sparq-solid-cth-revisions.tsv` with the
+sparq, specification-tests and CTH commits, immutable image ID, backend and
+harness exit status. `CTH_REVISION` defaults to the image's
+`org.opencontainers.image.revision` label; otherwise it is required and must name
+the actual patched source commit used to build that image. This records supplied
+build provenance; it does not verify the image against the source checkout.
+`SPEC_TESTS` must be a Git checkout. Use clean suite and source checkouts for a
+reproducible report. The existing baseline remains enforced; a fresh report is
+kept even when its score fails the ratchet. Old exports are removed before
+preflight, so a startup failure leaves no previous report at the export path.
+Durable runs additionally keep `sparq-solid-cth-post-term-earl.ttl` and
+`sparq-solid-cth-post-kill-earl.ttl`, each with its own revisions file.
+
+### W3C LDP suite
+
+```sh
+LDP_TESTSUITE=/path/to/ldp-testsuite \
+  bash crates/sparq-lws-core/conformance/ldp.sh
+```
+
+`LDP_TESTSUITE` is required and names a `w3c/ldp-testsuite` Git source checkout.
+Use Maven and JDK 8: upstream's POM targets Java 7. The script builds its shaded
+JAR and the `sparq-lws-core` `ldp_conformance` example, starts a disposable
+in-memory fixture on `127.0.0.1:3001`, and runs `--basic` and `--direct` with
+`MUST SHOULD MAY` and non-RDF-source tests. The fixture uses the library's real
+Solid/LDP router. Basic is the implemented container model. Direct is a probe
+with explicit membership triples in the fixture: the current router advertises
+BasicContainer and does not implement Direct membership maintenance. These runs
+do not establish a DirectContainer conformance claim.
+
+`ldp.sh [OUT_DIR]` defaults to `target/earl`. Upstream writes each native report
+under `ldp-{basic,direct}/report/ldp-testsuite-execution-report-earl.ttl`.
+The example parses and merges both into `sparq-ldp-earl.ttl`, preserving native
+test IRIs and outcomes while giving each document's blank nodes a separate scope.
+`ldp-revisions.tsv` records source commits, groups, probe scope and both exit
+statuses. Logs and individual reports stay alongside it. A missing report fails
+the run, and TestNG's nonzero status is preserved after exporting valid reports.
+Docker, Maven downloads and TCP listeners are required outside restricted build
+containers for the CTH or LDP runs as applicable.
+
 Override knobs (all optional): `CTH_IMAGE`, `SPEC_TESTS`, `SPEC_TESTS_REPO`, `SERVER_BIN`, `ENV_FILE`,
 `CTH_BASELINE`, `CTH_ENFORCE_BASELINE`, `PSS_SPARQ_BACKEND`.
 
