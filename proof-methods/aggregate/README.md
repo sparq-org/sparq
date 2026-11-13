@@ -18,8 +18,9 @@ After exchanging partials, contributors can reconstruct both totals, including
 on refusal or a threshold verdict. A separate recipient receives only released
 values, a comparison verdict or refusal. A recipient that is also a contributor
 learns the totals as a contributor. Public rules, roster and proof metadata remain
-visible. `computeOnly: true` slots prove zero count and sum and count toward the
-contributor minimum; authenticate such roles before agreeing the rules.
+visible. `computeOnly: true` slots prove zero count and sum. The contributor
+minimum counts only parties that commit inputs, excluding compute-only slots;
+authenticate such roles before agreeing the rules.
 
 Invalid protocol messages abort with a check and roster index; there is no
 guaranteed output. A transport error's index is not transferable blame evidence.
@@ -33,7 +34,7 @@ and logs. Inconsistent input sets or active attacks can cause aborts.
 
 ## Node and TypeScript
 
-The vendorable package contains wasm, CommonJS glue, declarations and this guide;
+The vendorable package contains wasm, CommonJS and ESM entries, declarations and this guide;
 it also carries the project licence and dependency licence notices.
 installation needs neither Rust nor network: `npm install --offline ./package.tgz`.
 Use Node 24. Exported wire types include `SessionParams`, `Contribution`, `Partial`,
@@ -48,6 +49,7 @@ const call = (name, request) => JSON.parse(a[name](JSON.stringify(request)));
 const keys = Array.from({ length: 3 }, () => JSON.parse(a.generateKeys()));
 const params = {
   session_id: randomBytes(32).toString('base64url'), statistic: 'count-and-sum',
+  min_contributors: 2,
   min_group: 4, threshold: { statistic: 'sum', op: '>=', value: '20' },
   roster: keys.map((k, i) => ({ party_iri: `urn:party:${i}`,
     ed25519_public_key: k.ed25519_public_key,
@@ -60,6 +62,11 @@ const simulation = JSON.parse(a.simulateSession(JSON.stringify(params),
 const verified = call('verifyOutcome', { session: simulation.session,
   contributions: simulation.contributions, outcome: simulation.outcome });
 ```
+
+ESM consumers use `import * as a from 'sparq-verifiable-aggregate'` with the same
+functions. Conditional package exports select the ESM or CommonJS entry and the
+TypeScript declarations. Both JavaScript entries share one wasm instance; `main`
+remains available for older CommonJS consumers.
 
 `simulateSession(paramsJson, partyInputsJson[])` simulates all parties in one
 process through the same message functions. It is not a deployment: it handles
@@ -80,16 +87,20 @@ const outcome = call('finish', { session, index, keys: keys[index].secret,
 call('verifyOutcome', { session, contributions, outcome });
 ```
 
-With a roster below `min_contributors`, skip partial exchange and call `finish`
+With fewer input parties than `min_contributors`, skip partial exchange and call `finish`
 with `local: null, messages: []`. Every roster member must still attest its input;
 missing, duplicate, unknown-key or invalid contributions yield `input-not-attested`.
-Errors throw JSON text `{code,index,check}`. `generateKeys(seed?)` accepts an optional
+Errors throw JSON text `{code,index,check}`. Missing or malformed signatures give
+the same error as invalid signatures: `check: "signature"`, with
+`code: "input-not-attested"` for contributions and `code: "protocol-error"` for
+partials and outcomes. Other missing fields retain encoding errors.
+`generateKeys(seed?)` accepts an optional
 base64url fixture seed; never use predictable seeds for production identities.
 All protocol randomness comes from the OS, even with fixture keys.
 
 ## Rules, encoding and checks
 
-Defaults: `min_contributors: 3`, `max_value_bits: 48`; `min_group: 0` disables the
+Defaults: `min_contributors: 3` (parties that commit inputs), `max_value_bits: 48`; `min_group: 0` disables the
 group rule. Counts are unsigned 32-bit values; sums accept widths through 64.
 The roster accepts up to 1024 distinct identities and keys. `statistic` is
 `count-and-sum` or `count-only` (omit sums or use `sum: null` for count-only).
@@ -115,6 +126,8 @@ The Rust API exports `Session::new`, `contribute`, `receive_and_partial`, `finis
 Run `cargo test --manifest-path proof-methods/Cargo.toml -p sparq-verifiable-aggregate`.
 Install the exact CLI version pinned in `Cargo.toml`, then run
 `proof-methods/aggregate/build-node.sh /tmp/aggregate-node` (destination must be new).
-Run `AGGREGATE_PACKAGE=/tmp/aggregate-node node --test proof-methods/aggregate/tests/node-smoke.cjs`.
+The build packs and installs the generated package offline, then runs both the
+CommonJS and ESM smoke tests against that installation. The ESM test imports the
+package by name from the installation directory.
 The optional `wasm` feature enables JSON bindings and JavaScript entropy.
 `AGGREGATE_EVIDENCE` optionally selects a local evidence file outside the repository.

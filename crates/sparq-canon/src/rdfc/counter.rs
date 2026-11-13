@@ -11,6 +11,7 @@ pub trait HndqCallCounter {
 pub struct SimpleHndqCallCounter {
     counter: usize,
     limit: usize,
+    permutations_left: Option<usize>,
 }
 
 impl Default for SimpleHndqCallCounter {
@@ -18,6 +19,7 @@ impl Default for SimpleHndqCallCounter {
         Self {
             counter: Default::default(),
             limit: DEFAULT_HNDQ_CALL_LIMIT,
+            permutations_left: None,
         }
     }
 }
@@ -28,7 +30,11 @@ impl HndqCallCounter for SimpleHndqCallCounter {
             Some(limit) => limit,
             None => DEFAULT_HNDQ_CALL_LIMIT,
         };
-        Self { counter: 0, limit }
+        Self {
+            counter: 0,
+            limit,
+            permutations_left: None,
+        }
     }
 
     fn add(&mut self, _identifier: &str) -> Result<(), CanonicalizationError> {
@@ -47,5 +53,21 @@ impl fmt::Debug for SimpleHndqCallCounter {
             .field("counter", &self.counter)
             .field("limit", &self.limit)
             .finish()
+    }
+}
+
+impl SimpleHndqCallCounter {
+    pub fn with_permutation_limit(mut self, limit: Option<usize>) -> Self {
+        self.permutations_left = limit;
+        self
+    }
+
+    pub fn permutation(&mut self) -> Result<(), CanonicalizationError> {
+        if let Some(left) = self.permutations_left.as_mut() {
+            *left = left
+                .checked_sub(1)
+                .ok_or(CanonicalizationError::PermutationLimitExceeded)?;
+        }
+        Ok(())
     }
 }

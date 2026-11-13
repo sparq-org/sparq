@@ -1,0 +1,550 @@
+[
+  {
+    "name": "presentation-context-combo1-ok.json",
+    "presentation": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiablePresentation"
+      ],
+      "holder": "did:key:z6MkpJySvETLnxhQG9DzEdmKJtysBDjuuTeDfUj1uNNCUqcj",
+      "verifiableCredential": [
+        {
+          "@context": [
+            "https://www.w3.org/ns/credentials/v2"
+          ],
+          "type": [
+            "VerifiableCredential"
+          ],
+          "issuer": "did:example:issuer",
+          "credentialSubject": {
+            "id": "did:example:subject"
+          }
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "name": "presentation-context-combo2-ok.json",
+    "presentation": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2",
+        {
+          "ExampleVerifiablePresentation": "https://example.org/#ExampleVerifiablePresentation"
+        }
+      ],
+      "type": [
+        "VerifiablePresentation",
+        "ExampleVerifiablePresentation"
+      ],
+      "holder": "did:key:z6MkpJySvETLnxhQG9DzEdmKJtysBDjuuTeDfUj1uNNCUqcj",
+      "verifiableCredential": [
+        {
+          "@context": [
+            "https://www.w3.org/ns/credentials/v2"
+          ],
+          "type": [
+            "VerifiableCredential"
+          ],
+          "issuer": "did:example:issuer",
+          "credentialSubject": {
+            "id": "did:example:subject"
+          }
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "name": "presentation-context-order-fail.json",
+    "presentation": {
+      "@context": [
+        {
+          "CredentialManagerPresentation": "https://example.org/examples#CredentialManagerPresentation"
+        },
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiablePresentation",
+        "CredentialManagerPresentation"
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "presentation-enveloped-vc-missing-type-fail.json",
+    "presentation": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiablePresentation"
+      ],
+      "verifiableCredential": [
+        {
+          "@context": "https://www.w3.org/ns/credentials/v2",
+          "id": "data:application/vc-ld+jwt,eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJ2YyI6eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiLCJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvZXhhbXBsZXMvdjIiXSwiaWQiOiJodHRwOi8vZXhhbXBsZS5lZHUvY3JlZGVudGlhbHMvMzczMiIsInR5cGUiOlsiVW5pdmVyc2l0eURlZ3JlZUNyZWRlbnRpYWwiXSwiaXNzdWVyIjoiaHR0cHM6Ly9leGFtcGxlLmVkdS9pc3N1ZXJzLzU2NTA0OSIsInZhbGlkRnJvbSI6IjIwMTAtMDEtMDFUMDA6MDA6MDBaIiwiY3JlZGVudGlhbFN1YmplY3QiOnsiaWQiOiJkaWQ6ZXhhbXBsZTplYmZlYjFmNzEyZWJjNmYxYzI3NmUxMmVjMjEiLCJkZWdyZWUiOnsidHlwZSI6IkJhY2hlbG9yRGVncmVlIiwibmFtZSI6IkJhY2hlbG9yIG9mIFNjaWVuY2UgYW5kIEFydHMifX19LCJpc3MiOiJodHRwczovL2V4YW1wbGUuZWR1L2lzc3VlcnMvNTY1MDQ5IiwianRpIjoiaHR0cDovL2V4YW1wbGUuZWR1L2NyZWRlbnRpYWxzLzM3MzIiLCJzdWIiOiJkaWQ6ZXhhbXBsZTplYmZlYjFmNzEyZWJjNmYxYzI3NmUxMmVjMjEifQo=.0fkQPZOKlD0Sl0A798KBUNMOdGq90McQQIEtKU9tgSd9K1kRcxWVKDXQJcn_FJqLvo2bk793EHk-RTeEL1HyAQ"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "presentation-enveloped-vc-ok.json",
+    "presentation": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiablePresentation"
+      ],
+      "verifiableCredential": [
+        {
+          "@context": "https://www.w3.org/ns/credentials/v2",
+          "id": "data:application/vc-ld+jwt;base64url,eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJ2YyI6eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiLCJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvZXhhbXBsZXMvdjIiXSwiaWQiOiJodHRwOi8vZXhhbXBsZS5lZHUvY3JlZGVudGlhbHMvMzczMiIsInR5cGUiOlsiVmVyaWZpYWJsZUNyZWRlbnRpYWwiLCJVbml2ZXJzaXR5RGVncmVlQ3JlZGVudGlhbCJdLCJpc3N1ZXIiOiJodHRwczovL2V4YW1wbGUuZWR1L2lzc3VlcnMvNTY1MDQ5IiwidmFsaWRGcm9tIjoiMjAxMC0wMS0wMVQwMDowMDowMFoiLCJjcmVkZW50aWFsU3ViamVjdCI6eyJpZCI6ImRpZDpleGFtcGxlOmViZmViMWY3MTJlYmM2ZjFjMjc2ZTEyZWMyMSIsImRlZ3JlZSI6eyJ0eXBlIjoiQmFjaGVsb3JEZWdyZWUiLCJuYW1lIjoiQmFjaGVsb3Igb2YgU2NpZW5jZSBhbmQgQXJ0cyJ9fX0sImlzcyI6Imh0dHBzOi8vZXhhbXBsZS5lZHUvaXNzdWVycy81NjUwNDkiLCJqdGkiOiJodHRwOi8vZXhhbXBsZS5lZHUvY3JlZGVudGlhbHMvMzczMiIsInN1YiI6ImRpZDpleGFtcGxlOmViZmViMWY3MTJlYmM2ZjFjMjc2ZTEyZWMyMSJ9.0fkQPZOKlD0Sl0A798KBUNMOdGq90McQQIEtKU9tgSd9K1kRcxWVKDXQJcn_FJqLvo2bk793EHk-RTeEL1HyAQ",
+          "type": "EnvelopedVerifiableCredential"
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "name": "presentation-holder-fail.json",
+    "presentation": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiablePresentation"
+      ],
+      "holder": "z6MkpJySvETLnxhQG9DzEdmKJtysBDjuuTeDfUj1uNNCUqcj",
+      "verifiableCredential": [
+        {
+          "@context": [
+            "https://www.w3.org/ns/credentials/v2"
+          ],
+          "type": [
+            "VerifiableCredential"
+          ],
+          "issuer": "did:example:issuer",
+          "credentialSubject": {
+            "id": "did:example:subject"
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "presentation-holder-name-fail.json",
+    "presentation": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiablePresentation"
+      ],
+      "holder": {
+        "name": "Acme"
+      },
+      "verifiableCredential": [
+        {
+          "@context": [
+            "https://www.w3.org/ns/credentials/v2"
+          ],
+          "type": [
+            "VerifiableCredential"
+          ],
+          "issuer": "did:example:issuer",
+          "credentialSubject": {
+            "id": "did:example:subject"
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "presentation-holder-object-fail.json",
+    "presentation": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiablePresentation"
+      ],
+      "holder": {
+        "id": "z6MkpJySvETLnxhQG9DzEdmKJtysBDjuuTeDfUj1uNNCUqcj"
+      },
+      "verifiableCredential": [
+        {
+          "@context": [
+            "https://www.w3.org/ns/credentials/v2"
+          ],
+          "type": [
+            "VerifiableCredential"
+          ],
+          "issuer": "did:example:issuer",
+          "credentialSubject": {
+            "id": "did:example:subject"
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "presentation-holder-object-ok.json",
+    "presentation": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiablePresentation"
+      ],
+      "holder": {
+        "id": "did:key:z6MkpJySvETLnxhQG9DzEdmKJtysBDjuuTeDfUj1uNNCUqcj"
+      },
+      "verifiableCredential": [
+        {
+          "@context": [
+            "https://www.w3.org/ns/credentials/v2"
+          ],
+          "type": [
+            "VerifiableCredential"
+          ],
+          "issuer": "did:example:issuer",
+          "credentialSubject": {
+            "id": "did:example:subject"
+          }
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "name": "presentation-holder-ok.json",
+    "presentation": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiablePresentation"
+      ],
+      "holder": "did:key:z6MkpJySvETLnxhQG9DzEdmKJtysBDjuuTeDfUj1uNNCUqcj",
+      "verifiableCredential": [
+        {
+          "@context": [
+            "https://www.w3.org/ns/credentials/v2"
+          ],
+          "type": [
+            "VerifiableCredential"
+          ],
+          "issuer": "did:example:issuer",
+          "credentialSubject": {
+            "id": "did:example:subject"
+          }
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "name": "presentation-id-ok.json",
+    "presentation": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiablePresentation"
+      ],
+      "id": "urn:uuid:9c9a36f8-518f-4976-a934-6649502d0008"
+    },
+    "valid": true
+  },
+  {
+    "name": "presentation-missing-base-context-fail.json",
+    "presentation": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/examples/v2"
+      ],
+      "type": [
+        "VerifiablePresentation"
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "presentation-missing-required-type-fail.json",
+    "presentation": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2",
+        {
+          "CredentialManagerPresentation": "https://example.org/examples#CredentialManagerPresentation"
+        }
+      ],
+      "type": [
+        "CredentialManagerPresentation"
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "presentation-multiple-vc-ok.json",
+    "presentation": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiablePresentation"
+      ],
+      "verifiableCredential": [
+        {
+          "@context": [
+            "https://www.w3.org/ns/credentials/v2"
+          ],
+          "type": [
+            "VerifiableCredential"
+          ],
+          "issuer": "did:example:issuer",
+          "credentialSubject": {
+            "id": "did:example:subject"
+          }
+        },
+        {
+          "@context": [
+            "https://www.w3.org/ns/credentials/v2"
+          ],
+          "type": [
+            "VerifiableCredential"
+          ],
+          "issuer": "did:example:issuer",
+          "credentialSubject": {
+            "id": "did:example:other-subject"
+          }
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "name": "presentation-no-context-fail-or-inject.json",
+    "presentation": {
+      "type": [
+        "VerifiablePresentation"
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "presentation-no-type-fail.json",
+    "presentation": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "presentation-ok.json",
+    "presentation": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiablePresentation"
+      ]
+    },
+    "valid": true
+  },
+  {
+    "name": "presentation-optional-type-ok.json",
+    "presentation": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2",
+        {
+          "CredentialManagerPresentation": "https://example.org/examples#CredentialManagerPresentation"
+        }
+      ],
+      "type": [
+        "VerifiablePresentation",
+        "CredentialManagerPresentation"
+      ]
+    },
+    "valid": true
+  },
+  {
+    "name": "presentation-self-asserted-vc-holder-mismatch.json",
+    "presentation": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiablePresentation"
+      ],
+      "holder": "did:example:alice",
+      "verifiableCredential": [
+        {
+          "@context": [
+            "https://www.w3.org/ns/credentials/v2"
+          ],
+          "type": [
+            "VerifiableCredential"
+          ],
+          "issuer": "did:key:z6MkpJySvETLnxhQG9DzEdmKJtysBDjuuTeDfUj1uNNCUqcj",
+          "credentialSubject": {
+            "id": "did:example:subject"
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "presentation-self-asserted-vc-issuer-mismatch.json",
+    "presentation": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiablePresentation"
+      ],
+      "holder": "did:key:z6MkpJySvETLnxhQG9DzEdmKJtysBDjuuTeDfUj1uNNCUqcj",
+      "verifiableCredential": [
+        {
+          "@context": [
+            "https://www.w3.org/ns/credentials/v2"
+          ],
+          "type": [
+            "VerifiableCredential"
+          ],
+          "issuer": "did:example:alice",
+          "credentialSubject": {
+            "id": "did:example:subject"
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "presentation-self-asserted-vc-no-holder.json",
+    "presentation": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiablePresentation"
+      ],
+      "verifiableCredential": [
+        {
+          "@context": [
+            "https://www.w3.org/ns/credentials/v2"
+          ],
+          "type": [
+            "VerifiableCredential"
+          ],
+          "issuer": "did:key:z6MkpJySvETLnxhQG9DzEdmKJtysBDjuuTeDfUj1uNNCUqcj",
+          "credentialSubject": {
+            "id": "did:example:subject"
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "presentation-self-asserted-vc-ok.json",
+    "presentation": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiablePresentation"
+      ],
+      "holder": "did:key:z6MkpJySvETLnxhQG9DzEdmKJtysBDjuuTeDfUj1uNNCUqcj",
+      "verifiableCredential": [
+        {
+          "@context": [
+            "https://www.w3.org/ns/credentials/v2"
+          ],
+          "type": [
+            "VerifiableCredential"
+          ],
+          "issuer": "did:key:z6MkpJySvETLnxhQG9DzEdmKJtysBDjuuTeDfUj1uNNCUqcj",
+          "credentialSubject": {
+            "id": "did:example:subject"
+          }
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "name": "presentation-vc-as-string-fail.json",
+    "presentation": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiablePresentation"
+      ],
+      "verifiableCredential": [
+        "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJ2YyI6eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiLCJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvZXhhbXBsZXMvdjIiXSwiaWQiOiJodHRwOi8vZXhhbXBsZS5lZHUvY3JlZGVudGlhbHMvMzczMiIsInR5cGUiOlsiVmVyaWZpYWJsZUNyZWRlbnRpYWwiLCJVbml2ZXJzaXR5RGVncmVlQ3JlZGVudGlhbCJdLCJpc3N1ZXIiOiJodHRwczovL2V4YW1wbGUuZWR1L2lzc3VlcnMvNTY1MDQ5IiwidmFsaWRGcm9tIjoiMjAxMC0wMS0wMVQwMDowMDowMFoiLCJjcmVkZW50aWFsU3ViamVjdCI6eyJpZCI6ImRpZDpleGFtcGxlOmViZmViMWY3MTJlYmM2ZjFjMjc2ZTEyZWMyMSIsImRlZ3JlZSI6eyJ0eXBlIjoiQmFjaGVsb3JEZWdyZWUiLCJuYW1lIjoiQmFjaGVsb3Igb2YgU2NpZW5jZSBhbmQgQXJ0cyJ9fX0sImlzcyI6Imh0dHBzOi8vZXhhbXBsZS5lZHUvaXNzdWVycy81NjUwNDkiLCJqdGkiOiJodHRwOi8vZXhhbXBsZS5lZHUvY3JlZGVudGlhbHMvMzczMiIsInN1YiI6ImRpZDpleGFtcGxlOmViZmViMWY3MTJlYmM2ZjFjMjc2ZTEyZWMyMSJ9.0fkQPZOKlD0Sl0A798KBUNMOdGq90McQQIEtKU9tgSd9K1kRcxWVKDXQJcn_FJqLvo2bk793EHk-RTeEL1HyAQ"
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "presentation-vc-missing-required-type-fail.json",
+    "presentation": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiablePresentation"
+      ],
+      "verifiableCredential": [
+        {
+          "@context": [
+            "https://www.w3.org/ns/credentials/v2"
+          ],
+          "type": [],
+          "issuer": "did:example:issuer",
+          "credentialSubject": {
+            "id": "did:example:subject"
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "presentation-vc-ok.json",
+    "presentation": {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "type": [
+        "VerifiablePresentation"
+      ],
+      "verifiableCredential": [
+        {
+          "@context": [
+            "https://www.w3.org/ns/credentials/v2"
+          ],
+          "type": [
+            "VerifiableCredential"
+          ],
+          "issuer": "did:example:issuer",
+          "credentialSubject": {
+            "id": "did:example:subject"
+          }
+        }
+      ]
+    },
+    "valid": true
+  }
+]

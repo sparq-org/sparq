@@ -36,6 +36,12 @@ const call = (name, request) => JSON.parse(aggregate[name](JSON.stringify(reques
 const keys = JSON.parse(aggregate.generateKeys());
 ```
 
+After installing the packed package, CommonJS consumers use
+`require('sparq-verifiable-aggregate')`; ESM consumers use
+`import * as aggregate from 'sparq-verifiable-aggregate'`. Conditional exports
+select the entry and declarations, and both entries share one wasm instance.
+The build packs and installs offline and runs both package smoke tests.
+
 All five step functions take one JSON string and return one JSON string:
 
 | Function | Request | Result |
@@ -57,27 +63,33 @@ Parameters are `{session_id,statistic,min_group,min_contributors?,max_value_bits
 `max_value_bits:48`; `min_group:0` disables the group threshold. A roster entry is
 `{party_iri,ed25519_public_key,x25519_public_key,computeOnly?}`, with base64url public keys.
 A `computeOnly: true` entry must supply zero count and zero sum (or no sum for
-count-only); its proof enforces this role. Such entries count toward the contributor
-minimum. The requester may use a roster identity and participate in both rounds;
+count-only); its proof enforces this role. The contributor minimum counts only
+parties that commit inputs, excluding compute-only entries. For two input parties
+and a compute-only requester, explicitly set `min_contributors:2` to permit a result.
+The requester may use a roster identity and participate in both rounds;
 it then learns totals as a contributor.
 Each party uses its zero-based roster index. `input` is `{count,sum}`, with an
 unsigned count and unsigned canonical decimal **string** sum; count-only uses
 `sum:null`. Points, proof bytes, ciphertexts and scalars also use base64url.
 
-For a roster below `min_contributors`, skip partial exchange and call `finish`
+For fewer input parties than `min_contributors`, skip partial exchange and call `finish`
 with `local:null,messages:[]` after collecting every signed contribution. Missing
 or invalid hospital input is an error, not a successful threshold refusal.
 Outcome JSON rejects unknown fields. In Rust, construct or match the empty refusal
 as `Outcome::TooFewContributors {}`.
 Errors throw JSON text `{code,index,check}`; treat `input-not-attested` as a failed
-session. `below-minimum-group` exposes a proof with no count or sum opening;
+session. Missing or malformed signatures keep the invalid-signature error:
+`check:"signature"` with `code:"input-not-attested"` for contributions and
+`code:"protocol-error"` for partials and outcomes. Other missing fields retain
+their encoding errors. `below-minimum-group` exposes a proof with no count or sum opening;
 `release` exposes the count and optional sum plus blindings. Only contributor
 processes receive partial plaintexts; recipient processes receive public
 contributions and outcomes.
 
-The [offline smoke test](../../proof-methods/aggregate/tests/node-smoke.cjs) is a
-complete routing example and drives every public step through the generated
-package. It uses Node 24 and needs no network.
+The [CommonJS smoke test](../../proof-methods/aggregate/tests/node-smoke.cjs) and
+[ESM smoke test](../../proof-methods/aggregate/tests/node-smoke.mjs) route sessions
+through the packed, offline-installed package on Node 24. The ESM test imports by
+package name from the installation directory.
 
 Optional `threshold` is `{statistic:"count"|"sum",op:">="|"<",value}` with `value`
 a canonical unsigned decimal string fitting `u128`. Sum comparisons require
