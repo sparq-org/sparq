@@ -509,9 +509,11 @@ preserve order and duplicates where the operator does; they are not universally
 deduplicated. Custom expression bodies and SPARQL function calls use the same
 evaluator during validation.
 
-See [Advanced Features](references/advanced-features.md) for rules, node-expression
-forms, argument scopes and graph scopes, and [validation details](references/validation-details.md)
-for constraint coverage, prerequisites and conformance ratchets.
+See [Advanced Features](references/advanced-features.md) for SHACL-AF rules,
+SHACL 1.2 inference rules and declared rule entailment, node-expression APIs and graph scopes, and [validation details](references/validation-details.md)
+for constraint coverage, prerequisites and conformance ratchets. The 1.2 rule
+executor rejects unsupported processors anywhere among the shapes graph's rules
+and rule sets, including unselected and deactivated nodes and included sets.
 
 ## See also
 

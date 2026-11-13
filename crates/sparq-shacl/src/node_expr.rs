@@ -192,9 +192,9 @@ pub(crate) fn eval_function_body(
     expr.try_eval(data, &GraphView::new(data), model, focus, &scope)
 }
 
-/// Parses a SHACL-AF node expression value (the full algebra — see [`NodeExpr`]).
-/// `None` for an unsupported / ill-formed blank-node expression (e.g. a function
-/// expression, or a filter shape whose shape is not in the model) — skipped.
+/// Parses a shared node expression value (see [`NodeExpr`]).
+/// Returns `None` for an unsupported or malformed expression, or a filter shape
+/// whose shape is not registered in the model.
 pub(crate) fn parse_node_expr(g: &GraphView, model: &ShapesModel, node: &Term) -> Option<NodeExpr> {
     struct Guard;
     impl Drop for Guard {

@@ -105,18 +105,15 @@ and call `validate_with_model`. CLI: `cargo run -p sparq-shacl --example validat
 
 ## Scope and non-goals
 
-`validate_strict` returns `Err(ShaclFailure)` for an unsound SHACL-SPARQL pre-binding (`MINUS`/
-`VALUES`/`SERVICE` / a sub-`SELECT` dropping `$this` / a `BIND` re-binding it, sq-0mjfd) and for
-**ill-formed shapes-graph constructs** — the W3C-suite `sht:Failure` outcome: an unparsable
-`sh:path` or pathless property shape, a non-`xsd:integer` count/length, a malformed SHACL list,
-a non-node-kind `sh:nodeKind`, a non-IRI `sh:severity`, EITHER qualified parameter without the
-other, ANY `sh:entailment` (no regime is supported, SHACL §3.4), or a PRESENT `sh:select`/
-`sh:sparqlExpr`/`shacl-af` node expression that does not build — **fail-closed relative to this
-engine's parsers** (sq-11a, sq-ehq4g, sq-c1v3e); construct-local checks, not a full
-SHACL-of-SHACL pass. `validate` skips all of these leniently, surfacing each skip in
-`report.diagnostics` (joining the sq-lz99x uncompilable-`sh:pattern` skip there). Out of scope:
-`$shapesGraph` — see `bd list -l area:sparq-shacl`. Results are **not deduplicated** across
-traversal routes (a nested shape reports once per parent route); re-entrant recursion conforms.
+`validate_strict` returns `Err(ShaclFailure)` for inadmissible SHACL-SPARQL
+pre-binding, malformed shapes, unsupported entailment regimes, and declared rule
+execution failures. Default validation follows SHACL 1.2 admission rules;
+`validate_strict_shacl10` retains SHACL 1.0 Appendix A admission. With `shacl-af`,
+SHACL 1.2 rule entailments are supported through `rules12`; without it those
+regimes are unsupported. `validate` exposes processing-failure diagnostics.
+These checks are not a complete SHACL-of-SHACL validation pass.
+`$shapesGraph` remains out of scope. Results are not deduplicated across traversal
+routes (a nested shape reports once per parent route); re-entrant recursion conforms.
 
 ## License
 

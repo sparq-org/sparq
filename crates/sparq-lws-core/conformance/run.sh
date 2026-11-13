@@ -63,6 +63,26 @@ CERT="$HERE/tls/server-cert.pem"
 KEY="$HERE/tls/server-key.pem"
 SAN_CNF="$HERE/tls/san.cnf"
 
+# --keep-earl [OUT_DIR] preserves the native report before the existing ratchet.
+# CTH_REVISION is the commit used to build the patched image (or its OCI revision label).
+KEEP_EARL=0
+EARL_DIR="$WORKSPACE/target/earl"
+if [ "${1:-}" = --keep-earl ] && [ "$#" -le 2 ]; then
+  KEEP_EARL=1
+  EARL_DIR="${2:-$EARL_DIR}"
+elif [ "$#" -ne 0 ]; then
+  echo "Usage: $0 [--keep-earl [OUT_DIR]]" >&2
+  exit 2
+fi
+if [ "$KEEP_EARL" = 1 ]; then
+  mkdir -p "$EARL_DIR"
+  EARL_DIR="$(cd "$EARL_DIR" && pwd)"
+  for phase in '' -post-term -post-kill; do
+    rm -f "$EARL_DIR/sparq-solid-cth${phase}-earl.ttl" \
+      "$EARL_DIR/sparq-solid-cth${phase}-revisions.tsv"
+  done
+fi
+
 BASE_URL="https://localhost:3000"
 AUDIENCE="https://localhost:3000"
 ISSUER="http://localhost:8080/realms/solid"
@@ -125,6 +145,16 @@ fi
 [ -d "$SPEC_TESTS" ] || { echo "ERROR: specification-tests not found at $SPEC_TESTS (override SPEC_TESTS)" >&2; exit 1; }
 
 docker image inspect "$IMAGE" >/dev/null 2>&1 || { echo "ERROR: CTH image '$IMAGE' not present. Build the ath-patched image (see conformance/README.md 'DPoP ath') or set CTH_IMAGE." >&2; exit 1; }
+if [ "$KEEP_EARL" = 1 ]; then
+  CTH_REVISION="${CTH_REVISION:-$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$IMAGE")}"
+  if [[ ! "$CTH_REVISION" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    echo "ERROR: --keep-earl requires CTH_REVISION (the patched image's source commit) or its org.opencontainers.image.revision label" >&2
+    exit 1
+  fi
+  CTH_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$IMAGE")"
+  SPEC_REVISION="$(git -C "$SPEC_TESTS" rev-parse HEAD)"
+  SPARQ_REVISION="$(git -C "$WORKSPACE" rev-parse HEAD)"
+fi
 # Obtain the probe/forwarder image UP FRONT. The networking probe below reads a failed `docker run` as
 # "the harness netns cannot reach the server"; if the image were merely missing, that misreads as the
 # VM-backed case and starts a forwarder on an engine that does not need one.
@@ -279,6 +309,15 @@ run_harness() {
   # fail) — tolerate it and report the score. A zero exit is a clean pass.
   echo ">> Reports in $output (report.html / report.ttl EARL). Server log: $REPORTS/server.log"
   echo ">> CONFORMANCE RESULT: passed=${passed} failed=${failed} untested=${untested} inapplicable=${inapplicable} total=${total} (harness exit code: ${harness_rc})"
+
+  if [ "$KEEP_EARL" = 1 ]; then
+    local suffix=''
+    if [ "$output" != "$REPORTS" ]; then suffix="-${output##*/}"; fi
+    cp "$EARL_REPORT" "$EARL_DIR/sparq-solid-cth${suffix}-earl.ttl"
+    printf 'sparq\t%s\nspecification-tests\t%s\nconformance-test-harness\t%s\ncth-image\t%s\nharness-exit\t%s\nbackend\t%s\n' \
+      "$SPARQ_REVISION" "$SPEC_REVISION" "$CTH_REVISION" "$CTH_IMAGE_ID" \
+      "$harness_rc" "$SPARQ_BACKEND" > "$EARL_DIR/sparq-solid-cth${suffix}-revisions.tsv"
+  fi
 
   # --- ratchet against the pinned floor -------------------------------------------------------------
   # PORT DELTA (sq-gg0qq.7): the source repo recorded its score as PROSE in SCORE.md, which

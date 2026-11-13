@@ -17,6 +17,11 @@
   INFERENCE step (they produce triples), not part of the existing `validate(..)`
   path. Use `FactDomain::AssertedPlusInferred` when constraints should see the rule
   closure without expanding manually.
+- **SHACL 1.2 inference rules also require `shacl-af`.** The separate `rules12`
+  module implements their scheduling semantics. Declared `sh:RulesEntailment`
+  and `sh:RuleSet` regimes execute before validation; without the feature these
+  regimes are unsupported. See [Advanced Features](advanced-features.md) for
+  selection, scheduling and failure behavior.
 - **The SHACL Compact Syntax parser is OPT-IN behind the `scs` cargo feature.**
   With it off the `scs` module and the `parse_scs` / `parse_scs_to_graph` / `ScsError`
   / `DEFAULT_BASE` symbols are absent (zero parser code compiled in). It adds no new

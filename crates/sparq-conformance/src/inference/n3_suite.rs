@@ -84,6 +84,13 @@ fn suite_resolver(tests_root: std::path::PathBuf) -> impl Fn(&str) -> Option<Str
 }
 
 pub fn run_suite(n3_root: &Path, out: &mut Vec<TestResult>) -> Result<(), String> {
+    out.extend(run_suite_with_ids(n3_root)?.into_iter().map(|(_, r)| r));
+    Ok(())
+}
+
+/// Run the N3 manifests with their published test IRIs for implementation reports.
+pub fn run_suite_with_ids(n3_root: &Path) -> Result<Vec<(String, TestResult)>, String> {
+    let mut out = Vec::new();
     let tests = n3_root.join("tests");
     if !tests.is_dir() {
         return Err(format!(
@@ -97,32 +104,55 @@ pub fn run_suite(n3_root: &Path, out: &mut Vec<TestResult>) -> Result<(), String
         ("n3/extended", "N3Tests/manifest-extended.ttl"),
         ("n3/turtle", "TurtleTests/manifest.ttl"),
     ] {
-        run_manifest(&tests.join(manifest), suite, &tests, out)?;
+        run_manifest(&tests.join(manifest), suite, &tests, &mut out)?;
     }
-    Ok(())
+    Ok(out)
 }
 
 fn run_manifest(
     path: &Path,
     suite: &str,
     tests_root: &Path,
-    out: &mut Vec<TestResult>,
+    out: &mut Vec<(String, TestResult)>,
 ) -> Result<(), String> {
     let g = MiniGraph::load(path)?;
-    // Walk by declared type (robust against the one malformed entries-list
-    // token upstream), in manifest order via the subjects' first occurrence.
+    let start = out.len();
+    // Preserve typed-test discovery alongside listed entries, so an incomplete
+    // entries list cannot hide a declared test.
+    let mut candidates = Vec::new();
+    for m in g.subjects_with_type(&format!("{MF}Manifest")) {
+        if let Some(head) = g.object(&m, &format!("{MF}entries")) {
+            for entry in g.checked_list(head)? {
+                candidates.push(as_node(&entry).ok_or("manifest entry is not a resource")?);
+            }
+        }
+    }
+    candidates.extend(
+        g.triples
+            .iter()
+            .filter(|t| {
+                t.predicate.as_str() == "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
+                    && matches!(&t.object, oxrdf::Term::NamedNode(ty)
+                if ty.as_str().starts_with(TEST) || ty.as_str().starts_with(&format!("{RDFT}Test")))
+            })
+            .map(|t| t.subject.clone()),
+    );
     let mut seen = std::collections::HashSet::new();
-    for t in &g.triples {
-        let node = t.subject.clone();
+    for node in candidates {
         if !seen.insert(node.clone()) {
             continue;
         }
         let types = g.types_of(&node);
-        let kind = types.iter().find_map(|ty| {
-            ty.strip_prefix(TEST)
-                .or_else(|| ty.strip_prefix(RDFT).and_then(|r| r.strip_prefix("Test")))
-        });
-        let Some(kind) = kind else { continue };
+        let kind = types
+            .iter()
+            .find_map(|ty| {
+                ty.strip_prefix(TEST)
+                    .or_else(|| ty.strip_prefix(RDFT).and_then(|r| r.strip_prefix("Test")))
+            })
+            .unwrap_or("unknown");
+        let oxrdf::NamedOrBlankNode::NamedNode(id) = &node else {
+            return Err("test has no IRI".into());
+        };
         let name = g
             .str_object(&node, &format!("{MF}name"))
             .unwrap_or_default();
@@ -139,21 +169,17 @@ fn run_manifest(
                     _ => None,
                 })
         };
-        let Some(action) = file("action") else {
-            continue; // subjects without mf:action are manifest scaffolding
-        };
+        let action = file("action");
         let result = file("result");
         let rejected = g
             .object(&node, "http://www.w3.org/ns/rdftest#approval")
             .is_some_and(
-                |t| matches!(t, oxrdf::Term::NamedNode(n) if n.as_str().ends_with("Rejected")),
+                |t| matches!(t, oxrdf::Term::NamedNode(n) if matches!(n.as_str().strip_prefix(RDFT), Some("Rejected" | "Withdrawn"))),
             );
-        let mut outcome = if rejected {
-            // rdft:Rejected — upstream explicitly rejected the entry from the
-            // suite (e.g. biR's bare '+' list element: "not allowed in
-            // turtle nor n3").
-            Outcome::OutOfScope("rdft:Rejected upstream".into())
-        } else {
+        if rejected {
+            continue;
+        }
+        let mut outcome = if let Some(action) = action {
             match kind {
                 "TestN3PositiveSyntax" => syntax_test(&action, tests_root, true, false),
                 "TurtlePositiveSyntax" => syntax_test(&action, tests_root, true, true),
@@ -165,19 +191,27 @@ fn run_manifest(
                     eval_test_turtle(&action, result.as_deref(), tests_root, false)
                 }
                 "TestN3Reason" => reason_test(&g, &node, &action, result.as_deref(), tests_root),
-                other => Outcome::OutOfScope(format!("unhandled test type {other}")),
+                other => Outcome::Fail(format!("unhandled test type {other}")),
             }
+        } else {
+            Outcome::Fail("missing or nonlocal mf:action".into())
         };
         if let Outcome::Fail(e) = &outcome {
             if let Some(detail) = documented_divergence(suite, &entry_id(&node), &name, e) {
                 outcome = Outcome::Divergence(detail, e.clone());
             }
         }
-        out.push(TestResult {
-            suite: suite.to_string(),
-            name,
-            outcome,
-        });
+        out.push((
+            crate::rdf::published_iri(id.as_str(), tests_root, CANONICAL_BASE),
+            TestResult {
+                suite: suite.to_string(),
+                name,
+                outcome,
+            },
+        ));
+    }
+    if out.len() == start {
+        return Err("manifest has no active entries".into());
     }
     Ok(())
 }
@@ -218,10 +252,8 @@ fn parse_with_watchdog_mode(
 }
 
 fn read(path: &Path) -> Result<String, Outcome> {
-    match std::fs::read(path) {
-        // Lossy: one legacy suite file (07test/utf8.n3) carries a stray
-        // non-UTF-8 byte; the replacement character keeps it parseable.
-        Ok(bytes) => Ok(String::from_utf8_lossy(&bytes).into_owned()),
+    match std::fs::read_to_string(path) {
+        Ok(text) => Ok(text),
         Err(e) => Err(Outcome::Fail(format!("read {}: {e}", path.display()))),
     }
 }
@@ -459,23 +491,53 @@ struct Options {
     filter: bool,
 }
 
-fn options(g: &MiniGraph, node: &oxrdf::NamedOrBlankNode) -> Options {
+fn options(g: &MiniGraph, node: &oxrdf::NamedOrBlankNode) -> Result<Options, String> {
     let mut o = Options::default();
-    if let Some(opt_t) = g.object(node, &format!("{TEST}options")) {
-        if let Some(opt) = as_node(opt_t) {
-            let flag = |name: &str| {
-                matches!(
-                    g.str_object(&opt, &format!("{TEST}{name}")).as_deref(),
-                    Some("true") | Some("1")
-                )
+    let mut containers = g.objects(node, &format!("{TEST}options"));
+    containers.dedup();
+    if containers.len() > 1 {
+        return Err("multiple test:options nodes".into());
+    }
+    if let Some(opt_t) = containers.first() {
+        let opt = as_node(opt_t).ok_or("test:options is not a resource")?;
+        let mut seen = std::collections::HashMap::new();
+        for triple in g.triples.iter().filter(|t| t.subject == opt) {
+            let predicate = triple.predicate.as_str();
+            if let Some(previous) = seen.insert(predicate, &triple.object) {
+                if previous != &triple.object {
+                    return Err(format!("multiple values for N3 option {predicate}"));
+                }
+                continue;
+            }
+            let key = predicate.strip_prefix(TEST).unwrap_or(predicate);
+            if key == "filter" {
+                o.filter = true;
+                continue;
+            }
+            if !matches!(key, "data" | "conclusions" | "strings" | "think" | "rules") {
+                return Err(format!("unsupported N3 option {predicate}"));
+            }
+            let value = match &triple.object {
+                oxrdf::Term::Literal(l) if l.datatype().as_str() == XSD_BOOLEAN => {
+                    match l.value() {
+                        "true" | "1" => true,
+                        "false" | "0" => false,
+                        _ => return Err(format!("invalid boolean N3 option {predicate}")),
+                    }
+                }
+                _ => return Err(format!("non-boolean N3 option {predicate}")),
             };
-            o.data = flag("data");
-            o.conclusions = flag("conclusions");
-            o.strings = flag("strings");
-            o.filter = g.object(&opt, &format!("{TEST}filter")).is_some();
+            match key {
+                "data" => o.data = value,
+                "conclusions" => o.conclusions = value,
+                "strings" => o.strings = value,
+                // Both reasoning modes already run to fixpoint; see the module docs.
+                "think" | "rules" => {}
+                _ => unreachable!(),
+            }
         }
     }
-    o
+    Ok(o)
 }
 
 /// The manifest entry's own id: the local name of its IRI (`…#cwm_syntax_too-nested.n3`),
@@ -597,7 +659,10 @@ fn reason_test(
     result: Option<&Path>,
     tests_root: &Path,
 ) -> Outcome {
-    let opts = options(g, node);
+    let opts = match options(g, node) {
+        Ok(opts) => opts,
+        Err(e) => return Outcome::Fail(e),
+    };
     if opts.strings {
         return Outcome::OutOfScope("log:outputString (test:strings) not implemented".into());
     }
@@ -910,5 +975,102 @@ mod divergence_tests {
             ),
             None
         );
+    }
+}
+
+#[cfg(test)]
+mod earl_tests {
+    use super::*;
+
+    #[test]
+    fn unhandled_reasoner_options_cannot_pass_by_being_ignored() {
+        let root = std::env::temp_dir().join(format!("sparq-n3-options-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("manifest.ttl");
+        std::fs::write(
+            &path,
+            format!(
+                r#"
+            @prefix mf: <{MF}> . @prefix test: <{TEST}> .
+            <> a mf:Manifest; mf:entries (<#ok> <#unknown> <#literal> <#bad-value> <#multiple>) .
+            <#ok> a test:TestN3Reason; mf:action <input.n3>; mf:result <input.n3>;
+                test:options [test:think true; test:data true] .
+            <#unknown> a test:TestN3Reason; mf:action <input.n3>; mf:result <input.n3>;
+                test:options [test:future true] .
+            <#literal> a test:TestN3Reason; mf:action <input.n3>; mf:result <input.n3>;
+                test:options false .
+            <#bad-value> a test:TestN3Reason; mf:action <input.n3>; mf:result <input.n3>;
+                test:options [test:data "invalid"] .
+            <#multiple> a test:TestN3Reason; mf:action <input.n3>; mf:result <input.n3>;
+                test:options [test:data true, false] .
+        "#
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("input.n3"),
+            "<https://example.test/s> <https://example.test/p> <https://example.test/o> .",
+        )
+        .unwrap();
+        let mut rows = Vec::new();
+        run_manifest(&path, "n3/reasoner", &root, &mut rows).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+        assert_eq!(rows.len(), 5);
+        assert!(matches!(rows[0].1.outcome, Outcome::Pass));
+        for (_, row) in &rows[1..] {
+            assert!(matches!(row.outcome, Outcome::Fail(_)), "{row:?}");
+        }
+    }
+
+    #[test]
+    fn published_manifest_ids_include_unrunnable_n3_tests() {
+        let root = std::env::temp_dir().join(format!("sparq-n3-earl-{}", std::process::id()));
+        let dir = root.join("N3Tests");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("manifest-parser.ttl");
+        std::fs::write(
+            &path,
+            format!(
+                r#"
+            @prefix mf: <{MF}> . @prefix test: <{TEST}> . @prefix rdft: <{RDFT}> .
+            <> a mf:Manifest; mf:entries (<#ok> <#missing> <#unknown> <#rejected>) .
+            <#ok> a test:TestN3PositiveSyntax; mf:action <ok.n3>; mf:name "same display name" .
+            <#missing> a test:TestN3NegativeSyntax; mf:name "same display name" .
+            <#unknown> a test:FutureTest; mf:action <ok.n3> .
+            <#rejected> a test:TestN3PositiveSyntax; rdft:approval rdft:Rejected .
+            <#typed> a test:TestN3PositiveSyntax; mf:action <absent.n3> .
+            <#unreadable> a test:TestN3PositiveSyntax; mf:action <unreadable.n3> .
+        "#
+            ),
+        )
+        .unwrap();
+        std::fs::write(dir.join("ok.n3"), "<s> <p> <o> .").unwrap();
+        std::fs::write(dir.join("unreadable.n3"), b"<s> <p> \"\xff\" .").unwrap();
+        let mut rows = Vec::new();
+        run_manifest(&path, "n3/parser", &root, &mut rows).unwrap();
+        let malformed = std::fs::read_to_string(&path)
+            .unwrap()
+            .replace("mf:entries (<#ok>", "mf:entries (false");
+        std::fs::write(&path, malformed).unwrap();
+        let error = run_manifest(&path, "n3/parser", &root, &mut Vec::new()).unwrap_err();
+        assert!(error.contains("entry is not a resource"), "{error}");
+        std::fs::remove_dir_all(root).unwrap();
+        assert_eq!(
+            rows.len(),
+            5,
+            "typed tests outside malformed lists are included; rejected omitted"
+        );
+        assert_eq!(
+            rows[0].0,
+            "https://w3c.github.io/N3/tests/N3Tests/manifest-parser.ttl#ok"
+        );
+        assert_eq!(
+            rows[1].0,
+            "https://w3c.github.io/N3/tests/N3Tests/manifest-parser.ttl#missing"
+        );
+        assert!(matches!(rows[0].1.outcome, Outcome::Pass));
+        for (_, row) in &rows[1..] {
+            assert!(matches!(row.outcome, Outcome::Fail(_)), "{row:?}");
+        }
     }
 }
