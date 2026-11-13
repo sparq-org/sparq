@@ -175,9 +175,9 @@ pub(crate) fn wcoj_global_order(
 pub(super) fn bgp_is_cyclic(patterns: &[TriplePattern]) -> bool {
     let mut next_id = 0u32;
     let mut ids: FxHashMap<Variable, u32> = FxHashMap::default();
-    let mut edges: Vec<std::collections::HashSet<u32>> = Vec::new();
+    let mut edges: Vec<WorkSet<u32>> = Vec::new();
     for tp in patterns {
-        let mut e = std::collections::HashSet::new();
+        let mut e = WorkSet::new();
         for v in [tp_var(&tp.subject), nnp_var(&tp.predicate), tp_var(&tp.object)].into_iter().flatten() {
             let id = *ids.entry(v).or_insert_with(|| {
                 let id = next_id;

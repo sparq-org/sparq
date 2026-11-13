@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -77,6 +78,20 @@ class PureLogic(unittest.TestCase):
 
 
 class LiveWorkflows(unittest.TestCase):
+    def test_local_composite_actions_are_scanned_without_a_workflow(self):
+        for suffix in ("yml", "yaml"):
+            with self.subTest(suffix=suffix), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                action = root / ".github/actions/nested/setup" / f"action.{suffix}"
+                action.parent.mkdir(parents=True)
+                bad = ("name: setup\nruns:\n  using: composite\n  steps:\n"
+                       "    - uses: taiki-e/install-action@7a79fe8c3a13344501c80d99cae481c1c9085912\n")
+                action.write_text(bad)
+                self.assertEqual(gate.scan_workflows(root), [(action,
+                    "- uses: taiki-e/install-action@7a79fe8c3a13344501c80d99cae481c1c9085912")])
+                action.write_text(bad + "      with:\n        tool: cargo-nextest\n")
+                self.assertEqual(gate.scan_workflows(root), [])
+
     def test_repo_workflows_pass(self):
         """The repo's own workflows must currently satisfy the gate. If a future edit
         re-introduces a selector-less SHA-pinned install-action, this fails first."""

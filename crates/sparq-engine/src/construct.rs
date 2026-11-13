@@ -65,7 +65,7 @@ pub fn construct_prepared_with_budget_detailed(
     budget: &QueryBudget,
 ) -> Result<Vec<Triple>, QueryFailure> {
     let semantics = prepared.resolve_ebv_semantics(budget.ebv_semantics).map_err(QueryFailure::Evaluation)?;
-    let q = prepared.query();
+    let q = prepared.query_for_budget(budget);
     let active = crate::active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = crate::view_scope(&active);
@@ -122,7 +122,7 @@ pub fn describe_prepared_with_budget_detailed(
     budget: &QueryBudget,
 ) -> Result<Vec<Triple>, QueryFailure> {
     let semantics = prepared.resolve_ebv_semantics(budget.ebv_semantics).map_err(QueryFailure::Evaluation)?;
-    let q = prepared.query();
+    let q = prepared.query_for_budget(budget);
     let active = crate::active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = crate::view_scope(&active);

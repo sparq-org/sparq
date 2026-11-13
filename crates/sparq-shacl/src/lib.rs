@@ -13,10 +13,14 @@ mod functions;
 #[cfg(feature = "imports")]
 pub mod imports;
 pub mod model;
+mod node_expr;
 pub mod path;
 mod report;
 #[cfg(any(feature = "shacl-af", feature = "sparql-rl"))]
 mod rule_schedule;
+pub use node_expr::{
+    eval_node_expression, eval_node_expression_result, eval_node_expression_with_scope, Scope,
+};
 // (sq-d1dw) SHACL-AF rules (`sh:rule`) — OPT-IN behind the `shacl-af`
 // cargo feature so the base validation path carries zero rule code when off.
 #[cfg(feature = "shacl-af")]
@@ -58,8 +62,8 @@ pub use imports::{resolve_imports, resolve_shapes_graph, ShapesGraphResolution};
 #[cfg(feature = "shacl-af")]
 pub use rules::{
     apply_rules, apply_rules_in_scope, apply_rules_in_scope_with_model, apply_rules_with_model,
-    conforms, eval_node_expression, eval_node_expression_with_scope, expand, expand_dataset,
-    ConformanceCheck, DatasetExpansion, Destination, GraphScope, Inference, Scope,
+    conforms, expand, expand_dataset, ConformanceCheck, DatasetExpansion, Destination, GraphScope,
+    Inference,
 };
 
 use oxrdf::Triple;

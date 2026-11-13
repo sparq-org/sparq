@@ -73,8 +73,11 @@ and call `validate_with_model`. CLI: `cargo run -p sparq-shacl --example validat
   sibling joins and projecting sub-SELECTs, sq-mue75) and SPARQL-based constraint
   *components* (`sh:ConstraintComponent` + `sh:parameter`/`sh:validator`, §6), pinned
   by the W3C `sparql/*` sub-suites.
+- **SHACL 1.2 node expressions** — standalone evaluation in both feature states via
+  `eval_node_expression_result(data, shapes, expr, focus, &scope)`, preserving an empty output
+  separately from evaluation failure; custom expression bodies also work in SPARQL functions.
 - **SHACL Advanced Features (opt-in `shacl-af`)** — a rule **inference** step (`sh:rule` / `sh:values`, not part of
-  `validate`): `sh:TripleRule`, `sh:SPARQLRule`, value rules, node expressions, `sh:expression` / `sh:nodeByExpression`;
+  `validate`): `sh:TripleRule`, `sh:SPARQLRule`, value rules, `sh:expression` / `sh:nodeByExpression`;
   `validate_with_domain` (and its model variant) selects asserted facts or `data ∪ inferred`. `apply_rules_in_scope` /
   `expand_dataset` take a `GraphScope` and a `Destination`, keeping asserted named graphs (gh-6614). Off ⇒ none compiles.
 - **Differential fuzzing** — a deterministic SplitMix64 fuzzer (`tests/diff_fuzz.rs`)
@@ -102,18 +105,15 @@ and call `validate_with_model`. CLI: `cargo run -p sparq-shacl --example validat
 
 ## Scope and non-goals
 
-`validate_strict` returns `Err(ShaclFailure)` for an unsound SHACL-SPARQL pre-binding (`MINUS`/
-`VALUES`/`SERVICE` / a sub-`SELECT` dropping `$this` / a `BIND` re-binding it, sq-0mjfd) and for
-**ill-formed shapes-graph constructs** — the W3C-suite `sht:Failure` outcome: an unparsable
-`sh:path` or pathless property shape, a non-`xsd:integer` count/length, a malformed SHACL list,
-a non-node-kind `sh:nodeKind`, a non-IRI `sh:severity`, EITHER qualified parameter without the
-other, ANY `sh:entailment` (no regime is supported, SHACL §3.4), or a PRESENT `sh:select`/
-`sh:sparqlExpr`/`shacl-af` node expression that does not build — **fail-closed relative to this
-engine's parsers** (sq-11a, sq-ehq4g, sq-c1v3e); construct-local checks, not a full
-SHACL-of-SHACL pass. `validate` skips all of these leniently, surfacing each skip in
-`report.diagnostics` (joining the sq-lz99x uncompilable-`sh:pattern` skip there). Out of scope:
-`$shapesGraph` — see `bd list -l area:sparq-shacl`. Results are **not deduplicated** across
-traversal routes (a nested shape reports once per parent route); re-entrant recursion conforms.
+`validate_strict` returns `Err(ShaclFailure)` for inadmissible SHACL-SPARQL
+pre-binding, malformed shapes, unsupported entailment regimes, and declared rule
+execution failures. Default validation follows SHACL 1.2 admission rules;
+`validate_strict_shacl10` retains SHACL 1.0 Appendix A admission. With `shacl-af`,
+SHACL 1.2 rule entailments are supported through `rules12`; without it those
+regimes are unsupported. `validate` exposes processing-failure diagnostics.
+These checks are not a complete SHACL-of-SHACL validation pass.
+`$shapesGraph` remains out of scope. Results are not deduplicated across traversal
+routes (a nested shape reports once per parent route); re-entrant recursion conforms.
 
 ## License
 

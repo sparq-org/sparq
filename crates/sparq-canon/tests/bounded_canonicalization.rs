@@ -3,6 +3,7 @@ use oxrdf::{BlankNode, GraphName, NamedNode, Quad, Term};
 use sha2::Sha256;
 use sparq_canon::{
     CanonicalizationLimits, canonicalize_quads_bounded_with, issue_quads_bounded_with,
+    issue_quads_bounded_ordered_with,
 };
 
 fn limits() -> CanonicalizationLimits {
@@ -38,6 +39,10 @@ fn bounded_canonicalization_and_issuer_match_standard_output_under_relabeling() 
             issue_quads_bounded_with::<Sha256>(&input, &limits()).unwrap(),
             sparq_canon::issue_quads_with::<Sha256>(&input).unwrap()
         );
+        assert_eq!(
+            issue_quads_bounded_ordered_with::<Sha256>(&input, &limits()).unwrap(),
+            sparq_canon::issue_quads_with::<Sha256>(&input).unwrap().into_iter().collect()
+        );
     }
 }
 
@@ -64,6 +69,7 @@ fn each_capacity_rejects_and_hndq_limit_reaches_the_library() {
                 .contains(expected)
         );
         assert!(issue_quads_bounded_with::<Sha256>(&graph, &cap).is_err());
+        assert!(issue_quads_bounded_ordered_with::<Sha256>(&graph, &cap).is_err());
     }
     let mut cap = limits();
     cap.max_hndq_calls = 0;

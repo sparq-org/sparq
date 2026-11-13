@@ -5,8 +5,8 @@ enabled by the exact-dataset evaluator. It separates a valid RDF numeric lexical
 from a computation the current engine can represent. This is a bounded numeric
 profile, not arbitrary-precision SPARQL arithmetic.
 
-Integer consumers use `i64`. Decimal consumers use a signed `i128` mantissa and
-checked decimal scale/alignment. Decimal division retains the engine's existing
+Integer arithmetic consumers use `i64`. Decimal arithmetic consumers use a signed
+`i128` mantissa and checked decimal scale/alignment. Decimal division retains the engine's existing
 precision: exact results terminating within eighteen fractional digits when representable,
 otherwise half-up rounding to eighteen fractional digits. Integer overflow, decimal overflow/alignment failure, and
 otherwise valid conversions outside these lanes set a sticky
@@ -16,9 +16,13 @@ mode. Normal promotion involving a float/double operand retains that type's
 semantics, including NaN. This guard does not promise exact real-number arithmetic
 for floating types or expand the existing decimal division precision.
 
-Interpreted and compiled expressions, FILTER/equality, casts, standard ordering,
-MIN/MAX and SUM/AVG share checked consumers. Numeric sargable shortcuts and parallel expression
-work fall back when this option is active, so worker-local evaluation cannot lose
+Interpreted and compiled arithmetic, casts, MIN/MAX and SUM/AVG share checked
+consumers. Relational comparison of two well-formed integer/decimal values and
+standard ordering can instead compare exact lexicals of any length. The bounded
+numeric fast path stays first; exceeding its mantissa or scale-alignment capacity
+in these comparisons does not set an arithmetic capacity failure. Other scalar
+comparisons retain the checked operand limits and sticky failures. Numeric sargable
+shortcuts and parallel expression work fall back when this option is active, so worker-local evaluation cannot lose
 the capacity state. This may increase work; no latency neutrality is claimed.
 Reentrant calls restore their parent's state. A custom extension must propagate a
 failed child evaluation rather than converting its error into an ordinary value;
@@ -34,8 +38,9 @@ unary plus preserve term identity. Numeric-source casts, including `xsd:string`,
 currently enter the numeric lane and can reject a large literal even when a more
 specialized conversion could decide the result. Exact
 SECONDS output likewise retains all bounded input fraction digits; a later
-arithmetic/comparison consumer fails if the result exceeds the decimal lane. Default native
-evaluation retains its existing finite-representation fallback behavior, which
+arithmetic consumer fails if the result exceeds the decimal lane. Exact
+integer/decimal comparison remains available for those fractional digits.
+Default native evaluation retains its existing finite-representation fallback behavior, which
 is a known implementation limitation, not a normative datatype validity rule.
 
 Effective boolean value (EBV) has a separate exact classification path. Valid

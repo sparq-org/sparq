@@ -43,7 +43,7 @@ use crate::error::{JsonLdError, JsonLdErrorCode as E};
 use crate::expand::expand;
 use crate::json::Json;
 use crate::loader::DocumentLoader;
-use crate::node_map::{generate_node_map, BlankNodeIssuer};
+use crate::node_map::{try_generate_node_map, BlankNodeIssuer};
 use crate::options::{JsonLdOptions, ProcessingMode};
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -161,13 +161,13 @@ pub fn frame_match_from_rdf(
 ) -> Result<Json, JsonLdError> {
     crate::context::budget::with_budget(|| {
         let input_bytes = json_bytes(&from_rdf);
-        frame_match_inner(input_bytes, |frame_default| graph_maps_from_rdf(from_rdf, frame_default), frame_doc, options, frame_options, loader)
+        frame_match_inner(input_bytes, |frame_default| Ok(graph_maps_from_rdf(from_rdf, frame_default)), frame_doc, options, frame_options, loader)
     })
 }
 
 fn frame_match_inner(
     input_bytes: usize,
-    graph_maps: impl FnOnce(bool) -> GraphMaps,
+    graph_maps: impl FnOnce(bool) -> Result<GraphMaps, JsonLdError>,
     frame_doc: &Json,
     options: &JsonLdOptions,
     frame_options: &FrameOptions,
@@ -185,7 +185,7 @@ fn frame_match_inner(
     }
 
     // §4.1 steps 4–7: frame the expanded input (returns the pruned expanded output).
-    let maps = graph_maps(fopts.frame_default);
+    let maps = graph_maps(fopts.frame_default)?;
     frame_maps(&maps, input_bytes, &expanded_frame, options, &fopts)
 }
 
@@ -289,7 +289,7 @@ pub fn frame_expanded(
     frame_options: &FrameOptions,
 ) -> Result<Json, JsonLdError> {
     // §4.1 step 4: the graph map (+ @merged unless frameDefault).
-    let maps = build_graph_maps(expanded_input, frame_options.frame_default);
+    let maps = build_graph_maps(expanded_input, frame_options.frame_default)?;
     frame_maps(&maps, json_bytes(expanded_input), expanded_frame, options, frame_options)
 }
 
@@ -672,12 +672,12 @@ enum Embed {
 /// Build the framing graph maps from the expanded input: clone the node map's graphs and
 /// (unless `frame_default`) add the `@merged` graph (Merge Node Maps, JSON-LD 1.1 API
 /// §7.3).
-fn build_graph_maps(expanded_input: &Json, frame_default: bool) -> GraphMaps {
-    let graphs = generate_node_map(expanded_input)
+fn build_graph_maps(expanded_input: &Json, frame_default: bool) -> Result<GraphMaps, JsonLdError> {
+    let graphs = try_generate_node_map(expanded_input)?
         .into_graphs()
         .map(|(name, nodes)| (name, nodes.into_iter().collect()))
         .collect();
-    finish_graph_maps(graphs, frame_default)
+    Ok(finish_graph_maps(graphs, frame_default))
 }
 
 /// The graph maps of fromRdf output ([`frame_match_from_rdf`]): what node map generation
@@ -2245,7 +2245,7 @@ mod tests {
     fn from_rdf_graph_maps_match_node_map_generation() {
         fn check(doc: &Json) {
             for frame_default in [false, true] {
-                let expected = build_graph_maps(doc, frame_default);
+                let expected = build_graph_maps(doc, frame_default).unwrap();
                 let actual = graph_maps_from_rdf(doc.clone(), frame_default);
                 let names = |m: &GraphMaps| m.graphs.keys().cloned().collect::<Vec<_>>();
                 assert_eq!(names(&actual), names(&expected), "graphs of {}", text(doc));
@@ -2361,7 +2361,7 @@ mod tests {
         let mut text = String::new();
         doc.write(&mut text);
         assert!(text.contains(r#"{"@list":[{"@list":[{"@id":"http://ex/target"}]}]}"#), "{text}");
-        let expected = build_graph_maps(&doc, false);
+        let expected = build_graph_maps(&doc, false).unwrap();
         let actual = graph_maps_from_rdf(doc.clone(), false);
         assert_eq!(*actual.graphs["@default"], *expected.graphs["@default"]);
         assert!(actual.graphs["@default"].contains_key("http://ex/target"));

@@ -55,3 +55,9 @@
   crate: "sparq-geo"
   features: "geof_accessors"
   test: true
+
+# Shared comparator tests always run; the external corpus is fixture-gated.
+- name: "sparq-geo (geosparql-benchmark)"
+  crate: "sparq-geo"
+  features: "geosparql_rewrite,geof_accessors"
+  test: true

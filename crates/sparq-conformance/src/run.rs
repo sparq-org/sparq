@@ -111,7 +111,7 @@ fn load_dataset_with_graphs(
             continue;
         };
         let t = Term::NamedNode(nn);
-        if !graph.named().iter().any(|(g, _)| *g == t) {
+        if graph.named_graph(&t).is_none() {
             graph.add_named(
                 t,
                 sparq_core::Graph::from_parts(sparq_core::dict::Dict::new(), Vec::new()),

@@ -149,7 +149,7 @@ const CRATE_LOCAL_FLOORS: &[(&str, &str, &str)] = &[
     // its own crate (which takes the floors crate as a `dev-dependency`). Both read the
     // SAME compile-time constant, so they CANNOT drift — and the guard no longer reads
     // another crate's test source, which is what closed the `ci_audit_inputs.py`
-    // "residual 3". These eleven are the `SHARED_CRATE_FLOORS` set below; the
+    // "residual 3". These shared floors are the `SHARED_CRATE_FLOORS` set below; the
     // `all_crate_test_suites_are_guarded` test exempts exactly them.
     //
     // sq-oy1f.40 — the SIX W3C JSON-LD 1.1 ratchets (toRdf, fromRdf,
@@ -356,12 +356,13 @@ const CRATE_LOCAL_FLOORS: &[(&str, &str, &str)] = &[
 
 /// sq-z1xv8 — the suite labels whose ratchet floor is sourced at COMPILE
 /// TIME from the SHARED `sparq-conformance-floors` crate, imported into BOTH
-/// `scoreboard::SUITES` and the enforcing runner in its own crate. These eleven do NOT
+/// `scoreboard::SUITES` and the enforcing runner in its own crate. These shared floors do NOT
 /// need — and must NOT have — a textual floor-sync row in `CRATE_LOCAL_FLOORS`: the
 /// registry and the runner read the SAME `const`, so they cannot drift, and reading the
 /// runner's source would mean reaching back out of this crate (the CI test-selection
 /// hole this bead closed). `all_crate_test_suites_are_guarded` exempts exactly this set.
 const SHARED_CRATE_FLOORS: &[&str] = &[
+    "GeoSPARQL Compliance Benchmark",
     "W3C SHACL core",
     "W3C SHACL-SPARQL",
     "OGC GeoSPARQL topology compliance",
@@ -375,7 +376,7 @@ const SHARED_CRATE_FLOORS: &[&str] = &[
     "RSP expressivity / SRBench correctness",
 ];
 
-/// sq-z1xv8 — the pinned floor VALUES the eleven shared-crate registry
+/// sq-z1xv8 — the pinned floor VALUES the shared-crate registry
 /// rows must carry, as `(label, expected_floor)`. Because the registry imports the
 /// shared `const` directly, drift is impossible — but a silent LOWERING is not: editing
 /// `sparq-conformance-floors` down would drop the registry value with it. A ratchet may
@@ -384,6 +385,7 @@ const SHARED_CRATE_FLOORS: &[&str] = &[
 /// textual-guard floor is bumped, and exactly how `LIB_SOURCED_EXPECTED` pins the six
 /// JSON-LD lanes).
 const SHARED_CRATE_EXPECTED: &[(&str, usize)] = &[
+    ("GeoSPARQL Compliance Benchmark", 124),
     ("W3C SHACL core", 98),
     ("W3C SHACL-SPARQL", 5),
     ("OGC GeoSPARQL topology compliance", 197),
@@ -415,11 +417,14 @@ const LIB_SOURCED_FLOORS: &[&str] = &[
     "W3C RDF 1.2 N-Quads syntax",
     "W3C RDF 1.2 N-Quads C14N",
     "W3C JSON-LD 1.1 toRdf",
+    "W3C JSON-LD toRdf-ingest (Graph / oxjsonld)",
     "W3C JSON-LD 1.1 fromRdf",
     "W3C JSON-LD 1.1 compact",
     "W3C JSON-LD 1.1 frame",
     "W3C JSON-LD 1.1 expand",
     "W3C JSON-LD 1.1 flatten",
+    "W3C JSON-LD 1.1 html",
+    "W3C JSON-LD 1.1 remote-doc",
 ];
 
 /// sq-oy1f.40 — the pinned floor VALUES the six lib-sourced JSON-LD
@@ -441,7 +446,8 @@ const LIB_SOURCED_EXPECTED: &[(&str, usize)] = &[
     ("W3C RDF 1.2 N-Triples C14N", 41),
     ("W3C RDF 1.2 N-Quads syntax", 31),
     ("W3C RDF 1.2 N-Quads C14N", 41),
-    ("W3C JSON-LD 1.1 toRdf", 413),
+    ("W3C JSON-LD 1.1 toRdf", 454),
+    ("W3C JSON-LD toRdf-ingest (Graph / oxjsonld)", 429),
     // sq-oy1f.28 — raised 51 → 52: the lane flipped from the engine-writer
     // round-trip oracle to the native document-level `sparq_jsonld::from_rdf` (§8.1)
     // oracle (normative expected-doc comparison + scoped round-trip + REAL negative
@@ -457,7 +463,7 @@ const LIB_SOURCED_EXPECTED: &[(&str, usize)] = &[
     // NegativeEvaluationTests against the manifest's `expectErrorCode` instead of
     // skipping them (a wrong code is a FAIL). Bumped in the SAME commit as the lib
     // const src/floors/compact.rs::FLOOR (rise-only).
-    ("W3C JSON-LD 1.1 compact", 243),
+    ("W3C JSON-LD 1.1 compact", 244),
     // sq-oy1f.29 — raised 61 → 92: the frame lane moved from the RDF-first
     // framer (`graph_to_jsonld_framed`) to the NATIVE Framing pipeline compared against
     // the W3C EXPECTED document under the stronger normative oracle (see
@@ -481,7 +487,9 @@ const LIB_SOURCED_EXPECTED: &[(&str, usize)] = &[
     // so merging main flips its 7 inherited fails to passes and it now MEASURES 53 pass /
     // 0 fail on the merged tree — a net RISE above the old writer oracle's 50 (union of
     // the native oracle AND main's expand fixes — see src/floors/flatten.rs). Rise-only.
-    ("W3C JSON-LD 1.1 flatten", 53),
+    ("W3C JSON-LD 1.1 flatten", 55),
+    ("W3C JSON-LD 1.1 html", 49),
+    ("W3C JSON-LD 1.1 remote-doc", 18),
 ];
 
 /// sq-oy1f.40 — the registry's six lib-sourced JSON-LD floors carry the
@@ -504,7 +512,7 @@ fn lib_sourced_jsonld_floors_are_pinned() {
     }
 }
 
-/// sq-z1xv8 — the registry's eleven shared-crate floors carry the pinned
+/// sq-z1xv8 — the registry's shared-crate floors carry the pinned
 /// values (a ratchet may only RISE; a silent LOWERING of a
 /// `sparq_conformance_floors::<module>::<FLOOR>` const drops the registry value and
 /// trips this). Also asserts the registry row and the shared const are literally the
@@ -514,6 +522,10 @@ fn shared_crate_floors_are_pinned() {
     use sparq_conformance_floors as floors;
     // The registry row's value MUST be the shared const, not a copy of it.
     let shared: &[(&str, usize)] = &[
+        (
+            "GeoSPARQL Compliance Benchmark",
+            floors::geo::GEOSPARQL_BENCHMARK_FLOOR,
+        ),
         ("W3C SHACL core", floors::shacl::CORE_FLOOR),
         ("W3C SHACL-SPARQL", floors::shacl::SPARQL_FLOOR),
         (

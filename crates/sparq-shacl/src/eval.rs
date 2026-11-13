@@ -172,8 +172,7 @@ pub(crate) fn count_focus_nodes(data: &Graph, shapes: &ShapesModel) -> usize {
 /// SHACL-AF rules module uses this to evaluate `sh:condition` gating: a rule
 /// fires for a focus node only when it conforms to every condition shape. Reuses
 /// the full constraint validator (Core + sh:sparql + nested shapes), so a
-/// condition may be any shape. Gated to the feature so it adds nothing when off.
-#[cfg(feature = "shacl-af")]
+/// condition may be any shape. Node expressions also use this validation primitive.
 pub(crate) fn conforms_node(data: &Graph, shapes: &ShapesModel, sid: usize, node: &Term) -> bool {
     let mut v = Validator::new(data, shapes);
     v.conforms(node, sid)
@@ -2858,7 +2857,7 @@ fn equal_value(a: &Term, b: &Term) -> bool {
 
 /// SPARQL-operator-style comparison of two terms; `None` when not comparable
 /// (non-literals, or literals of incompatible / unordered types).
-fn cmp_terms(a: &Term, b: &Term) -> Option<Ordering> {
+pub(crate) fn cmp_terms(a: &Term, b: &Term) -> Option<Ordering> {
     match (a, b) {
         (Term::Literal(la), Term::Literal(lb)) => cmp_literals(la, lb),
         _ => None,

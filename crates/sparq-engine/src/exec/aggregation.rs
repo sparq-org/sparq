@@ -283,7 +283,7 @@ pub(super) fn eval_aggregate(graph: &Graph, local: &LocalVocab, b: &Bindings, me
     match agg {
         AggregateExpression::CountSolutions { distinct } => {
             let n = if *distinct {
-                let mut seen = std::collections::HashSet::new();
+                let mut seen = WorkSet::new();
                 members.iter().filter(|&&ri| seen.insert(b.rows[ri].clone())).count()
             } else {
                 members.len()
@@ -583,7 +583,7 @@ pub(super) fn f32_promotion_may_tie(x: f64, y: f64) -> bool {
 }
 
 pub(super) fn dedup_values(vals: &mut Vec<Value>) {
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = WorkSet::new();
     vals.retain(|v| seen.insert(value_key(v)));
 }
 

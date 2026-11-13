@@ -206,9 +206,16 @@ than an estimate. It is NOT a claim of a bit-identical comparator: the runner
 re-implements the benchmark's answer comparison, and the bound on that is quantified
 under *Comparator equivalence* below.
 
+The measurements and comparator discussion below are a historical record. Those runs
+used the retired archive fetcher. Current reproduction uses
+`crates/sparq-geo/fetch-geosparql-benchmark.sh`, which returns a Git checkout; the example reads
+its `src/main/resources`. The example and ratchet now share the current comparator.
+Use the generated EARL results for current counts; this historical matrix was not rerun
+when the fetch recipes were consolidated. This is a community benchmark, not OGC certification.
+
 | System | GeoSPARQL compliance (requirements-weighted, of 30 reqs / 206 queries) | Source |
 |---|---|---|
-| **sparq** | **72.22%** (143/206 correct) | `bench/geo/gsb.sh` + `crates/sparq-geo/examples/gsb_compliance.rs` |
+| **sparq** | **72.22%** (143/206 correct) | `crates/sparq-geo/examples/gsb_compliance.rs`; current fetch: `crates/sparq-geo/fetch-geosparql-benchmark.sh` |
 | GeoSPARQL Fuseki 3.17 | 82.75% (177/206 correct) | arXiv:2102.06139 Table 2 |
 | Ontotext GraphDB 9.3.3 | 69.75% | same |
 | OpenLink Virtuoso 7.3 | 63.46% | same |
@@ -216,7 +223,7 @@ under *Comparator equivalence* below.
 | Stardog 7.4.0 / Blazegraph 2.1.5 / plain Jena Fuseki 3.14 | 56.67% | same |
 | Apache Marmotta 3.4.0 | 46.67% | same |
 
-**How the sparq row was produced** (`bench/geo/gsb.sh` → `gsb_compliance`). The upstream
+**How the historical sparq row was produced** (`gsb_compliance`; current fetch: `crates/sparq-geo/fetch-geosparql-benchmark.sh`). The upstream
 artifact is GPL-2.0, so it is fetched gather-only under a pinned sha256 and never
 vendored; the runner reproduces the benchmark's own scoring table and RE-IMPLEMENTS its
 answer comparator (ordered rows, `geo:wktLiteral` whitespace/case-folded, `geo:gmlLiteral`
@@ -230,7 +237,8 @@ comparator that dropped XML entity references while parsing `.srx`, so every *es
 expected GML answer was mangled before comparison and could not match; the GML normaliser
 was also lossy (empty elements, escaping, malformed input). Both were fixed in round 1,
 and **all four configurations have since been re-run end-to-end** against the pinned
-corpus (`bench/geo/gsb.sh`; the fetched tarball's sha256 matched the pin in its header).
+corpus (the retired tarball recipe recorded SHA-256
+`d46db11041be96881208b4954f70bda636fd217fcab4ea99ffb8bb658a5f21bf`).
 The sparq row, the configuration matrix, and the per-requirement breakdown below are the
 output of that corrected run — and are unchanged from the pre-fix recording, because the
 requirements the fixes touch (R18/R19, the only ones whose expected answers carry GML)
@@ -360,7 +368,7 @@ is a first-class outcome, not a hidden sparq win.
   clearly-BEHIND family with a same-family comparison. **BEHIND → immediate fix bead
   per the §5.3 rule.**
 - **GeoSPARQL benchmark run — DONE (sq-ql2iy).** sparq-geo now runs the 206-query
-  Jovanovik benchmark (`bench/geo/gsb.sh` + `crates/sparq-geo/examples/gsb_compliance.rs`),
+  Jovanovik benchmark (`crates/sparq-geo/examples/gsb_compliance.rs`; current fetch: `crates/sparq-geo/fetch-geosparql-benchmark.sh`),
   scoring **72.22%** against Fuseki 82.75% et al., re-derived 2026-07-26 with the corrected
   answer comparator. The row in §3.7 is a same-artifact comparison and the verdict moved
   NOT-COMPARABLE → BEHIND.

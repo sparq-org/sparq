@@ -844,8 +844,8 @@ impl TripleStore {
         Some(stats)
     }
 
-    /// Opens a store whose permutations are MEMORY-MAPPED from `dir` (written by
-    /// [`Graph::save`](crate::Graph::save)). The 6 (or 3, compact) index files stay on disk; the OS
+    /// Opens permutations from `dir` (written by [`Graph::save`](crate::Graph::save)),
+    /// owning small files and mapping larger files. For mapped indexes the OS
     /// pages in only the ranges a query touches, so datasets larger than RAM are
     /// queryable. Per-predicate stats are recomputed from the mapped POS/PSO indexes.
     ///
@@ -857,24 +857,27 @@ impl TripleStore {
         let mut perms: [PermData; 6] = std::array::from_fn(|_| PermData::default());
         for (i, slot) in perms.iter_mut().enumerate() {
             let path = dir.join(format!("perm{i}.bin"));
-            let file = std::fs::File::open(&path)?;
-            if file.metadata()?.len() == 0 {
+            let backing = crate::backing::Backing::open(&path)?;
+            if backing.is_empty() {
                 continue; // an empty (unbuilt, e.g. compact-index) permutation
             }
-            // SAFETY: the file is owned by this store for its lifetime and is not mutated.
-            let map = unsafe { memmap2::Mmap::map(&file)? };
             // FORMAT AUTO-DETECTION: a block-compressed file (written by `save_compressed`)
             // starts with FILE_MAGIC (`SPQCPRM1`) or, for a `spqcprm2`-emitting build,
             // FILE_MAGIC_V2 (`SPQCPRM2`); anything else is the original raw [u32;3] format.
-            // sq-7d3dj.32.2.7: both magics route to `from_mmap`, which re-checks the
+            // sq-7d3dj.32.2.7: both magics route to `from_backing`, which re-checks the
             // magic and picks the V1/V2 decode reader — a V1 file decodes byte-identically
-            // forever. Compressed perms are served lazily — block-wise decode off the mapped file.
-            *slot = if map.len() >= 8
-                && (map[..8] == crate::compress::FILE_MAGIC || map[..8] == crate::compress::FILE_MAGIC_V2)
+            // forever. Compressed perms are served lazily, block-wise from the backing.
+            *slot = if backing.len() >= 8
+                && (backing[..8] == crate::compress::FILE_MAGIC || backing[..8] == crate::compress::FILE_MAGIC_V2)
             {
-                PermData::Compressed(crate::compress::CompressedPerm::from_mmap(map)?)
+                PermData::Compressed(crate::compress::CompressedPerm::from_backing(backing)?)
             } else {
-                PermData::Mapped(map)
+                match backing.decode::<12, _>(|b| std::array::from_fn(|i| {
+                    Id::from_le_bytes(b[i * 4..i * 4 + 4].try_into().unwrap())
+                })) {
+                    crate::backing::Array::Owned(rows) => PermData::Owned(rows),
+                    crate::backing::Array::Mapped(map) => PermData::Mapped(map),
+                }
             };
         }
         // Use the persisted stats if present (no POS/PSO re-scan — keeps open fast and the
@@ -1831,7 +1834,7 @@ mod tests {
         }
         assert!(cmp_total * 2 < raw_total, "expected >2x overall perm compression, got {raw_total}/{cmp_total}");
 
-        let raw = TripleStore::open(&raw_dir, None).unwrap(); // old format: still opens (compat)
+        let raw = crate::backing::with_threshold(0, || TripleStore::open(&raw_dir, None)).unwrap(); // mapped raw reference
         let lazy = TripleStore::open(&cmp_dir, None).unwrap(); // auto-detected compressed
         let mut eager = TripleStore::open(&cmp_dir, None).unwrap();
         eager.decompress_to_ram(); // load-time decompression mode

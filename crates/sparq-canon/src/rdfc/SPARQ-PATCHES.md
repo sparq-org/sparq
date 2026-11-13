@@ -135,3 +135,11 @@ The following stay green:
 [canon]: https://www.w3.org/TR/rdf-canon/#canon-algorithm
 [hndq]: https://www.w3.org/TR/rdf-canon/#hash-nd-quads
 [hrbn]: https://www.w3.org/TR/rdf-canon/#hash-related-blank-node
+
+## zkVM collection adapter
+
+On `target_os = "zkvm"`, work maps are ordered and the private dataset adapter
+stores quads by their serialized lexical keys. This preserves RDF set semantics
+without constructing oxrdf's randomly seeded string interner. Canonical output
+still goes through the existing relabelling and final serialization. Native
+builds retain oxrdf's Dataset and the original work-map types.

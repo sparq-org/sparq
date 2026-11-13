@@ -5,6 +5,8 @@
 
 pub mod accept;
 pub mod baseenc;
+#[cfg(feature = "mmap")]
+mod backing;
 pub mod civil;
 pub mod compress;
 pub mod dict;
@@ -42,6 +44,9 @@ pub mod extsort;
 pub mod iri;
 pub mod json;
 pub mod meter;
+mod named_index;
+#[cfg(test)]
+mod named_index_tests;
 pub mod net;
 mod nt;
 pub mod percent;
@@ -93,6 +98,13 @@ const NUMERIC_CACHE_FILE: &str = "numerics-v3.bin";
 // the XSD 1.1 year zero.
 const TEMPORAL_CACHE_FILE: &str = "temporals-v4.bin";
 
+#[cfg(test)]
+mod precision_gate_cost {
+    std::thread_local! {
+        pub static SCANNED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+}
+
 /// An immutable, dictionary-encoded RDF graph ready for querying.
 pub struct Graph {
     /// Term dictionary ([`dict`](Self::dict) reads it). Private: a directory-backed graph's
@@ -114,16 +126,16 @@ pub struct Graph {
     /// no extra allocation is made for graphs that never query a temporal value.
     exact_temporals: std::sync::OnceLock<rustc_hash::FxHashMap<Id, temporal::ExactCacheCell>>,
     /// (sq-lr2ii) Memoised guard against the engine's f64 sargable-FILTER fast
-    /// path deciding a comparison wrongly for an f64-INEXACT decimal. `0` = not yet computed,
-    /// `1` = known to hold NO such decimal (fast path safe), `2` = holds at least one (the
-    /// engine must decline the fast path and use the exact evaluator). Lazily filled by
-    /// [`has_high_precision_decimal`](Self::has_high_precision_decimal); reset to `0` by a
-    /// delta that appends terms (`apply_delta_mem`) so it is recomputed over the grown
-    /// dictionary. Interior-mutable so a shared `&Graph` can populate it; never observable in
-    /// results (pure correctness gate).
-    high_precision_decimal: std::sync::atomic::AtomicU8,
-    /// The `xsd:float` twin of `high_precision_decimal` (same `0`/`1`/`2` encoding, same
-    /// reset rule): whether the graph holds any `xsd:float` literal. Filled lazily by
+    /// path deciding a comparison wrongly for an f64-inexact decimal or an uncached
+    /// valid exact numeric. The low two bits encode `0` = not computed, `1` = safe,
+    /// `2` = unsafe (decline pushdown). The upper bits hold the highest dictionary ID
+    /// proved safe. Packing both into one atomic gives forks a consistent snapshot,
+    /// even while another reader initializes the memo. A safe memo checks only appended
+    /// IDs on growth; an unsafe verdict is sticky because terms are never removed.
+    /// Interior-mutable so a shared `&Graph` can populate this correctness gate.
+    high_precision_decimal: std::sync::atomic::AtomicU64,
+    /// Whether the graph holds any `xsd:float` literal (`0` = not computed,
+    /// `1` = absent, `2` = present); reset on dictionary growth. Filled lazily by
     /// [`has_float_literal`](Self::has_float_literal).
     float_literal: std::sync::atomic::AtomicU8,
     /// Named graphs (each a self-contained `Graph`), keyed by their name term. Empty for the
@@ -146,6 +158,8 @@ pub struct Graph {
     /// [`set_named`](Self::set_named), [`remove_named`](Self::remove_named) and the like, which
     /// refuse a directory-backed graph on either side.
     named: Vec<(Term, Graph)>,
+    /// Exact term identity to Vec positions; independent of the prefix index and durable slots.
+    named_index: named_index::NamedIndex,
     /// (sq-zz8z, gh-51) Lazily-built sorted permutation of `named` indices, ordered by
     /// the UTF-8 bytes of each graph's IRI string, enabling a binary-search RANGE SCAN for a
     /// prefix-scoped `GRAPH ?g … FILTER(STRSTARTS(STR(?g), prefix))` instead of an O(graphs) full
@@ -1391,6 +1405,7 @@ impl Graph {
         }
         let mut g = g.unwrap_or_else(|| build_terms(&[]));
         g.named = named;
+        g.named_changed();
         Ok(g)
     }
 
@@ -1450,6 +1465,7 @@ impl Graph {
         }
         let mut g = main.unwrap_or_else(|| Self::build(Dict::new(), Vec::new()));
         g.named = named;
+        g.named_changed();
         Ok(g)
     }
 
@@ -1525,6 +1541,7 @@ impl Graph {
         }
         let mut g = main.unwrap_or_else(|| Self::build(Dict::new(), Vec::new()));
         g.named = named;
+        g.named_changed();
         Ok(g)
     }
 
@@ -1671,14 +1688,22 @@ impl Graph {
     ///
     /// It is the per-name companion to
     /// [`for_named_graphs_with_prefix`](Self::for_named_graphs_with_prefix) (which is
-    /// prefix-scoped). It is a linear scan over the `named` Vec (a dataset's distinct graphs are
-    /// typically few); for a prefix sweep use the indexed prefix method instead.
+    /// prefix-scoped). Exact names use a side index; duplicate names resolve to the first
+    /// entry, as with [`named_graph_index`](Self::named_graph_index).
     ///
     /// The DEFAULT graph is `self` itself — it is not part of `named` and is not returned here;
     /// pass `&graph` directly to scope introspect/sim/vectors to the default graph.
     #[inline]
     pub fn named_graph(&self, name: &Term) -> Option<&Graph> {
-        self.named.iter().find(|(n, _)| n == name).map(|(_, g)| g)
+        self.named_graph_index(name).map(|i| &self.named[i].1)
+    }
+
+    /// The first position of the exact name term in [`named`](Self::named), or `None`.
+    /// Uses an in-memory hash index. A position can change after removal; it is not a
+    /// durable slot id and must not be retained across changes to the named-graph list.
+    #[inline]
+    pub fn named_graph_index(&self, name: &Term) -> Option<usize> {
+        self.named_index.positions(&self.named, name).map(|p| p.first)
     }
 
     /// The named graphs, in their (positional) order: each a self-contained `Graph`, keyed by
@@ -1735,9 +1760,29 @@ impl Graph {
         Ok(())
     }
 
-    /// The named graphs changed: the prefix index is rebuilt on its next use.
-    fn named_changed(&self) {
+    /// Bulk membership changes rebuild exact positions and invalidate the prefix order.
+    fn named_changed(&mut self) {
+        self.named_index = named_index::NamedIndex::from_named(&self.named);
         *self.graph_prefix_index.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    fn push_named(&mut self, name: Term, graph: Graph) {
+        self.named.push((name, graph));
+        self.named_index.append(&self.named);
+        *self.graph_prefix_index.get_mut().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    fn remove_named_at(&mut self, i: usize) -> (Term, Graph) {
+        self.named_index.remove(&self.named, i);
+        let removed = self.named.remove(i);
+        *self.graph_prefix_index.get_mut().unwrap_or_else(|e| e.into_inner()) = None;
+        removed
+    }
+
+    #[cfg(all(test, feature = "mmap"))]
+    fn pop_named(&mut self) -> Option<(Term, Graph)> {
+        let i = self.named.len().checked_sub(1)?;
+        Some(self.remove_named_at(i))
     }
 
     /// Adds the in-memory graph `g` as a named graph called `name`, after the others (a second
@@ -1746,8 +1791,7 @@ impl Graph {
     /// inserts), and for a `g` that is directory-backed or refuses writes.
     pub fn add_named(&mut self, name: Term, g: Graph) -> Result<(), String> {
         self.check_named_insertable(&g)?;
-        self.named.push((name, g));
-        self.named_changed();
+        self.push_named(name, g);
         Ok(())
     }
 
@@ -1776,7 +1820,7 @@ impl Graph {
     /// and [`apply_delta_to_named`](Self::apply_delta_to_named) instead.
     pub fn set_named(&mut self, name: Term, g: Graph) -> Result<Option<Graph>, String> {
         self.check_named_insertable(&g)?;
-        let old = match self.named.iter().position(|(n, _)| *n == name) {
+        let old = match self.named_graph_index(&name) {
             Some(i) => {
                 if self.named[i].1.is_directory_backed() {
                     return Err(format!(
@@ -1787,11 +1831,10 @@ impl Graph {
                 Some(std::mem::replace(&mut self.named[i].1, g))
             }
             None => {
-                self.named.push((name, g));
+                self.push_named(name, g);
                 None
             }
         };
-        self.named_changed();
         Ok(old)
     }
 
@@ -1801,12 +1844,11 @@ impl Graph {
     /// [`drop_named_durable`](Self::drop_named_durable)), or this graph refuses writes.
     pub fn remove_named(&mut self, name: &Term) -> Result<Option<Graph>, String> {
         self.refuse_if_detached()?;
-        let Some(i) = self.named.iter().position(|(n, _)| n == name) else {
+        let Some(i) = self.named_graph_index(name) else {
             return Ok(None);
         };
         self.check_named_movable_from(i)?;
-        let removed = self.named.remove(i).1;
-        self.named_changed();
+        let removed = self.remove_named_at(i).1;
         Ok(Some(removed))
     }
 
@@ -1896,6 +1938,7 @@ impl Graph {
 
     fn replace_default_unchecked(&mut self, mut default: Graph) {
         default.named = std::mem::take(&mut self.named);
+        default.named_index = std::mem::take(&mut self.named_index);
         #[cfg(feature = "mmap")]
         if default.lock.is_none() {
             default.lock = self.lock.take();
@@ -2066,9 +2109,10 @@ impl Graph {
             numerics,
             temporals,
             exact_temporals: std::sync::OnceLock::new(),
-            high_precision_decimal: std::sync::atomic::AtomicU8::new(0),
+            high_precision_decimal: std::sync::atomic::AtomicU64::new(0),
             float_literal: std::sync::atomic::AtomicU8::new(0),
             named: Vec::new(),
+            named_index: named_index::NamedIndex::default(),
             graph_prefix_index: std::sync::Mutex::new(None),
             #[cfg(feature = "mmap")]
             wal: WriteState::Ephemeral,
@@ -2115,9 +2159,10 @@ impl Graph {
             temporals: self.temporals.into_sparse_if_worthwhile(),
             // sq-lr2ii: re-encoding keeps the same values; recompute the guard lazily.
             exact_temporals: std::sync::OnceLock::new(),
-            high_precision_decimal: std::sync::atomic::AtomicU8::new(0),
+            high_precision_decimal: std::sync::atomic::AtomicU64::new(0),
             float_literal: std::sync::atomic::AtomicU8::new(0),
             named: self.named,
+            named_index: self.named_index,
             graph_prefix_index: std::sync::Mutex::new(None),
             #[cfg(feature = "mmap")]
             wal: self.wal,
@@ -2360,10 +2405,9 @@ impl Graph {
         self.store.decompress_to_ram();
     }
 
-    /// Opens a graph saved by [`save`](Self::save) with its permutation indexes AND
-    /// numeric-value cache MEMORY-MAPPED (paged in on demand) — so a large out-of-core
-    /// dataset opens near-instantly without re-parsing every term, and the cache stays
-    /// off the heap. The dictionary is loaded into RAM; the big indexes stay on disk.
+    /// Opens a graph saved by [`save`](Self::save), owning small dictionary, cache and
+    /// permutation files in memory and mapping larger files (paged in on demand).
+    /// Owned backing contributes to [`heap_bytes`](Self::heap_bytes).
     /// A missing or wrong-sized current cache is recomputed in memory. Legacy
     /// unversioned caches are ignored because they used older validation rules.
     /// Saving to a new directory persists current cache files without changing RDF.
@@ -2528,10 +2572,13 @@ impl Graph {
             Ok(f) if f.metadata()?.len() as usize
                 == NUMERICS_MAGIC.len() + dict.len() * std::mem::size_of::<f64>() =>
             {
-                // SAFETY: the file is owned by this graph for its lifetime and not mutated.
-                let m = unsafe { memmap2::Mmap::map(&f)? };
+                let m = backing::Backing::open_file(f, (NUMERICS_MAGIC.len() + dict.len() * std::mem::size_of::<f64>()) as u64)?;
                 if m[..NUMERICS_MAGIC.len()] == NUMERICS_MAGIC {
-                    NumData::Mapped(m, rustc_hash::FxHashMap::default())
+                    match m {
+                        backing::Backing::Owned(bytes) => NumData::Owned(bytes[NUMERICS_MAGIC.len()..]
+                            .chunks_exact(8).map(|b| f64::from_le_bytes(b.try_into().unwrap())).collect()),
+                        backing::Backing::Mapped(m) => NumData::Mapped(m, rustc_hash::FxHashMap::default()),
+                    }
                 } else {
                     NumData::Owned(numerics_of(&dict))
                 }
@@ -2541,8 +2588,15 @@ impl Graph {
         let tp = dir.join(TEMPORAL_CACHE_FILE);
         let temporals = match std::fs::File::open(&tp) {
             Ok(f) if f.metadata()?.len() as usize == dict.len() * 9 => {
-                // SAFETY: the file is owned by this graph for its lifetime and not mutated.
-                TempData::Mapped(unsafe { memmap2::Mmap::map(&f)? }, rustc_hash::FxHashMap::default())
+                let m = backing::Backing::open_file(f, (dict.len() * 9) as u64)?;
+                match m {
+                    backing::Backing::Owned(bytes) => {
+                        let n = bytes.len() / 9;
+                        TempData::Owned(bytes[..n * 8].chunks_exact(8).zip(&bytes[n * 8..])
+                            .map(|(b, &flag)| TempCell { instant: f64::from_le_bytes(b.try_into().unwrap()), flag }).collect())
+                    }
+                    backing::Backing::Mapped(m) => TempData::Mapped(m, rustc_hash::FxHashMap::default()),
+                }
             }
             // Absent or stale (a graph saved before this cache existed): recompute —
             // backward compatible, like the numerics cache.
@@ -2558,8 +2612,9 @@ impl Graph {
             numerics,
             temporals,
             exact_temporals: std::sync::OnceLock::new(),
-            high_precision_decimal: std::sync::atomic::AtomicU8::new(0),
+            high_precision_decimal: std::sync::atomic::AtomicU64::new(0),
             float_literal: std::sync::atomic::AtomicU8::new(0),
+            named_index: named_index::NamedIndex::from_named(&named),
             named,
             graph_prefix_index: std::sync::Mutex::new(None),
             // Not writable yet: the log is attached below, after the replay.
@@ -2643,7 +2698,7 @@ impl Graph {
                 let idx = if insert {
                     Some(self.ensure_named(&name)?)
                 } else {
-                    self.named.iter().position(|(n, _)| *n == name)
+                    self.named_graph_index(&name)
                 };
                 if let Some(i) = idx {
                     if insert {
@@ -3439,35 +3494,57 @@ impl Graph {
         }
     }
 
-    /// (sq-lr2ii) `true` if the graph holds any `xsd:decimal` literal with MORE
-    /// than 15 significant digits — a value the f64 `numerics` cache CANNOT represent exactly,
+    /// `true` if the graph holds a valid integer/decimal literal missing from the
+    /// numeric cache, or a cached `xsd:decimal` with more than 15 significant digits.
+    /// Missing entries include valid values beyond the arithmetic tower: a cache-only
+    /// scan would drop them before the exact evaluator can compare their lexicals.
+    /// A high-precision decimal is a value the f64 `numerics` cache cannot represent exactly,
     /// so the engine's f64-based sargable FILTER fast path could decide `=`/`<`/`>`/`<=`/`>=`
     /// WRONGLY for it (e.g. `"1.000000000000000001"^^xsd:decimal` shares the f64 `1.0` with the
     /// constant `1`, yet is not equal to it). The engine consults this at the sargable-decision
     /// point to DECLINE that fast path and fall back to the exact general evaluator; a graph
-    /// without any such decimal keeps the fast path (a decimal of `<= 15` significant digits
+    /// without any such literal keeps the fast path (a decimal of `<= 15` significant digits
     /// round-trips through f64 unambiguously, and a large-integer collision needs a `> 15`-digit
-    /// CONSTANT, which the engine already declines). Integers/float/double are exempt: an
-    /// integer's exactness is the constant-side guard's job and a float/double's value IS its f64.
+    /// CONSTANT, which the engine already declines). Cached integers are exempt: their
+    /// exactness is the constant-side guard's job. Float/double values are their own f64;
+    /// ill-typed exact literals do not set this flag.
     ///
-    /// Memoised (see `high_precision_decimal`): the first call scans the graph's numeric terms
-    /// once (short-circuiting on the first offender); later calls are an atomic load. A delta
-    /// that appends terms resets the memo so it is recomputed over the grown dictionary. This is
-    /// a CONSERVATIVE, graph-wide gate — one offending decimal declines the numeric fast path for
+    /// Memoised (see `high_precision_decimal`): the first call scans the graph's dictionary
+    /// once (short-circuiting on the first offender); later calls are an atomic load. Forks
+    /// inherit the memo. When a delta appends terms to a graph proved safe, only the new IDs
+    /// are checked, retaining the scanned-prefix watermark. This is
+    /// a conservative, graph-wide gate — one offending literal declines the numeric fast path for
     /// every comparison on the graph — chosen for safety (correctness is never at risk; only the
     /// pushdown optimisation is skipped for affected graphs).
+    #[inline]
     pub fn has_high_precision_decimal(&self) -> bool {
         use std::sync::atomic::Ordering::Relaxed;
-        match self.high_precision_decimal.load(Relaxed) {
+        match self.high_precision_decimal.load(Relaxed) & 3 {
             2 => true,
             1 => false,
-            _ => {
-                let found = (1..=self.dict.len() as Id)
-                    .any(|id| self.numerics.lookup(id).is_some() && is_high_precision_decimal(&self.dict, id));
-                self.high_precision_decimal.store(if found { 2 } else { 1 }, Relaxed);
-                found
-            }
+            _ => self.compute_high_precision_decimal(),
         }
+    }
+
+    // Keep dictionary inspection out of the warmed numeric scan eligibility path.
+    #[cold]
+    fn compute_high_precision_decimal(&self) -> bool {
+        use std::sync::atomic::Ordering::Relaxed;
+        let scanned = (self.high_precision_decimal.load(Relaxed) >> 2) as Id;
+        let len = self.dict.len() as Id;
+        let found = (scanned + 1..=len).any(|id| {
+            #[cfg(test)]
+            precision_gate_cost::SCANNED.with(|count| count.set(count.get() + 1));
+            if self.numerics.lookup(id).is_some() {
+                return is_high_precision_decimal(&self.dict, id);
+            }
+            matches!(self.dict.term_parts(id),
+                dict::TermParts::Lit { value, datatype, lang: None }
+                    if exact_numeric_literal_valid(value, datatype))
+        });
+        self.high_precision_decimal
+            .store(if found { 2 } else { (u64::from(len) << 2) | 1 }, Relaxed);
+        found
     }
 
     /// `true` if the graph holds any `xsd:float` literal. The engine's f64 sargable-FILTER
@@ -3475,8 +3552,9 @@ impl Graph {
     /// compares an `xs:float` against an integer/decimal constant in the FLOAT tier (the
     /// constant rounded to `f32`): `"0.1"^^xsd:float = 0.1` is true although the two `f64`
     /// images differ. The engine consults this to decline that fast path for a constant the
-    /// float tier would round (one not exactly an `f32`). Memoised and reset exactly like
-    /// [`has_high_precision_decimal`](Self::has_high_precision_decimal).
+    /// float tier would round (one not exactly an `f32`). Memoised and reset when the
+    /// dictionary grows; unlike [`has_high_precision_decimal`](Self::has_high_precision_decimal),
+    /// this guard recomputes over the whole dictionary.
     pub fn has_float_literal(&self) -> bool {
         use std::sync::atomic::Ordering::Relaxed;
         match self.float_literal.load(Relaxed) {
@@ -3503,9 +3581,10 @@ impl Graph {
     }
 
     /// A rough estimate of the graph's in-memory footprint in bytes (dictionary +
-    /// the six permutation indexes), for benchmarking.
+    /// the six permutation indexes and the exact named-graph index), for benchmarking.
     pub fn heap_bytes(&self) -> usize {
         self.dict.heap_bytes() + self.store.heap_bytes() + self.numerics.heap_bytes() + self.temporals.heap_bytes()
+            + self.named_index.heap_bytes()
             + self.exact_temporals.get().map_or(0, |cells| {
                 cells.capacity() * (std::mem::size_of::<Id>() + std::mem::size_of::<temporal::ExactCacheCell>())
             })
@@ -3639,24 +3718,34 @@ impl Graph {
     /// without a write-ahead log, sharing storage and any mapping locks with the base.
     /// Do not replace a complete dataset with this partial view.
     pub fn fork_scoped(&self, names: &[Term]) -> Graph {
-        self.fork_with_named(self.named.iter().filter(|(name, _)| names.contains(name)))
+        let mut selected: Vec<usize> = names.iter()
+            .filter_map(|name| self.named_index.positions(&self.named, name))
+            .flat_map(|p| std::iter::once(p.first).chain(p.duplicates.iter().copied()))
+            .collect();
+        selected.sort_unstable();
+        selected.dedup();
+        self.fork_with_named(selected.into_iter().map(|i| &self.named[i]))
     }
 
     fn fork_with_named<'a>(&self, named: impl Iterator<Item = &'a (Term, Graph)>) -> Graph {
+        let named: Vec<_> = named.map(|(name, g)| {
+            #[cfg(test)]
+            scoped_fork_cost::NAMED_FORKS.with(|count| count.set(count.get() + 1));
+            (name.clone(), g.fork())
+        }).collect();
         Graph {
             dict: self.dict.fork(),
             store: self.store.fork(),
             numerics: self.numerics.fork(),
             temporals: self.temporals.fork(),
-            // sq-lr2ii: the fork shares the same values; recompute the guard lazily.
+            // The fork shares values and the precision memo; exact temporal keys stay lazy.
             exact_temporals: std::sync::OnceLock::new(),
-            high_precision_decimal: std::sync::atomic::AtomicU8::new(0),
+            high_precision_decimal: std::sync::atomic::AtomicU64::new(
+                self.high_precision_decimal.load(std::sync::atomic::Ordering::Relaxed),
+            ),
             float_literal: std::sync::atomic::AtomicU8::new(0),
-            named: named.map(|(name, g)| {
-                #[cfg(test)]
-                scoped_fork_cost::NAMED_FORKS.with(|count| count.set(count.get() + 1));
-                (name.clone(), g.fork())
-            }).collect(),
+            named_index: named_index::NamedIndex::from_named(&named),
+            named,
             // A fork is a fresh logical copy; rebuild the prefix index lazily on first use.
             graph_prefix_index: std::sync::Mutex::new(None),
             #[cfg(feature = "mmap")]
@@ -4111,7 +4200,7 @@ impl Graph {
         let tree = std::sync::Arc::clone(&self.tree);
         #[cfg(feature = "mmap")]
         let _permit = tree.write_permit();
-        match self.named.iter().position(|(n, _)| n == name) {
+        match self.named_graph_index(name) {
             Some(i) => {
                 self.refuse_while_txn_poisoned()?;
                 self.named[i].1.clear_default_durable()?;
@@ -4129,7 +4218,7 @@ impl Graph {
     /// Writable opens clean undeclared residue after validating the complete declared layout.
     /// Returns false when no attached graph matches. A stale handle is detached from memory only.
     pub fn drop_named_durable(&mut self, name: &Term) -> Result<bool, String> {
-        let Some(idx) = self.named.iter().position(|(n, _)| n == name) else {
+        let Some(idx) = self.named_graph_index(name) else {
             return Ok(false);
         };
         // Hold the reentrant tree permit through validation, logging and materialization.
@@ -4140,7 +4229,6 @@ impl Graph {
         // Refused while this graph, or any named graph under it, refuses writes (a frozen named
         // graph would be re-saved from its view) or keeps a failed journal commit for the reopen.
         self.refuse_while_txn_poisoned()?;
-        self.named_changed();
         // Directory-backed parent: durably remove the sub-dir + manifest entry. For an in-memory
         // parent (or a non-mmap build) fall through to the plain in-memory entry removal below.
         #[cfg(feature = "mmap")]
@@ -4149,7 +4237,7 @@ impl Graph {
         if let Some(dir) = self.wal.dir() {
             return self.drop_named_durable_dir(idx, &dir);
         }
-        self.named.remove(idx);
+        self.remove_named_at(idx);
         Ok(true)
     }
 
@@ -4170,7 +4258,7 @@ impl Graph {
             .dir()
             .is_some_and(|path| child.tree.replaced_since(&path, child.generation).is_some())
         {
-            self.named.remove(idx);
+            self.remove_named_at(idx);
             return Ok(true);
         }
         if self.tree.materializing() {
@@ -4178,7 +4266,7 @@ impl Graph {
             let named_dir = dir.join(NAMED_SUBDIR);
             let slot = child.named_slot_in(&named_dir).ok_or("named graph has no durable slot")?;
             self.tree.defer_drop(dir, slot, self.next_slot).map_err(|e| e.to_string())?;
-            self.named.remove(idx);
+            self.remove_named_at(idx);
             return Ok(true);
         }
         self.tree.checkpoint().map_err(|e| e.to_string())?;
@@ -4193,7 +4281,7 @@ impl Graph {
             })?),
         };
         let entries = self.named_slot_entries_skipping(&named_dir, Some(idx))?;
-        let (_, removed) = self.named.remove(idx);
+        let (_, removed) = self.remove_named_at(idx);
         drop(removed);
         let persisted = self.commit_named_drop(dir, slot, &entries);
         self.freeze_on_err(persisted, "dropping a named graph")?;
@@ -4250,7 +4338,6 @@ impl Graph {
             self.begin_durable_write()?;
         }
         self.refuse_while_txn_poisoned()?;
-        self.named_changed();
         #[cfg(feature = "mmap")]
         if self.tree.materializing() && self.wal.is_durable() {
             let names: Vec<_> = self.named.iter().map(|(n, _)| n.clone()).collect();
@@ -4260,6 +4347,7 @@ impl Graph {
         #[cfg(feature = "mmap")]
         self.tree.checkpoint().map_err(|e| e.to_string())?;
         self.named.clear();
+        self.named_changed();
         #[cfg(feature = "mmap")]
         if let Some(dir) = self.wal.dir() {
             let persisted = self.commit_drop_all_named(&dir);
@@ -4331,7 +4419,7 @@ impl Graph {
             match slot {
                 None => self.apply_delta(&ins, &del)?,
                 Some(name) => {
-                    if let Some(i) = self.named.iter().position(|(n, _)| *n == name) {
+                    if let Some(i) = self.named_graph_index(&name) {
                         self.named[i].1.apply_delta(&ins, &del)?;
                     } else if !ins.is_empty() {
                         let i = self.ensure_named(&name)?;
@@ -4472,11 +4560,10 @@ impl Graph {
     }
 
     pub fn ensure_named(&mut self, name: &Term) -> Result<usize, String> {
-        if let Some(i) = self.named.iter().position(|(n, _)| n == name) {
+        if let Some(i) = self.named_graph_index(name) {
             return Ok(i);
         }
         self.refuse_if_detached()?;
-        self.named_changed();
         #[cfg(feature = "mmap")]
         let tree = std::sync::Arc::clone(&self.tree);
         #[cfg(feature = "mmap")]
@@ -4499,7 +4586,7 @@ impl Graph {
                 g.lock = self.lock.clone();
                 let created = self.tree.defer_create(&dir, slot, name, self.next_slot);
                 self.freeze_on_err(created.map_err(|e| e.to_string()), "creating a named graph")?;
-                self.named.push((name.clone(), g));
+                self.push_named(name.clone(), g);
                 return Ok(self.named.len() - 1);
             }
             self.tree.checkpoint().map_err(|e| e.to_string())?;
@@ -4513,10 +4600,10 @@ impl Graph {
             let mut g = self.freeze_on_err(created, "creating a named graph")?;
             g.tree = std::sync::Arc::clone(&self.tree);
             g.share_tree();
-            self.named.push((name.clone(), g));
+            self.push_named(name.clone(), g);
             return Ok(self.named.len() - 1);
         }
-        self.named.push((name.clone(), Graph::from_parts(Dict::new(), Vec::new())));
+        self.push_named(name.clone(), Graph::from_parts(Dict::new(), Vec::new()));
         Ok(self.named.len() - 1)
     }
 
@@ -4551,21 +4638,20 @@ impl Graph {
                 }
             }
         }
-        // sq-lr2ii: an inserted term may be an f64-inexact decimal. If the sargable-safety
-        // guard was memoised as "no such decimal" (1), reset it to recompute over the grown
-        // dictionary; a "found" (2) verdict is monotonic (terms are never removed) and stays.
-        // Interning is append-only and extend_for touches only new IDs.
-        // Equal lengths therefore preserve every term/numeric value read by the memo.
-        // Any future path changing existing terms or cached values must invalidate it.
+        // Interning and cache extension leave existing IDs unchanged. A safe precision
+        // memo therefore needs to inspect only the suffix after its watermark. The
+        // exclusive Graph borrow prevents queries from observing a stale safe verdict.
+        // Unknown memos stay lazy; unsafe verdicts stay sticky even after deletion.
         if self.dict.len() != old_len {
-            for memo in [&self.high_precision_decimal, &self.float_literal] {
-                let _ = memo.compare_exchange(
-                    1,
-                    0,
-                    std::sync::atomic::Ordering::Relaxed,
-                    std::sync::atomic::Ordering::Relaxed,
-                );
+            if self.high_precision_decimal.load(std::sync::atomic::Ordering::Relaxed) & 3 == 1 {
+                self.compute_high_precision_decimal();
             }
+            let _ = self.float_literal.compare_exchange(
+                1,
+                0,
+                std::sync::atomic::Ordering::Relaxed,
+                std::sync::atomic::Ordering::Relaxed,
+            );
         }
         self.store.apply_delta(&ins_ids, &del_ids);
     }
@@ -4991,17 +5077,18 @@ impl Graph {
                 TxnOp::Create(name) => (true, Some(name), None),
                 TxnOp::Drop(name) => {
                     self.named.retain(|(n, _)| *n != name);
+                    self.named_changed();
                     continue;
                 }
             };
             let target = match slot {
                 None => &mut *self,
-                Some(name) => match self.named.iter().position(|(n, _)| *n == name) {
+                Some(name) => match self.named_graph_index(&name) {
                     Some(i) => &mut self.named[i].1,
                     None if insert => {
                         let mut sub = Graph::new();
                         sub.detached = self.detached.clone();
-                        self.named.push((name, sub));
+                        self.push_named(name, sub);
                         &mut self.named.last_mut().expect("just pushed").1
                     }
                     None => continue,
@@ -5240,7 +5327,7 @@ impl Graph {
         // directory/WAL — the parent's `save` writes the whole `named/` sub-tree afresh).
         for (name, sub) in &self.named {
             let sub_fresh = sub.reintern_live()?;
-            fresh.named.push((name.clone(), sub_fresh));
+            fresh.push_named(name.clone(), sub_fresh);
         }
         Ok(fresh)
     }
@@ -12886,7 +12973,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("sparq_unversioned_numerics_{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         g.save(&dir).unwrap();
-        assert!(matches!(Graph::open(&dir).unwrap().numerics, NumData::Mapped(..)), "a current cache is mapped");
+        assert!(matches!(backing::with_threshold(0, || Graph::open(&dir)).unwrap().numerics, NumData::Mapped(..)), "a current cache is mapped when forced");
 
         // Rewrite the numerics cache exactly as the pre-header layout stored it: `n` native f64, the
         // float valued at the nearest f64 of its lexical (`0.1`, not `0.1f32`).
@@ -12903,7 +12990,7 @@ mod tests {
         let dir2 = dir.with_extension("resaved");
         std::fs::remove_dir_all(&dir2).ok();
         g2.save(&dir2).unwrap();
-        let g3 = Graph::open(&dir2).unwrap();
+        let g3 = backing::with_threshold(0, || Graph::open(&dir2)).unwrap();
         assert!(matches!(g3.numerics, NumData::Mapped(..)));
         assert_eq!(g3.numeric_value(fid), Some(f64::from(0.1f32)));
         drop((g2, g3));
@@ -12969,7 +13056,7 @@ mod tests {
         let g = Graph::load_str(&nt, "ntriples").unwrap();
         let dir = std::env::temp_dir().join(format!("sparq_mmap_test_{}", std::process::id()));
         g.save(&dir).unwrap();
-        let g2 = Graph::open(&dir).unwrap();
+        let g2 = backing::with_threshold(0, || Graph::open(&dir)).unwrap();
         assert_eq!(g.len(), g2.len());
         assert_eq!(g.dict.len(), g2.dict.len());
         let dump = |gg: &Graph| {
@@ -14431,8 +14518,8 @@ mod tests {
     }
 
     /// sq-lr2ii — `has_high_precision_decimal` is the engine's sargable-safety gate:
-    /// TRUE iff the graph holds an `xsd:decimal` with > 15 significant digits (an f64-inexact
-    /// value). Integers past 2^53, floats/doubles, and <=15-digit decimals do NOT set it.
+    /// Cached `xsd:decimal` values with > 15 significant digits set the guard.
+    /// Cached integers past 2^53, floats/doubles, and <=15-digit decimals do not.
     #[test]
     fn has_high_precision_decimal_flags_only_inexact_decimals() {
         let xsd_ = |ty: &str| format!("http://www.w3.org/2001/XMLSchema#{ty}");
@@ -14456,6 +14543,35 @@ mod tests {
         // NOT flagged: an empty / non-numeric graph.
         assert!(!build("\"hello\"").has_high_precision_decimal());
         assert!(!Graph::new().has_high_precision_decimal());
+    }
+
+    #[test]
+    fn has_high_precision_decimal_detects_uncached_exact_values() {
+        let huge = "340282366920938463463374607431768211456001";
+        for (value, datatype, expected) in [
+            (huge.to_owned(), "integer", true),
+            (format!("-{huge}"), "integer", true),
+            (format!("{huge}.5"), "decimal", true),
+            (format!("7.{}", "0".repeat(50)), "decimal", true),
+            (huge.to_owned(), "positiveInteger", true),
+            (huge.to_owned(), "nonNegativeInteger", true),
+            (format!("-{huge}"), "negativeInteger", true),
+            (format!("-{huge}"), "nonPositiveInteger", true),
+            ("0.1234567890123456789012345678901234567890123".to_owned(), "decimal", true),
+            (format!(" {huge}"), "integer", false),
+            (format!("{huge}.5"), "integer", false),
+            (huge.to_owned(), "byte", false),
+            (huge.to_owned(), "negativeInteger", false),
+            (huge.to_owned(), "string", false),
+            ("NaN".to_owned(), "double", false),
+        ] {
+            let data = format!("<http://ex/s> <http://ex/p> \"{value}\"^^<http://www.w3.org/2001/XMLSchema#{datatype}> .");
+            let graph = Graph::load_str(&data, "ntriples").unwrap();
+            let id = graph.iter_ids().next().unwrap()[2];
+            assert!(graph.numeric_value(id).is_none(), "fixture must miss the numeric cache");
+            assert_eq!(graph.has_high_precision_decimal(), expected, "{value}^^{datatype}");
+            assert_eq!(graph.has_high_precision_decimal(), expected, "memoised {value}^^{datatype}");
+        }
     }
 
     /// sq-lr2ii — the memoised flag must NOT go stale: inserting an f64-inexact
@@ -14503,7 +14619,7 @@ mod tests {
             g.apply_delta(&[], std::slice::from_ref(&removed)).unwrap();
             assert_eq!(g.len(), 2);
             assert_eq!(
-                g.high_precision_decimal.load(Relaxed),
+                g.high_precision_decimal.load(Relaxed) & 3,
                 1,
                 "delete, sparse={sparse}"
             );
@@ -14511,27 +14627,27 @@ mod tests {
             assert!(absent.iter().all(|term| g.id_of(term).is_some()));
             g.apply_delta(&[], &[absent]).unwrap();
             assert_eq!(g.len(), 2);
-            assert_eq!(g.high_precision_decimal.load(Relaxed), 1, "absent delete");
+            assert_eq!(g.high_precision_decimal.load(Relaxed) & 3, 1, "absent delete");
             g.apply_delta(&[removed], &[]).unwrap();
             assert_eq!(g.len(), 3);
             assert_eq!(
-                g.high_precision_decimal.load(Relaxed),
+                g.high_precision_decimal.load(Relaxed) & 3,
                 1,
                 "known reinsertion"
             );
             g.apply_delta(&[], &[]).unwrap();
-            assert_eq!(g.high_precision_decimal.load(Relaxed), 1, "empty delta");
+            assert_eq!(g.high_precision_decimal.load(Relaxed) & 3, 1, "empty delta");
             let inline = triple("urn:s", 999999);
             g.apply_delta(std::slice::from_ref(&inline), &[]).unwrap();
             assert_eq!(g.id_of(&inline[2]), Some(dict::INLINE_BASE + 999999));
             assert_eq!(g.dict.len(), d);
-            assert_eq!(g.high_precision_decimal.load(Relaxed), 1, "inline integer");
+            assert_eq!(g.high_precision_decimal.load(Relaxed) & 3, 1, "inline integer");
             assert!(!g.has_high_precision_decimal());
         }
     }
 
     #[test]
-    fn has_high_precision_decimal_memo_invalidates_stored_growth() {
+    fn has_high_precision_decimal_memo_checks_stored_growth() {
         use std::sync::atomic::Ordering::Relaxed;
         for sparse in [false, true] {
             let mut g = Graph::load_str("@prefix : <urn:> . :s :p 7 .", "turtle").unwrap();
@@ -14556,17 +14672,90 @@ mod tests {
                 assert!(g.numeric_value(id).is_some(), "{lexical}");
                 assert_eq!(g.dict.term(id), triple[2]);
                 assert_eq!(
-                    g.high_precision_decimal.load(Relaxed),
-                    0,
+                    g.high_precision_decimal.load(Relaxed) & 3,
+                    if high_precision { 2 } else { 1 },
                     "growth: {lexical}"
                 );
                 assert_eq!(g.has_high_precision_decimal(), high_precision);
                 if high_precision {
                     g.apply_delta(&[], &[triple]).unwrap();
-                    assert_eq!(g.high_precision_decimal.load(Relaxed), 2, "sticky found");
+                    assert_eq!(g.high_precision_decimal.load(Relaxed) & 3, 2, "sticky found");
                     assert!(g.has_high_precision_decimal());
                 }
             }
+        }
+    }
+
+    #[test]
+    fn has_high_precision_decimal_memo_scans_only_new_ids() {
+        for storage in ["dense", "sparse", "compressed"] {
+            let mut parent = Graph::load_str("<urn:s> <urn:p> 1.5 .", "turtle").unwrap();
+            match storage {
+                "sparse" => {
+                    parent.numerics = NumData::Sparse(
+                        (1..=parent.dict.len() as Id)
+                            .filter_map(|id| parent.numerics.lookup(id).map(|v| (id, v)))
+                            .collect(),
+                    );
+                }
+                "compressed" => parent = parent.into_compressed(),
+                _ => {}
+            }
+            precision_gate_cost::SCANNED.with(|count| count.set(0));
+            assert!(!parent.has_high_precision_decimal());
+            assert_eq!(
+                precision_gate_cost::SCANNED.with(|count| count.replace(0)),
+                parent.dict.len(),
+                "initial scan: {storage}"
+            );
+            let mut child = parent.fork();
+            assert!(!child.has_high_precision_decimal());
+            assert!(!child.snapshot().has_high_precision_decimal());
+            assert_eq!(
+                precision_gate_cost::SCANNED.with(|count| count.get()),
+                0,
+                "forks must inherit the memo: {storage}"
+            );
+            for i in 0..3 {
+                let old_len = child.dict.len();
+                let triple = [
+                    Term::NamedNode(NamedNode::new(format!("urn:new-subject:{i}")).unwrap()),
+                    Term::NamedNode(NamedNode::new(format!("urn:new-predicate:{i}")).unwrap()),
+                    Term::Literal(Literal::new_simple_literal(format!("new-value:{i}"))),
+                ];
+                child.apply_delta(&[triple], &[]).unwrap();
+                assert!(!child.has_high_precision_decimal());
+                assert_eq!(child.dict.len(), old_len + 3);
+                assert_eq!(
+                    precision_gate_cost::SCANNED.with(|count| count.replace(0)),
+                    3,
+                    "scan only appended IDs: {storage}, batch {i}"
+                );
+                assert!(!child.fork().has_high_precision_decimal());
+                assert!(!parent.has_high_precision_decimal());
+                assert_eq!(precision_gate_cost::SCANNED.with(|count| count.get()), 0);
+            }
+            let huge = [
+                Term::NamedNode(NamedNode::new_unchecked("urn:s")),
+                Term::NamedNode(NamedNode::new_unchecked("urn:p")),
+                Term::Literal(Literal::new_typed_literal(
+                    "340282366920938463463374607431768211456001",
+                    xsd::INTEGER,
+                )),
+            ];
+            child.apply_delta(std::slice::from_ref(&huge), &[]).unwrap();
+            assert!(child.has_high_precision_decimal());
+            assert_eq!(
+                precision_gate_cost::SCANNED.with(|count| count.replace(0)),
+                1
+            );
+            let mut unsafe_fork = child.fork();
+            assert!(unsafe_fork.has_high_precision_decimal());
+            unsafe_fork.apply_delta(&[], &[huge]).unwrap();
+            unsafe_fork.compact().unwrap();
+            assert!(unsafe_fork.has_high_precision_decimal());
+            assert!(!parent.has_high_precision_decimal());
+            assert_eq!(precision_gate_cost::SCANNED.with(|count| count.get()), 0);
         }
     }
 
@@ -14578,7 +14767,7 @@ mod tests {
         assert!(!parent.has_high_precision_decimal());
         let mut child = parent.fork();
         assert!(matches!(&child.numerics, NumData::Forked { .. }));
-        assert_eq!(child.high_precision_decimal.load(Relaxed), 0);
+        assert_eq!(child.high_precision_decimal.load(Relaxed) & 3, 1);
         assert!(!child.has_high_precision_decimal());
         let d = child.dict.len();
         let removed = [
@@ -14589,15 +14778,15 @@ mod tests {
         child
             .apply_delta(&[], std::slice::from_ref(&removed))
             .unwrap();
-        assert_eq!(child.high_precision_decimal.load(Relaxed), 1);
+        assert_eq!(child.high_precision_decimal.load(Relaxed) & 3, 1);
         assert_eq!(parent.len(), 2);
         assert_eq!(child.len(), 1);
         child.compact().unwrap();
         assert_eq!(child.dict.len(), d);
-        assert_eq!(child.high_precision_decimal.load(Relaxed), 1);
+        assert_eq!(child.high_precision_decimal.load(Relaxed) & 3, 1);
         assert!(!child.has_high_precision_decimal());
         child.apply_delta(&[removed], &[]).unwrap();
-        assert_eq!(child.high_precision_decimal.load(Relaxed), 1);
+        assert_eq!(child.high_precision_decimal.load(Relaxed) & 3, 1);
         let snapshot = child.snapshot();
         assert!(!snapshot.has_high_precision_decimal());
         let inexact = [
@@ -14617,7 +14806,7 @@ mod tests {
         child
             .apply_delta(std::slice::from_ref(&inexact), &[])
             .unwrap();
-        assert_eq!(child.high_precision_decimal.load(Relaxed), 0);
+        assert_eq!(child.high_precision_decimal.load(Relaxed) & 3, 2);
         assert!(child.has_high_precision_decimal());
         assert!(snapshot.id_of(&inexact[2]).is_none());
         assert!(!snapshot.has_high_precision_decimal());
@@ -14632,7 +14821,7 @@ mod tests {
             .unwrap()
             .save(&dir)
             .unwrap();
-        let mut g = Graph::open(&dir).unwrap();
+        let mut g = backing::with_threshold(0, || Graph::open(&dir)).unwrap();
         assert!(matches!(&g.numerics, NumData::Mapped(..)));
         assert!(!g.has_high_precision_decimal());
         let d = g.dict.len();
@@ -14643,7 +14832,7 @@ mod tests {
         ];
         g.apply_delta(&[], &[removed]).unwrap();
         assert_eq!(g.dict.len(), d);
-        assert_eq!(g.high_precision_decimal.load(Relaxed), 1);
+        assert_eq!(g.high_precision_decimal.load(Relaxed) & 3, 1);
         let inexact = [
             Term::NamedNode(NamedNode::new("urn:s").unwrap()),
             Term::NamedNode(NamedNode::new("urn:p").unwrap()),
@@ -14653,14 +14842,14 @@ mod tests {
             )),
         ];
         g.apply_delta(std::slice::from_ref(&inexact), &[]).unwrap();
-        assert_eq!(g.high_precision_decimal.load(Relaxed), 0);
+        assert_eq!(g.high_precision_decimal.load(Relaxed) & 3, 2);
         assert!(g.numeric_value(g.id_of(&inexact[2]).unwrap()).is_some());
         drop(g); // Reopen must obtain the new term and numeric cache through WAL replay.
         let mut reopened = Graph::open(&dir).unwrap();
-        assert_eq!(reopened.high_precision_decimal.load(Relaxed), 0);
+        assert_eq!(reopened.high_precision_decimal.load(Relaxed) & 3, 0);
         assert!(reopened.has_high_precision_decimal());
         reopened.apply_delta(&[], &[inexact]).unwrap();
-        assert_eq!(reopened.high_precision_decimal.load(Relaxed), 2);
+        assert_eq!(reopened.high_precision_decimal.load(Relaxed) & 3, 2);
         reopened.compact().unwrap(); // The dictionary retains the now-orphaned decimal.
         assert!(reopened.has_high_precision_decimal());
         drop(reopened);
@@ -14933,7 +15122,7 @@ mod tests {
         let mut g = Graph::load_str("", "ntriples").unwrap();
         assert!(!g.is_directory_backed());
         assert!(Graph::open(&dir).unwrap().is_directory_backed());
-        g.named.push((named("child"), Graph::open(&dir).unwrap()));
+        g.push_named(named("child"), Graph::open(&dir).unwrap());
         assert!(g.is_directory_backed(), "a durable named graph makes the dataset durable");
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -15415,7 +15604,7 @@ mod tests {
         .save(&dir)
         .unwrap();
         let mut parent = Graph::open(&dir).unwrap();
-        let (_, mut child) = parent.named.pop().expect("one named graph");
+        let (_, mut child) = parent.pop_named().expect("one named graph");
         let t = [term_iri(8, "s"), term_iri(8, "p"), term_iri(8, "o")];
         child
             .apply_delta(std::slice::from_ref(&t), &[])
@@ -15451,8 +15640,10 @@ mod tests {
         .unwrap()
         .save(&dir)
         .unwrap();
-        let mut parent = Graph::open(&dir).unwrap();
-        let (_, mut child) = parent.named.pop().expect("one named graph");
+        // Small files are read into owned memory and closed at open; force the mapped
+        // backing so the open files this scenario depends on stay open on Windows.
+        let mut parent = backing::with_threshold(0, || Graph::open(&dir)).unwrap();
+        let (_, mut child) = parent.pop_named().expect("one named graph");
         let t = [term_iri(8, "s"), term_iri(8, "p"), term_iri(8, "o")];
         child
             .apply_delta(std::slice::from_ref(&t), &[])
@@ -15775,8 +15966,7 @@ mod tests {
             .unwrap();
         let mut g = Graph::open(&dir).unwrap();
         // Construct an in-memory attachment and an invalid named container.
-        g.named
-            .push((named("mem"), Graph::from_parts(Dict::new(), Vec::new())));
+        g.push_named(named("mem"), Graph::from_parts(Dict::new(), Vec::new()));
         std::fs::write(dir.join(NAMED_SUBDIR), b"not a directory").unwrap();
         let e = g
             .drop_all_named_durable()
@@ -15886,7 +16076,7 @@ mod tests {
         .save(&dir)
         .unwrap();
         let mut parent = Graph::open(&dir).unwrap();
-        let (_, mut child) = parent.named.pop().expect("one named graph");
+        let (_, mut child) = parent.pop_named().expect("one named graph");
         let tree = std::sync::Arc::clone(&parent.tree);
         // Hold the permit, then start the writer: it blocks before its first check.
         let permit = tree.write_permit();
@@ -16368,10 +16558,10 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
         let mut g = Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
             .unwrap();
-        g.named.push((
+        g.push_named(
             Term::Literal(oxrdf::Literal::new_simple_literal("not a graph name")),
             Graph::load_str("<http://ex/a> <http://ex/b> <http://ex/c> .", "ntriples").unwrap(),
-        ));
+        );
         let e = g
             .save(&dir)
             .expect_err("a literal graph name must be refused");
@@ -18003,7 +18193,7 @@ mod tests {
         let dir = txn_tmp_dir("detached-sibling-drop");
         save_named_store(&dir, &["g0", "g1", "g2"]);
         let mut root = Graph::open(&dir).unwrap();
-        let (name, mut detached) = root.named.pop().unwrap();
+        let (name, mut detached) = root.pop_named().unwrap();
         root.drop_named_durable(&named("g0")).unwrap();
         detached.apply_delta(&[one_triple()], &[]).unwrap();
         drop(detached);
@@ -18024,7 +18214,7 @@ mod tests {
         let dir = txn_tmp_dir("detached-last-drop");
         save_named_store(&dir, &["g0", "g1"]);
         let mut root = Graph::open(&dir).unwrap();
-        let (name, mut detached) = root.named.pop().unwrap();
+        let (name, mut detached) = root.pop_named().unwrap();
         root.drop_named_durable(&named("g0")).unwrap();
         assert_eq!(declared_manifest_slots(&dir), vec![1]);
         assert!(dir.join(NAMED_SUBDIR).join("1").is_dir());
@@ -18047,7 +18237,7 @@ mod tests {
         let dir = txn_tmp_dir("detached-create");
         save_named_store(&dir, &["g0", "g1"]);
         let mut root = Graph::open(&dir).unwrap();
-        let (name, mut detached) = root.named.pop().unwrap();
+        let (name, mut detached) = root.pop_named().unwrap();
         root.ensure_named(&named("fresh")).unwrap();
         detached.apply_delta(&[one_triple()], &[]).unwrap();
         drop(detached);
@@ -18076,8 +18266,8 @@ mod tests {
         {
             let mut root = Graph::open(&dir).unwrap();
             let mut foreign = Graph::open(&other).unwrap();
-            let (_, foreign_child) = foreign.named.pop().expect("the other store's named graph");
-            root.named.push((named("foreign"), foreign_child));
+            let (_, foreign_child) = foreign.pop_named().expect("the other store's named graph");
+            root.push_named(named("foreign"), foreign_child);
             let err = root
                 .drop_named_durable(&named("foreign"))
                 .expect_err("a graph that is not in a slot of this store cannot be dropped by it");
@@ -18145,7 +18335,7 @@ mod tests {
                 None,
                 "a directory reached through `..` is not a slot of this store"
             );
-            root.named.push((named("escaped"), child));
+            root.push_named(named("escaped"), child);
             assert!(root
                 .drop_named_durable(&named("escaped"))
                 .expect_err("refused")
@@ -18170,7 +18360,7 @@ mod tests {
         save_named_store(&dir, &["g0"]);
         let mut root = Graph::open(&dir).unwrap();
         assert!(root.set_named(named("ram"), Graph::default()).is_err());
-        root.named.push((named("ram"), Graph::default()));
+        root.push_named(named("ram"), Graph::default());
         assert!(root.drop_named_durable(&named("ram")).is_err());
         assert_eq!(declared_manifest_slots(&dir), vec![0]);
         assert!(dir.join(NAMED_SUBDIR).join("0").is_dir());
@@ -18189,7 +18379,7 @@ mod tests {
         {
             let mut root = Graph::open(&dir).unwrap();
             let mut foreign = Graph::open(&other).unwrap();
-            let (_, foreign_child) = foreign.named.pop().expect("the other store's slot 1");
+            let (_, foreign_child) = foreign.pop_named().expect("the other store's slot 1");
             assert_eq!(
                 foreign_child.named_slot_in(&other.join(NAMED_SUBDIR)),
                 Some(1),
@@ -18200,7 +18390,7 @@ mod tests {
                 None,
                 "and no slot at all of this one"
             );
-            root.named.push((named("foreign"), foreign_child));
+            root.push_named(named("foreign"), foreign_child);
             let err = root
                 .ensure_named(&named("fresh"))
                 .expect_err("the set cannot be recorded in this store's manifest");
@@ -18362,7 +18552,7 @@ mod tests {
                     .unwrap();
             alias.tree = std::sync::Arc::clone(&root.tree);
             alias.generation = root.tree.generation();
-            root.named.push((named("alias"), alias));
+            root.push_named(named("alias"), alias);
             let err = root
                 .ensure_named(&named("fresh"))
                 .expect_err("a set that names one slot twice is not published");

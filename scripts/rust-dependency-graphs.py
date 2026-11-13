@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Run dependency gates over the root, exact evaluator, guest and proof-methods workspaces.
 
-zkp-14.5: the separately pinned V5 guest is its own workspace with its
-own lock, so it is a fourth graph. The detached proof-methods workspace is a
-fifth. A missing lock fails its gate.
+Every separately pinned guest, including the canonicalisation regression guest,
+has its own workspace and lock. A missing lock fails its gate.
 """
 from __future__ import annotations
 
@@ -21,6 +20,7 @@ MANIFESTS = (
     Path("zk/sparql-evaluator/Cargo.toml"),
     Path("zk/sparql-evaluator/methods/guest/Cargo.toml"),
     Path("zk/sparql-evaluator/methods/guest-authrdf/Cargo.toml"),
+    Path("zk/sparql-evaluator/methods/guest-canon/Cargo.toml"),
     Path("proof-methods/Cargo.toml"),
 )
 ACTIONS = ("deny-integrity", "deny-advisories", "fetch", "vet", "sbom", "sbom-paths", "patch-policy")

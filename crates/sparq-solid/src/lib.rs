@@ -1478,7 +1478,7 @@ impl PodStore {
     #[cfg(feature = "odrl-bridge")]
     fn odrl_grants(&self, session: &Session, mode: Mode, target: &str) -> bool {
         self.odrl_grants_present(session, mode, target)
-            && self.graph.named().iter().any(|(n, _)| matches!(n, Term::NamedNode(g) if g.as_str() == target))
+            && self.graph.named_graph(&Term::NamedNode(NamedNode::new_unchecked(target))).is_some()
     }
 
     /// [`PodStore::odrl_grants`] for a `target` the caller knows exists now.
@@ -2893,7 +2893,7 @@ mod dropped_view_tests;
 #[cfg(test)]
 mod update_path_tests;
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod storage_view_tests;
 
 #[cfg(test)]

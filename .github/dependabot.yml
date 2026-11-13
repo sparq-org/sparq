@@ -38,6 +38,9 @@ updates:
       # holds uuid at 1.26.x (#6824). Drop this entry when the floor moves to 1.89.
       - dependency-name: "uuid"
         versions: [">= 1.27"]
+      # yrs >=0.27 uses if-let guards requiring Rust 1.95; keep the Rust 1.88 MSRV.
+      - dependency-name: "yrs"
+        versions: [">= 0.27.0"]
 
   # ---- GitHub Actions ----
   - package-ecosystem: github-actions

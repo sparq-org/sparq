@@ -27,19 +27,17 @@
 //! ## Options honoured
 //!
 //! `compactArrays`, `ordered`, `processingMode`, and `compactToRelative` from
-//! [`JsonLdOptions`]. One modelling note: this crate has no remote-document layer yet, so
-//! [`JsonLdOptions::base`] stands in for *both* the API's `base` override *and* the
-//! document URL. `compactToRelative: false` therefore disables base-relative IRI
-//! compaction entirely (the spec's letter would still relativise against an explicit
-//! `base` option); a context's own `@base` continues to apply. This matches how the W3C
-//! harness drives the flag (the `compactToRelative` suite cases set no `base` option).
+//! [`JsonLdOptions`]. Remote input retains its final document URL as the fallback base.
+//! For already-expanded input, `compactToRelative: false` clears the initial options
+//! base; a context's own `@base` continues to apply. This retains the existing behavior
+//! of that helper, including for an explicit `base` option.
 //!
 //! Remote `@context` / `@import` references (in the caller context or reachable during
 //! the initial expansion) are dereferenced only through the [`DocumentLoader`]
 //! (deny-by-default via [`NoopLoader`](crate::loader::NoopLoader)).
 
 use crate::cache::Lru;
-use crate::context::inverse::{compact_iri, InverseContext};
+use crate::context::inverse::{try_compact_iri, InverseContext};
 use crate::context::{budget, ActiveContext, Direction, Override};
 use crate::error::{JsonLdError, JsonLdErrorCode as E};
 use crate::expand::{expand, expand_value};
@@ -82,6 +80,16 @@ fn compact_inner(
     options: &JsonLdOptions,
     loader: &dyn DocumentLoader,
 ) -> Result<Json, JsonLdError> {
+    if let Json::Str(url) = input {
+        if crate::context::iri::is_absolute_iri(url) {
+            let (expanded, document_url) = crate::expand::expand_remote(url, options, loader)?;
+            let mut options = options.clone();
+            if options.base.is_none() && options.compact_to_relative {
+                options.base = Some(document_url);
+            }
+            return compact_expanded(&expanded, context, &options, loader);
+        }
+    }
     let expanded = expand(input, options, loader)?;
     compact_expanded(&expanded, context, options, loader)
 }
@@ -100,7 +108,18 @@ pub fn compact_expanded(
     options: &JsonLdOptions,
     loader: &dyn DocumentLoader,
 ) -> Result<Json, JsonLdError> {
-    crate::context::budget::with_budget(|| compact_expanded_inner(expanded, context, options, loader))
+    crate::context::budget::with_budget(|| compact_expanded_inner(expanded, context, options, loader, false))
+}
+
+pub(crate) fn compact_flattened(
+    expanded: &Json,
+    context: &Json,
+    options: &JsonLdOptions,
+    loader: &dyn DocumentLoader,
+) -> Result<Json, JsonLdError> {
+    crate::context::budget::with_budget(|| {
+        compact_expanded_inner(expanded, context, options, loader, true)
+    })
 }
 
 fn compact_expanded_inner(
@@ -108,6 +127,7 @@ fn compact_expanded_inner(
     context: &Json,
     options: &JsonLdOptions,
     loader: &dyn DocumentLoader,
+    graph: bool,
 ) -> Result<Json, JsonLdError> {
     // API step: a map with an @context entry contributes that entry's value.
     let ctx_value = context
@@ -115,9 +135,8 @@ fn compact_expanded_inner(
         .cloned()
         .unwrap_or_else(|| context.clone());
 
-    // API step: the active context's base IRI. `options.base` stands in for the document
-    // URL (no remote-document layer), so `compactToRelative: false` clears the initial
-    // base (see the module doc); a context `@base` may still set one below.
+    // The caller has supplied an explicit base or the remote document's fallback.
+    // Keep the expanded-input helper's compactToRelative behavior (see module docs).
     let base = if options.compact_to_relative {
         options.base.as_deref()
     } else {
@@ -125,6 +144,7 @@ fn compact_expanded_inner(
     };
     let ctx = root_ctx(&ctx_value, base, options, loader)?;
     let ctx: &Ctx = &ctx;
+    ctx.confused_iri.set(false);
     let env = Env {
         loader,
         options,
@@ -133,7 +153,7 @@ fn compact_expanded_inner(
     };
 
     // The Compaction Algorithm proper, with a null active property.
-    let compacted = compact_element(ctx, None, expanded, Read::Value, &env);
+    let compacted = compact_element(ctx, graph.then_some("@graph"), expanded, Read::Value, &env);
     ctx.trim_memos();
     let compacted = compacted?;
 
@@ -161,6 +181,9 @@ fn compact_expanded_inner(
         if let Json::Obj(members) = &mut result {
             members.insert(0, ("@context".to_string(), ctx_value));
         }
+    }
+    if ctx.confused_iri.replace(false) {
+        return Err(JsonLdError::new(E::IriConfusedWithPrefix));
     }
     Ok(result)
 }
@@ -200,7 +223,7 @@ fn root_ctx(
     }
     let active =
         ActiveContext::new(base).process(ctx_value, options.base.as_deref(), loader, options)?;
-    let ctx = Rc::new(Ctx::new(active));
+    let ctx = Rc::new(Ctx::new(active, options.processing_mode));
     if cacheable {
         ROOT_CACHE.with(|cache| {
             cache.borrow_mut().insert(RootContext {
@@ -343,7 +366,12 @@ impl Env<'_> {
             prev = p.previous_context.as_deref();
         }
         let retained = root.retained.get() + held;
-        let ctx = Rc::new(Ctx::with_budget(active, Rc::clone(&root.memo_used)));
+        let ctx = Rc::new(Ctx::with_budget(
+            active,
+            self.options.processing_mode,
+            Rc::clone(&root.memo_used),
+            Rc::clone(&root.confused_iri),
+        ));
         // Once a context has not fitted, the cache takes no more until the next call.
         let fits = !root.overflowed.get()
             && root.derived.borrow().len() < DERIVED_CAP
@@ -363,6 +391,8 @@ impl Env<'_> {
 /// switches are rare relative to nodes, so the eager rebuild keeps the common path free
 /// of repeated inverse construction.
 struct Ctx {
+    confused_iri: Rc<Cell<bool>>,
+    mode: ProcessingMode,
     active: ActiveContext,
     inverse: InverseContext,
     /// Memoised IRI Compaction results: iri → (shape, vocab, reverse, result).
@@ -385,14 +415,21 @@ struct Ctx {
 }
 
 impl Ctx {
-    fn new(active: ActiveContext) -> Ctx {
-        Ctx::with_budget(active, Rc::default())
+    fn new(active: ActiveContext, mode: ProcessingMode) -> Ctx {
+        Ctx::with_budget(active, mode, Rc::default(), Rc::default())
     }
 
     /// A context whose memo insertions count against `memo_used`.
-    fn with_budget(active: ActiveContext, memo_used: Rc<Cell<usize>>) -> Ctx {
+    fn with_budget(
+        active: ActiveContext,
+        mode: ProcessingMode,
+        memo_used: Rc<Cell<usize>>,
+        confused_iri: Rc<Cell<bool>>,
+    ) -> Ctx {
         let inverse = active.inverse_context();
         Ctx {
+            confused_iri,
+            mode,
             active,
             inverse,
             memo: RefCell::default(),
@@ -429,21 +466,57 @@ impl Ctx {
     /// IRI Compaction against this context (see `context::inverse`'s `compact_iri`),
     /// memoised for the value shapes in [`Shape`].
     fn ciri(&self, iri: &str, value: Option<&Json>, vocab: bool, reverse: bool) -> String {
+        let check = |result: Result<String, JsonLdError>| match result {
+            Ok(result) => (result, false),
+            Err(_) => {
+                self.confused_iri.set(true);
+                (iri.to_string(), true)
+            }
+        };
         let Some(shape) = Shape::of(value, &self.inverse) else {
-            return compact_iri(&self.active, &self.inverse, iri, value, vocab, reverse);
+            return check(try_compact_iri(
+                &self.active,
+                &self.inverse,
+                iri,
+                value,
+                vocab,
+                reverse,
+                self.mode,
+            ))
+            .0;
         };
         let hit = |e: &&MemoEntry| e.1 == vocab && e.2 == reverse && e.0.is(&shape);
         if let Some(entries) = self.memo.borrow().get(iri) {
             if let Some(e) = entries.iter().find(hit) {
                 debug_assert_eq!(
                     e.3,
-                    compact_iri(&self.active, &self.inverse, iri, value, vocab, reverse),
+                    try_compact_iri(
+                        &self.active,
+                        &self.inverse,
+                        iri,
+                        value,
+                        vocab,
+                        reverse,
+                        self.mode,
+                    )
+                    .unwrap_or_else(|_| iri.to_string()),
                     "memoised IRI compaction diverged for {iri}"
                 );
+                if e.4 {
+                    self.confused_iri.set(true);
+                }
                 return e.3.clone();
             }
         }
-        let result = compact_iri(&self.active, &self.inverse, iri, value, vocab, reverse);
+        let (result, confused) = check(try_compact_iri(
+            &self.active,
+            &self.inverse,
+            iri,
+            value,
+            vocab,
+            reverse,
+            self.mode,
+        ));
         let mut memo = self.memo.borrow_mut();
         let entries = match memo.get_mut(iri) {
             Some(entries) => entries,
@@ -456,7 +529,7 @@ impl Ctx {
         };
         // Shapes vary with datatypes and language tags, so they are capped per IRI too.
         if entries.len() < MEMO_SHAPES {
-            entries.push((shape.to_owned(), vocab, reverse, result.clone()));
+            entries.push((shape.to_owned(), vocab, reverse, result.clone(), confused));
         }
         result
     }
@@ -485,7 +558,7 @@ const RETAIN_BUDGET: usize = 1 << 16;
 static NEXT_CTX_ID: AtomicU64 = AtomicU64::new(0);
 
 /// One memoised IRI Compaction: (value shape, vocab, reverse, result).
-type MemoEntry = (OwnedShape, bool, bool, String);
+type MemoEntry = (OwnedShape, bool, bool, String, bool);
 
 /// Everything IRI Compaction reads from a `value`, for the shapes it is cheap to
 /// summarise exactly: no value, a plain value object (`@value` plus optional `@type` /
@@ -1921,7 +1994,7 @@ mod tests {
     // Within one call, new IRIs stop being memoised once the shared budget is spent.
     #[test]
     fn memo_is_bounded_within_a_call() {
-        let ctx = Ctx::new(ActiveContext::new(None));
+        let ctx = Ctx::new(ActiveContext::new(None), ProcessingMode::JsonLd11);
         for i in 0..MEMO_CALL_CAP + 10 {
             ctx.ciri(&format!("http://ex/n{i}"), None, false, false);
         }

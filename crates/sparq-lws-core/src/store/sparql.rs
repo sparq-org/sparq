@@ -325,42 +325,86 @@ pub fn select_meta(resource: &str) -> Result<String, BuildError> {
     ))
 }
 
-/// SELECT the COMBINED read plan (read-2 — the §3.1 combined query): the index-record metadata of
-/// the target AND of every ACL candidate on its resolution chain, in ONE query — `VALUES ?g { … }`
-/// over the graph IRIs, matching each graph's reserved record. A graph with no record simply
-/// yields no row (authoritatively absent — the query consulted SPARQ, not a cache).
+// Comparative measurements favor a conservative boundary beyond ordinary pod walks.
+// Larger walks retain VALUES rather than repeating graph-name lookups for every candidate.
+pub(super) const READ_PLAN_CONSTANT_CANDIDATES: usize = 64;
+
+/// SELECT the target and ACL candidates in one query. Short walks use balanced
+/// constant GRAPH branches; longer walks retain the VALUES plan.
+/// Absent records yield no row in either form.
 ///
-/// The SPARQL 1.1 Protocol permits exactly ONE query string per request, so batching the walk
-/// means one richer query — this one. Every IRI (the target + each server-derived candidate) flows
-/// through the injection-safe fallible [`iri`] builder: an IRIREF-invalid value REJECTS the whole
-/// build (fail-closed, never escaped-and-aliased). Duplicate IRIs (a `.acl` target is its own
-/// first candidate) are emitted once — the response is keyed by graph IRI, so de-duplication in
-/// the `VALUES` list cannot change the result.
+/// Every name passes through the fallible [`iri`] builder before dispatch. Duplicate
+/// names are evaluated once; the reader restores the caller's candidate order and roles.
 pub fn select_read_plan(target: &str, acl_candidates: &[String]) -> Result<String, BuildError> {
-    let mut values = String::new();
-    let mut seen: Vec<&str> = Vec::with_capacity(1 + acl_candidates.len());
-    for raw in std::iter::once(target).chain(acl_candidates.iter().map(String::as_str)) {
-        if seen.contains(&raw) {
-            continue;
+    let names = read_plan_names(target, acl_candidates);
+    if acl_candidates.len() > READ_PLAN_CONSTANT_CANDIDATES {
+        let mut values = String::new();
+        for name in names {
+            let name = name?;
+            if !values.is_empty() {
+                values.push(' ');
+            }
+            values.push_str(&name);
         }
-        seen.push(raw);
-        if !values.is_empty() {
-            values.push(' ');
-        }
-        values.push_str(&iri(raw)?);
+        return Ok(format!(
+            "SELECT ?g ?ct ?bk ?etag ?mod ?appendSeq WHERE {{ VALUES ?g {{ {values} }} {record} }}",
+            record = read_plan_record("?g"),
+        ));
     }
-    Ok(format!(
-        "SELECT ?g ?ct ?bk ?etag ?mod ?appendSeq WHERE {{ VALUES ?g {{ {values} }} \
-            GRAPH ?g {{ {s} {pct} ?ct ; {pbk} ?bk ; {pet} ?etag . \
-            OPTIONAL {{ {s} {pmod} ?mod }} OPTIONAL {{ {s} {pseq} ?appendSeq }} }} }}",
-        values = values,
+    let names = names.collect::<Result<Vec<_>, _>>()?;
+    let mut query = String::from("SELECT ?g ?ct ?bk ?etag ?mod ?appendSeq WHERE { ");
+    read_plan_union(&names, &mut query);
+    query.push_str(" }");
+    Ok(query)
+}
+
+fn read_plan_names<'a>(
+    target: &'a str,
+    candidates: &'a [String],
+) -> impl Iterator<Item = Result<String, BuildError>> + 'a {
+    let mut seen = Vec::with_capacity(1 + candidates.len());
+    std::iter::once(target)
+        .chain(candidates.iter().map(String::as_str))
+        .filter_map(move |raw| {
+            if seen.contains(&raw) {
+                None
+            } else {
+                seen.push(raw);
+                Some(iri(raw))
+            }
+        })
+}
+
+fn read_plan_union(names: &[String], output: &mut String) {
+    if let [graph] = names {
+        output.push_str("{ BIND(");
+        output.push_str(graph);
+        output.push_str(" AS ?g) ");
+        output.push_str(&read_plan_record(graph));
+        output.push_str(" }");
+        return;
+    }
+    let (left, right) = names.split_at(names.len() / 2);
+    output.push_str("{ ");
+    read_plan_union(left, output);
+    output.push_str(" UNION ");
+    read_plan_union(right, output);
+    output.push_str(" }");
+}
+
+// Keep all rows of a multi-valued record: the reader validates every row before
+// choosing the first per graph. Do not add LIMIT to individual graph branches.
+fn read_plan_record(graph: &str) -> String {
+    format!(
+        "GRAPH {graph} {{ {s} {pct} ?ct ; {pbk} ?bk ; {pet} ?etag . \
+            OPTIONAL {{ {s} {pmod} ?mod }} OPTIONAL {{ {s} {pseq} ?appendSeq }} }}",
         s = iri_const(&s_record()),
         pct = iri_const(&p_content_type()),
         pbk = iri_const(&p_blob_key()),
         pet = iri_const(&p_etag()),
         pmod = iri_const(&p_modified()),
         pseq = iri_const(&p_append_seq()),
-    ))
+    )
 }
 
 /// CONSTRUCT the resource's own RDF (everything in its graph EXCEPT the reserved index record).
@@ -1829,9 +1873,87 @@ mod tests {
         assert!(q.contains("\"op-abc\""), "nonce as a literal: {q}");
     }
 
+    // Require explicit binary groups before counting their UNION depth: adjacent
+    // UNION tokens in a group would otherwise associate implicitly.
+    fn read_plan_union_depth(query: &str) -> usize {
+        let mut groups: Vec<(usize, usize)> = Vec::new();
+        let mut depth = 0;
+        let bytes = query.as_bytes();
+        for (i, byte) in bytes.iter().enumerate() {
+            match byte {
+                b'{' => groups.push((0, 0)),
+                b'}' => {
+                    let (unions, children) = groups.pop().unwrap();
+                    assert!(unions <= 1, "read-plan UNION groups must be binary");
+                    let nested = children + usize::from(unions == 1);
+                    if let Some((_, maximum)) = groups.last_mut() {
+                        *maximum = (*maximum).max(nested);
+                    } else {
+                        depth = depth.max(nested);
+                    }
+                }
+                _ if bytes[i..].starts_with(b"UNION ") => groups.last_mut().unwrap().0 += 1,
+                _ => {}
+            }
+        }
+        assert!(groups.is_empty(), "read-plan groups must be balanced");
+        depth
+    }
+
+    #[test]
+    fn select_read_plan_bounds_union_nesting_and_retains_values() {
+        let boundary = READ_PLAN_CONSTANT_CANDIDATES;
+        for count in (0..=boundary + 1).chain([4096]) {
+            let candidates: Vec<_> = (0..count)
+                .map(|i| format!("https://pod.example/acl-{i}"))
+                .collect();
+            let query = select_read_plan("https://pod.example/doc", &candidates).unwrap();
+            let depth = read_plan_union_depth(&query);
+            if count <= boundary {
+                let names = count + 1;
+                let expected_depth = (usize::BITS - (names - 1).leading_zeros()) as usize;
+                assert_eq!(
+                    depth, expected_depth,
+                    "logarithmic UNION nesting at candidate count {count}"
+                );
+                assert_eq!(
+                    query.matches("GRAPH <").count(),
+                    names,
+                    "constant branches below the boundary"
+                );
+                assert!(
+                    !query.contains("VALUES ?g"),
+                    "constant form below the boundary"
+                );
+            } else {
+                assert!(
+                    query.contains("VALUES ?g {"),
+                    "VALUES form above the boundary"
+                );
+                assert!(
+                    query.contains("GRAPH ?g {"),
+                    "variable graph in the VALUES form"
+                );
+                assert_eq!(depth, 0, "VALUES form has no UNION nesting");
+            }
+        }
+        let target = "https://pod.example/.acl";
+        let duplicates = vec![target.to_string(); boundary + 1];
+        let query = select_read_plan(target, &duplicates).unwrap();
+        assert!(
+            query.contains("VALUES ?g {"),
+            "walk length selects the query form"
+        );
+        assert_eq!(
+            query.matches(&iri_const(target)).count(),
+            1,
+            "VALUES names remain deduplicated"
+        );
+    }
+
     #[test]
     fn select_read_plan_is_one_query_over_all_candidates() {
-        // ONE SELECT carrying the target + every ACL candidate as VALUES rows — the whole per-read
+        // ONE SELECT carrying constant GRAPH branches for the whole per-read
         // metadata chain in one protocol request (§3.1).
         let candidates = vec![
             "http://pod/a/b/doc.acl".to_string(),
@@ -1841,12 +1963,17 @@ mod tests {
         ];
         let q = select_read_plan("http://pod/a/b/doc", &candidates).unwrap();
         assert!(q.starts_with("SELECT ?g ?ct ?bk ?etag"), "{q}");
-        assert_eq!(q.matches("VALUES").count(), 1, "one VALUES block: {q}");
+        assert!(!q.contains("GRAPH ?g"), "only constant graph branches: {q}");
+        assert_eq!(
+            q.matches("GRAPH <").count(),
+            1 + candidates.len(),
+            "one branch per name: {q}"
+        );
         assert!(q.contains(&iri_const("http://pod/a/b/doc")), "target: {q}");
         for c in &candidates {
             assert!(q.contains(&iri_const(c)), "candidate {c}: {q}");
         }
-        // The record match binds the three reserved predicates once each.
+        // Every branch binds the required reserved predicates.
         assert!(q.contains(&iri_const(&p_content_type())));
         assert!(q.contains(&iri_const(&p_blob_key())));
         assert!(q.contains(&iri_const(&p_etag())));
@@ -1854,15 +1981,14 @@ mod tests {
 
     #[test]
     fn select_read_plan_dedups_a_target_that_is_its_own_candidate() {
-        // A `.acl` target IS its own first candidate (protected-resource derivation): the VALUES
-        // list carries it ONCE — dedup cannot change the (graph-keyed) result.
+        // A `.acl` target IS its own first candidate: evaluate its graph only once.
         let acl = "http://pod/a/doc.acl";
         let candidates = vec![acl.to_string(), "http://pod/a/.acl".to_string()];
         let q = select_read_plan(acl, &candidates).unwrap();
         assert_eq!(
-            q.matches(&iri_const(acl)).count(),
+            q.matches(&format!("GRAPH {}", iri_const(acl))).count(),
             1,
-            "the duplicate IRI appears once in VALUES: {q}"
+            "the duplicate graph is evaluated once: {q}"
         );
     }
 

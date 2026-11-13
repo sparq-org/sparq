@@ -283,7 +283,7 @@ impl Bound {
     /// cannot re-enter as syntax.
     pub fn render(&self) -> String {
         match self {
-            Bound::Query(q) => q.query().to_string(),
+            Bound::Query(q) => q.source_query().to_string(),
             Bound::Update(u) => u.update().to_string(),
         }
     }

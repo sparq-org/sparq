@@ -27,10 +27,10 @@ rustdoc-args = ["--cfg", "docsrs"]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
 # (required to publish — crates.io strips `path`).
 sparq-core = { path = "../sparq-core", version = "0.1.8", default-features = false }
-# The exact any-length decimal comparison and the XSD float parser the engine's numeric
-# tower uses, for SHACL range constraints. sparq-engine already links this crate with
-# `numeric`, so it adds no new crate to the graph.
-sparq-substrate = { path = "../sparq-substrate", version = "0.1.8", default-features = false, features = ["numeric"] }
+# The numeric tower for range constraints and the shared SPARQL total-order algorithm
+# for node expressions. sparq-engine already enables both substrate features, so this
+# adds no package to the dependency graph.
+sparq-substrate = { path = "../sparq-substrate", version = "0.1.8", default-features = false, features = ["numeric", "compare"] }
 oxrdf.workspace = true
 oxttl.workspace = true
 # Algebra-level pre-binding of $this (a VALUES injection on the parsed sh:select) — more
