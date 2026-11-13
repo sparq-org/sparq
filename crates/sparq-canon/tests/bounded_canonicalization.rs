@@ -267,3 +267,26 @@ fn guest_profile_admits_the_largest_positive_fixture() {
     );
     assert!(issue_quads_bounded_ordered_with::<Sha256>(&graph, &cap).is_ok());
 }
+
+#[test]
+fn guest_negative_fixture_without_quad_cap_stops_at_the_work_budget() {
+    let graph =
+        sparq_canon::parse_nquads(include_str!("rdf-canon-testdata/rdfc10/test074-in.nq")).unwrap();
+    let cap = CanonicalizationLimits {
+        max_quads: 100_000,
+        ..guest_canon_profile::limits()
+    };
+    assert!(graph.len() <= cap.max_quads);
+    for result in [
+        canonicalize_quads_bounded_with::<Sha256>(&graph, &cap).map(|_| ()),
+        issue_quads_bounded_with::<Sha256>(&graph, &cap).map(|_| ()),
+        issue_quads_bounded_ordered_with::<Sha256>(&graph, &cap).map(|_| ()),
+    ] {
+        let message = result.unwrap_err().to_string();
+        assert!(
+            message.contains("Hash N-degree Quads") || message.contains("permutation capacity"),
+            "{message}"
+        );
+        assert!(!message.contains("input"), "{message}");
+    }
+}
