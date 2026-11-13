@@ -11,6 +11,19 @@ fn main(
     indices: pub [u32; 1],
     result: pub bool,
     issuer_root: pub Field,
+    issuer_depth: pub u32,
+    holder_required: pub bool,
+    holder_issuers_present: pub bool,
+    holder_issuer_count: pub u32,
+    holder_issuers: pub [Field; 4],
+    status_required: pub bool,
+    allow_missing_status: pub bool,
+    snapshot_root: pub Field,
+    snapshot_depth: pub u32,
+    validity_required: pub bool,
+    now: pub u64,
+    freshness_required: pub bool,
+    earliest_created: pub u64,
     credential_quad_bounds: pub [u32; 1],
     statement_binding: pub Field,
     credential_0: [[core::suite_entry::TermOpening<32>; 4]; 4],
@@ -34,6 +47,7 @@ fn main(
     ops_core::project(t0, [1], t1);
     ops_core::check_bound(t1, bounds[2]);
     ops_core::ask(t1, result);
-    ops_core_statement::bind_ask_authenticated(issuer_root, credential_quad_bounds, request_digest, input_commitment, signature_mode, bounds, parameters, indices, result, statement_binding);
+    let envelope = ops_core_statement::envelope_words(issuer_root, issuer_depth, holder_required, holder_issuers_present, holder_issuer_count, holder_issuers, status_required, allow_missing_status, snapshot_root, snapshot_depth, validity_required, now, freshness_required, earliest_created);
+    ops_core_statement::bind_ask_authenticated(envelope, credential_quad_bounds, request_digest, input_commitment, signature_mode, bounds, parameters, indices, result, statement_binding);
 }
 

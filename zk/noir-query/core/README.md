@@ -23,3 +23,7 @@ salt, unsalted quad hashes or the root. Salt is a canonical private field elemen
 
 The detached evaluator's SHA-256 module remains a frozen second copy. The new
 Rust suite owns the source for new callers and pins all Noir globals.
+
+The expression modules expose `(Lane<T>, is_error)`, with a distinct capacity
+channel. Call `filter_accept` at a FILTER root. The term-opening contract binds
+scalar values to authenticated lexical openings and recomputed keys.

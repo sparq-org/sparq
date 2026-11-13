@@ -92,3 +92,24 @@ See the [query compiler record](../../research/noir-query-compiler.md).
 ## License
 
 MIT.
+
+The expression lane is available through `lower::expr` and the `expr_*` Noir
+modules. Its value, error and capacity channels are separate; capacity refusals
+are asserted at the expression root and cannot be absorbed as SPARQL errors.
+
+The host plan, lowering, interpreter, code generator, request, statement layout
+and presentation values also build for WebAssembly. The subprocess compiler
+driver remains native. `method::Prepared` and `method::Presentation` are portable;
+`Request::plan` and `Answer::release` expose the shared reconstruction operations.
+
+Authenticated layouts include a verifier-stored envelope policy group. The
+request admits typed policy values through `new_authenticated_with_policy`,
+and `Request::envelope_inputs` supplies their values to reconstruction. Enabled
+envelope policies receive a named native refusal until the statement lane's
+consumer is integrated. The issuer-root construction remains pending that
+lane's canonical policy-root module.
+
+The expression dispatcher calls the shared typed comparison, boolean and
+membership gadgets. Capacity remains separate from SPARQL errors. The corpus
+ratchet independently compares native and WebAssembly bytecode and keys for
+each passing program, and the workflow tests the committed Noir manifests.

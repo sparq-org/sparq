@@ -14,3 +14,9 @@ pub mod ops_core_expr;
 pub mod ops_core_statement;
 pub mod ops_core_suite;
 mod ops_core_tests;
+
+pub mod expr_term_contract;
+pub mod expr_core;
+pub mod expr_compare;
+pub mod expr_arith;
+mod expr_tests;

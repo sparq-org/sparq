@@ -691,7 +691,7 @@ jobs:
       # the end of the job is what proves these tests ran.
       - name: Run the default-run live ZK tests (real nargo/bb)
         run: |
-          cargo test -p sparq-zk-compose -p sparq-zk -- --test-threads=1
+          cargo test -p sparq-zk-compose -p sparq-zk -p sparq-zk-query -- --test-threads=1
 
       # Rebuild the immutable foundation separately from the PR candidate.
       # This independently checks the provenance of all four legacy key goldens.
@@ -762,11 +762,21 @@ jobs:
       # or workflow level, and on a non-bash `shell:` anywhere in this job. The ledger
       # proves each live body reached the call placed after its assertions; it does
       # not grade what those assertions check.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install the pinned query compiler agreement dependencies
+        run: npm ci --ignore-scripts --prefix zk/noir-query/compiler-agreement
       - name: Run the exact Noir query compiler contracts and corpus ratchet
         run: |
           set -euo pipefail
+          rustup target add wasm32-unknown-unknown
+          cargo check -p sparq-zk-query --target wasm32-unknown-unknown
+          cargo check -p sparq-zk-query --target wasm32-unknown-unknown --features ordered-json
           (cd zk/noir-query/core && nargo check && nargo test)
           (cd zk/noir-query/fixtures/generated_smoke && nargo check && nargo test)
+          python3 scripts/check-noir-dependency-aliases.py
+          node zk/noir-query/compiler-agreement/check.mjs --self-test
           cargo test -p sparq-zk-query -- --include-ignored --test-threads=1
 
       - name: Verify every live ZK test ran

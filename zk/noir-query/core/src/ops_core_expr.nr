@@ -1,9 +1,12 @@
-//! Initial key-comparison, boolean and membership expression contract.
-//! Lane D's typed expression gadgets replace this dispatch at integration.
+//! Adapts authenticated suite keys to the shared expression gadgets.
+//! The adapter uses only checked keys; it accepts no private scalar payload.
 
-use crate::table::{TermCell, Table, unbound, same_term};
+use crate::table::{TermCell, Table, unbound};
 use crate::ops_core::Boolean;
 use crate::suite_constants::{DT_STRING, DT_LANGSTRING};
+use crate::expr_core::{Lane, Scalar, Numeric, StringLane, TemporalLane, truth,
+    zero_numeric, TERM, BOOLEAN, NUMERIC, STRING, DATE, DATETIME, DECIMAL};
+use crate::{expr_core, expr_compare};
 
 pub struct Step {
     pub op: u8,
@@ -12,85 +15,140 @@ pub struct Step {
     pub parameter: u32,
     pub comparison: u8,
 }
-
 struct Value {
     term: TermCell,
-    boolean: bool,
+    boolean: (Lane<bool>, bool),
     is_boolean: bool,
-    is_error: bool,
+}
+fn error() -> Value { boolean(truth(false, true)) }
+fn boolean(value: (Lane<bool>, bool)) -> Value {
+    Value { term: unbound(), boolean: value, is_boolean: true }
+}
+fn term(value: TermCell) -> Value {
+    Value { term: value, boolean: truth(false, true), is_boolean: false }
 }
 
-fn error() -> Value { Value {term: unbound(), boolean: false, is_boolean: true, is_error: true} }
-fn boolean(value: bool, is_error: bool) -> Value { Value {term: unbound(), boolean: value, is_boolean: true, is_error} }
+// Equality uses a term-identity token for strings. Ordering uses the checked
+// short-string key, whose zero padding preserves the lexical order. Neither
+// representation is exposed as a lexical opening to other expression gadgets.
+fn scalar(cell: TermCell, equality: bool, effective_boolean: bool) -> (Lane<Scalar<32>>, bool) {
+    let mut value = Scalar {
+        tag: TERM, valid: true, boolean: false, number: zero_numeric(),
+        string: StringLane { bytes: [0; 32], len: 0, lang: 0 },
+        temporal: TemporalLane { key_class: 0, key: 0 },
+        term: crate::expr_term_contract::TermCell {
+            bound: cell.bound, kind: if cell.kind > 0 { cell.kind - 1 } else { 0 },
+            enc: cell.enc, key_class: cell.key_class, key: cell.key, dt: cell.dt, lang: cell.lang,
+        },
+    };
+    let mut capacity = false;
+    if cell.bound & (cell.kind == 3) {
+        if effective_boolean {
+            assert(cell.key_class != 0x7f, "literal value range");
+            assert(cell.key_class != 2, "floating-point EBV not yet supported");
+        } else {
+            assert(cell.key_class != 0x7f, "literal comparison range");
 
-fn ebv(value: Value) -> Boolean {
-    let mut result = Boolean {value: false, is_error: true};
-    if value.is_boolean {
-        result = Boolean {value: value.boolean, is_error: value.is_error};
-    } else if value.term.bound & (value.term.kind == 3) {
-        assert(value.term.dt != DT_LANGSTRING, "language-tagged effective boolean value not yet supported");
-        assert(value.term.key_class != 0x7f, "literal value range");
-        assert(value.term.key_class != 2, "floating-point EBV not yet supported");
-        if value.term.key_class == 1 {
-            result = Boolean {value: value.term.key != 0x0180000000000000000000000000000000000000000000000000000000000000, is_error: false};
-        } else if (value.term.key_class == 5) | (value.term.key_class == 6) {
-            result = Boolean {value: (value.term.key != value.term.key_class as Field * 0x1000000000000000000000000000000000000000000000000000000000000), is_error: false};
-        } else if value.term.key_class == 7 {
-            result = Boolean {value: true, is_error: false};
         }
-    }
-    result
-}
-
-fn compare(op: u8, a: Value, b: Value) -> Value {
-    assert(op <= 4, "comparison instruction");
-    let mut result = error();
-    if a.is_boolean & b.is_boolean {
-        let av = a.boolean as u8; let bv = b.boolean as u8;
-        let value = ((op == 0) & (av == bv)) | ((op == 1) & (av < bv))
-            | ((op == 2) & (av <= bv)) | ((op == 3) & (av > bv)) | ((op == 4) & (av >= bv));
-        result = boolean(value, a.is_error | b.is_error);
-    } else if !a.is_boolean & !b.is_boolean {
-        if a.term.bound & b.term.bound {
-            assert((a.term.key_class != 0x7f) & (b.term.key_class != 0x7f), "literal comparison range");
-            if (a.term.kind == 3) & (b.term.kind == 3) {
-                assert((a.term.key_class != 2) & (b.term.key_class != 2), "floating-point comparison not yet supported");
-                let temporal_a = (a.term.key_class == 3) | (a.term.key_class == 4) | (a.term.key_class == 8);
-                let temporal_b = (b.term.key_class == 3) | (b.term.key_class == 4) | (b.term.key_class == 8);
-                assert(!(temporal_a & temporal_b) | (a.term.dt == b.term.dt), "mixed temporal datatypes not yet supported");
-                assert(!(temporal_a & temporal_b) | (a.term.key_class == b.term.key_class), "mixed timezone comparison not yet supported");
-                assert((op != 0) | ((a.term.key_class != 0) & (b.term.key_class != 0)), "literal equality without a supported value key");
-                let strings = ((a.term.key_class == 6) | (a.term.key_class == 7))
-                    & ((b.term.key_class == 6) | (b.term.key_class == 7));
-                assert((op == 0) | !strings | (((a.term.lang == 0) | (a.term.dt == DT_STRING)) & ((b.term.lang == 0) | (b.term.dt == DT_STRING))), "language-tagged string ordering not yet supported");
-                assert(((op == 0) & strings) | ((a.term.key_class != 7) & (b.term.key_class != 7)), "string comparison capacity");
-            }
-            let class = a.term.key_class;
-            let keyed = (a.term.kind == 3) & (b.term.kind == 3) & (class == b.term.key_class)
-                & ((class == 1) | (class == 3) | (class == 4) | (class == 5) | (class == 6) | (class == 8));
-            let strings = (a.term.kind == 3) & (b.term.kind == 3)
-                & ((a.term.key_class == 6) | (a.term.key_class == 7))
-                & ((b.term.key_class == 6) | (b.term.key_class == 7));
-            if (op == 0) & strings {
-                result = boolean(same_term(a.term, b.term), false);
-            } else if keyed {
-                let av = a.term.key; let bv = b.term.key;
-                let less = av.lt(bv); let greater = bv.lt(av);
-                let value = ((op == 0) & (av == bv)) | ((op == 1) & less)
-                    | ((op == 2) & !greater) | ((op == 3) & greater) | ((op == 4) & !less);
-                result = boolean(value, false);
-            } else if op == 0 {
-                if (a.term.kind != 3) | (b.term.kind != 3) {
-                    result = boolean(same_term(a.term, b.term), false);
-                } else if same_term(a.term, b.term) {
-                    result = boolean(true, false);
+        let prefix: Field = cell.key_class as Field * 0x1000000000000000000000000000000000000000000000000000000000000;
+        if cell.key_class == 1 {
+            let zero: Field = 0x1800000000000000000000000000000000000000000000000000000000000;
+            let negative = cell.key.lt(zero);
+            let magnitude = if negative { zero - cell.key } else { cell.key - zero };
+            capacity = !magnitude.lt(expr_core::EXACT_LIMIT);
+            value.tag = NUMERIC;
+            value.number = Numeric { ty: DECIMAL, negative: negative & !capacity,
+                magnitude: if capacity { 0 } else { magnitude }, bits: 0 };
+        } else if cell.key_class == 5 {
+            value.tag = BOOLEAN;
+            value.boolean = cell.key != prefix;
+        } else if (cell.key_class == 3) | (cell.key_class == 4) | (cell.key_class == 8) {
+            value.tag = if cell.key_class == 8 { DATE } else { DATETIME };
+            value.temporal = TemporalLane { key_class: cell.key_class, key: cell.key - prefix };
+        } else if (cell.key_class == 6) | (cell.key_class == 7) {
+            value.tag = STRING;
+            value.string.lang = if cell.dt == DT_STRING { 0 } else { cell.lang };
+            if effective_boolean {
+                let nonempty = (cell.key_class == 7) | (cell.key != prefix);
+                value.string.len = nonempty as u32;
+                value.string.bytes[0] = nonempty as u8;
+            } else if equality {
+                value.string.bytes = cell.enc.to_be_bytes::<32>();
+                value.string.len = 32;
+            } else {
+                assert(cell.key_class == 6, "string comparison capacity");
+                let bytes = cell.key.to_be_bytes::<32>();
+                for i in 0..30 {
+                    value.string.bytes[i] = bytes[i + 2];
+                    if bytes[i + 2] != 0 { value.string.len = i + 1; }
                 }
             }
         }
+    }
+    (Lane { value, capacity }, !cell.bound)
+}
+fn ebv(value: Value) -> (Lane<bool>, bool) {
+    if value.is_boolean { value.boolean }
+    else {
+        assert(!value.term.bound | (value.term.dt != DT_LANGSTRING), "language-tagged effective boolean value not yet supported");
+        expr_core::ebv(scalar(value.term, false, true))
+    }
+}
+fn compare(op: u8, a: Value, b: Value, membership: bool) -> (Lane<bool>, bool) {
+    assert(op <= 4, "comparison instruction");
+    assert(!membership | (op == 0), "membership comparison instruction");
+    if a.is_boolean & b.is_boolean {
+        let (av, ae) = a.boolean; let (bv, be) = b.boolean;
+        let mut left = scalar(unbound(), false, false);
+        let mut right = left;
+        let (mut x, _) = left; let (mut y, _) = right;
+        x.value.tag = BOOLEAN; x.value.boolean = av.value; x.value.term.bound = true;
+        x.capacity = av.capacity;
+        y.value.tag = BOOLEAN; y.value.boolean = bv.value; y.value.term.bound = true;
+        y.capacity = bv.capacity;
+        left = (x, ae); right = (y, be);
+        if membership { expr_compare::in_list(left, [right]) }
+        else { expr_compare::value_compare(left, right, op) }
+    } else if !a.is_boolean & !b.is_boolean {
+        let a = a.term; let b = b.term;
+        if !a.bound | !b.bound { return truth(false, true); }
+        if a.bound & b.bound & (a.kind == 3) & (b.kind == 3) {
+            assert((a.key_class != 2) & (b.key_class != 2), "floating-point comparison not yet supported");
+            assert((op != 0) | ((a.key_class != 0) & (b.key_class != 0)), "literal equality without a supported value key");
+            let strings = ((a.key_class == 6) | (a.key_class == 7))
+                & ((b.key_class == 6) | (b.key_class == 7));
+            assert((op == 0) | !strings | (((a.lang == 0) | (a.dt == DT_STRING))
+                & ((b.lang == 0) | (b.dt == DT_STRING))), "language-tagged string ordering not yet supported");
+            let temporal_a = (a.key_class == 3) | (a.key_class == 4) | (a.key_class == 8);
+            let temporal_b = (b.key_class == 3) | (b.key_class == 4) | (b.key_class == 8);
+            assert(!(temporal_a & temporal_b) | (a.dt == b.dt), "mixed temporal datatypes not yet supported");
+            assert(!(temporal_a & temporal_b) | (a.key_class == b.key_class), "mixed timezone comparison not yet supported");
+        }
+        let string_pair = ((a.key_class == 6) | (a.key_class == 7))
+            & ((b.key_class == 6) | (b.key_class == 7));
+        let (mut x, xe) = scalar(a, (op == 0) | !string_pair, false);
+        let (mut y, ye) = scalar(b, (op == 0) | !string_pair, false);
+        let result = if (x.value.tag == NUMERIC) & (y.value.tag == NUMERIC) {
+            // Keep the exact-only bucket statically typed. Error and capacity
+            // remain separate, and no IEEE conversion is instantiated here.
+            let xn = Numeric { ty: DECIMAL, negative: x.value.number.negative,
+                magnitude: x.value.number.magnitude, bits: 0 };
+            let yn = Numeric { ty: DECIMAL, negative: y.value.number.negative,
+                magnitude: y.value.number.magnitude, bits: 0 };
+            expr_compare::numeric_compare((Lane { value: xn, capacity: x.capacity }, false),
+                (Lane { value: yn, capacity: y.capacity }, false), op)
+        } else {
+            x.value.number = zero_numeric(); y.value.number = zero_numeric();
+            if membership { expr_compare::in_list((x, xe), [(y, ye)]) }
+            else { expr_compare::value_compare((x, xe), (y, ye), op) }
+        };
+        // Credential-local blank labels retain their distinct scopes.
+        if op == 0 { expr_core::logical_and(result, truth(a.scope == b.scope, false)) }
+        else { result }
     } else {
         assert(false, "comparison of boolean expression and term not yet supported");
+        truth(false, true)
     }
-    result
 }
 
 pub fn evaluate<let R: u32, let V: u32, let P: u32, let E: u32>(
@@ -103,35 +161,32 @@ pub fn evaluate<let R: u32, let V: u32, let P: u32, let E: u32>(
         for s in 0..E {
             let step = steps[s];
             if step.op == 0 {
-                let mut term = unbound();
-                for v in 0..V { if step.parameter == v { term = input.rows[r][v]; } }
-                values[s] = Value {term, boolean: false, is_boolean: false, is_error: false};
+                let mut cell = unbound();
+                for v in 0..V { if step.parameter == v { cell = input.rows[r][v]; } }
+                values[s] = term(cell);
             } else if step.op == 1 {
                 assert(step.parameter < P, "expression parameter");
-                values[s] = Value {term: parameters[step.parameter], boolean: false, is_boolean: false, is_error: false};
+                values[s] = term(parameters[step.parameter]);
             } else if step.op == 7 {
-                values[s] = boolean(false, false);
+                values[s] = boolean(truth(false, false));
             } else {
                 assert((step.a < s) & (step.b < s), "expression topology");
                 let a = values[step.a]; let b = values[step.b];
-                if step.op == 2 {
-                    values[s] = compare(step.comparison, a, b);
+                if (step.op == 2) | (step.op == 6) {
+                    values[s] = boolean(compare(step.comparison, a, b, step.op == 6));
+                } else if step.op == 3 {
+                    values[s] = boolean(expr_core::logical_and(ebv(a), ebv(b)));
+                } else if step.op == 4 {
+                    values[s] = boolean(expr_core::logical_or(ebv(a), ebv(b)));
                 } else {
-                    let av = ebv(a); let bv = ebv(b);
-                    if step.op == 3 {
-                        values[s] = boolean(av.value & bv.value, (av.is_error | bv.is_error)
-                            & !((!av.value & !av.is_error) | (!bv.value & !bv.is_error)));
-                    } else if step.op == 4 {
-                        values[s] = boolean(av.value | bv.value, (av.is_error | bv.is_error)
-                            & !((av.value & !av.is_error) | (bv.value & !bv.is_error)));
-                    } else {
-                        assert(step.op == 5, "expression opcode");
-                        values[s] = boolean(!av.value, av.is_error);
-                    }
+                    assert(step.op == 5, "expression opcode");
+                    values[s] = boolean(expr_core::logical_not(ebv(a)));
                 }
             }
         }
-        results[r] = ebv(values[E - 1]);
+        let root = ebv(values[E - 1]);
+        let (_, is_error) = root;
+        results[r] = Boolean { value: expr_core::filter_accept(root), is_error };
     }
     results
 }

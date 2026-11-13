@@ -146,3 +146,24 @@ subset of the draft: issuer sets, status windows, trust-policy roots, disclosure
 of the evaluation context are not modelled. Adapters owe all of these; the README lists each
 obligation. Because `QueryMethod` implementations are trusted local code, trait compliance is
 not evidence of correctness.
+
+The host compiler modules and presentation values build for WebAssembly; the
+native `method::Compiler` alone owns subprocesses and temporary proof files.
+`Request::plan()` reconstructs the trusted plan and credential limits, while
+`Answer::release` converts its canonical result through the supplied vocabulary.
+`method::Prepared` and `method::Presentation` remain available on both targets.
+
+`statement::EnvelopeInputs` carries the verifier-stored typed envelope policy.
+Admit it with `Request::new_authenticated_with_policy(stored, bounds, key,
+envelope, quad_bounds)` and obtain it through `Request::envelope_inputs()`.
+`Layout::reconstruct_authenticated_with_envelope` and
+`witness::prover_toml_authenticated_with_envelope` consume the same typed group.
+The existing authenticated methods retain the issuer-only profile. Enabled
+holder, status, validity and freshness policies require the statement lane's
+consumer; the current native driver refuses them by name until it is integrated.
+The canonical policy-root module remains a neighbouring-lane integration.
+
+Expression evaluation uses the shared typed gadgets, with a separate capacity
+channel. The generated-query coverage ratchet requires native and WebAssembly
+ABI, bytecode and independently derived key agreement for every passing program.
+Isolated gadget evidence stays distinct from generated-query and proof evidence.

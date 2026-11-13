@@ -30,7 +30,7 @@ pub struct Request {
     key: Vec<u8>,
     digest: [u8; 32],
     canonical_rdf: String,
-    issuer_root: Option<[u8; 32]>,
+    envelope: Option<crate::statement::EnvelopeInputs>,
     credential_quad_bounds: Vec<u32>,
 }
 
@@ -68,7 +68,13 @@ impl Request {
         issuer_root: [u8; 32],
     ) -> Result<Self, Error> {
         crate::credential::field(issuer_root)?;
-        Self::new_inner(stored, bounds, key, Some(issuer_root), None)
+        Self::new_inner(
+            stored,
+            bounds,
+            key,
+            Some(crate::statement::EnvelopeInputs::issuer_only(issuer_root)),
+            None,
+        )
     }
     /// Store distinct public quad limits for the ordered credential slots.
     pub fn new_authenticated_with_quad_bounds(
@@ -79,13 +85,30 @@ impl Request {
         quad_bounds: &[u32],
     ) -> Result<Self, Error> {
         crate::credential::field(issuer_root)?;
-        Self::new_inner(stored, bounds, key, Some(issuer_root), Some(quad_bounds))
+        Self::new_inner(
+            stored,
+            bounds,
+            key,
+            Some(crate::statement::EnvelopeInputs::issuer_only(issuer_root)),
+            Some(quad_bounds),
+        )
+    }
+    /// Admit typed policy values supplied by the verifier's envelope adapter.
+    pub fn new_authenticated_with_policy(
+        stored: StoredRequest,
+        bounds: Bounds,
+        key: Vec<u8>,
+        envelope: crate::statement::EnvelopeInputs,
+        quad_bounds: Option<&[u32]>,
+    ) -> Result<Self, Error> {
+        envelope.validate()?;
+        Self::new_inner(stored, bounds, key, Some(envelope), quad_bounds)
     }
     fn new_inner(
         stored: StoredRequest,
         bounds: Bounds,
         key: Vec<u8>,
-        issuer_root: Option<[u8; 32]>,
+        envelope: Option<crate::statement::EnvelopeInputs>,
         quad_bounds: Option<&[u32]>,
     ) -> Result<Self, Error> {
         if key.is_empty() {
@@ -103,7 +126,7 @@ impl Request {
         if requirements.mode() != EvaluationMode::ExactBounded {
             return Err(Error::Unsupported("evaluation mode".into()));
         }
-        if issuer_root.is_some() {
+        if envelope.is_some() {
             if requirements.source_evidence() != SourceEvidence::IssuerAuthenticated
                 || !requirements
                     .accepted_suites()
@@ -117,10 +140,16 @@ impl Request {
         } else if requirements.source_evidence() != SourceEvidence::None {
             return Err(Error::Unsupported("credential suite opening".into()));
         }
-        if requirements.status() != StatusPolicy::NotRequested {
+        if let Some(policy) = &envelope {
+            policy.validate()?;
+            if policy.holder_required != (requirements.holder() == HolderPolicy::Required)
+                || policy.status_required != (requirements.status() == StatusPolicy::Required)
+            {
+                return Err(Error::Invalid("request and envelope policy".into()));
+            }
+        } else if requirements.status() != StatusPolicy::NotRequested {
             return Err(Error::Unsupported("credential status envelope".into()));
-        }
-        if requirements.holder() != HolderPolicy::BearerAccepted {
+        } else if requirements.holder() != HolderPolicy::BearerAccepted {
             return Err(Error::Unsupported("holder envelope".into()));
         }
         if requirements.assembly() != DatasetAssembly::UnionDefaultGraph {
@@ -151,7 +180,7 @@ impl Request {
         if requirements.methods() != [descriptor(&plan, &key)?] {
             return Err(Error::Invalid("method descriptor".into()));
         }
-        let canonical_rdf = canonical_request(&stored, bounds, &plan, &key, issuer_root)?;
+        let canonical_rdf = canonical_request(&stored, bounds, &plan, &key, envelope.as_ref())?;
         let digest = Sha256::digest(canonical_rdf.as_bytes()).into();
         Ok(Self {
             stored,
@@ -159,13 +188,21 @@ impl Request {
             key,
             digest,
             canonical_rdf,
-            issuer_root,
+            envelope,
             credential_quad_bounds,
         })
     }
     pub fn issuer_root(&self) -> Result<[u8; 32], Error> {
-        self.issuer_root
-            .ok_or_else(|| Error::Unsupported("authenticated issuer policy required".into()))
+        Ok(self.envelope_inputs()?.issuer_root)
+    }
+    /// Single trusted seam for envelope public-input derivation.
+    pub fn envelope_inputs(&self) -> Result<crate::statement::EnvelopeInputs, Error> {
+        let policy = self
+            .envelope
+            .clone()
+            .ok_or_else(|| Error::Unsupported("authenticated issuer policy required".into()))?;
+        policy.validate()?;
+        Ok(policy)
     }
     pub fn stored(&self) -> &StoredRequest {
         &self.stored
@@ -183,7 +220,8 @@ impl Request {
     pub fn canonical_rdf(&self) -> &str {
         &self.canonical_rdf
     }
-    pub(crate) fn plan(&self) -> Result<Plan, Error> {
+    /// Rebuild the trusted plan and credential limits from this stored request.
+    pub fn plan(&self) -> Result<Plan, Error> {
         lower(self.stored.query(), self.bounds)?
             .with_credential_quad_bounds(&self.credential_quad_bounds)
     }
@@ -194,7 +232,7 @@ fn canonical_request(
     b: Bounds,
     plan: &Plan,
     key: &[u8],
-    issuer_root: Option<[u8; 32]>,
+    envelope: Option<&crate::statement::EnvelopeInputs>,
 ) -> Result<String, Error> {
     let mut rdf = String::new();
     let mut triple = |subject: &str, predicate: &str, object: String| {
@@ -233,8 +271,13 @@ fn canonical_request(
         "storedRequestEncoding":sparq_query_protocol::LOCAL_ENCODING_PROFILE,
         "storedRequest":URL_SAFE_NO_PAD.encode(sparq_query_protocol::encode_stored_request(stored)),
     });
-    if let Some(root) = issuer_root {
-        parameters["issuerRoot"] = serde_json::json!(URL_SAFE_NO_PAD.encode(root));
+    if let Some(policy) = envelope {
+        parameters["issuerRoot"] = serde_json::json!(URL_SAFE_NO_PAD.encode(policy.issuer_root));
+        parameters["envelope"] = serde_json::json!(policy
+            .words()?
+            .iter()
+            .map(|w| URL_SAFE_NO_PAD.encode(w))
+            .collect::<Vec<_>>());
     }
     // This parameter schema contains only strings and bounded integers. Sort
     // both objects explicitly for its canonical RDF JSON lexical form.

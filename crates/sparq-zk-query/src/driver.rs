@@ -14,7 +14,7 @@ use crate::{
     witness, Error,
 };
 use oxrdf::Term;
-use sparq_query_protocol::{consume_challenge, ChallengeStore, Identifier, MethodDescriptor};
+use sparq_query_protocol::{consume_challenge, ChallengeStore, Identifier};
 use sparq_zk_compose::driver::ProgramProver;
 use std::{
     collections::BTreeMap,
@@ -23,41 +23,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-/// A locally compiled shape and its exact verification key.
-#[derive(Clone, Debug)]
-pub struct Prepared {
-    pub plan: Plan,
-    pub verification_key: Vec<u8>,
-    pub descriptor: MethodDescriptor,
-    /// Locally compiled artifact, for reproducibility checks and export.
-    pub artifact: serde_json::Value,
-}
-
-/// A presentation carries RDF results and evidence, never a plan, program,
-/// verification key, ABI, capacity or public-input blob.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Presentation {
-    pub request_digest: [u8; 32],
-    pub input_commitment: [u8; 32],
-    pub signature_mode: u8,
-    pub result: Answer,
-    pub proof: Vec<u8>,
-}
-impl Presentation {
-    /// Canonical local envelope for this draft primitive. The public adapter
-    /// additionally applies its complete transport envelope's resource bound.
-    pub fn encoded(&self) -> Result<Vec<u8>, Error> {
-        let result = match &self.result {
-            Answer::Ask(value) => serde_json::json!({"boolean":value}),
-            Answer::Select { variables, rows } => serde_json::json!({"variables":variables,
-                "rows":rows.iter().map(|r|r.iter().map(|t|t.as_ref().map(ToString::to_string)).collect::<Vec<_>>()).collect::<Vec<_>>() }),
-        };
-        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-        serde_json::to_vec(&serde_json::json!({"requestDigest":URL_SAFE_NO_PAD.encode(self.request_digest),
-            "inputCommitment":URL_SAFE_NO_PAD.encode(self.input_commitment),"signatureMode":self.signature_mode,
-            "result":result,"proof":URL_SAFE_NO_PAD.encode(&self.proof)})).map_err(infrastructure)
-    }
-}
+pub use crate::presentation::{Prepared, Presentation};
 
 struct Compiled {
     _workspace: tempfile::TempDir,
@@ -187,9 +153,10 @@ impl Compiler {
         salt: [u8; 32],
         now: impl Fn() -> u64,
     ) -> Result<Presentation, Error> {
+        let envelope = request.envelope_inputs()?;
+        envelope.require_consumer()?;
         let plan = request.plan()?;
         let compiled = self.checked_key(request, &plan)?;
-        let issuer_root = request.issuer_root()?;
         freshness(request, now())?;
         let encoder = &SuiteEncoder;
         let cells = credentials
@@ -207,18 +174,17 @@ impl Compiler {
             signature_mode: 1,
             result: result.encode(encoder)?,
         };
-        let public = public_input_bytes(&Layout::new(&plan).reconstruct_authenticated(
-            &plan,
-            &statement,
-            issuer_root,
-        )?);
-        let input = witness::prover_toml_authenticated(
+        let public = public_input_bytes(
+            &Layout::new(&plan)
+                .reconstruct_authenticated_with_envelope(&plan, &statement, &envelope)?,
+        );
+        let input = witness::prover_toml_authenticated_with_envelope(
             &plan,
             credentials,
             &trace,
             request.digest(),
             salt,
-            issuer_root,
+            &envelope,
         )?;
         let work = tempfile::Builder::new()
             .prefix("proof_")
@@ -258,7 +224,8 @@ impl Compiler {
         now: impl Fn() -> u64,
     ) -> Result<Answer, Error> {
         let encoder = &SuiteEncoder;
-        let issuer_root = request.issuer_root()?;
+        let envelope = request.envelope_inputs()?;
+        envelope.require_consumer()?;
         if request.stored().audience() != expected_audience {
             return Err(Error::Invalid("request audience".into()));
         }
@@ -276,11 +243,10 @@ impl Compiler {
             signature_mode: presentation.signature_mode,
             result: presentation.result.encode(encoder)?,
         };
-        let public = public_input_bytes(&Layout::new(&plan).reconstruct_authenticated(
-            &plan,
-            &statement,
-            issuer_root,
-        )?);
+        let public = public_input_bytes(
+            &Layout::new(&plan)
+                .reconstruct_authenticated_with_envelope(&plan, &statement, &envelope)?,
+        );
         let work = tempfile::Builder::new()
             .prefix("verify_")
             .tempdir_in(&self.root)

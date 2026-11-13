@@ -58,7 +58,8 @@ impl Answer {
             },
         })
     }
-    pub(crate) fn release(
+    /// Release a canonical RDF answer using the trusted plan and vocabulary.
+    pub fn release(
         value: &ResultValue,
         plan: &Plan,
         vocabulary: &[Term],

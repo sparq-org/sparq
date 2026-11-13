@@ -195,6 +195,26 @@ pub fn prover_toml_authenticated(
     presentation_salt: [u8; 32],
     issuer_root: [u8; 32],
 ) -> Result<String, Error> {
+    prover_toml_authenticated_with_envelope(
+        plan,
+        credentials,
+        trace,
+        request_digest,
+        presentation_salt,
+        &crate::statement::EnvelopeInputs::issuer_only(issuer_root),
+    )
+}
+
+/// Encode the stored envelope inputs alongside the authenticated witness.
+pub fn prover_toml_authenticated_with_envelope(
+    plan: &Plan,
+    credentials: &[crate::credential::Credential],
+    trace: &Trace,
+    request_digest: [u8; 32],
+    presentation_salt: [u8; 32],
+    envelope: &crate::statement::EnvelopeInputs,
+) -> Result<String, Error> {
+    let issuer_root = envelope.issuer_root;
     use crate::credential::{SuiteEncoder, LEXICAL_CAPACITY};
     use sha2::{Digest, Sha256};
     use sparq_merkle_suite::poseidon as suite;
@@ -213,11 +233,8 @@ pub fn prover_toml_authenticated(
         signature_mode: 1,
         result: trace.result.clone(),
     };
-    let words = crate::statement::Layout::new(plan).reconstruct_authenticated(
-        plan,
-        &statement,
-        issuer_root,
-    )?;
+    let words = crate::statement::Layout::new(plan)
+        .reconstruct_authenticated_with_envelope(plan, &statement, envelope)?;
     let base = prover_toml(
         plan,
         &cells,
@@ -299,6 +316,39 @@ pub fn prover_toml_authenticated(
         }
     }
     writeln!(out, "issuer_root = {}", field(issuer_root)).unwrap();
+    writeln!(out, "issuer_depth = {}", envelope.issuer_depth).unwrap();
+    writeln!(out, "holder_required = {}", envelope.holder_required).unwrap();
+    writeln!(
+        out,
+        "holder_issuers_present = {}",
+        envelope.holder_issuers_present
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "holder_issuer_count = {}",
+        envelope.holder_issuer_count
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "holder_issuers = {}",
+        array(envelope.holder_issuers.iter().copied().map(field))
+    )
+    .unwrap();
+    writeln!(out, "status_required = {}", envelope.status_required).unwrap();
+    writeln!(
+        out,
+        "allow_missing_status = {}",
+        envelope.allow_missing_status
+    )
+    .unwrap();
+    writeln!(out, "snapshot_root = {}", field(envelope.snapshot_root)).unwrap();
+    writeln!(out, "snapshot_depth = {}", envelope.snapshot_depth).unwrap();
+    writeln!(out, "validity_required = {}", envelope.validity_required).unwrap();
+    writeln!(out, "now = {}", envelope.now).unwrap();
+    writeln!(out, "freshness_required = {}", envelope.freshness_required).unwrap();
+    writeln!(out, "earliest_created = {}", envelope.earliest_created).unwrap();
     for (c, proof) in proofs.iter().enumerate() {
         writeln!(out, "credential_proof_{c} = {}", json_toml(proof)).unwrap();
     }

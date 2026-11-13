@@ -341,6 +341,7 @@ impl Value {
                     ));
                 }
                 1 => {
+                    check_exact_magnitude(c)?;
                     let mut zero = [0; 32];
                     zero[2] = 0x80;
                     let mut full_zero = zero;
@@ -363,6 +364,21 @@ impl Value {
             },
         })
     }
+}
+
+// Lane D's exact numeric bucket applies equally to the host and circuit.
+fn check_exact_magnitude(c: Cell) -> Result<(), Error> {
+    let mut zero = [0; 32];
+    zero[1] = 1;
+    zero[2] = 0x80;
+    let a = crate::statement::field(c.key)?;
+    let b = crate::statement::field(zero)?;
+    let magnitude = if c.key < zero { b - a } else { a - b };
+    let bytes = sparq_zk::field::field_to_be_bytes_32(&magnitude);
+    if bytes[..18].iter().any(|b| *b != 0) {
+        return Err(Error::Capacity("exact numeric expression range".into()));
+    }
+    Ok(())
 }
 
 fn plain_string(c: Cell) -> bool {
@@ -397,6 +413,11 @@ fn compare(op: Compare, a: Value, b: Value) -> Result<Value, Error> {
     };
     if !a.bound || !b.bound {
         return Ok(Value::Boolean(false, true));
+    }
+    for c in [a, b] {
+        if c.kind == 3 && c.key_class == 1 {
+            check_exact_magnitude(c)?;
+        }
     }
     if a.key_class == 0x7f || b.key_class == 0x7f {
         return Err(Error::Capacity("literal comparison range".into()));

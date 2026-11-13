@@ -1,0 +1,157 @@
+{
+  "schema_version": 1,
+  "tracking": "#7384",
+  "profile": "NoirQueryV1",
+  "standard_baseline": {
+    "sparql11": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/"
+  },
+  "evidence": {
+    "layer": "isolated_gadget_execution",
+    "corpus": "core/src/expr_tests.nr",
+    "runner": "crates/sparq-zk-query/src/lower/expr_tests.rs",
+    "command": "cargo test -p sparq-zk-query",
+    "guest_proof_coverage": "not_asserted",
+    "full_w3c_conformance": "not_asserted",
+    "negative_cases_are_feature_support": false
+  },
+  "features": [
+    {
+      "id": "ebv",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#expressions",
+      "positive_cases": [
+        "noir:expr_tests::effective_boolean_values",
+        "noir:expr_tests::boolean_truth_tables"
+      ],
+      "rejection_cases": [
+        "noir:expr_tests::ebv_error_low",
+        "noir:expr_tests::and_error_low",
+        "noir:expr_tests::or_error_low",
+        "noir:expr_tests::not_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated gadgets only; credential openings and generated-query result binding are integration prerequisites. Exact numeric bucket: abs(value * 10^18) < 2^112; excess result precision is a capacity refusal. Mixed temporal key classes are refused."
+    },
+    {
+      "id": "functional_forms",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#expressions",
+      "positive_cases": [
+        "noir:expr_tests::conditional_and_coalesce",
+        "noir:expr_tests::term_equality_and_membership"
+      ],
+      "rejection_cases": [
+        "noir:expr_tests::if_error_low",
+        "noir:expr_tests::coalesce_error_low",
+        "noir:expr_tests::in_error_low",
+        "noir:expr_tests::not_in_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated gadgets only; credential openings and generated-query result binding are integration prerequisites. Exact numeric bucket: abs(value * 10^18) < 2^112; excess result precision is a capacity refusal. Mixed temporal key classes are refused."
+    },
+    {
+      "id": "syntax_and_ill_typed_values",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#expressions",
+      "positive_cases": [
+        "noir:expr_tests::arithmetic_examples_and_boundaries",
+        "noir:expr_tests::numeric_comparison_and_promotion",
+        "noir:expr_tests::strings_booleans_and_dates",
+        "noir:expr_tests::floating_boundaries"
+      ],
+      "rejection_cases": [
+        "noir:expr_tests::add_error_low",
+        "noir:expr_tests::sub_error_low",
+        "noir:expr_tests::mul_error_low",
+        "noir:expr_tests::div_error_low",
+        "noir:expr_tests::equality_error_low",
+        "noir:expr_tests::integer_fraction_changed",
+        "noir:expr_tests::exact_input_outside_bucket"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated gadgets only; credential openings and generated-query result binding are integration prerequisites. Exact numeric bucket: abs(value * 10^18) < 2^112; excess result precision is a capacity refusal. Mixed temporal key classes are refused."
+    }
+  ],
+  "functions": [
+    {
+      "name": "BOUND",
+      "group": "functional_forms",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_tests::effective_boolean_values"
+      ],
+      "rejection_cases": [
+        "noir:expr_tests::bound_value_changed"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated gadgets only; credential openings and generated-query result binding are integration prerequisites. Exact numeric bucket: abs(value * 10^18) < 2^112; excess result precision is a capacity refusal. Mixed temporal key classes are refused."
+    },
+    {
+      "name": "IF",
+      "group": "functional_forms",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_tests::conditional_and_coalesce"
+      ],
+      "rejection_cases": [
+        "noir:expr_tests::if_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated gadgets only; credential openings and generated-query result binding are integration prerequisites. Exact numeric bucket: abs(value * 10^18) < 2^112; excess result precision is a capacity refusal. Mixed temporal key classes are refused."
+    },
+    {
+      "name": "COALESCE",
+      "group": "functional_forms",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_tests::conditional_and_coalesce"
+      ],
+      "rejection_cases": [
+        "noir:expr_tests::coalesce_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated gadgets only; credential openings and generated-query result binding are integration prerequisites. Exact numeric bucket: abs(value * 10^18) < 2^112; excess result precision is a capacity refusal. Mixed temporal key classes are refused."
+    },
+    {
+      "name": "IN",
+      "group": "functional_forms",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_tests::term_equality_and_membership"
+      ],
+      "rejection_cases": [
+        "noir:expr_tests::in_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated gadgets only; credential openings and generated-query result binding are integration prerequisites. Exact numeric bucket: abs(value * 10^18) < 2^112; excess result precision is a capacity refusal. Mixed temporal key classes are refused."
+    },
+    {
+      "name": "NOT IN",
+      "group": "functional_forms",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_tests::term_equality_and_membership"
+      ],
+      "rejection_cases": [
+        "noir:expr_tests::not_in_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated gadgets only; credential openings and generated-query result binding are integration prerequisites. Exact numeric bucket: abs(value * 10^18) < 2^112; excess result precision is a capacity refusal. Mixed temporal key classes are refused."
+    },
+    {
+      "name": "sameTerm",
+      "group": "term_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:expr_tests::term_equality_and_membership",
+        "noir:expr_tests::unary_plus_keeps_identity"
+      ],
+      "rejection_cases": [
+        "noir:expr_tests::same_term_error_low"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated gadgets only; credential openings and generated-query result binding are integration prerequisites. Exact numeric bucket: abs(value * 10^18) < 2^112; excess result precision is a capacity refusal. Mixed temporal key classes are refused."
+    }
+  ],
+  "known_semantic_divergences": []
+}

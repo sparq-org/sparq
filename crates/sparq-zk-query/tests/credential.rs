@@ -1,6 +1,6 @@
 #[path = "support/authenticated.rs"]
 mod authenticated;
-#[path = "support/mod.rs"]
+#[path = "support/fixture.rs"]
 mod fixture_support;
 use sparq_zk_query::{
     capacity::Bounds,

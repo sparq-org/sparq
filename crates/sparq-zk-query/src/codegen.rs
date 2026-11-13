@@ -254,8 +254,16 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
     } else {
         binder.to_owned()
     };
+    if authenticated {
+        writeln!(
+            source,
+            "    let envelope = ops_core_statement::envelope_words({});",
+            crate::statement::Layout::envelope_arguments()
+        )
+        .unwrap();
+    }
     let issuer_argument = if authenticated {
-        "issuer_root, credential_quad_bounds, "
+        "envelope, credential_quad_bounds, "
     } else {
         ""
     };
@@ -343,7 +351,7 @@ fn expression(e: &Expr, schema: &[Var], parameters: &[u32], steps: &mut Vec<Step
                 let rhs = expression(b, schema, parameters, steps);
                 let comparison = steps.len();
                 steps.push(Step {
-                    op: 2,
+                    op: 6,
                     a: operand,
                     b: rhs,
                     ..Step::default()

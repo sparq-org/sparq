@@ -329,6 +329,7 @@ LIB_ROOTS: dict[str, str] = {
 HELPER_MODULES: list[str] = [
     "crates/sparq-zk/tests/support/mod.rs",
     "crates/sparq-zk-compose/tests/support/mod.rs",
+    "crates/sparq-zk-query/tests/support/mod.rs",
 ]
 CARGO_TOMLS: dict[str, str] = {
     "sparq-zk": "crates/sparq-zk/Cargo.toml",
@@ -2156,7 +2157,7 @@ jobs:
           if [ -n "${__OPTOUT__:-}" ]; then exit 1; fi
       - name: Run the default-run live ZK tests (real nargo/bb)
         run: |
-          cargo test -p sparq-zk-compose -p sparq-zk -- --test-threads=1
+          cargo test -p sparq-zk-compose -p sparq-zk -p sparq-zk-query -- --test-threads=1
       - name: __VERIFY__
         run: __VERIFYCMD__
 """
@@ -2553,6 +2554,7 @@ EVASION_RULES: dict[str, str] = {
 # back from the inventory, so a change to either side has to be noticed.
 _FIXTURE_KEYS = [
     "crates/sparq-zk-compose/src/thing.rs:11",
+    "crates/sparq-zk-query/src/thing.rs:11",
     "crates/sparq-zk-compose/tests/live.rs:5",
     "crates/sparq-zk/src/thing.rs:11",
     "crates/sparq-zk/tests/plain.rs:5",
@@ -2560,7 +2562,7 @@ _FIXTURE_KEYS = [
 
 
 _DECLARED = {
-    "sparq-zk-query": "",
+    "sparq-zk-query": "live src/thing.rs::src_live_case\n",
     "sparq-zk": "live tests/plain.rs::plain_case\nlive src/thing.rs::src_live_case\n",
     "sparq-zk-compose": (
         "# the clean fixture's live and structural tests\n"
@@ -2586,10 +2588,6 @@ def _write_fixture(root: Path) -> None:
     for _pkg, rel in SCAN_DIRS:
         (root / rel).mkdir(parents=True, exist_ok=True)
     for pkg, lib_rel in LIB_ROOTS.items():
-        if pkg == "sparq-zk-query":
-            (root / lib_rel).parent.mkdir(parents=True, exist_ok=True)
-            (root / lib_rel).write_text("//! Query compiler fixture.\n", encoding="utf-8")
-            continue
         (root / lib_rel).parent.mkdir(parents=True, exist_ok=True)
         (root / lib_rel).write_text(_SRC_LIB, encoding="utf-8")
         (root / lib_rel).parent.joinpath("thing.rs").write_text(

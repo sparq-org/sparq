@@ -1,4 +1,4 @@
-#[path = "support/mod.rs"]
+#[path = "support/fixture.rs"]
 mod fixture_support;
 
 use fixture_support::{fixture, FixtureEncoder};

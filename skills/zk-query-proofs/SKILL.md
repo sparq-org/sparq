@@ -66,6 +66,8 @@ profile `local-struct-v1`, and defines a shared `ChallengeStore` contract that c
 original challenge once. It has no backend, interoperable wire encoding, transport, parser,
 hash or other cryptography, ships no production challenge store, proves no cryptographic claim,
 and registers no method. See [query-method contracts](references/query-method-contracts.md).
+The research Noir query compiler additionally exposes portable host reconstruction
+and typed envelope inputs there; its subprocess method driver remains native.
 
 The detached exact-evaluator host crate's optional `vcq` feature (off by default) adds
 the first `QueryMethod` adapter, `sparq_proved_evaluator::vcq::Risc0ExactV3`, over the V3 relation:

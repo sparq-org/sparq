@@ -1,6 +1,6 @@
 #[path = "support/authenticated.rs"]
 mod authenticated;
-#[path = "support/mod.rs"]
+#[path = "support/fixture.rs"]
 mod fixture_support;
 #[path = "../../sparq-zk-compose/tests/support/mod.rs"]
 mod support;
@@ -54,6 +54,9 @@ fn merged_manifest() -> Value {
                     .find(|r| r[key] == name)
                     .expect("fragment refers to inventory entry");
                 *slot = row.clone();
+                if let Some(evidence) = fragment.get("evidence") {
+                    slot["evidence"] = evidence.clone();
+                }
             }
         }
     }
@@ -131,12 +134,24 @@ fn manifest_covers_the_corpus_without_overstating_and_never_lowers_the_floor() {
                 assert!(positives.is_empty());
             }
             for id in positives {
+                if let Some(reference) = id.as_str().and_then(|s| s.strip_prefix("noir:")) {
+                    assert_eq!(row["evidence"]["layer"], "isolated_gadget_execution");
+                    assert_eq!(row["guest_proof_evidence"], "not_asserted");
+                    assert_noir_reference(reference, false);
+                    continue;
+                }
                 assert!(
                     cases
                         .iter()
                         .any(|c| c["id"] == *id && c["status"] == "passing"),
                     "feature claim lacks executed case: {id}"
                 );
+            }
+            for id in row["rejection_cases"].as_array().into_iter().flatten() {
+                if let Some(reference) = id.as_str().and_then(|s| s.strip_prefix("noir:")) {
+                    assert_eq!(row["evidence"]["layer"], "isolated_gadget_execution");
+                    assert_noir_reference(reference, true);
+                }
             }
         }
     }
@@ -151,6 +166,44 @@ fn manifest_covers_the_corpus_without_overstating_and_never_lowers_the_floor() {
                 .any(|c| c["id"] == *id && c["status"] == "passing"),
             "coverage floor: {id}"
         );
+    }
+}
+
+// Isolated gadget references are tracked separately from generated-query cases.
+// The workflow runs the committed package's tests; these references cannot raise
+// the query corpus floor or claim guest-proof coverage.
+fn assert_noir_reference(reference: &str, rejection: bool) {
+    let (module, function) = reference.split_once("::").expect("Noir test reference");
+    assert!(module
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'_'));
+    assert!(function
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'_'));
+    let source = std::fs::read_to_string(
+        root()
+            .join("zk/noir-query/core/src")
+            .join(format!("{module}.nr")),
+    )
+    .expect("referenced Noir module");
+    let declaration = format!("fn {function}(");
+    let preceding = source
+        .split_once(&declaration)
+        .expect("referenced Noir test")
+        .0;
+    let attribute = preceding
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .unwrap()
+        .trim();
+    if rejection {
+        assert!(
+            attribute.starts_with("#[test(should_fail"),
+            "rejection test: {reference}"
+        );
+    } else {
+        assert_eq!(attribute, "#[test]", "positive test: {reference}");
     }
 }
 
@@ -202,13 +255,14 @@ fn assert_expected(trace: &Trace, fixture: &Value) {
 fn corpus_cases_execute_with_engine_expected_result_and_altered_witness_controls() {
     let Some(gate) = support::gate(
         "corpus_cases_execute_with_engine_expected_result_and_altered_witness_controls",
-        &["nargo", "bb"],
+        &["nargo", "bb", "node"],
     ) else {
         return;
     };
     let corpus = corpus();
     let manifest = merged_manifest();
     let mut workspaces = std::collections::BTreeMap::new();
+    let mut compiler_agreement = std::collections::BTreeSet::new();
     for fixture in corpus["cases"].as_array().unwrap() {
         let entry = manifest["cases"]
             .as_array()
@@ -233,6 +287,42 @@ fn corpus_cases_execute_with_engine_expected_result_and_altered_witness_controls
             .entry(plan.hash())
             .or_insert_with(|| Workspace::new(&package));
         let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+        if entry["status"] == "passing" && compiler_agreement.insert(plan.hash()) {
+            let artifact = driver.compile().unwrap();
+            let compile_only = support::live_tool(&gate, "node")
+                .arg(root().join("zk/noir-query/compiler-agreement/check.mjs"))
+                .arg(workspace.0.join(&package.name))
+                .arg(&artifact)
+                .arg("--compile-only")
+                .arg(workspace.0.join("wasm-cache"))
+                .output()
+                .unwrap();
+            assert!(
+                compile_only.status.success(),
+                "compiler bytecode agreement for {}: {}{}",
+                fixture["id"],
+                String::from_utf8_lossy(&compile_only.stdout),
+                String::from_utf8_lossy(&compile_only.stderr)
+            );
+            let key = driver.canonical_vk(&workspace.0).unwrap();
+            let key_file = workspace.0.join("agreement.vk");
+            std::fs::write(&key_file, key).unwrap();
+            let out = support::live_tool(&gate, "node")
+                .arg(root().join("zk/noir-query/compiler-agreement/check.mjs"))
+                .arg(workspace.0.join(&package.name))
+                .arg(artifact)
+                .arg(key_file)
+                .arg(workspace.0.join("wasm-cache"))
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "compiler agreement for {}: {}{}",
+                fixture["id"],
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
         let input = prover_toml_authenticated(
             &plan,
             &data,
@@ -299,6 +389,22 @@ fn corpus_cases_execute_with_engine_expected_result_and_altered_witness_controls
         let changed = input.replace("request_digest = [7,", "request_digest = [8,");
         assert!(driver.execute(&changed, "altered_public").is_err());
     }
+    // Every passing case was visited, and each distinct generated program
+    // derived its bytecode and key with both pinned implementations.
+    let passing_programs: std::collections::BTreeSet<_> = corpus["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| {
+            manifest["cases"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|c| c["id"] == f["id"] && c["status"] == "passing")
+        })
+        .map(|f| lower(f["query"].as_str().unwrap(), B).unwrap().hash())
+        .collect();
+    assert_eq!(compiler_agreement, passing_programs);
     support::complete(gate);
 }
 

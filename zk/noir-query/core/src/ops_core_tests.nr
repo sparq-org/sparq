@@ -321,7 +321,12 @@ fn filter_keeps_only_non_error_true_roots() {
 fn slice_handles_an_offset_beyond_the_input() { ops_core::slice(two(), 100, false, 0, empty::<4,1>()); }
 
 fn expression_cell(class: u8, key: Field, enc: Field) -> TermCell {
-    TermCell {bound:true, kind:3, enc, key_class:class, key: key + class as Field * 0x1000000000000000000000000000000000000000000000000000000000000, dt:0, lang:0, scope:0}
+    let payload = if class == 1 {
+        0x800000000000000000000000000000000000000000000000000000000000 + key * 1000000000000000000
+    } else if (class == 5) | (class == 6) {
+        key * 0x10000000000000000000000000000000000000000000000000000000000
+    } else { key };
+    TermCell {bound:true, kind:3, enc, key_class:class, key: payload + class as Field * 0x1000000000000000000000000000000000000000000000000000000000000, dt:0, lang:0, scope:0}
 }
 fn expr_step(op: u8, a: u32, b: u32, parameter: u32, comparison: u8) -> crate::ops_core_expr::Step {
     crate::ops_core_expr::Step {op, a, b, parameter, comparison}
@@ -352,7 +357,7 @@ fn expression_error_lane_cannot_be_forced_low() {
 #[test]
 fn expression_key_comparison_includes_boundaries() {
     for class in [1,3,4,5,6,8] {
-        let a=expression_cell(class,2,11); let b=expression_cell(class,3,12);
+        let a=expression_cell(class,if class == 5 {0} else {2},11); let b=expression_cell(class,if class == 5 {1} else {3},12);
         for op in 0..5 {
             let unequal=crate::ops_core_expr::evaluate(Table {rows:[[a]],len:1},[b],
                 [expr_step(0,0,0,0,0),expr_step(1,0,0,0,0),expr_step(2,0,1,0,op as u8)]);
@@ -404,7 +409,7 @@ fn expression_cannot_reference_a_future_step() {
 #[test(should_fail_with = "expression opcode")]
 fn expression_refuses_unknown_instructions() {
     let _result=crate::ops_core_expr::evaluate(Table {rows:[[unbound()]],len:1},[unbound()],
-        [expr_step(7,0,0,0,0),expr_step(6,0,0,0,0)]);
+        [expr_step(7,0,0,0,0),expr_step(8,0,0,0,0)]);
 }
 
 #[test(should_fail_with = "operator length")]
@@ -494,7 +499,7 @@ fn request_row_bound_is_positive_even_for_an_empty_table() {
 
 #[test]
 fn expression_effective_boolean_value_uses_the_suite_key_prefix() {
-    let zero: Field = 0x0180000000000000000000000000000000000000000000000000000000000000;
+    let zero: Field = 0x1800000000000000000000000000000000000000000000000000000000000;
     let mut numeric=expression_cell(1,0,11);numeric.key=zero;
     let result=crate::ops_core_expr::evaluate(Table{rows:[[numeric]],len:1},[unbound()],[expr_step(0,0,0,0,0)]);
     assert(!result[0].value & !result[0].is_error);
@@ -512,4 +517,16 @@ fn expression_effective_boolean_value_uses_the_suite_key_prefix() {
 fn expression_refuses_pending_language_tagged_ebv() {
     let mut cell=expression_cell(0,0,11);cell.dt=crate::suite_constants::DT_LANGSTRING;
     let _result=crate::ops_core_expr::evaluate(Table{rows:[[cell]],len:1},[unbound()],[expr_step(0,0,0,0,0)]);
+}
+
+#[test(should_fail_with = "membership comparison instruction")]
+fn expression_membership_cannot_select_a_different_relation() {
+    let _ = crate::ops_core_expr::evaluate(Table {rows:[[expression_cell(1,0,1)]],len:1},
+        [expression_cell(1,1,2)], [expr_step(0,0,0,0,0),expr_step(1,0,0,0,0),expr_step(6,0,1,0,1)]);
+}
+#[test]
+fn expression_unbound_comparison_keeps_its_error() {
+    let result = crate::ops_core_expr::evaluate(Table {rows:[[unbound()]],len:1},
+        [expression_cell(0x7f,0,1)], [expr_step(0,0,0,0,0),expr_step(1,0,0,0,0),expr_step(2,0,1,0,0)]);
+    assert(!result[0].value & result[0].is_error);
 }
