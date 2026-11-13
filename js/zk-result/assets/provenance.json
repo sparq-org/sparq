@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "0967474ec3c212ff6c0725d47248a885ddce0390",
+  "sourceCommit": "d859c4f4ef58e48d7468380a5308c796ba61104f",
   "uncommittedSourceChanges": true,
   "toolchain": {
     "nargo": "1.0.0-beta.21",
@@ -10,15 +10,81 @@
       "member": "result_v5_k1_n16_p3_r4_f0_d10",
       "acir": "result_v5_k1_n16_p3_r4_f0_d10.json",
       "vk": "result_v5_k1_n16_p3_r4_f0_d10.vk",
-      "acirSha256": "cdafe6de89b75ef908afd96c933b912d869f8b154030f740620767413949968e",
+      "proofBytes": 14656,
+      "acirSha256": "2bcba7f431f12b09054e1e37d22eef53ec05791d67d6f617d32e9d7789180866",
       "vkSha256": "2981d456ba8f5d2af50ee1e50741cd4a1573065378fbce552d66f11ca9edf945"
     },
     {
       "member": "result_v5_k2_n16_p3_r4_f0_d10",
       "acir": "result_v5_k2_n16_p3_r4_f0_d10.json",
       "vk": "result_v5_k2_n16_p3_r4_f0_d10.vk",
-      "acirSha256": "47273d4ed64ea7aee74f16549175231211eefa65edabecb0c2dfcf305c297d9d",
+      "proofBytes": 14656,
+      "acirSha256": "afde8eef300573928deb99f24fd0c5232bb53550d3b54f969fe97b0bdc8d4afb",
       "vkSha256": "f516ad7a18a86419cc0ad8b92a8479267965cdc7a9f3de27091a3df02cc093d1"
+    },
+    {
+      "member": "result_v5_k1_n16_p3_r4_f1_date_d10",
+      "acir": "result_v5_k1_n16_p3_r4_f1_date_d10.json",
+      "vk": "result_v5_k1_n16_p3_r4_f1_date_d10.vk",
+      "proofBytes": 14656,
+      "acirSha256": "1f2270f0157c3148aad5e9dd0bd7ab5ba45f2a3e99176edc8a220a4959881409",
+      "vkSha256": "f556b21d5debf2cea2900ec4c8f5a58989c067cdc2febf08c32bf46fdf7bfefa"
+    },
+    {
+      "member": "result_v5_k1_n16_p3_r4_f2_i64_d10",
+      "acir": "result_v5_k1_n16_p3_r4_f2_i64_d10.json",
+      "vk": "result_v5_k1_n16_p3_r4_f2_i64_d10.vk",
+      "proofBytes": 14656,
+      "acirSha256": "5d364d9b81bb63ba704ff36d446ce0e6eb84e47f8f85964bb7f55089b8221e88",
+      "vkSha256": "0788c55d830937e3af1bd6beea4d984b6d49ec2460fdaf07abe9fea96120e8d7"
+    },
+    {
+      "member": "result_v5_k1_n16_p3_r4_f2_i64_d17",
+      "acir": "result_v5_k1_n16_p3_r4_f2_i64_d17.json",
+      "vk": "result_v5_k1_n16_p3_r4_f2_i64_d17.vk",
+      "proofBytes": 14656,
+      "acirSha256": "3594ae08ecc72dbb778888c70ec401f56752c8fe63687b7bc286e2d06de2564b",
+      "vkSha256": "acc4260a0e7a4a4a7eeeb6d7711ec4b9c7be5bf02c319c1fbbaf793ae331f391"
+    },
+    {
+      "member": "result_v5_k1_n16_p3_r4_f2_i64_d20",
+      "acir": "result_v5_k1_n16_p3_r4_f2_i64_d20.json",
+      "vk": "result_v5_k1_n16_p3_r4_f2_i64_d20.vk",
+      "proofBytes": 14656,
+      "acirSha256": "fc9bf5edc834d9c399686dbd83a356ba1e6fcae1e1f8bd2982c88a0592b0e723",
+      "vkSha256": "9499c8ef33ddd194ee0fc2ac07da168f08ef24b0ad6adaf1a9e86aa8a67fd6d1"
+    },
+    {
+      "member": "result_v5_k2_n16_p3_r4_f1_date_d10",
+      "acir": "result_v5_k2_n16_p3_r4_f1_date_d10.json",
+      "vk": "result_v5_k2_n16_p3_r4_f1_date_d10.vk",
+      "proofBytes": 14656,
+      "acirSha256": "282ad99ffa8ad51e23f4fe485e4282b23847f10d89ab2589f9278e9a10a6f5f5",
+      "vkSha256": "f5520e35001fa11628c62cefb4002b8918c0001b0a644404ad65c38e72f6efed"
+    },
+    {
+      "member": "result_v5_k2_n16_p3_r4_f2_i64_d10",
+      "acir": "result_v5_k2_n16_p3_r4_f2_i64_d10.json",
+      "vk": "result_v5_k2_n16_p3_r4_f2_i64_d10.vk",
+      "proofBytes": 14656,
+      "acirSha256": "631064aab24b128e6d2742b246bd0829869c81fc6d79858d1a1738ffd9655e6f",
+      "vkSha256": "03f9059583a18b47820563422c027e115c93d35678f7c138a0080508d0308db6"
+    },
+    {
+      "member": "result_v5_k2_n16_p3_r4_f2_i64_d17",
+      "acir": "result_v5_k2_n16_p3_r4_f2_i64_d17.json",
+      "vk": "result_v5_k2_n16_p3_r4_f2_i64_d17.vk",
+      "proofBytes": 14656,
+      "acirSha256": "c1aa7ece27a3ce3f13e463a084e6d265adc9280845c34ed48ec613a39761fc6d",
+      "vkSha256": "a1b03d9622cfb30aca44b6baba66576499c430570aa7fe8b42a94e352f573136"
+    },
+    {
+      "member": "result_v5_k2_n16_p3_r4_f2_i64_d20",
+      "acir": "result_v5_k2_n16_p3_r4_f2_i64_d20.json",
+      "vk": "result_v5_k2_n16_p3_r4_f2_i64_d20.vk",
+      "proofBytes": 14656,
+      "acirSha256": "d92191e5f97ac2bf858ce776a1f8cd911aa356edae0ea47c0298fc8bd00214bb",
+      "vkSha256": "81c1948ec204d0bcb97c9455282b7764297d63198092765ba28d3a80d3a7eaad"
     }
   ]
 }

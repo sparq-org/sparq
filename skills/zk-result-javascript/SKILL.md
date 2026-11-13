@@ -27,8 +27,18 @@ releases no rows. Proof encoding must match the selected member's fixed wire
 length before cryptographic verification.
 
 Use bounded positive `SELECT DISTINCT` basic graph patterns with projected
-canonical integer predicates and IRI/literal pattern constants. Unsupported
-members reject. The package ships dependencies and proof artifacts, uses only the
+canonical nonnegative integer predicates and IRI/literal pattern constants.
+Hidden FILTER operands support full-width unsigned `xsd:integer` and canonical
+timezone-free `xsd:date` comparisons. Negative integer constants reject; the
+`i64` suffix denotes unsigned width. Mixed hidden date/integer comparisons and
+multiple hidden date comparisons reject.
+
+Bundled method-bound families are `result_v5_k{1,2}_n16_p3_r4_f0_d10`,
+`result_v5_k{1,2}_n16_p3_r4_f1_date_d10` and
+`result_v5_k{1,2}_n16_p3_r4_f2_i64_d{10,17,20}`. Native preparation selects the
+member from the query, selected credentials and accepted status snapshots;
+JavaScript uses that exact registry entry. Unsupported members reject. The
+package ships dependencies and proof artifacts, uses only the
 WASM proving backend and bundled CRS, and needs no network or native toolchain to
 install its tarball or prove and verify.
 
@@ -48,5 +58,6 @@ A source checkout generates ignored host bindings and pinned CRS with
 `node js/zk-result/scripts/build.mjs`. This development step uses Cargo and the
 matching binding generator, downloads the CRS and checks committed length and
 SHA-256 pins. It does not invoke the circuit toolchain. Member regeneration is a
-separate `node js/zk-result/scripts/build-circuits.mjs` step; rerun the host build
+separate `node js/zk-result/scripts/build-circuits.mjs` step that checks every
+generated key against the native canonical key pin; rerun the host build
 afterward. Consumer tarballs already contain all generated runtime files.

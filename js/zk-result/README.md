@@ -37,11 +37,28 @@ those checks succeed. Rejection returns no released rows. A reason describes
 canonical-key, statement, proof-encoding, cryptographic-proof, replay or store failure.
 
 The admitted query is a bounded positive `SELECT DISTINCT` basic graph pattern.
-Public numeric predicates apply to projected canonical integer literals. Pattern
-constants such as a degree IRI and a typed boolean are supported. Hidden numeric
-predicates and other capacity profiles require an independently supported member
-in the registry; unsupported cases reject. Proofs support the returned selected
-rows only. The [contract](../../skills/zk-query-proofs/references/successful-results.md)
+Public numeric predicates apply to projected canonical nonnegative integer literals.
+Hidden comparisons support canonical nonnegative `xsd:integer` values across the
+full unsigned width and timezone-free `xsd:date` literals in `YYYY-MM-DD` form.
+Negative integer constants reject under the shared native unsigned contract;
+the `i64` member suffix denotes width, not signed arithmetic. A hidden date
+comparison uses a dedicated date member. Mixed hidden date/integer comparisons
+and multiple hidden date comparisons reject. Pattern constants such as a degree
+IRI and a typed boolean are supported; unsupported cases reject.
+
+The registry bundles these method-bound member families in either credential
+capacity shape:
+
+- `result_v5_k{1,2}_n16_p3_r4_f0_d10` for public predicates;
+- `result_v5_k{1,2}_n16_p3_r4_f1_date_d10` for a hidden date comparison;
+- `result_v5_k{1,2}_n16_p3_r4_f2_i64_d{10,17,20}` for hidden unsigned integer comparisons.
+
+The WebAssembly host selects the member through native preparation, using the
+query, selected credentials and accepted status snapshots. JavaScript looks up
+that exact member in the registry.
+
+Proofs support the returned selected rows only. The
+[contract](../../skills/zk-query-proofs/references/successful-results.md)
 states the native relation's limits.
 
 Policy shape:
@@ -98,7 +115,8 @@ them. The host step leaves committed circuit artifacts unchanged.
 
 Only when regenerating members, run `node scripts/build-circuits.mjs` with the
 repository's pinned circuit toolchain, then rerun the host step. It refreshes the
-committed ACIR, canonical keys and circuit provenance. Consumers use the shipped
+committed ACIR, canonical keys and circuit provenance, rejecting any generated
+key that differs from the native canonical key pin. Consumers use the shipped
 artifacts. Run `npm test` for behavioral tests. On Linux,
 `python3 scripts/offline.py node --test --test-concurrency=1 test/*.test.js`
 enforces network isolation using the system seccomp library. CI builds the host

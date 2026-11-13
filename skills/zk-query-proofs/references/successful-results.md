@@ -240,7 +240,16 @@ WebAssembly host, ACIR, canonical VKs, CRS and npm dependencies; installation an
 runtime require no native proving toolchain or network. It uses the same shared
 preparation and verifier reconstruction as Rust, with the ZK `noir-recursive`
 verifier target. A data-driven member registry joins each ACIR to its canonical
-VK; unsupported members reject.
+VK. It bundles the public-predicate family
+`result_v5_k{1,2}_n16_p3_r4_f0_d10`, the hidden date family
+`result_v5_k{1,2}_n16_p3_r4_f1_date_d10` and the hidden unsigned integer family
+`result_v5_k{1,2}_n16_p3_r4_f2_i64_d{10,17,20}`. The latter uses canonical
+nonnegative `xsd:integer`, including values above the signed range; negative
+constants reject. The date family uses canonical timezone-free `xsd:date` and
+refuses mixed hidden date/integer comparisons and multiple hidden date
+comparisons. The host returns the member chosen by native preparation, and the
+JavaScript layer requires its exact registry entry. Regeneration checks each key
+against the native canonical key pin; unsupported members reject.
 
 `prove({query, credentials, policy, nonce})` returns a presentation and released
 result. `verify({expectedQuery, presentation, policy, nonce, seenNonces})` first
