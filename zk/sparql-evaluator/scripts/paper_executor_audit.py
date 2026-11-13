@@ -32,9 +32,54 @@ def key(r):
     return (r["id"], r["suite"], r["mode"], r["n"], r["statements_per_credential"])
 
 
+def validate_record(record):
+    """Read legacy records and validate the additive host-measurement schema."""
+    schema = record.get("schema")
+    if schema in (None, "sparq.zk-paper-sweep.v1"):
+        return
+    if schema != "sparq.zk-paper-sweep.v2":
+        raise ValueError(f"unsupported paper-sweep schema {schema!r}")
+
+    def integer(value):
+        return type(value) is int and value >= 0
+
+    def require(condition, message):
+        if not condition:
+            raise ValueError(message)
+
+    n = record["n"]
+    require(integer(n) and n > 0, "invalid credential count")
+    merkle = record["suite"] == "eddsa-sha256-merkle-2026"
+    hidden = record["mode"] == "hidden"
+    require(record["credential_encoding"] == "serde-json-signed-credential-v1", "credential encoding")
+    require(record["presentation_encoding"] == "serde-json-answer-presentation-v1", "presentation encoding")
+    for field in ("issuer_sign_ns", "issuer_signature_primitive_ns", "issuer_merkle_tree_ns", "credential_bytes", "credential_encoded_bytes"):
+        values = record[field]
+        require(isinstance(values, list) and len(values) == n, f"{field}: expected one entry per credential")
+        require(all(value is None if field == "issuer_merkle_tree_ns" and not merkle else integer(value) for value in values), f"{field}: invalid sample")
+    for inclusive, primitive, tree, component, encoded in zip(
+        record["issuer_sign_ns"], record["issuer_signature_primitive_ns"], record["issuer_merkle_tree_ns"], record["credential_bytes"], record["credential_encoded_bytes"]
+    ):
+        require(inclusive >= primitive + (tree or 0), "issuer intervals exceed inclusive timer")
+        require(encoded > component, "complete credential must include proofValue and framing")
+    proofs = record.get("proofs", [])
+    require(record["verifier_split_status"] == ("measured" if proofs else "not_measured_no_receipt"), "receipt timing status")
+    for proof in proofs:
+        for field in ("verify_ns", "verifier_receipt_ns", "verifier_request_ns", "verifier_stages_ns", "presentation_bytes", "presentation_encoded_bytes"):
+            require(integer(proof[field]), f"{field}: invalid sample")
+        signature = proof["verifier_signature_ns"]
+        require(signature is None if hidden else integer(signature), "signature stage must be absent only in hidden mode")
+        total = proof["verifier_receipt_ns"] + proof["verifier_request_ns"] + (signature or 0)
+        require(total == proof["verifier_stages_ns"] <= proof["verify_ns"], "verifier stages must partition one verification")
+        require(proof["presentation_encoded_bytes"] > proof["presentation_bytes"], "complete presentation must include framing")
+
+
 def load(path):
     raw = gzip.open(path, "rb").read()
-    return raw, [json.loads(line) for line in raw.splitlines() if line.strip()]
+    records = [json.loads(line) for line in raw.splitlines() if line.strip()]
+    for record in records:
+        validate_record(record)
+    return raw, records
 
 
 def cause(record, reruns):

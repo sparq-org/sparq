@@ -205,7 +205,19 @@ executor and records cycles, segments and journal and witness sizes; `--prove N`
 also proves and verifies N times; `--phases` (feature `phase-cycles`) adds the
 per-phase cycle breakdown from the measurement image. `--blank-free` names the
 credential holder with an IRI so that the credential data has no blank node.
-Each case prints one JSON record.
+Each case prints one JSON record. The additive host measurements use schema
+`sparq.zk-paper-sweep.v2`; legacy records remain readable. See the
+[measurement boundaries](../../../zk/sparql-evaluator/host/examples/paper_sweep/README.md)
+for primitive signing, S4 tree construction, complete JSON carrier sizes and the
+three disjoint verifier stages. `AnswerPresentation` is the local JSON carrier
+for a `Presentation` plus optional detached signatures. `verify_answer_with_artifact`
+and `verify_answer_with_artifact_timed` use the same production stages as the
+existing low-level entry points; the timed form returns `(Journal, VerificationTimings)`
+only on success. Its signature duration is absent in hidden mode. Without a real
+receipt, the sweep emits no verifier split or complete answer-size sample. The
+`paper_verify` sibling sizes retained envelopes without proofs (`--size-only`)
+or verifies against an independent request file without generating a new proof;
+see the same measurement boundaries for invocation and nonce-store scope.
 
 `zk/sparql-evaluator/coverage-authenticated-rdf.json` is generated from those
 records by `scripts/authenticated_rdf_coverage.py`. Each feature records whether
