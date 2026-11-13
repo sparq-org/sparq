@@ -20,7 +20,7 @@
 //! 2. **True engine round-trips** — the round-trip-reduction WIN, now landed (76ea):
 //!    - `embedded_read_plan_override_is_one_engine_round_trip` measures the REAL engine round-trips
 //!      of `EmbeddedSparqClient::read_plan` via its own `engine_round_trips()` counter (one increment
-//!      per blocking engine dispatch): the combined `VALUES ?g { … } GRAPH ?g { … }` SELECT answers
+//!      per blocking engine dispatch): the combined SELECT over constant GRAPH branches answers
 //!      the whole plan in **ONE** round-trip (down from `1 + N`), and returns the byte-identical
 //!      `ReadPlan` the sequential loop would — a round-trip reduction, not a behaviour change.
 //!    - `embedded_read_plan_default_loop_would_fan_out_to_one_plus_n` keeps the BASELINE pinned: the
@@ -582,7 +582,7 @@ async fn embedded_read_plan_default_loop_would_fan_out_to_one_plus_n() {
 }
 
 /// **The round-trip-reduction WIN (76ea), measured on the REAL engine.** `EmbeddedSparqClient` now
-/// overrides `read_plan` with ONE combined `VALUES ?g { … } GRAPH ?g { … }` SELECT. Its
+/// overrides `read_plan` with ONE combined SELECT over constant GRAPH branches. Its
 /// `engine_round_trips()` counter (one increment per blocking engine dispatch — the embedded analogue
 /// of a network round-trip) proves the whole plan over a target + `N = 4` ACL candidates costs
 /// exactly **1** round-trip, down from the `1 + N = 5` the trait default (pinned above) would spend.
