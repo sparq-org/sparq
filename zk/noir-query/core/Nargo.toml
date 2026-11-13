@@ -5,5 +5,6 @@ authors = ["sparq"]
 compiler_version = ">=1.0.0"
 
 [dependencies]
-compose_core = { path = "../../compose/compose_core" }
+poseidon = { git = "https://github.com/noir-lang/poseidon", tag = "v0.3.0" }
+compose = { path = "../../compose/compose_core" }
 sha256 = { git = "https://github.com/noir-lang/sha256", tag = "v0.3.0" }

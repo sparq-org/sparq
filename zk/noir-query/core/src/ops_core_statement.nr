@@ -1,7 +1,7 @@
 //! Public statement binding and the explicit supplied-cell dataset stand-in.
 
 use crate::table::{TermCell, Table};
-use compose_core::hashes::h2;
+use compose::hashes::h2;
 
 global STATEMENT_DOMAIN: Field = 0x4e5153544d5431;
 global CREDENTIAL_DOMAIN: Field = 0x4e5143454c4c31;
