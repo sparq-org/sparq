@@ -2941,7 +2941,7 @@ mod dropped_view_tests;
 #[cfg(test)]
 mod update_path_tests;
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod storage_view_tests;
 
 #[cfg(test)]

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Build W3C EARL reports: earl-report.sh <rdf12|canon|jsonld|all> [OUT_DIR] [--fetch-only]
+# Build W3C EARL reports: earl-report.sh <rdf12|rdfxml|semantics|rdf11|n3|canon|jsonld|all> [OUT_DIR] [--fetch-only]
 # Defaults to upstream HEAD. *_TESTS_PIN overrides accept an upstream commit/ref.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 suite="${1:-all}"
 out="${2:-$root/target/earl}"
-case "$suite" in rdf12|canon|jsonld|all) ;; *) echo "unknown suite: $suite" >&2; exit 2 ;; esac
+case "$suite" in rdf12|rdfxml|semantics|rdf11|n3|canon|jsonld|all) ;; *) echo "unknown suite: $suite" >&2; exit 2 ;; esac
 case "${3:-}" in ''|--fetch-only) ;; *) echo "unknown option: $3" >&2; exit 2 ;; esac
 mkdir -p "$out"
 out="$(cd "$out" && pwd -P)"
@@ -14,7 +14,17 @@ mkdir -p "$out/suites"
 # Invalidate selected reports before fetching/running: a failed repeat run must
 # not leave yesterday's Turtle artifact beside today's logs and suite revision.
 if [[ "${3:-}" != --fetch-only ]]; then
-  if [[ "$suite" == rdf12 || "$suite" == all ]]; then rm -f -- "$out"/sparq-rdf12-*-earl.ttl; fi
+  if [[ "$suite" == rdf12 || "$suite" == all ]]; then
+    for dir in rdf-turtle rdf-trig rdf-n-triples rdf-n-quads; do
+      rm -f -- "$out/sparq-rdf12-$dir-earl.ttl"
+    done
+  fi
+  if [[ "$suite" == rdfxml || "$suite" == all ]]; then
+    rm -f -- "$out/sparq-rdf12-rdf-xml-earl.ttl" "$out/sparq-rdf11-rdf-xml-earl.ttl"
+  fi
+  if [[ "$suite" == semantics || "$suite" == all ]]; then rm -f -- "$out/sparq-rdf12-semantics-earl.ttl"; fi
+  if [[ "$suite" == rdf11 || "$suite" == all ]]; then rm -f -- "$out"/sparq-rdf11-*-earl.ttl; fi
+  if [[ "$suite" == n3 || "$suite" == all ]]; then rm -f -- "$out/sparq-n3-earl.ttl"; fi
   if [[ "$suite" == canon || "$suite" == all ]]; then rm -f -- "$out/sparq-rdf-canon-earl.ttl"; fi
   if [[ "$suite" == jsonld || "$suite" == all ]]; then
     rm -f -- "$out/sparq-json-ld-api-earl.ttl" "$out/sparq-json-ld-framing-earl.ttl"
@@ -34,7 +44,10 @@ fetch() { # repository, pin (empty means HEAD)
   git -C "$dest" clean -q -fdx
   printf '%s\t%s\n' "$repo" "$(git -C "$dest" rev-parse HEAD)" >> "$out/revisions.tsv"
 }
-if [[ "$suite" == rdf12 || "$suite" == all ]]; then fetch rdf-tests "${RDF_TESTS_PIN:-HEAD}"; fi
+case "$suite" in
+  rdf12|rdfxml|semantics|rdf11|all) fetch rdf-tests "${RDF_TESTS_PIN:-HEAD}" ;;
+esac
+if [[ "$suite" == n3 || "$suite" == all ]]; then fetch N3 "${N3_TESTS_PIN:-HEAD}"; fi
 if [[ "$suite" == canon || "$suite" == all ]]; then fetch rdf-canon "${RDF_CANON_TESTS_PIN:-HEAD}"; fi
 if [[ "$suite" == jsonld || "$suite" == all ]]; then
   fetch json-ld-api "${JSONLD_TESTS_PIN:-HEAD}"
@@ -49,15 +62,16 @@ profile="${SPARQ_EARL_PROFILE:-dev}"
 
 run() { # crate, target, exact test, completion marker, optional cargo arguments
   local krate="$1" target="$2" test="$3" marker="$4"
+  local log="$out/$marker.log"
   shift 4
   cargo test --profile "$profile" -p "$krate" --test "$target" "$@" --no-run
   # Reports include failures even if a pass-count ratchet fails. A missing
   # completion marker is a harness/build failure, never a publishable partial report.
   local status=0
   cargo test --profile "$profile" -p "$krate" --test "$target" "$@" "$test" -- --exact --nocapture \
-    > "$out/$target.log" 2>&1 || status=$?
-  if ! grep -qxF "EARL complete $marker" "$out/$target.log"; then
-    cat "$out/$target.log" >&2
+    > "$log" 2>&1 || status=$?
+  if ! grep -qxF "EARL complete $marker" "$log"; then
+    cat "$log" >&2
     echo "incomplete $marker run (exit $status)" >&2
     exit 1
   fi
@@ -74,11 +88,27 @@ report() { # outcomes, published prefix, output basename, repository, scope
     --output "$out/$file.ttl"
 }
 
+require_prefixes() { # Refuse to drop outcomes while splitting a completed run.
+  python3 - "$@" <<'PY'
+import sys
+with open(sys.argv[1], encoding="utf-8") as source:
+    for line in source:
+        test = line.split("\t", 1)[0]
+        if not test.startswith(tuple(sys.argv[2:])):
+            sys.exit(f"uncovered EARL test IRI: {test.rstrip()}")
+PY
+}
+
 if [[ "$suite" == rdf12 || "$suite" == all ]]; then
   raw="$out/rdf12-outcomes.tsv"
   rm -f "$raw"
   SPARQ_RDF12_ROOT="$out/suites/rdf-tests/rdf/rdf12" SPARQ_EARL_OUT="$raw" \
     run sparq-conformance rdf12_syntax rdf12_syntax_ratchets rdf12
+  require_prefixes "$raw" \
+    https://w3c.github.io/rdf-tests/rdf/rdf12/rdf-turtle/ \
+    https://w3c.github.io/rdf-tests/rdf/rdf12/rdf-trig/ \
+    https://w3c.github.io/rdf-tests/rdf/rdf12/rdf-n-triples/ \
+    https://w3c.github.io/rdf-tests/rdf/rdf12/rdf-n-quads/
   for dir in rdf-turtle rdf-trig rdf-n-triples rdf-n-quads; do
     base="https://w3c.github.io/rdf-tests/rdf/rdf12/$dir/"
     # Test IRIs use <.../syntax#id>, not <.../syntax/manifest.ttl#id>.
@@ -87,6 +117,49 @@ if [[ "$suite" == rdf12 || "$suite" == all ]]; then
     report "$out/$dir.tsv" "$base" "sparq-rdf12-$dir-earl" rdf-tests \
       "Covers RDF 1.2 syntax, evaluation where present, and N-Triples/N-Quads syntax canonical form where present."
   done
+fi
+if [[ "$suite" == rdfxml || "$suite" == semantics || "$suite" == rdf11 || "$suite" == all ]]; then
+  for lane in rdfxml semantics rdf11; do
+    if [[ "$suite" != "$lane" && "$suite" != all ]]; then continue; fi
+    raw="$out/$lane-outcomes.tsv"
+    rm -f "$raw"
+    test="${lane}_ratchets"
+    if [[ "$lane" == semantics ]]; then test=semantics_ratchet; fi
+    SPARQ_RDF_TESTS_ROOT="$out/suites/rdf-tests" SPARQ_EARL_OUT="$raw" \
+      run sparq-conformance earl_suites "$test" "$lane" --features rdfxml
+    case "$lane" in
+      rdfxml) dirs="rdf12/rdf-xml rdf11/rdf-xml" ;;
+      semantics) dirs="rdf12/rdf-semantics" ;;
+      rdf11) dirs="rdf11/rdf-turtle rdf11/rdf-trig rdf11/rdf-n-triples rdf11/rdf-n-quads rdf11/rdf-xml rdf11/rdf-mt" ;;
+    esac
+    prefixes=()
+    for dir in $dirs; do
+      base="https://w3c.github.io/rdf-tests/rdf/$dir/"
+      if [[ "$dir" == rdf12/rdf-semantics ]]; then base="${base%/}"; fi
+      prefixes+=("$base")
+    done
+    require_prefixes "$raw" "${prefixes[@]}"
+    for dir in $dirs; do
+      base="https://w3c.github.io/rdf-tests/rdf/$dir/"
+      file="sparq-${dir/\//-}-earl"
+      if [[ "$dir" == rdf12/rdf-semantics ]]; then
+        file=sparq-rdf12-semantics-earl
+        base="${base%/}"
+      fi
+      # RDF 1.2 test IDs use eval#id; RDF 1.1 uses manifest.ttl#id.
+      grep -F "$base" "$raw" > "$out/${dir/\//-}.tsv"
+      report "$out/${dir/\//-}.tsv" "$base" "$file" rdf-tests \
+        "Covers $dir. Withdrawn/rejected upstream entries are omitted; unsupported and unrunnable entries fail."
+    done
+  done
+fi
+if [[ "$suite" == n3 || "$suite" == all ]]; then
+  raw="$out/n3-outcomes.tsv"
+  rm -f "$raw"
+  SPARQ_N3_ROOT="$out/suites/N3" SPARQ_EARL_OUT="$raw" \
+    run sparq-conformance earl_suites n3_ratchets n3
+  report "$raw" "https://w3c.github.io/N3/tests/" sparq-n3-earl N3 \
+    "Covers N3Tests parser, extended and reasoner manifests and TurtleTests. Upstream rejected/withdrawn entries are omitted; local divergences, unsupported options, unhandled types and unrunnable entries fail."
 fi
 if [[ "$suite" == canon || "$suite" == all ]]; then
   raw="$out/canon-outcomes.tsv"
@@ -102,6 +175,7 @@ if [[ "$suite" == jsonld || "$suite" == all ]]; then
   SPARQ_JSONLD_ROOT="$out/suites/json-ld-api/tests" \
     SPARQ_JSONLD_FRAME_ROOT="$out/suites/json-ld-framing/tests" SPARQ_EARL_OUT="$raw" \
     run sparq-conformance jsonld_suite gated::jsonld_conformance_ratchet jsonld --features jsonld-suite
+  require_prefixes "$raw" https://w3c.github.io/json-ld-api/tests/ https://w3c.github.io/json-ld-framing/tests/
   for repo in json-ld-api json-ld-framing; do
     base="https://w3c.github.io/$repo/tests/"
     grep -F "$base" "$raw" > "$out/$repo.tsv"

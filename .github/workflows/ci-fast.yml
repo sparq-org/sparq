@@ -5,7 +5,8 @@ name: ci-fast
 # WHAT: one workflow whose jobs are ordinary `needs:` edges — no cross-workflow polling.
 # Four parallel work jobs cover the core crates and sparq-reason, and one aggregating job
 # named `ci-fast` is the check the ruleset requires:
-#   * lint        — clippy -D warnings on the core crates (fmt is informational: see below)
+#   * lint        — clippy -D warnings + path-filtered unsafe register/count checks
+#                   (fmt is informational: see below)
 #   * test        — nextest + doctests on the core crates, default features
 #   * test-reason — nextest + doctests on sparq-reason, default features
 #   * conformance — the W3C SPARQL conformance ratchet, the same command + floor as ci.yml
@@ -58,8 +59,31 @@ jobs:
     name: lint (clippy core crates; fmt non-blocking)
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: unsafe
+        if: github.event_name == 'pull_request'
+        with:
+          filters: |
+            register:
+              - 'crates/**/*.rs'
+              - 'compliance/memsafety/unsafe-register.md'
+              - 'bench/unsafe-snapshot.json'
+              - 'scripts/unsafe-gate.py'
+              - '.github/workflows/ci-fast.yml'
+              - '.github/workflows/ci.yml'
+      # Include tests/examples and future unsafe-bearing crates, not just today's
+      # snapshot keys. Off the PR path, always run the same checks as ci.yml.
+      - name: Verify unsafe register and count ratchet
+        if: github.event_name != 'pull_request' || steps.unsafe.outputs.register == 'true'
+        run: |
+          python3 scripts/unsafe-gate.py --self-test
+          python3 scripts/unsafe-gate.py --verify-register
+          python3 scripts/unsafe-gate.py --check
       # rust-toolchain.toml pins the compiler (+ clippy/rustfmt); the first cargo call
       # materialises it. Print it so a lint disagreement names its own compiler.
       - name: Rust (pinned by rust-toolchain.toml)
