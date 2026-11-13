@@ -34,25 +34,27 @@
 //! documentation. `expand`, `flatten`, `html`, and `remote-doc` were the algorithm
 //! categories sparq did not gate historically; `expand`/`flatten` graduated,
 //! `html`/`remote-doc` remain the documented NOT-IMPLEMENTED buckets the runner
-//! reports separately (never failed).
+//! reports separately in local runs. EARL includes those entries as failed, except
+//! entries with specVersion or processingMode json-ld-1.0 (not applicable).
 //!
 //! ## Feature gating (both states)
 //!
 //! The whole lane is behind this crate's opt-in `jsonld-suite` feature
-//! (forwards to `sparq-core/jsonld` + `sparq-engine/serialize-rdf`). With the
-//! feature OFF this file compiles to a single self-SKIP `#[test]` (no oxjsonld /
-//! writer code links), so the default `cargo test -p sparq-conformance` and the
-//! `--workspace` shards stay green and lean. With it ON the runner executes and
+//! (forwards to `sparq-core/jsonld`). With the
+//! feature OFF this file compiles to a single self-SKIP `#[test]`.
+//! With it ON the runner executes and
 //! asserts the pinned floors. The toRdf/fromRdf/compact fixtures are fetched by
 //! `scripts/fetch-jsonld-tests.sh` into the gitignored `tests/w3c/json-ld-api/`,
 //! and the frame fixtures by `scripts/fetch-jsonld-framing-tests.sh` into
 //! `tests/w3c/json-ld-framing/`; when either is absent the runner SKIPS that lane
 //! so a fresh offline checkout stays green.
 
-// When the lane feature is OFF the runner is a single self-SKIP test
-// so the default + `--workspace` builds neither link oxjsonld/the writer nor go
-// red on a fresh checkout. (cfg gate, not a runtime branch, so zero JSON-LD code
-// compiles in the default state — the lean-core invariant.)
+#[cfg(feature = "jsonld-suite")]
+#[path = "support/earl.rs"]
+mod earl;
+
+// When the lane feature is OFF this test binary contains only a self-SKIP test.
+// The RDF writers are enabled independently for syntax C14N and Eval.
 #[cfg(not(feature = "jsonld-suite"))]
 #[test]
 fn jsonld_suite_skipped_without_feature() {
@@ -101,6 +103,11 @@ mod gated {
     fn jsonld_conformance_ratchet() {
         let root = suite_root();
         if !root.exists() {
+            assert!(
+                std::env::var_os("SPARQ_JSONLD_ROOT").is_none()
+                    && std::env::var_os("SPARQ_EARL_OUT").is_none(),
+                "configured JSON-LD suite missing"
+            );
             eprintln!(
                 "SKIP: W3C JSON-LD suite not present at {} — run scripts/fetch-jsonld-tests.sh",
                 root.display()
@@ -134,7 +141,32 @@ mod gated {
         // ratchet is asserted below.
         let frame_root = frame_suite_root();
         let frame = frame_root.exists().then(|| frame::run_frame(&frame_root));
+        // Emit before ratchet assertions, including local skips and unsupported buckets.
+        for (cat, score) in [
+            ("toRdf", &tordf),
+            ("fromRdf", &fromrdf),
+            ("compact", &compact),
+            ("expand", &expand),
+            ("flatten", &flatten),
+        ] {
+            crate::common::report(&root, cat, score);
+        }
+        for (cat, _) in NOT_IMPLEMENTED_CATS {
+            crate::common::report(&root, cat, &crate::common::Score::default());
+        }
+        if let Some(score) = &frame {
+            crate::common::report(&frame_root, "frame", score);
+        } else {
+            assert!(
+                std::env::var_os("SPARQ_JSONLD_FRAME_ROOT").is_none()
+                    && std::env::var_os("SPARQ_EARL_OUT").is_none(),
+                "configured JSON-LD framing suite missing"
+            );
+        }
 
+        if std::env::var_os("SPARQ_EARL_OUT").is_some() {
+            println!("EARL complete jsonld");
+        }
         println!(
             "\nW3C JSON-LD 1.1 conformance scoreboard (pinned w3c/json-ld-api + json-ld-framing)"
         );

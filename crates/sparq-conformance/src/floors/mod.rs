@@ -38,3 +38,5 @@ pub mod flatten;
 pub mod frame;
 pub mod from_rdf;
 pub mod to_rdf;
+
+pub mod rdf12;

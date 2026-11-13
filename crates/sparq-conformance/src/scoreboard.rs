@@ -275,6 +275,78 @@ pub struct Suite {
 ///   FunctionalProperty enforcement) are reported separately, never summed in).
 pub const SUITES: &[Suite] = &[
     Suite {
+        label: "W3C RDF 1.2 Turtle syntax",
+        family: "W3C RDF syntax",
+        runner: Runner::CrateTest { krate: "sparq-conformance", target: "rdf12_syntax" },
+        ci_job: "conformance",
+        ratchet_floor: crate::floors::rdf12::LANES[0].2,
+        floor_basis: "pass",
+        note: "w3c/rdf-tests RDF 1.2; per-manifest assumed base; C14N uses syntax layout, not RDFC-1.0",
+    },
+    Suite {
+        label: "W3C RDF 1.2 Turtle eval",
+        family: "W3C RDF syntax",
+        runner: Runner::CrateTest { krate: "sparq-conformance", target: "rdf12_syntax" },
+        ci_job: "conformance",
+        ratchet_floor: crate::floors::rdf12::LANES[1].2,
+        floor_basis: "pass",
+        note: "w3c/rdf-tests RDF 1.2; per-manifest assumed base; C14N uses syntax layout, not RDFC-1.0",
+    },
+    Suite {
+        label: "W3C RDF 1.2 TriG syntax",
+        family: "W3C RDF syntax",
+        runner: Runner::CrateTest { krate: "sparq-conformance", target: "rdf12_syntax" },
+        ci_job: "conformance",
+        ratchet_floor: crate::floors::rdf12::LANES[2].2,
+        floor_basis: "pass",
+        note: "w3c/rdf-tests RDF 1.2; per-manifest assumed base; C14N uses syntax layout, not RDFC-1.0",
+    },
+    Suite {
+        label: "W3C RDF 1.2 TriG eval",
+        family: "W3C RDF syntax",
+        runner: Runner::CrateTest { krate: "sparq-conformance", target: "rdf12_syntax" },
+        ci_job: "conformance",
+        ratchet_floor: crate::floors::rdf12::LANES[3].2,
+        floor_basis: "pass",
+        note: "w3c/rdf-tests RDF 1.2; per-manifest assumed base; C14N uses syntax layout, not RDFC-1.0",
+    },
+    Suite {
+        label: "W3C RDF 1.2 N-Triples syntax",
+        family: "W3C RDF syntax",
+        runner: Runner::CrateTest { krate: "sparq-conformance", target: "rdf12_syntax" },
+        ci_job: "conformance",
+        ratchet_floor: crate::floors::rdf12::LANES[4].2,
+        floor_basis: "pass",
+        note: "w3c/rdf-tests RDF 1.2; per-manifest assumed base; C14N uses syntax layout, not RDFC-1.0",
+    },
+    Suite {
+        label: "W3C RDF 1.2 N-Triples C14N",
+        family: "W3C RDF syntax",
+        runner: Runner::CrateTest { krate: "sparq-conformance", target: "rdf12_syntax" },
+        ci_job: "conformance",
+        ratchet_floor: crate::floors::rdf12::LANES[5].2,
+        floor_basis: "pass",
+        note: "w3c/rdf-tests RDF 1.2; per-manifest assumed base; C14N compares shipping triples_to_ntriples bytes, not RDFC-1.0",
+    },
+    Suite {
+        label: "W3C RDF 1.2 N-Quads syntax",
+        family: "W3C RDF syntax",
+        runner: Runner::CrateTest { krate: "sparq-conformance", target: "rdf12_syntax" },
+        ci_job: "conformance",
+        ratchet_floor: crate::floors::rdf12::LANES[6].2,
+        floor_basis: "pass",
+        note: "w3c/rdf-tests RDF 1.2; per-manifest assumed base; C14N uses syntax layout, not RDFC-1.0",
+    },
+    Suite {
+        label: "W3C RDF 1.2 N-Quads C14N",
+        family: "W3C RDF syntax",
+        runner: Runner::CrateTest { krate: "sparq-conformance", target: "rdf12_syntax" },
+        ci_job: "conformance",
+        ratchet_floor: crate::floors::rdf12::LANES[7].2,
+        floor_basis: "pass",
+        note: "w3c/rdf-tests RDF 1.2; per-manifest assumed base; C14N compares shipping graph_to_nquads bytes, not RDFC-1.0",
+    },
+    Suite {
         label: "W3C SPARQL (1.0 / 1.1 / 1.2, query+update+syntax)",
         family: "W3C SPARQL",
         runner: Runner::SparqlBinary,
@@ -422,20 +494,17 @@ pub const SUITES: &[Suite] = &[
     },
     // sq-oy1f.2 / sq-3uos5 / sq-oy1f.19 / sq-oy1f — the W3C JSON-LD 1.1
     // conformance ratchets. The runner is crate-local here (`tests/jsonld_suite.rs`)
-    // but behind the OPT-IN `jsonld-suite` feature (forwards to sparq-core/jsonld +
-    // sparq-engine/serialize-rdf) so the default + `--workspace` builds neither link
-    // oxjsonld nor go red — the lean-core posture. Six gated categories: toRdf
-    // (JSON-LD → RDF through the real oxjsonld parse path), fromRdf (RDF → JSON-LD
-    // through the native serialize-rdf writer, re-parse round-trip), compact (RDF →
-    // compacted JSON-LD via the native Compaction Algorithm, lossless round-trip),
-    // frame (RDF → framed JSON-LD via the native Framing Algorithm over the SEPARATE
-    // w3c/json-ld-framing suite, RDF-equivalence to the normative expected output),
-    // and expand + flatten (RDF → expanded/flattened JSON-LD via the shipping
-    // `graph_to_jsonld` writer, RDF-equivalence to the normative expected document).
+    // but behind the OPT-IN `jsonld-suite` feature. The RDF writers are enabled
+    // independently for syntax C14N/Eval. Six gated categories: toRdf, fromRdf,
+    // compact, frame, expand and flatten. Each runner documents its comparison:
+    // toRdf checks dataset isomorphism; the other five compare normative JSON-LD
+    // documents produced by their native algorithms. Framing uses the separate
+    // w3c/json-ld-framing suite.
     // The floors are the MEASURED pass counts at the pinned suite revisions (NOT
     // 100% — remote-context/option/writer-shape divergences are honest, recorded
     // gaps); they may only RISE. html + remote-doc remain the documented
-    // NOT-IMPLEMENTED buckets the runner reports separately (never failed). Floors
+    // NOT-IMPLEMENTED buckets in local runs. EARL reports them as failed, omitting
+    // JSON-LD 1.0-only entries across all categories as not applicable. Floors
     // kept in lock-step
     // by `tests/scoreboard_floors.rs`.
     Suite {

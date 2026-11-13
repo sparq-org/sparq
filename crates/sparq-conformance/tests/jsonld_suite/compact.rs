@@ -192,8 +192,8 @@ pub fn run_compact(root: &Path) -> CompactScores {
             let want_code = e.expect_error_code.as_deref().unwrap_or("");
             match &outcome {
                 Err(err) if err.code().as_str() == want_code => {
-                    s.pass();
-                    strict.pass();
+                    s.pass(&e.id);
+                    strict.pass(&e.id);
                 }
                 Err(err) => {
                     let why = format!(
@@ -255,7 +255,7 @@ pub fn run_compact(root: &Path) -> CompactScores {
             }
         };
         if json_ld_equal_strict_order(&got, &want) {
-            strict.pass();
+            strict.pass(&e.id);
         } else {
             strict.fail(
                 &e.id,
@@ -280,7 +280,7 @@ pub fn run_compact(root: &Path) -> CompactScores {
                 ),
             );
         } else {
-            s.pass();
+            s.pass(&e.id);
         }
     }
     CompactScores {

@@ -23,14 +23,9 @@
 //!
 //! Source: w3c/rdf-tests (same pinned clone as `scripts/fetch-conformance.sh`).
 
-use crate::inference::report::{Outcome, TestResult};
-use crate::quadset::{compare_quad_sets, dataset_quads, quad_strings, SetCompare};
-use crate::rdf::{iri_to_path, MiniGraph};
-use oxrdf::{NamedOrBlankNode, Term};
+use crate::inference::report::TestResult;
+use crate::quadset::dataset_quads;
 use std::path::Path;
-
-const MF: &str = "http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#";
-const RDFT: &str = "http://www.w3.org/ns/rdftest#";
 
 /// Which of the three line-oriented suites to run — selects the manifest's test kinds,
 /// the parse path and (for TriG) the canonical base handling.
@@ -106,150 +101,66 @@ pub fn parse_sparq_quads(
     }
 }
 
-fn canonical_iri(suite: LineSuite, suite_root: &Path, file: &Path) -> String {
-    match file.strip_prefix(suite_root) {
-        Ok(rel) => format!("{}{}", suite.canonical_base(), rel.display()),
-        Err(_) => crate::rdf::file_iri(file),
+/// Load through the same entry points as `parse_sparq_quads`, retaining the store
+/// for the shipping writers used by syntax C14N and evaluation.
+pub(crate) fn parse_sparq_graph(
+    suite: LineSuite,
+    text: &str,
+    base: &str,
+) -> Result<sparq_core::Graph, String> {
+    match suite {
+        LineSuite::NTriples => sparq_core::Graph::load_str(text, "ntriples"),
+        LineSuite::NQuads => sparq_core::Graph::load_dataset(text, "nquads"),
+        LineSuite::TriG => sparq_core::Graph::load_dataset_with_base(text, "trig", base),
     }
 }
 
-/// Walk the suite's `manifest.ttl` and run every entry through the sparq parse path.
-/// `suite_root` is `<rdf-tests>/rdf/rdf11/rdf-{n-triples,n-quads,trig}`.
+/// Run one manifest with its declared base, or an explicit base override.
+/// Returns each test IRI with its named outcome, including failures to run a test.
+pub fn run_manifest(
+    suite: LineSuite,
+    manifest: &Path,
+    base: Option<&str>,
+) -> Result<Vec<(String, TestResult)>, String> {
+    match suite {
+        LineSuite::NTriples => crate::syntax_suite::run_manifest(
+            manifest,
+            base,
+            suite.label(),
+            suite.kind_stem(),
+            |text, base| parse_sparq_graph(LineSuite::NTriples, text, base),
+        ),
+        LineSuite::NQuads => crate::syntax_suite::run_manifest(
+            manifest,
+            base,
+            suite.label(),
+            suite.kind_stem(),
+            |text, base| parse_sparq_graph(LineSuite::NQuads, text, base),
+        ),
+        LineSuite::TriG => crate::syntax_suite::run_manifest(
+            manifest,
+            base,
+            suite.label(),
+            suite.kind_stem(),
+            |text, base| parse_sparq_graph(LineSuite::TriG, text, base),
+        ),
+    }
+}
+
+/// Walk the suite's RDF 1.1 manifest through the sparq parse path.
 pub fn run_suite(
     suite: LineSuite,
     suite_root: &Path,
     out: &mut Vec<TestResult>,
 ) -> Result<(), String> {
-    let manifest = suite_root.join("manifest.ttl");
-    if !manifest.is_file() {
-        return Err(format!(
-            "{} not found — run scripts/fetch-conformance.sh",
-            manifest.display()
-        ));
-    }
-    let g = MiniGraph::load(&manifest)?;
-    let mut seen = std::collections::HashSet::new();
-    for t in &g.triples {
-        let node = t.subject.clone();
-        if !seen.insert(node.clone()) {
-            continue;
-        }
-        let kind = g
-            .types_of(&node)
-            .into_iter()
-            .find_map(|ty| ty.strip_prefix(RDFT).map(str::to_string));
-        let Some(kind) = kind else { continue };
-        let name = g
-            .str_object(&node, &format!("{MF}name"))
-            .unwrap_or_else(|| match &node {
-                NamedOrBlankNode::NamedNode(n) => n
-                    .as_str()
-                    .rsplit(['#', '/'])
-                    .next()
-                    .unwrap_or(n.as_str())
-                    .to_string(),
-                NamedOrBlankNode::BlankNode(b) => format!("_:{}", b.as_str()),
-            });
-        let file = |pred: &str| {
-            g.object(&node, &format!("{MF}{pred}"))
-                .and_then(|t| match t {
-                    Term::NamedNode(n) => iri_to_path(n.as_str()),
-                    _ => None,
-                })
-        };
-        let Some(action) = file("action") else {
-            continue;
-        };
-        let result = file("result");
-        let stem = suite.kind_stem();
-        let outcome = match kind.strip_prefix(stem) {
-            Some("PositiveSyntax") => syntax_test(suite, &action, suite_root, true),
-            Some("NegativeSyntax") => syntax_test(suite, &action, suite_root, false),
-            Some("Eval") => eval_test(suite, &action, result.as_deref(), suite_root, true),
-            Some("NegativeEval") => eval_test(suite, &action, result.as_deref(), suite_root, false),
-            _ => Outcome::OutOfScope(format!("unhandled rdft type {kind}")),
-        };
-        out.push(TestResult {
-            suite: suite.label().to_string(),
-            name,
-            outcome,
-        });
-    }
+    out.extend(
+        run_manifest(
+            suite,
+            &suite_root.join("manifest.ttl"),
+            Some(suite.canonical_base()),
+        )?
+        .into_iter()
+        .map(|(_, result)| result),
+    );
     Ok(())
-}
-
-fn parse_action(
-    suite: LineSuite,
-    action: &Path,
-    suite_root: &Path,
-) -> Result<Vec<[String; 4]>, Outcome> {
-    let bytes = std::fs::read(action)
-        .map_err(|e| Outcome::Fail(format!("read {}: {e}", action.display())))?;
-    let text = String::from_utf8_lossy(&bytes).into_owned();
-    let base = canonical_iri(suite, suite_root, action);
-    parse_sparq_quads(suite, &text, &base).map_err(Outcome::Fail)
-}
-
-fn syntax_test(suite: LineSuite, action: &Path, suite_root: &Path, positive: bool) -> Outcome {
-    match parse_action(suite, action, suite_root) {
-        Ok(_) if positive => Outcome::Pass,
-        Ok(_) => Outcome::Fail("negative syntax: parser accepted an invalid document".into()),
-        Err(Outcome::Fail(_)) if !positive => Outcome::Pass,
-        Err(o) if !positive => o, // a read error, not a rejection — surface it
-        Err(Outcome::Fail(e)) => Outcome::Fail(format!("parse error: {e}")),
-        Err(o) => o,
-    }
-}
-
-fn eval_test(
-    suite: LineSuite,
-    action: &Path,
-    result: Option<&Path>,
-    suite_root: &Path,
-    positive: bool,
-) -> Outcome {
-    let parsed = match parse_action(suite, action, suite_root) {
-        Ok(q) => q,
-        Err(Outcome::Fail(e)) => {
-            return if positive {
-                Outcome::Fail(format!("action parse error: {e}"))
-            } else {
-                Outcome::Pass // rejecting the bad document is the right answer
-            };
-        }
-        Err(o) => return o,
-    };
-    if !positive {
-        return Outcome::Fail("negative eval: parser accepted an invalid document".into());
-    }
-    let Some(result) = result else {
-        return Outcome::Fail(format!("{}Eval without mf:result", suite.kind_stem()));
-    };
-    // Expected side: the N-Quads expectation via oxttl (the differential reference for
-    // the dataset value). Its IRIs are already absolute (they bake in the canonical base).
-    let bytes = match std::fs::read(result) {
-        Ok(b) => b,
-        Err(e) => return Outcome::Fail(format!("read {}: {e}", result.display())),
-    };
-    let mut expected: Vec<[String; 4]> = Vec::new();
-    for q in oxttl::NQuadsParser::new().for_slice(&bytes) {
-        match q {
-            Ok(q) => expected.push(quad_strings(&q)),
-            Err(e) => return Outcome::Fail(format!("expected parse error: {e}")),
-        }
-    }
-    match compare_quad_sets(&parsed, &expected) {
-        SetCompare::Equal => Outcome::Pass,
-        SetCompare::Different { only_a, only_b } => Outcome::Fail(format!(
-            "parsed dataset not isomorphic to the reference ({} vs {} quads; only-parsed {:?}; \
-             only-expected {:?})",
-            parsed.len(),
-            expected.len(),
-            only_a,
-            only_b,
-        )),
-        SetCompare::Unverified => {
-            Outcome::OutOfScope("blank-node isomorphism budget exhausted (unverified)".into())
-        }
-    }
 }

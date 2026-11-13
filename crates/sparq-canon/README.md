@@ -110,6 +110,7 @@ is now a re-export).
 
 ## 📚 Learn more
 
+- [EARL reporting and suite-root overrides](../sparq-conformance/README.md#earl-reports).
 - [W3C RDF Dataset Canonicalization (RDFC-1.0)](https://www.w3.org/TR/rdf-canon/)
 - [`skills/rdf-canon/SKILL.md`](../../skills/rdf-canon/SKILL.md) — how to use this
   surface; `tests/rdf-canon-testdata/PROVENANCE.md` — the vendored W3C snapshot.

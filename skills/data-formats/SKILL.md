@@ -9,6 +9,11 @@ For named graph access, durable create/drop, and layout recovery, see
 [named graph accessors](named-accessors.md), including cleanup after the complete declared
 tree opens and durable journal format upgrades.
 
+Contributor manifest APIs `sparq_conformance::turtle_suite::run_manifest(path, base)` and
+`sparq_conformance::line_syntax::run_manifest(suite, path, base)` return `(test IRI, TestResult)` rows.
+`base: Option<&str>` overrides `mf:assumedTestBase` when set; `None` uses the manifest's declaration.
+For EARL usage and suite-root overrides, see [the conformance README](../../crates/sparq-conformance/README.md#earl-reports).
+
 How to get RDF *into* a sparq `Graph` and how to snapshot one cheaply. Text formats
 (Turtle / N-Triples / N-Quads / TriG) and the in-memory + streaming + external-memory
 loaders live in `sparq-core`; the binary HDT archive format (including content-sniffed
