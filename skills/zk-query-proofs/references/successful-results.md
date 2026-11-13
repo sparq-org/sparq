@@ -290,12 +290,39 @@ ordinary proof relation. The [Node README](../../../js/zk-result/README.md)
 specifies the exact derivation and the public-input layout, whose order and count
 are checked against reconstruction and every bundled ABI by the offline suite.
 
+The Node policy also accepts `issuers?: Record<string, string>` alongside
+`trustedIssuers?: string[]`; both grant trust. Scoped queries use
+`?g vcq:verifiedIssuer <urn:issuer:a> . GRAPH ?g { BGP + FILTERs }`, with
+`vcq:` = `https://w3id.org/sparq/vcq#`. The WHERE contains only issuer declarations
+and GRAPH blocks. Each graph variable must be declared, used as a graph name,
+and occur nowhere else. FILTERs remain inside their GRAPH block and use variables
+bound in their own input. All graph variables must name the same issuer IRI;
+different IRIs reject `per-fact-issuer-binding-needs-query-method`, even if their
+policy keys coincide. Multiple graph variables may use separate credentials with
+that issuer's key; they do not identify individual credentials.
+
+`planner::lower_issuer_scope(query)` returns `(flat_query, optional_issuer_iri)`
+after shared syntax admission, preserving original text for admitted unscoped
+queries. It authenticates no issuer by itself. The Node Rust adapter resolves
+the IRI through the policy map (`issuer-not-in-policy` if unknown), restricts
+proving credentials to that key, reconstructs the flat relation independently,
+and checks every authenticated public issuer slot for that key
+(`issuer-scope-mismatch` before nonce-store access). The outer presentation retains
+the exact receiver request. This binds all supporting facts to **one issuer per
+proof**, without circuit changes. Per-fact binding across issuers is the query
+method's job; the flat relation does not establish it. Native unscoped result
+verification retains its existing behavior. Research grade, not externally audited.
+
 Successful Node verification also returns
 `report: { rule: { query, member }, issuers, subject: [], fresh, complete: false }`.
 Rust resolves the issuer keys from reconstructed public coordinates and receiver
-trust policy, never unchecked presentation metadata. Every public signature slot
-authenticates a private credential and must be trusted; the canonical ordered key
-list preserves duplicates. A slot may be padding or unused by selected solutions.
+trust policy, never unchecked presentation metadata. Scoped `issuers` is the
+single requested policy IRI, meaning every authenticated public issuer slot carries
+its policy key. Unscoped slots resolve to matching policy IRIs, sorted per slot,
+or key hex when unnamed. Key-only policies retain their existing hex report.
+Every public signature slot authenticates a private credential and must be trusted;
+canonical slot order and duplicates are preserved for unscoped queries. A slot may
+be padding or unused by selected solutions.
 It establishes neither distinct credential count nor which issuer signed which
 fact, because selected credential/leaf references stay private. `rule` records
 the exact expected query and independently selected member. `subject` is empty

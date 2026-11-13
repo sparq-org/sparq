@@ -65,12 +65,50 @@ Policy shape:
 
 ```ts
 {
-  trustedIssuers: string[],
+  trustedIssuers?: string[],
+  issuers?: { [iri: string]: string },
   snapshots: { status_list: string, version: number, bits: number[] }[],
   minVersion: number,
   maxVersion: number
 }
 ```
+
+Both policy properties grant trust: `trustedIssuers` retains its existing key
+list, and `issuers` maps issuer IRIs to compressed public keys. An issuer IRI in a
+query must resolve through `issuers`; a trusted key alone does not name an IRI.
+Unknown IRIs reject with `issuer-not-in-policy`.
+
+## Issuer-scoped queries
+
+```sparql
+PREFIX vcq: <https://w3id.org/sparq/vcq#>
+SELECT DISTINCT ?x WHERE {
+  ?g vcq:verifiedIssuer <urn:issuer:a> .
+  GRAPH ?g { ?s <urn:age> ?x . FILTER (?x >= 21) }
+}
+```
+
+The scoped WHERE contains only issuer-declaration triples and variable-named
+GRAPH blocks whose bodies use the admitted positive BGP/JOIN/FILTER fragment.
+Every graph variable must have a declaration, occur in a GRAPH name, and appear
+nowhere else, including projection, triple positions and FILTER operands.
+All declarations must name the same issuer IRI. Multiple graph variables with
+that IRI may draw facts from separate credentials of that issuer; graph variables
+do not identify individual credentials. FILTERs belong inside their GRAPH block
+and must reference variables bound by that block's own input.
+
+The Rust adapter shares admission and lowering between proving and verification.
+It lowers the scoped query to the existing flat relation, proves using only
+credentials with the named issuer's policy key, and independently requires
+**every authenticated public issuer slot** to carry that key. A different trusted
+key rejects with `issuer-scope-mismatch`, before nonce-store access. Different
+issuer IRIs reject with `per-fact-issuer-binding-needs-query-method`, even if they
+map to the same key. The presentation and report retain the exact scoped request.
+
+This binds all supporting facts to **one issuer per proof**. Per-fact binding
+across issuers is the query method's job; this relation does not establish that
+attribution. Unscoped queries keep their existing proving and verification
+semantics. Research grade and not externally audited.
 
 Version and index values must be safe nonnegative JavaScript integers. Status
 bits use the native least-significant-bit-first byte encoding. Status references
@@ -148,16 +186,19 @@ Only successful `verify` calls return `report`:
 ```
 
 `rule.query` is the receiver's exact `expectedQuery`; `rule.member` is the
-canonical member selected during reconstruction. `issuers` contains the public
-signature-slot keys from the rebuilt inputs accepted by the proof, in canonical
-lexicographic order, using the same compressed lowercase hex encoding as
-`Policy.trustedIssuers`. Every slot authenticates a private credential commitment
-and is checked against that trusted list. It reveals the actual slot keys, rather
-than reporting the entire trusted set. Repeated slots remain repeated; a slot
+canonical member selected during reconstruction. For a scoped query, `issuers`
+is the single requested policy IRI. It means every authenticated public issuer
+slot carries that IRI's policy key, including padding and slots unused by the
+selected solutions. It does not provide per-fact attribution across issuers.
+
+For an unscoped query, `issuers` resolves each authenticated public signature
+slot to its policy IRIs in sorted IRI order, or its compressed lowercase key hex
+when unnamed. Slots follow canonical lexicographic key order, and repeated slots
+remain repeated; policies with only `trustedIssuers` retain the existing hex
+report. This reports actual authenticated slots, not the entire trust set. A slot
 may be padding or unused by the selected solutions. The list establishes neither
-distinct credential count nor which issuer signed which fact: the selected
-credential/leaf references are private. A consumer requiring issuer authority for
-individual predicates must not infer it from this report.
+distinct credential count nor which issuer signed which fact: selected
+credential/leaf references stay private.
 
 `subject` is empty because this statement has no holder binding. `fresh` is the
 canonical nonce only after the caller's store has consumed it. `complete` is

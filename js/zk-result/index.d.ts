@@ -10,7 +10,10 @@ export interface Credential {
   graphNQuads: string; salt: string; issuer: string; signature: string; statusRef: StatusRef;
 }
 export interface Policy {
-  trustedIssuers: string[];
+  /** Additional trusted keys; existing policies remain supported. */
+  trustedIssuers?: string[];
+  /** Trusted issuer IRI to compressed public key. Required for query issuer IRIs. */
+  issuers?: Record<string, string>;
   snapshots: { status_list: string; version: number; bits: number[] }[];
   minVersion: number; maxVersion: number;
 }
@@ -34,8 +37,9 @@ export function issue(issuer: Issuer | TestIssuer, graphNQuads: string, statusRe
 export function testIssue(input: { issuer: TestIssuer; graphNQuads: string; status: StatusRef; seedHex: string }): Credential;
 export interface VerificationReport {
   rule: { query: string; member: string };
-  /** Authenticated public signature slots, in canonical order, including repeats.
-   * A slot need not contribute a fact; this does not attribute facts to issuers.
+  /** Scoped: the single requested policy IRI; every authenticated slot has its key.
+   * Unscoped: each slot's policy IRIs (sorted), or key hex if unnamed; repeats remain.
+   * A slot need not contribute a fact; there is no per-fact attribution across issuers.
    */
   issuers: string[];
   /** This statement has no holder binding. */
