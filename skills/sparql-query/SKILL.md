@@ -169,7 +169,12 @@ arithmetic. See [exact temporal scope](../zk-query-proofs/references/exact-tempo
 `strict_numeric_capacity: true` rejects unsupported numeric consumers as
 a sticky whole-query capacity failure; it is `false` by default. It retains the
 `i64` integer and `i128` decimal lanes, including the existing bounded decimal
-division precision, while refusing overflow fallback to floating point.
+division precision, while refusing arithmetic overflow fallback to floating point.
+Relational comparisons (`=`, `!=`, `<`, `<=`, `>`, `>=`) between well-formed
+integer/decimal values and `ORDER BY` use exact lexical comparison when the
+bounded numeric fast path cannot represent or align the values. They accept
+mantissas beyond `i128` in both capacity modes; this does not expand arithmetic.
+Other scalar comparisons retain their checked numeric capacity failures.
 Direct RDF output, valid unary plus, `isNumeric` and `sameTerm` preserve large
 lexicals without asserting arithmetic support. Numeric EBV separately classifies
 validated integer/decimal digits exactly, without a floating-point conversion.
@@ -774,11 +779,16 @@ SPARQL Update `USING` identity behavior.
   O(1) f64 `numerics` cache (`extract_sargable`). Because an f64 cannot represent a decimal with
   `> 15` significant digits exactly (e.g. `"1.000000000000000001"^^xsd:decimal` shares the f64 `1.0`
   with the integer `1`), that fast path is **declined** whenever the graph holds such a decimal
-  (`Graph::has_high_precision_decimal`) OR the constant itself has `> 15` significant digits — the
+  or any valid integer/decimal literal missing from the numeric cache
+  (`Graph::has_high_precision_decimal`), OR the constant itself has `> 15` significant digits — the
   comparison then falls back to the exact evaluator (`=`/`<`/`>`/`<=`/`>=` decided by exact decimal
   string arithmetic, matching the `BIND((?v = c) AS ?b)` expression path). The decline is
-  graph-wide/conservative (correctness first): a graph carrying one high-precision decimal skips the
+  graph-wide/conservative: a graph carrying one high-precision decimal or uncached exact numeric skips the
   numeric-pushdown optimisation for all its numeric FILTERs, never the wrong answer.
+  Forks inherit the safety verdict and scanned dictionary watermark. After a write
+  to a graph proved safe, this gate checks only appended IDs and memoizes the
+  result for the next numeric FILTER. A newly inserted uncached exact value still
+  disables pushdown, including through UPDATE and transactions.
 - **`SELECT *`** never exposes blank-node "variables" (`_:x` in a pattern is an existential var).
 - **Non-deterministic builtins** (`sq-98w7z.1`) — `NOW()` is **query-constant** per SPARQL 1.1
   §17.4.5.1: every evaluation within one execution (across rows, parallel workers, `EXISTS`
@@ -1252,7 +1262,17 @@ SPARQL Update `USING` identity behavior.
   `sparq-conformance` harness lights it, and the nightly sparq-vs-oxigraph differential fuzzer covers
   the `FILTER(?v = <iri>)` trigger shape ON too since sq-7d3dj.30.13), and a shape that does
   not exactly meet a rewrite's conditions is left **verbatim** (conservative). Note `From<Query>` does
-  NOT rewrite (it takes an already-built algebra as-is). When off, zero rewrite code compiles, the
+  NOT rewrite (it takes an already-built algebra as-is). Prepared execution under
+  `strict_numeric_capacity` or `temporal_year_range` uses the retained original algebra: a
+  bag-equivalent rewrite can otherwise hide a capacity failure by eliminating checked operands.
+  Prepared parameter binding retains both plans; `with_query` evaluates its replacement algebra
+  as supplied. The prepared result cache keys and evaluates the plan selected for those limits;
+  text EXPLAIN ANALYZE uses that plan too. Template rendering retains the original operands for
+  subsequent execution under capacity limits. Preparation uses
+  `rewrite::rewrite_query_ref(&Query) -> Option<Query>`: passes report changes through `Some`,
+  while `None` leaves the input in place without cloning algebra or comparing complete queries.
+  The owning `rewrite::rewrite_query(Query) -> Query` remains available as a convenience wrapper.
+  When off, zero rewrite code compiles, the
   default native + wasm builds are byte-identical, and no new dependencies are added (no `unsafe`).
 - **Equality-FILTER → value join** is the non-default `value-join` cargo feature (bead
   `sq-7d3dj.30.7`; the SP2Bench q05a/q12a star-intersection shape). With it ON, a conjunctive group

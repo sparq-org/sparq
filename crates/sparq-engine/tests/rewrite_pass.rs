@@ -301,3 +301,186 @@ fn zero_length_path_endpoint_not_substituted() {
     let raw = SparqlParser::new().parse_query(&q).unwrap();
     assert_ne!(rewrite_query(raw.clone()), raw);
 }
+
+// Rewrites preserve ordinary bags but can eliminate a checked operand. Reusing
+// one prepared query must select the original plan for semantic capacity limits.
+#[test]
+fn rewritten_filters_preserve_capacity_across_result_apis() {
+    use sparq_engine::{EvaluationCapacity, QueryBudget, QueryFailure};
+
+    let cases = [
+        (
+            "\"9223372036854775808\"^^xsd:integer",
+            QueryBudget {
+                strict_numeric_capacity: true,
+                ..QueryBudget::unlimited()
+            },
+            EvaluationCapacity::NumericRepresentation,
+        ),
+        (
+            "\"3000-01-01T00:00:00Z\"^^xsd:dateTime",
+            QueryBudget {
+                temporal_year_range: Some((1900, 2100)),
+                ..QueryBudget::unlimited()
+            },
+            EvaluationCapacity::TemporalYear,
+        ),
+    ];
+    for (literal, budget, cause) in cases {
+        for compressed in [false, true] {
+            let g = Graph::load_str(&format!("{PFX} ex:s ex:p {literal} ."), "turtle").unwrap();
+            let g = if compressed { g.into_compressed() } else { g };
+            for filter in ["?v = ex:missing", "ex:missing = ?v"] {
+                let body = format!("{{ ?s ex:p ?v FILTER({filter}) }}");
+                for form in ["ASK", "SELECT ?s"] {
+                    let text = format!("{PFX} {form} {body}");
+                    let prepared = PreparedQuery::parse(&text).unwrap();
+                    let raw = SparqlParser::new().parse_query(&text).unwrap();
+                    assert_ne!(
+                        prepared.query(),
+                        &raw,
+                        "the optimization must remain enabled"
+                    );
+                    assert!(query_prepared(&g, &prepared).unwrap().rows.is_empty());
+                    assert_eq!(
+                        sparq_engine::query_prepared_with_budget_detailed(&g, &prepared, &budget)
+                            .unwrap_err(),
+                        QueryFailure::Capacity(cause),
+                    );
+                    let check = |result: Result<(), String>| {
+                        let error = result.unwrap_err();
+                        assert!(error.contains(&cause.to_string()), "{text}: {error}");
+                    };
+                    check(
+                        sparq_engine::count_prepared_with_budget(&g, &prepared, &budget)
+                            .map(|_| ()),
+                    );
+                    check(
+                        sparq_engine::query_json_prepared_with_budget(&g, &prepared, &budget)
+                            .map(|_| ()),
+                    );
+                    check(
+                        sparq_engine::query_json_chunks_with_budget(&g, &text, &budget).map(|_| ()),
+                    );
+                    check(sparq_engine::query_json_stream_prepared_with_budget(
+                        &g,
+                        &prepared,
+                        &budget,
+                        |_| std::ops::ControlFlow::Continue(()),
+                    ));
+                    check(
+                        sparq_engine::explain_analyze_with_budget(&g, &text, &budget).map(|_| ()),
+                    );
+                    if form == "ASK" {
+                        check(
+                            sparq_engine::ask_prepared_with_budget(&g, &prepared, &budget)
+                                .map(|_| ()),
+                        );
+                    }
+                    assert!(query_prepared(&g, &prepared).unwrap().rows.is_empty());
+                }
+                for form in ["CONSTRUCT { ?s ex:copy ?v } WHERE", "DESCRIBE ?s WHERE"] {
+                    let text = format!("{PFX} {form} {body}");
+                    let prepared = PreparedQuery::parse(&text).unwrap();
+                    let result = if form.starts_with("CONSTRUCT") {
+                        sparq_engine::construct_prepared_with_budget_detailed(
+                            &g, &prepared, &budget,
+                        )
+                    } else {
+                        sparq_engine::describe_prepared_with_budget_detailed(&g, &prepared, &budget)
+                    };
+                    assert_eq!(result.unwrap_err(), QueryFailure::Capacity(cause), "{text}");
+                    assert!(sparq_engine::construct_or_describe(&g, &text)
+                        .unwrap()
+                        .is_empty());
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "params")]
+#[test]
+fn parameter_binding_keeps_capacity_plan_after_rewrite() {
+    let g = Graph::load_str(
+        &format!("{PFX} ex:s ex:p \"9223372036854775808\"^^xsd:integer ."),
+        "turtle",
+    )
+    .unwrap();
+    let prepared = PreparedQuery::parse(&format!(
+        "{PFX} SELECT ?s {{ ?s ?predicate ?v FILTER(?v = ex:missing) }}"
+    ))
+    .unwrap()
+    .bind(
+        "predicate",
+        oxrdf::NamedNode::new("http://ex/p").unwrap().into(),
+    )
+    .unwrap();
+    assert!(query_prepared(&g, &prepared).unwrap().rows.is_empty());
+    let budget = sparq_engine::QueryBudget {
+        strict_numeric_capacity: true,
+        ..sparq_engine::QueryBudget::unlimited()
+    };
+    assert_eq!(
+        sparq_engine::query_prepared_with_budget_detailed(&g, &prepared, &budget).unwrap_err(),
+        sparq_engine::QueryFailure::Capacity(
+            sparq_engine::EvaluationCapacity::NumericRepresentation
+        ),
+    );
+}
+
+#[cfg(feature = "result-cache")]
+#[test]
+fn prepared_cache_keeps_capacity_plan_distinct_from_rewritten_algebra() {
+    let g = Graph::load_str(
+        &format!("{PFX} ex:s ex:p \"9223372036854775808\"^^xsd:integer ."),
+        "turtle",
+    )
+    .unwrap();
+    let prepared = PreparedQuery::parse(&format!(
+        "{PFX} ASK {{ ?s ex:p ?v FILTER(?v = ex:missing) }}"
+    ))
+    .unwrap();
+    let budget = sparq_engine::QueryBudget {
+        strict_numeric_capacity: true,
+        ..sparq_engine::QueryBudget::unlimited()
+    };
+    let cache = sparq_engine::ResultCache::new(4);
+    // Explicitly supplied rewritten algebra has no numeric operand to consume.
+    assert!(cache
+        .get_or_eval(&g, prepared.query(), 0, &budget)
+        .unwrap()
+        .rows
+        .is_empty());
+    assert!(cache
+        .get_or_eval_prepared(&g, &prepared, 0, &sparq_engine::QueryBudget::unlimited())
+        .unwrap()
+        .rows
+        .is_empty());
+    let error = cache
+        .get_or_eval_prepared(&g, &prepared, 0, &budget)
+        .unwrap_err();
+    assert!(error.contains("numeric-representation"), "{error}");
+}
+
+#[cfg(feature = "templates")]
+#[test]
+fn rendered_templates_preserve_capacity_checks() {
+    let g = Graph::load_str(
+        &format!("{PFX} ex:s ex:p \"9223372036854775808\"^^xsd:integer ."),
+        "turtle",
+    )
+    .unwrap();
+    let prepared = PreparedQuery::parse(&format!(
+        "{PFX} ASK {{ ?s ex:p ?v FILTER(?v = ex:missing) }}"
+    ))
+    .unwrap();
+    let rendered = sparq_engine::templates::Bound::Query(Box::new(prepared)).render();
+    assert!(!sparq_engine::ask(&g, &rendered).unwrap());
+    let budget = sparq_engine::QueryBudget {
+        strict_numeric_capacity: true,
+        ..sparq_engine::QueryBudget::unlimited()
+    };
+    let error = sparq_engine::ask_with_budget(&g, &rendered, &budget).unwrap_err();
+    assert!(error.contains("numeric-representation"), "{error}");
+}

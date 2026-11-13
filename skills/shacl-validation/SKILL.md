@@ -506,6 +506,19 @@ for constraint coverage, prerequisites and conformance ratchets. The 1.2 rule
 executor rejects unsupported processors anywhere among the shapes graph's rules
 and rule sets, including unselected and deactivated nodes and included sets.
 
+- **SHACL-AF numeric node expressions preserve exact digits.** With `shacl-af`,
+  `min`, `max` and `orderBy` share the range constraints' any-length exact
+  integer/decimal comparison and refine mixed floating ties by exact value,
+  matching engine numeric sorting. `min`/`max` retain the first member on equal
+  values and keep NaN unordered; `orderBy` sorts NaN first in ascending order.
+  `sum` adds through the bounded exact decimal tower: integer-only sums stay
+  `xsd:integer`, a decimal
+  operand produces `xsd:decimal`, and float/double operands promote as in engine
+  arithmetic (a double operand produces `xsd:double`). Arithmetic overflow follows
+  the engine's floating fallback; a valid operand beyond the arithmetic tower
+  yields no sum result. `sum` ignores non-numeric and ill-typed members; empty
+  input sums to integer zero.
+
 ## See also
 
 - `sparql-query` — running standalone SPARQL through `sparq-engine` (what `sh:sparql`
