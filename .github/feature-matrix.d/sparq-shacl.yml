@@ -56,8 +56,14 @@
   features: "scs"
   test: true
 
-# The parser, behavioral tests and W3C syntax dispatch are default off.
+# The processor, behavioral tests and W3C dispatch are default off.
 - name: "sparq-shacl (sparql-rl)"
   crate: "sparq-shacl"
   features: "sparql-rl"
+  test: true
+
+# Exercise the shared scheduler, clock and binding seams with both consumers.
+- name: "sparq-shacl (shacl-af,sparql-rl)"
+  crate: "sparq-shacl"
+  features: "shacl-af,sparql-rl"
   test: true

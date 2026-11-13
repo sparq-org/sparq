@@ -88,7 +88,7 @@ and call `validate_with_model`. CLI: `cargo run -p sparq-shacl --example validat
 - **SHACL Compact Syntax parser (opt-in `scs`)** — `parse_scs(text, base)` / `parse_scs_to_graph(text, base)` turn a
   [W3C SHACL Compact Syntax](https://w3c.github.io/shacl/shacl-compact-syntax/) document into shapes triples `validate` consumes;
   round-trips **32/32** vendored W3C fixtures graph-isomorphically; zero new deps. Off ⇒ none compiles.
-- **SPARQL-RL syntax (opt-in `sparql-rl`, default off)** — `sparql_rl::parse(source, base)` returns a borrowed tree; evaluation, variable well-formedness and stratification are not implemented. See the usage skill for parser bounds.
+- **SPARQL-RL (opt-in `sparql-rl`, default off)** — `sparql_rl::{parse, check_well_formed, stratify, infer, infer_with_limits}` provide syntax, variable-scope checks, dependency stratification and inference over one incremental working graph. IMPORTS is refused. See the usage skill and module docs for limits and pinned conformance.
 - **Shapes-graph assembly (opt-in `imports`)** — `resolve_shapes_graph`/`resolve_imports`:
   `sh:shapesGraph` + cycle-guarded `owl:imports` closure via a caller-supplied loader. Off ⇒ none compiles.
 

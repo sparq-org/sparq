@@ -15,6 +15,8 @@ pub mod imports;
 pub mod model;
 pub mod path;
 mod report;
+#[cfg(any(feature = "shacl-af", feature = "sparql-rl"))]
+mod rule_schedule;
 // (sq-d1dw) SHACL-AF rules (`sh:rule`) — OPT-IN behind the `shacl-af`
 // cargo feature so the base validation path carries zero rule code when off.
 #[cfg(feature = "shacl-af")]

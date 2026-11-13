@@ -1,9 +1,31 @@
-//! SPARQL 1.2 RL syntax, following data-shapes `04ecbb4` productions 1–161.
+//! SPARQL 1.2 RL parsing, preparation and inference at data-shapes `04ecbb4`.
 //!
-//! This parser does not check variable well-formedness, stratification or evaluate
-//! rules. Source slices retain lexical spelling and document-order declarations.
+//! [`parse`] admits concrete syntax. [`check_well_formed`] checks inScope/inUse;
+//! [`stratify`] checks open/closed dependencies independently of variable scope.
+//! [`infer`] performs both checks and returns only new triples. All processing
+//! operations refuse IMPORTS; syntax parsing retains it without loading anything.
+//!
+//! Evaluation uses one mutable default-graph working copy per inference call.
+//! Every rule publishes its additions before the next rule runs. Matching,
+//! expression evaluation, negation, grouping and template instantiation use the
+//! existing SPARQL engine, with one NOW value and each rule's original BASE.
+//!
+//! Default [`Limits`]: 256 rules, 1,000,000 dependency comparisons, 100 general
+//! passes per stratum (including the settling pass), 100,000 engine calls,
+//! 100,000 rows per query/accumulated table, 100,000 inferred triples, 64 MiB of
+//! serialized inferred triples, 100,000 template instances and a conservative
+//! 64 MiB template-expansion estimate per CONSTRUCT, and 64 MiB of engine
+//! working-set bytes per query. Candidate budgets apply before deduplication.
+//! Native inference shares one 30-second deadline across preparation and queries;
+//! wasm uses the deterministic limits. Exhaustion returns an error, never a
+//! successful partial inference. Input graphs remain immutable. Source admission
+//! retains the parser's 1 MiB and 64-level recursive grammar bounds.
 
 mod lexer;
+mod processor;
+pub use processor::{
+    check_well_formed, infer, infer_with_limits, stratify, Limits, RuleError, RuleErrorKind,
+};
 
 use lexer::{Kind, Token};
 use std::collections::HashSet;

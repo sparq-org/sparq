@@ -18,7 +18,7 @@ fn w3c_inference_rules_shacl12() {
     let mut score = Score::default();
     score.walk(&root.join("manifest.ttl"), "inference-rules", run);
     if cfg!(feature = "shacl-af") {
-        score.finish(47, 46, 2, 0);
+        score.finish(47, 47, 0, 0);
     } else {
         score.finish(47, 0, 0, 47);
     }

@@ -83,12 +83,12 @@ cargo run -p sparq-shacl --example validate -- data.ttl shapes.ttl
 cargo run -p sparq-shacl --example validate -- data.ttl shapes.ttl --turtle
 ```
 
-## SPARQL-RL syntax (opt-in)
+## SPARQL-RL (opt-in)
 
-The default-off `sparql-rl` feature exposes `sparql_rl::parse(source, base)` and
-its borrowed syntax tree. It adds no dependencies and is independent of
-`shacl-af`. This round supports syntax only; evaluation, well-formedness and
-stratification remain unsupported. See the [API and parser bounds](references/sparql-rl.md).
+The default-off `sparql-rl` feature exposes parsing, inScope/inUse checks,
+stratification and `infer`/`infer_with_limits`. Inference returns only new
+triples and uses one incremental working graph; IMPORTS is refused. It adds no
+dependencies and is independent of `shacl-af`. See the [API, semantics and limits](references/sparql-rl.md).
 
 ## Key APIs
 

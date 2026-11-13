@@ -466,6 +466,8 @@ jobs:
       # link that 404s under the book mount. The lowercase-root-doc case is the defect #5021
       # reports; narrowing `_ROOT_MD` back to `[A-Z]` reds exactly that case here.
       # Hermetic: no network, no files, no subprocess (same pattern as the lints above).
+      - name: Self-test SHACL EARL runner census and report membership
+        run: python3 scripts/tests/test_shacl_earl_runner.py
       - name: Self-test mdbook-rewrite-links.py (which link targets get rewritten)
         run: python3 scripts/mdbook-rewrite-links.py --self-test
 

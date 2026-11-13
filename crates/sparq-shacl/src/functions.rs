@@ -159,6 +159,11 @@ pub(crate) fn ask(data: &Graph, query: &PreparedQuery) -> Result<bool, String> {
     with_dataset(data, false, |data| sparq_engine::ask_prepared(data, query))
 }
 
+#[cfg(feature = "sparql-rl")]
+pub(crate) fn with_rule_bindings<T>(f: impl FnOnce() -> T) -> T {
+    sparq_engine::with_functions(&build_registry(None, Vec::new()), f)
+}
+
 pub(crate) fn binding_token() -> String {
     BINDING_TOKEN.with(Clone::clone)
 }

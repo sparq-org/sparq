@@ -1245,9 +1245,9 @@ jobs:
             echo "::error::FULL SHACL 1.2 suite regressed (default rc=$rc_default, shacl-af rc=$rc_af) — a runner's pinned ratchet floor/ceiling tripped. Inspect the per-category scoreboard above; see research/shacl12-conformance-gap.md. The floors are never weakened — closing a gap moves a FAIL to PASS and bumps the floor in the same commit."
             exit 1
           fi
-      - name: Run SPARQL-RL syntax ratchet
-        # The feature-matrix leg exercises self-contained parser tests. This
-        # job has the pinned fixtures, so it also enforces the syntax census.
+      - name: Run SPARQL-RL processor ratchet
+        # Feature-matrix legs exercise self-contained parser/evaluator tests. This
+        # job has the pinned fixtures and enforces every language-stage census.
         run: |
           set -euo pipefail
           test -f crates/sparq-shacl/tests/shacl/data-shapes/shacl12-test-suite/tests/sparql-rl/syntax/manifest.ttl

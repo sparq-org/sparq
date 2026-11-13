@@ -1068,7 +1068,7 @@ fn substitute_literal(l: &oxrdf::Literal, vars: &[String], row: &[Option<Term>])
 /// Builds the single-row `VALUES (?n1 ?n2 …) { (v1 v2 …) }` table that pre-binds
 /// each `(name, term)` in `bindings`. Returns `None` if any value is not
 /// expressible as a SPARQL ground term (e.g. a blank node — see `term_to_ground`).
-fn pre_bind_values(bindings: &[Binding]) -> Option<GraphPattern> {
+pub(crate) fn pre_bind_values(bindings: &[Binding]) -> Option<GraphPattern> {
     let mut variables = Vec::with_capacity(bindings.len());
     let mut row = Vec::with_capacity(bindings.len());
     let mut extra = Vec::new();
