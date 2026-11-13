@@ -10,3 +10,7 @@ pub mod ops_closed_extend;
 pub mod ops_closed_substitute;
 mod ops_closed_tests;
 pub mod ops_closed_graph;
+pub mod ops_closed_group;
+pub mod ops_closed_order;
+mod ops_closed_group_tests;
+mod ops_closed_order_tests;

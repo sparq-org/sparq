@@ -5,6 +5,8 @@ pub mod capacity;
 pub mod codegen;
 pub mod driver;
 pub mod interp;
+pub mod interp_closed_group;
+pub mod interp_closed_order;
 pub mod lower;
 pub mod plan;
 pub mod plan_closed;
