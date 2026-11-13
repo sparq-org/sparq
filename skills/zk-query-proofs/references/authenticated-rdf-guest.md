@@ -206,9 +206,10 @@ also proves and verifies N times; `--phases` (feature `phase-cycles`) adds the
 per-phase cycle breakdown from the measurement image. `--blank-free` names the
 credential holder with an IRI so that the credential data has no blank node.
 Each case prints one JSON record. The additive host measurements use schema
-`sparq.zk-paper-sweep.v2`; legacy records remain readable. See the
+`sparq.zk-paper-sweep.v3`; v1 and v2 records remain readable. See the
 [measurement boundaries](../../../zk/sparql-evaluator/host/examples/paper_sweep/README.md)
-for primitive signing, S4 tree construction, complete JSON carrier sizes and the
+for primitive signing, S4 tree construction, complete serde_json number-array
+carrier sizes and complete bincode companion sizes, and the
 three disjoint verifier stages. `AnswerPresentation` is the local JSON carrier
 for a `Presentation` plus optional detached signatures. `verify_answer_with_artifact`
 and `verify_answer_with_artifact_timed` use the same production stages as the
@@ -218,6 +219,12 @@ receipt, the sweep emits no verifier split or complete answer-size sample. The
 `paper_verify` sibling sizes retained envelopes without proofs (`--size-only`)
 or verifies against an independent request file without generating a new proof;
 see the same measurement boundaries for invocation and nonce-store scope.
+The JSON carriers are minified number arrays, not size-efficient binary carriers;
+`credential_bincode_bytes` and `presentation_bincode_bytes` measure the same full
+typed values using `bincode-1.3.3-fixint-le-v1`. S4 inclusive issuance is a host
+re-implementation boundary, so v1 and v2 issuance timings are not strictly
+comparable. No warm-up or automatic first-sample removal is performed; initial
+samples may be cold. Timed inputs and outputs use `std::hint::black_box`.
 
 `zk/sparql-evaluator/coverage-authenticated-rdf.json` is generated from those
 records by `scripts/authenticated_rdf_coverage.py`. Each feature records whether

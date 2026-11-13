@@ -5,7 +5,7 @@ use sparq_proved_evaluator_model::{
     authenticated_rdf::{Cryptosuite, SignedCredential},
     merkle_suite,
 };
-use std::time::Instant;
+use std::{hint::black_box, time::Instant};
 
 #[derive(Default)]
 pub(super) struct Timings {
@@ -29,8 +29,9 @@ trait Stages {
 
 impl Stages for Timings {
     fn run<T>(&mut self, stage: Stage, work: impl FnOnce() -> T) -> T {
+        let work = black_box(work);
         let start = Instant::now();
-        let result = work();
+        let result = black_box(work());
         let ns = start.elapsed().as_nanos();
         match stage {
             Stage::Signature => self.signature_ns += ns,
@@ -41,16 +42,41 @@ impl Stages for Timings {
     }
 }
 
+// A private operation seam lets tests observe the stage at the leaf/root
+// operation itself, independently of where the caller places the timer.
+#[derive(Clone, Copy)]
+enum TreePart {
+    Leaf,
+    Root,
+}
+trait TreeWork {
+    fn run<T>(&self, part: TreePart, work: impl FnOnce() -> T) -> T;
+}
+impl TreeWork for () {
+    fn run<T>(&self, _: TreePart, work: impl FnOnce() -> T) -> T {
+        work()
+    }
+}
+
 pub(super) fn issue(
     document: &str,
     config: &str,
     suite: Cryptosuite,
     salt: [u8; 32],
 ) -> (SignedCredential, Timings) {
+    let (document, config, suite, salt) = black_box((document, config, suite, salt));
     let start = Instant::now();
     let key = super::key();
     let mut timings = Timings::default();
-    let credential = issue_staged(document, config, suite, salt, &key, &mut timings);
+    let credential = black_box(issue_staged(
+        document,
+        config,
+        suite,
+        salt,
+        &key,
+        &mut timings,
+        &(),
+    ));
     timings.inclusive_ns = start.elapsed().as_nanos();
     (credential, timings)
 }
@@ -62,6 +88,7 @@ fn issue_staged(
     salt: [u8; 32],
     key: &impl Signer<ed25519_dalek::Signature>,
     stages: &mut impl Stages,
+    tree: &impl TreeWork,
 ) -> SignedCredential {
     let (canonical_document, canonical_config) = stages.run(Stage::Canonicalize, || {
         (
@@ -89,11 +116,16 @@ fn issue_staged(
                 let mut leaves: Vec<_> = quads
                     .iter()
                     .zip(canonical_document.lines())
-                    .map(|(quad, line)| (merkle_suite::leaf(quad).unwrap(), line))
+                    .map(|(quad, line)| {
+                        (
+                            tree.run(TreePart::Leaf, || merkle_suite::leaf(quad).unwrap()),
+                            line,
+                        )
+                    })
                     .collect();
                 leaves.sort_unstable();
                 let row: Vec<_> = leaves.iter().map(|(leaf, _)| *leaf).collect();
-                let root = merkle_suite::root(&row).unwrap();
+                let root = tree.run(TreePart::Root, || merkle_suite::root(&row).unwrap());
                 (leaves, root)
             });
             stages.run(Stage::Prepare, || {
@@ -143,6 +175,26 @@ mod tests {
             self.key.try_sign(message)
         }
     }
+    struct ObservedTree {
+        active: std::rc::Rc<std::cell::Cell<Option<Stage>>>,
+        leaves: std::cell::Cell<usize>,
+        roots: std::cell::Cell<usize>,
+    }
+    impl TreeWork for ObservedTree {
+        fn run<T>(&self, part: TreePart, work: impl FnOnce() -> T) -> T {
+            assert_eq!(
+                self.active.get(),
+                Some(Stage::Tree),
+                "leaf/root work outside tree timer"
+            );
+            let calls = match part {
+                TreePart::Leaf => &self.leaves,
+                TreePart::Root => &self.roots,
+            };
+            calls.set(calls.get() + 1);
+            work()
+        }
+    }
     impl Stages for Trace {
         fn run<T>(&mut self, stage: Stage, work: impl FnOnce() -> T) -> T {
             assert!(self.active.replace(Some(stage)).is_none());
@@ -168,7 +220,24 @@ mod tests {
                 key: &key,
                 active: trace.active.clone(),
             };
-            let issued = issue_staged(&doc, &config, suite, salt, &observed, &mut trace);
+            let tree = ObservedTree {
+                active: trace.active.clone(),
+                leaves: Default::default(),
+                roots: Default::default(),
+            };
+            let issued = issue_staged(&doc, &config, suite, salt, &observed, &mut trace, &tree);
+            assert_eq!(
+                tree.roots.get(),
+                usize::from(suite == Cryptosuite::EddsaSha256Merkle2026)
+            );
+            assert_eq!(
+                tree.leaves.get(),
+                if suite == Cryptosuite::EddsaSha256Merkle2026 {
+                    issued.document.lines().count()
+                } else {
+                    0
+                }
+            );
             let expected = if suite == Cryptosuite::EddsaSha256Merkle2026 {
                 assert_eq!(
                     trace.stages,

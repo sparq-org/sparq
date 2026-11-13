@@ -37,7 +37,7 @@ def validate_record(record):
     schema = record.get("schema")
     if schema in (None, "sparq.zk-paper-sweep.v1"):
         return
-    if schema != "sparq.zk-paper-sweep.v2":
+    if schema not in ("sparq.zk-paper-sweep.v2", "sparq.zk-paper-sweep.v3"):
         raise ValueError(f"unsupported paper-sweep schema {schema!r}")
 
     def integer(value):
@@ -62,9 +62,16 @@ def validate_record(record):
     ):
         require(inclusive >= primitive + (tree or 0), "issuer intervals exceed inclusive timer")
         require(encoded > component, "complete credential must include proofValue and framing")
+    if schema == "sparq.zk-paper-sweep.v3":
+        require(record["credential_compact_encoding"] == "bincode-1.3.3-fixint-le-v1", "compact credential encoding")
+        require(record["presentation_compact_encoding"] == "bincode-1.3.3-fixint-le-v1", "compact presentation encoding")
+        sizes = record["credential_bincode_bytes"]
+        require(isinstance(sizes, list) and len(sizes) == n and all(integer(size) and size > 0 for size in sizes), "complete compact credential sizes")
     proofs = record.get("proofs", [])
     require(record["verifier_split_status"] == ("measured" if proofs else "not_measured_no_receipt"), "receipt timing status")
     for proof in proofs:
+        if schema == "sparq.zk-paper-sweep.v3":
+            require(integer(proof["presentation_bincode_bytes"]) and proof["presentation_bincode_bytes"] > 0, "complete compact presentation size")
         for field in ("verify_ns", "verifier_receipt_ns", "verifier_request_ns", "verifier_stages_ns", "presentation_bytes", "presentation_encoded_bytes"):
             require(integer(proof[field]), f"{field}: invalid sample")
         signature = proof["verifier_signature_ns"]

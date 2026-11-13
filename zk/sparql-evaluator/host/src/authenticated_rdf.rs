@@ -51,6 +51,7 @@ use sparq_proved_evaluator_model::authenticated_rdf::{
 };
 use std::{
     convert::Infallible,
+    hint::black_box,
     path::Path,
     time::{Duration, Instant},
 };
@@ -194,8 +195,9 @@ impl Stages for () {
 
 impl Stages for VerificationTimings {
     fn run<T>(&mut self, stage: Stage, work: impl FnOnce() -> T) -> T {
+        let work = black_box(work);
         let start = Instant::now();
-        let result = work();
+        let result = black_box(work());
         let elapsed = start.elapsed();
         match stage {
             Stage::Receipt => self.receipt += elapsed,

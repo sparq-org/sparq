@@ -9,7 +9,7 @@ import unittest
 from paper_executor_audit import load, validate_record
 
 
-def record(merkle=False, hidden=True, proof=False):
+def record(merkle=False, hidden=True, proof=False, compact=False):
     value = dict(
         schema="sparq.zk-paper-sweep.v2", n=1,
         suite="eddsa-sha256-merkle-2026" if merkle else "eddsa-rdfc-2022",
@@ -28,18 +28,37 @@ def record(merkle=False, hidden=True, proof=False):
             verifier_stages_ns=50 if hidden else 70,
             presentation_bytes=1000, presentation_encoded_bytes=2000,
         )]
+    if compact:
+        value["schema"] = "sparq.zk-paper-sweep.v3"
+        value["credential_compact_encoding"] = "bincode-1.3.3-fixint-le-v1"
+        value["presentation_compact_encoding"] = "bincode-1.3.3-fixint-le-v1"
+        value["credential_bincode_bytes"] = [1200]
+        if proof:
+            value["proofs"][0]["presentation_bincode_bytes"] = 800
     return value
 
 
 class PaperSchemaTests(unittest.TestCase):
     def test_old_and_new_records_remain_readable(self):
         records = [{"id": "legacy"}, {"schema": "sparq.zk-paper-sweep.v1"}]
-        records += [record(m, h, p) for m in (False, True) for h in (False, True) for p in (False, True)]
+        records += [record(m, h, p, c) for m in (False, True) for h in (False, True) for p in (False, True) for c in (False, True)]
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "records.jsonl.gz"
             with gzip.open(path, "wt") as out:
                 out.write("\n".join(map(json.dumps, records)))
             self.assertEqual(load(path)[1], records)
+
+    def test_compact_carrier_fields_are_required_only_in_new_records(self):
+        for field, bad in [("credential_compact_encoding", "json"), ("presentation_compact_encoding", "json"),
+                           ("credential_bincode_bytes", []), ("credential_bincode_bytes", [0])]:
+            changed = record(compact=True)
+            changed[field] = bad
+            with self.subTest(field=field, bad=bad), self.assertRaises(ValueError):
+                validate_record(changed)
+        changed = record(compact=True, proof=True)
+        changed["proofs"][0]["presentation_bincode_bytes"] = 0
+        with self.assertRaises(ValueError):
+            validate_record(changed)
 
     def test_incomplete_or_overlapping_measurements_are_rejected(self):
         original = record(merkle=True, hidden=False, proof=True)

@@ -37,6 +37,8 @@ sha2.workspace = true
 spargebra = { version = "=0.4.6", features = ["sparql-12", "sep-0006", "sparq-deterministic-paths"], optional = true }
 
 [dev-dependencies]
+# Existing SDK codec, also used for complete compact measurement carriers.
+bincode = "=1.3.3"
 sparq-proved-evaluator-model = { path = "../model", features = ["graph-results"] }
 ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["alloc"] }
 sparq-canon = { path = "../../../crates/sparq-canon", default-features = false }

@@ -11,7 +11,9 @@ use sparq_proved_evaluator::{
     AcceptedGuest, Error, Nonces, embedded_authrdf_artifact, embedded_authrdf_pin,
 };
 use sparq_proved_evaluator_model::authenticated_rdf::Request;
-use std::{fs, time::Instant};
+use std::{fs, hint::black_box, time::Instant};
+#[path = "paper_sweep/encoding.rs"]
+mod encoding;
 
 #[derive(Default)]
 struct Once(bool);
@@ -23,9 +25,11 @@ impl Nonces for Once {
 
 fn size_record(answer: &AnswerPresentation, received: usize) -> Value {
     json!({
-        "schema": "sparq.zk-paper-verification.v1",
+        "schema": "sparq.zk-paper-verification.v2",
         "presentation_encoding": "serde-json-answer-presentation-v1",
         "presentation_received_bytes": received,
+        "presentation_bincode_bytes": encoding::bincode_bytes(answer).len(),
+        "presentation_compact_encoding": encoding::BINCODE_ENCODING,
         "presentation_encoded_bytes": serde_json::to_vec(answer).expect("complete answer encoding").len(),
         "presentation_bytes": serde_json::to_vec(&answer.presentation.receipt).expect("receipt encoding").len()
             + answer.signatures.as_ref().map_or(0, |signatures| signatures.iter().map(Vec::len).sum::<usize>()),
@@ -54,10 +58,12 @@ fn main() {
         )
         .expect("approved V5 pin");
         let mut nonces = Once::default();
+        let inputs = black_box((&answer, &expected, &mut nonces, &guest));
         let start = Instant::now();
-        let (journal, timings) =
-            verify_answer_with_artifact_timed(&answer, &expected, &mut nonces, &guest)
-                .expect("receipt verification");
+        let (journal, timings) = black_box(verify_answer_with_artifact_timed(
+            inputs.0, inputs.1, inputs.2, inputs.3,
+        ))
+        .expect("receipt verification");
         let aggregate = start.elapsed();
         record["verified"] = json!(true);
         record["verify_ns"] = json!(aggregate.as_nanos());
@@ -93,6 +99,11 @@ mod tests {
             let record = size_record(&answer, encoded.len());
             assert_eq!(record["presentation_encoded_bytes"], encoded.len());
             assert_eq!(record["presentation_received_bytes"], encoded.len());
+            let binary = encoding::bincode_bytes(&answer);
+            assert_eq!(record["presentation_bincode_bytes"], binary.len());
+            let binary_decoded: AnswerPresentation = bincode::deserialize(&binary).unwrap();
+            assert_eq!(serde_json::to_vec(&binary_decoded).unwrap(), encoded);
+            assert!(binary.len() < encoded.len());
             assert_eq!(record["verified"], false);
             assert!(record.get("verifier_receipt_ns").is_none());
             assert!(

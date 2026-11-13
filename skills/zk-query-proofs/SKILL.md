@@ -90,7 +90,8 @@ The V5 host also exposes `AnswerPresentation`, `verify_answer_with_artifact` and
 `verify_answer_with_artifact_timed`. The timed entry point partitions the existing
 verifier work once, with an absent signature interval in hidden mode; see the
 [authenticated RDF guest reference](references/authenticated-rdf-guest.md) and its
-linked host measurement boundaries. These local diagnostics add no cryptographic
+linked host measurement boundaries. Size records distinguish serde_json number-array
+carriers from complete bincode companion encodings. These local diagnostics add no cryptographic
 assurance; external audit remains pending.
 
 ## V2 component member dispatch

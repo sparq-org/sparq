@@ -3,20 +3,22 @@
 mod fixture;
 use super::*;
 use fixture::CountingNonces;
-use std::cell::Cell;
+use std::{cell::Cell, rc::Rc};
 
 #[derive(Default)]
 struct Trace {
     stages: Vec<Stage>,
-    active: bool,
+    active: Rc<Cell<Option<Stage>>>,
 }
 impl Stages for Trace {
     fn run<T>(&mut self, stage: Stage, work: impl FnOnce() -> T) -> T {
-        assert!(!self.active, "verification intervals must not nest");
-        self.active = true;
+        assert!(
+            self.active.replace(Some(stage)).is_none(),
+            "verification intervals must not nest"
+        );
         self.stages.push(stage);
         let result = work();
-        self.active = false;
+        self.active.set(None);
         result
     }
 }
@@ -220,7 +222,7 @@ fn staged_verifier_matches_legacy_decisions_journal_bytes_and_nonce_effects() {
 }
 
 #[test]
-fn production_envelope_roundtrips_and_matches_legacy_receipt_rejections() {
+fn production_envelope_roundtrips_and_dispatches_to_matching_entry_point() {
     let guest = AcceptedGuest::from_artifact(
         crate::embedded_authrdf_artifact().to_vec(),
         &crate::embedded_authrdf_pin(),
@@ -368,5 +370,83 @@ fn stage_timers_partition_one_verification_and_leave_hidden_signatures_absent() 
             timings.receipt + timings.request + timings.signatures.unwrap_or_default() <= elapsed
         );
         assert_eq!(nonces.calls, 1);
+    }
+}
+
+#[test]
+fn verifier_work_runs_inside_receipt_signature_and_request_intervals() {
+    struct ObservedNonces {
+        inner: CountingNonces,
+        active: Rc<Cell<Option<Stage>>>,
+    }
+    impl Nonces for ObservedNonces {
+        fn consume(&mut self, nonce: [u8; 32]) -> Result<bool, Error> {
+            assert_eq!(
+                self.active.get(),
+                Some(Stage::Request),
+                "nonce work outside request timer"
+            );
+            self.inner.consume(nonce)
+        }
+    }
+    for mode in [SignatureMode::Hidden, SignatureMode::Revealed] {
+        let mut witness = fixture::witness(
+            fixture::ASK_ISSUER,
+            sparq_proved_evaluator_model::DatasetAuthority::HolderDeclared,
+            [0x3c; 32],
+        );
+        witness.request.policy.signature_mode = mode;
+        let signatures = vec![witness.dataset.credentials[0].signature.clone()];
+        if mode == SignatureMode::Revealed {
+            witness.dataset.credentials[0].signature.clear();
+        }
+        let journal = auth::evaluate(&witness).unwrap();
+        let fake = fixture::fake_receipt([0; 8], bytes(&journal));
+        let mut trace = Trace::default();
+        let active = trace.active.clone();
+        let mut nonces = ObservedNonces {
+            inner: CountingNonces::default(),
+            active: active.clone(),
+        };
+        let mut receipts = 0;
+        let mut signatures_checked = 0;
+        let result = verify_staged(
+            &fake,
+            &witness.request,
+            &mut nonces,
+            [0; 8],
+            |j| {
+                if mode == SignatureMode::Revealed {
+                    assert_eq!(
+                        active.get(),
+                        Some(Stage::Signatures),
+                        "signature work outside signature timer"
+                    );
+                    signatures_checked += 1;
+                    check_revealed_signatures(j, &witness.request, &signatures)?;
+                } else {
+                    assert_eq!(active.get(), None);
+                }
+                Ok::<(), Rejected>(())
+            },
+            &mut trace,
+            |_, _| {
+                assert_eq!(
+                    active.get(),
+                    Some(Stage::Receipt),
+                    "receipt work outside receipt timer"
+                );
+                receipts += 1;
+                Ok(journal.clone())
+            },
+        );
+        assert_eq!(comparable(result).unwrap(), bytes(&journal));
+        assert_eq!(receipts, 1);
+        assert_eq!(
+            signatures_checked,
+            usize::from(mode == SignatureMode::Revealed)
+        );
+        assert_eq!(nonces.inner.calls, 1);
+        assert_eq!(active.get(), None);
     }
 }
