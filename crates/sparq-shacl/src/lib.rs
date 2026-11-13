@@ -16,6 +16,8 @@ pub mod model;
 mod node_expr;
 pub mod path;
 mod report;
+#[cfg(any(feature = "shacl-af", feature = "sparql-rl"))]
+mod rule_schedule;
 pub use node_expr::{
     eval_node_expression, eval_node_expression_result, eval_node_expression_with_scope, Scope,
 };
@@ -31,6 +33,8 @@ pub mod rules12;
 #[cfg(feature = "scs")]
 pub mod scs;
 mod sparql;
+#[cfg(feature = "sparql-rl")]
+pub mod sparql_rl;
 pub mod view;
 
 // (sq-11a) `IllFormedConstruct` records a shapes-graph construct that
