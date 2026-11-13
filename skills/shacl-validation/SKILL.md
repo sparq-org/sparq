@@ -117,10 +117,9 @@ pub fn validate_with_model(data: &Graph, model: &ShapesModel) -> ValidationRepor
 // DATATYPE check (integer-lexical but non-xsd:integer-typed, e.g. "3"^^xsd:string —
 // bare Turtle 3 types as xsd:integer, so ordinary graphs are unaffected), a
 // qualified COUNT without sh:qualifiedValueShape (the symmetric partial-parameter
-// case), an unsupported sh:entailment declaration (the SHACL §3.4 failure;
-// with `shacl-af`, sh:RulesEntailment and named sh:RuleSet regimes are supported),
-// and (feature `shacl-af`) an sh:expression / sh:nodeByExpression structural
-// node expression that does not
+// case), ANY sh:entailment declaration (no entailment regime is supported — the
+// SHACL §3.4 unsupported-regime failure), and (feature `shacl-af`) an
+// sh:expression / sh:nodeByExpression structural node expression that does not
 // build. Construct-local checks, NOT a full SHACL-of-SHACL pass;
 // ShaclFailure.ill_formed / ShapesModel::ill_formed() carry (node, predicate,
 // message). `validate` instead SKIPS all of the above unchanged (its never-fails
@@ -131,8 +130,8 @@ pub fn validate_strict(data: &Graph, shapes: &Graph) -> Result<ValidationReport,
 // SHACL 1.0 Appendix A admission: also reject local VALUES and subqueries
 // omitting a pre-bound name. validate_strict uses the SHACL 1.2 rules.
 pub fn validate_strict_shacl10(data: &Graph, shapes: &Graph) -> Result<ValidationReport, ShaclFailure>;
-// ShaclFailure.pre_binding carries admission failures, runtime solution-declared
-// failures and rule-execution failures; its historical field name is retained.
+// ShaclFailure.pre_binding carries admission failures and runtime solution-
+// declared failures; its historical field name is retained.
 pub fn validate_strict_with_model(data: &Graph, model: &ShapesModel)
     -> Result<ValidationReport, ShaclFailure>;
 
@@ -506,17 +505,6 @@ SHACL 1.2 inference rules and declared rule entailment, node-expression APIs and
 for constraint coverage, prerequisites and conformance ratchets. The 1.2 rule
 executor rejects unsupported processors anywhere among the shapes graph's rules
 and rule sets, including unselected and deactivated nodes and included sets.
-
-With `shacl-af`, `validate` and `validate_with_model` run declared
-`sh:RulesEntailment` or named `sh:RuleSet` regimes through the SHACL 1.2 executor;
-without a declaration they validate the supplied data. `rules12::apply_rules`
-returns `Result<Inference, String>`, while the existing top-level `apply_rules`
-and `expand` retain SHACL-AF behavior. `FactDomain::Asserted` follows `validate`,
-including declared SHACL 1.2 entailment; `FactDomain::AssertedPlusInferred` first
-adds the SHACL-AF closure and then follows the same validation path. Strict
-validation returns rule failures as errors; lenient validation reports diagnostics
-for processing failures. The SPARQL-RL language processor remains unsupported; its
-census is separate from the SHACL 1.2 EARL report, as detailed in the references.
 
 - **SHACL-AF numeric node expressions preserve exact digits.** With `shacl-af`,
   `min`, `max` and `orderBy` share the range constraints' any-length exact
