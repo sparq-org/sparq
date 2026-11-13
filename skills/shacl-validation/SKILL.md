@@ -500,9 +500,11 @@ let g = sparq_shacl::load_turtle_with_base(&text, &format!("file://{path}")).unw
 
 ## Advanced features and validation details
 
-See [Advanced Features](references/advanced-features.md) for rules, node-expression
-APIs and graph scopes, and [validation details](references/validation-details.md)
-for constraint coverage, prerequisites and conformance ratchets.
+See [Advanced Features](references/advanced-features.md) for SHACL-AF rules,
+SHACL 1.2 inference rules and declared rule entailment, node-expression APIs and graph scopes, and [validation details](references/validation-details.md)
+for constraint coverage, prerequisites and conformance ratchets. The 1.2 rule
+executor rejects unsupported processors anywhere among the shapes graph's rules
+and rule sets, including unselected and deactivated nodes and included sets.
 
 ## See also
 
