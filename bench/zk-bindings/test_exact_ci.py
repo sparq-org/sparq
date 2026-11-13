@@ -11,8 +11,8 @@ from run import file_hash
 class OriginalReplayTests(unittest.TestCase):
     def test_all_original_objects_and_both_authorities_are_configured(self):
         manifest = original_plan()
-        self.assertEqual(manifest["case_count"], 319)
-        self.assertEqual(len(manifest["jobs"]), 1914)
+        self.assertEqual(manifest["case_count"], 326)
+        self.assertEqual(len(manifest["jobs"]), 1956)
         self.assertEqual(manifest["classifications"], [])
         self.assertEqual({j["authority"] for j in manifest["jobs"]},
                          {"verifier_agreed", "holder_declared"})
@@ -22,6 +22,27 @@ class OriginalReplayTests(unittest.TestCase):
         self.assertIn("nullable-path-alternative-absent-constant", ids)
         for case in manifest["cases"]:
             self.assertEqual(case["query"], case["original_fixture"]["query"])
+
+    def test_numeric_promotions_keep_original_inputs_and_paired_capacity_causes(self):
+        manifest = original_plan()
+        cases = {c["id"]:c for c in manifest["cases"]}
+        inventory = load(Path(__file__).with_name("exact-originals.json"))
+        replacements = {c["original_fixture"]["capacity_replacement_for"]:c
+                        for c in cases.values() if "capacity_replacement_for" in c["original_fixture"]}
+        self.assertEqual(len(replacements), 7)
+        promotions = [p for p in inventory["historical_promotions"] if p["current_id"] in replacements]
+        self.assertEqual(len(promotions), 7)
+        for promotion in promotions:
+            case = cases[promotion["current_id"]]
+            original = promotion["original_fixture"]
+            self.assertEqual(case["query"], original["query"])
+            self.assertEqual(case["dataset"]["ntriples"], original["dataset_ntriples"])
+            self.assertFalse(case["rejection"])
+            self.assertEqual(case["expected"], case["original_fixture"]["expected_result"])
+            replacement = replacements[case["id"]]
+            self.assertTrue(replacement["rejection"])
+            self.assertEqual(replacement["expected_rejection"],
+                             {"category":"capacity", "phase":"evaluation", "cause":"numeric_representation"})
 
     def test_projection_registry_is_hash_pinned_and_applied_exactly(self):
         # Inventory pins the reviewed projection registry bytes.
