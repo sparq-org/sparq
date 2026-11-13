@@ -914,8 +914,7 @@ impl PreparedQuery {
         let mut prepared = Self::from_query_with_versions(query, version)?;
         #[cfg(feature = "algebra-rewrite")]
         {
-            let rewritten = rewrite::rewrite_query(prepared.query.clone());
-            if rewritten != prepared.query {
+            if let Some(rewritten) = rewrite::rewrite_query_ref(&prepared.query) {
                 prepared.unrewritten = Some(Box::new(std::mem::replace(&mut prepared.query, rewritten)));
             }
         }
