@@ -38,7 +38,7 @@ export interface ExampleCard {
 // The flagship `blurb` in surfaces.ts is the longer descriptive sentence used elsewhere; the
 // gallery wants the terse outcome, so it lives here, next to the gallery that consumes it.
 const FLAGSHIP_OUTCOME: Record<string, string> = {
-  "zk-car-hire": "Prove you may hire a car without revealing your documents.",
+  "zk-car-hire": "Prove you may hire a car with a live zero-knowledge proof (research demo).",
   "mpc-100k":
     "Learn only whether four incomes clear £100k — no salary, not even the total, revealed.",
   "solid-pairs":

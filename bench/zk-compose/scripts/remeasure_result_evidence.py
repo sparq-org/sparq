@@ -26,6 +26,10 @@ still leave a mixed set, which
 gate_counts_latest.json have staged or unstaged edits against HEAD, so that recovery never
 discards anything else and the size gate reads the committed snapshot, and unless `--commit`
 is HEAD. Git runs without inherited GIT_* environment variables.
+For an uncommitted candidate, pass `--working-tree` to `apply`: both independent
+measurements must match every current Noir source hash. The provenance records
+the base commit and labels the candidate as uncommitted; all cleanliness,
+member identity and expected-change checks still apply.
 `--baseline-commit` names the commit whose evidence is the pre-change baseline (default
 HEAD); the files are read from that commit with `git show`, never from the working tree.
 Each file keeps its destination `prepared_by`, and `apply` refuses a baseline whose
@@ -186,6 +190,15 @@ def apply(args: argparse.Namespace) -> None:
     first, second = (json.loads(path.read_text()) for path in (args.first, args.second))
     if without_artifacts(first) != without_artifacts(second):
         raise SystemExit("the two runs disagree")
+    working_tree = getattr(args, "working_tree", False)
+    if working_tree:
+        current_sources = {
+            str(path.relative_to(ROOT)): digest(path.read_bytes())
+            for path in sorted((ROOT / "zk/compose").rglob("*.nr"))
+            if "target" not in path.relative_to(ROOT).parts
+        }
+        if first["source_files"] != current_sources:
+            raise SystemExit("the measurements do not match the current Noir sources")
     measured = first["members"]
     evidence = load_commit(args.baseline_commit)
     destination = load(ROOT)
@@ -231,7 +244,11 @@ def apply(args: argparse.Namespace) -> None:
         "job_sha256": digest(args.job.read_bytes()),
         "independent_handoff_sha256": digest(args.second.read_bytes()),
     }
-    method = ("At measured_source, two independent runs from clean git archives of source_commit compiled every "
+    if working_tree:
+        provenance["source_state"] = "uncommitted candidate based on source_commit"
+    source_description = ("independent snapshots of the uncommitted candidate based on source_commit"
+                          if working_tree else "clean git archives of source_commit")
+    method = (f"At measured_source, two independent runs from {source_description} compiled every "
               "listed member with the pinned nargo, hashed the ACIR bytecode, ABI and artifact, measured "
               "`bb gates -s ultra_honk` and, for the v1 members, regenerated the noir-recursive verification key "
               "(bench/zk-compose/scripts/remeasure_result_evidence.py). The two runs agreed on every circuit "
@@ -302,6 +319,8 @@ def main() -> None:
     step.add_argument("--baseline-commit", default="HEAD",
                       help="commit whose bench/zk-compose evidence is the pre-change baseline (default: HEAD)")
     step.add_argument("--job", type=Path, required=True, help="job manifest; its hash is job_sha256")
+    step.add_argument("--working-tree", action="store_true",
+                      help="bind uncommitted candidate measurements to every current Noir source hash")
     step.add_argument("--commit", required=True)
     step.add_argument("--observed-at", required=True)
     step.add_argument("--platform", required=True)

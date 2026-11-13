@@ -131,6 +131,12 @@ differential-smoke = ["sparq-core", "sparq-engine", "sparq-bench"]
 pattern = "zk/sparql-evaluator/fixtures/conformance/raw-literal-whitespace.json"
 crates = ["sparq-engine"]
 
+# The JS result package's compiled circuit artifacts are read by the wasm
+# crate's ABI test (include_str!), so an artifact change re-runs it.
+[[map]]
+pattern = "js/zk-result/assets/**"
+crates = ["sparq-zk-result-wasm"]
+
 [[map]]
 pattern = "AGENTS.md"
 crates = ["sparq-kb"]
@@ -241,6 +247,56 @@ crates = ["sparq-zk-compose"]
 # must re-run sparq-zk-compose.
 [[map]]
 pattern = "zk/compose/compose_core/src/result_m5.nr"
+crates = ["sparq-zk-compose"]
+
+# The hidden-integer wrapper pin reads each member's main.nr with include_str!,
+# so a change to any compared source must re-run sparq-zk-compose.
+[[map]]
+pattern = "zk/compose/result_v2_k1_n16_p3_r4_f2_i64_d10/src/main.nr"
+crates = ["sparq-zk-compose"]
+
+[[map]]
+pattern = "zk/compose/result_v5_k1_n16_p3_r4_f2_i64_d10/src/main.nr"
+crates = ["sparq-zk-compose"]
+
+[[map]]
+pattern = "zk/compose/result_v2_k1_n16_p3_r4_f2_i64_d17/src/main.nr"
+crates = ["sparq-zk-compose"]
+
+[[map]]
+pattern = "zk/compose/result_v5_k1_n16_p3_r4_f2_i64_d17/src/main.nr"
+crates = ["sparq-zk-compose"]
+
+[[map]]
+pattern = "zk/compose/result_v2_k1_n16_p3_r4_f2_i64_d20/src/main.nr"
+crates = ["sparq-zk-compose"]
+
+[[map]]
+pattern = "zk/compose/result_v5_k1_n16_p3_r4_f2_i64_d20/src/main.nr"
+crates = ["sparq-zk-compose"]
+
+[[map]]
+pattern = "zk/compose/result_v2_k2_n16_p3_r4_f2_i64_d10/src/main.nr"
+crates = ["sparq-zk-compose"]
+
+[[map]]
+pattern = "zk/compose/result_v5_k2_n16_p3_r4_f2_i64_d10/src/main.nr"
+crates = ["sparq-zk-compose"]
+
+[[map]]
+pattern = "zk/compose/result_v2_k2_n16_p3_r4_f2_i64_d17/src/main.nr"
+crates = ["sparq-zk-compose"]
+
+[[map]]
+pattern = "zk/compose/result_v5_k2_n16_p3_r4_f2_i64_d17/src/main.nr"
+crates = ["sparq-zk-compose"]
+
+[[map]]
+pattern = "zk/compose/result_v2_k2_n16_p3_r4_f2_i64_d20/src/main.nr"
+crates = ["sparq-zk-compose"]
+
+[[map]]
+pattern = "zk/compose/result_v5_k2_n16_p3_r4_f2_i64_d20/src/main.nr"
 crates = ["sparq-zk-compose"]
 
 # sq-j506: the value-obligation diagnostic tests (crates/sparq-zk-compose/src/

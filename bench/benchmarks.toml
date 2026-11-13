@@ -2092,3 +2092,17 @@ pinning     = "crates/sparq-lws-crypt/tests/vectors/e1.json"
 records_to  = "stdout"
 featured    = false
 status      = "planning"
+
+[[benchmark]]
+id          = "zk-result-node-contract"
+name        = "Successful-result Node contract — registry stub"
+category    = "zk"
+measures    = "Proof acceptance and verifier rejection controls; no timing claim"
+invoke      = "cd js/zk-result && npm test"
+source      = "crates/sparq-zk-result-wasm/src/lib.rs, js/zk-result/test/result.test.js"
+dataset     = "Synthetic test-issued credential graphs and public predicates"
+quiet_box_sensitive = false
+pinning     = "Package lock and bundled circuit/key registry"
+records_to  = "Node test output"
+featured    = false
+status      = "ok"

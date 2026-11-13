@@ -101,3 +101,6 @@ pub mod result_signed_integer;
 // query-public pattern against a verifier-derived triple table. Research-grade,
 // NOT externally audited; gate/runtime effect unmeasured (EC2 snapshot pending).
 pub mod result_public;
+
+// Canonical date predicates over string-canonical terms.
+pub mod result_date;

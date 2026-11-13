@@ -12,7 +12,7 @@ predicates before accepting a presentation.
 ## Admission and result contract
 
 Use `DisclosureQuery::parse(query_text)` for SELECT DISTINCT or true ASK over a
-nonempty positive BGP, JOIN, and conjunctive directly bound integer FILTERs. The
+nonempty positive BGP, JOIN, and conjunctive directly bound integer or canonical date FILTERs. The
 parser rejects bag SELECT, REDUCED, LIMIT/OFFSET, ORDER BY, dataset clauses,
 expression projections, subqueries, aggregates, GRAPH, SERVICE, nonpositive
 operators, query blank-node syntax, and unsupported FILTER expressions. A FILTER
@@ -24,6 +24,10 @@ representable as `u64`. Other numeric types and lexical variants are outside thi
 predicate relation. The same term can still appear in an ordinary BGP without an
 integer FILTER. RDF identity, including literal lexical form and datatype, is
 preserved for pattern matching and DISTINCT; FILTER uses numeric comparison.
+Canonical timezone-free `xsd:date` bounds use the Gregorian `YYYYMMDD` key.
+`IntegerFilter::datatype` records `PredicateDatatype::{Integer, Date}` and both
+selection paths require the operand datatype to match the bound. Timezone
+suffixes, alternate date spellings and date-time bounds receive named refusals.
 
 Admission has conservative resource limits before any witness search. Query text
 is limited by `MAX_DISCLOSURE_QUERY_BYTES`; raw ASCII punctuation, including
