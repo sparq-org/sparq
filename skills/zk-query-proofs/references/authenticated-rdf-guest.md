@@ -549,6 +549,27 @@ independently obtained authenticated dataset commitment from the model under the
 same policy and salt. Bare `verifier-agreed` is refused because it lacks an anchor.
 The default `--signature-mode hidden` checks issuer signatures inside the proof.
 
+For verifier-agreed authority, the holder first computes the anchor with `commit`.
+It accepts the same request policy, credentials and salt that proving will use,
+authenticates the credentials and calls the model's `dataset_commitment`:
+
+```sh
+"$cli" commit --request request.json --credentials credential.json \
+  --salt-hex "$SALT_HEX"
+# After independently agreeing to the printed dataset_commitment, set ANCHOR_HEX.
+"$cli" request --query rule.rq --keys keys.json \
+  --authority "verifier-agreed:$ANCHOR_HEX" --nonce-hex "$NONCE_HEX" \
+  --out agreed-request.json
+```
+
+Use `agreed-request.json` for both `prove --request` and `verify --request`.
+`commit` prints only `{"dataset_commitment":"<hex>"}` and writes no files. It
+accepts several paths after `--credentials`. Authority, query and nonce do not
+change the dataset commitment; the complete policy, credential set and salt do.
+A holder-proposed commitment becomes a trust input only after the verifier agrees
+to it independently. In revealed mode, both request steps must use
+`--signature-mode revealed`, because the signature mode changes the commitment.
+
 Obtain `approved-guest/guest.bin` and `approved-guest/pin.json` from an independent
 approval of the existing `export_authrdf_guest` output. The directory and pin are
 trusted configuration, never presentation-supplied. The local exporter is:
@@ -586,10 +607,24 @@ stores for the same challenge domain. This local file store is not a distributed
 nonce service. A failed persistence operation may have consumed the nonce already;
 retry with a fresh challenge. Invalid proofs do not create the store or lock.
 
-For `--signature-mode revealed`, supply `verify --signatures signatures.json`.
-That JSON is an array of lowercase signature hex strings in the journal's
-`signed_messages` order, which can differ from input credential order. The caller
-retains the issuer signatures separately; the prover strips them from the witness.
-The verifier checks them through `verify_revealed_with_artifact` before nonce
-consumption. The existing revealed-mode privacy caveats above apply. Hidden-mode
-verification refuses `--signatures`.
+For `--signature-mode revealed`, verification can take the original credential
+files in any order:
+
+```sh
+"$cli" verify --presentation presentation.json --request request.json \
+  --guest approved-guest --nonce-store verifier/nonces.json \
+  --credentials credential.json
+```
+
+The CLI matches their signatures to journal messages using the model's signature
+checks, then passes the ordered signatures to `verify_revealed_with_artifact`.
+Matching alone does not accept a proof: the host still verifies the Succinct
+receipt, binds the independent request and checks signatures before nonce use.
+The credential-file option makes those files available to the verifying process;
+use it where that process is already permitted to read them.
+
+Alternatively, `verify --signatures signatures.json` takes an array of lowercase
+signature hex strings already in the journal's `signed_messages` order. Choose
+exactly one of `--credentials` or `--signatures` in revealed mode. The prover
+strips signatures from the private witness. The existing revealed-mode privacy
+caveats above apply. Hidden-mode verification refuses both options.
