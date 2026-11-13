@@ -128,12 +128,6 @@ fn exclusions_and_stage_refusals_are_named() {
         ("SELECT (UUID() AS ?x) WHERE {}", "UUID", true),
         ("SELECT (STRUUID() AS ?x) WHERE {}", "STRUUID", true),
         ("SELECT (BNODE() AS ?x) WHERE {}", "BNODE", true),
-        ("ASK {OPTIONAL {?s ?p ?o}}", "OPTIONAL", false),
-        (
-            "SELECT ?x WHERE {{SELECT ?x WHERE {VALUES ?x {1}}}}",
-            "subquery",
-            false,
-        ),
         ("ASK {FILTER(ABS(1)=1)}", "ABS", false),
         ("SELECT * WHERE {?s ?p ?o} ORDER BY ?s", "ORDER BY", false),
     ] {
@@ -184,5 +178,15 @@ fn rdf12_terms_are_refused_in_values_patterns_and_expressions() {
             Error::Unsupported("directional literal".into()),
             "{query}"
         );
+    }
+}
+
+#[test]
+fn closed_optional_and_subqueries_are_admitted() {
+    for query in [
+        "ASK {OPTIONAL {?s ?p ?o}}",
+        "SELECT ?x WHERE {{SELECT ?x WHERE {VALUES ?x {1}}}}",
+    ] {
+        lower(query, BOUNDS).unwrap();
     }
 }

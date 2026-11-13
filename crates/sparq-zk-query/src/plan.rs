@@ -65,6 +65,7 @@ impl Schema {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operator {
+    Closed(crate::plan_closed::ClosedOperator),
     Unit,
     Scan([Slot; 3]),
     Join(NodeId, NodeId),
@@ -82,6 +83,7 @@ pub enum Operator {
 impl Operator {
     pub fn inputs(&self) -> Vec<NodeId> {
         match self {
+            Self::Closed(op) => op.inputs(),
             Self::Join(a, b) => vec![*a, *b],
             Self::Filter(a, _) | Self::Project(a) | Self::Distinct(a) => vec![*a],
             Self::Slice { input, .. } => vec![*input],
@@ -174,6 +176,12 @@ impl Plan {
                 w.u32(v);
             }
             match &node.operator {
+                Operator::Closed(op) => {
+                    w.u8(8);
+                    let bytes = op.canonical_bytes();
+                    w.len(bytes.len());
+                    w.0.extend(bytes);
+                }
                 Operator::Unit => w.u8(0),
                 Operator::Scan(slots) => {
                     w.u8(1);

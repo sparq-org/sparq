@@ -1,6 +1,7 @@
 //! Admission from the workspace SPARQL parser. Refusals always name the construct.
 
 mod n0;
+mod closed;
 
 use crate::{capacity::Bounds, plan::*, Error};
 use spargebra::{algebra::GraphPattern, SparqlParser};
@@ -91,6 +92,7 @@ impl Builder {
     fn pattern(&mut self, pattern: &GraphPattern, outer: bool) -> Result<NodeId, Error> {
         use GraphPattern as G;
         match pattern {
+            _ if closed::handles(pattern, outer) => self.closed_pattern(pattern, None),
             G::Bgp { patterns } => {
                 let mut input = None;
                 for pattern in patterns {

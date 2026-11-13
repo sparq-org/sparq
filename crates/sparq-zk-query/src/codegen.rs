@@ -1,5 +1,8 @@
 //! Byte-deterministic gadget wiring. No constraint expressions are emitted here.
 
+#[path = "codegen_closed.rs"]
+mod closed;
+
 use crate::{plan::*, Error};
 use std::collections::BTreeMap;
 use std::fmt::Write;
@@ -91,6 +94,7 @@ pub fn generate(plan: &Plan) -> Result<Package, Error> {
             }))
         };
         match &node.operator {
+            Operator::Closed(op) => closed::generate(op, i, plan, &term_ids, &mut source)?,
             Operator::Unit => writeln!(source, "    ops_core::unit(t{i});").unwrap(),
             Operator::Scan(slots) => {
                 let mapping = array(slots.iter().map(|slot| {

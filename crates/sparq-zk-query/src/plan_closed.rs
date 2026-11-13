@@ -1,0 +1,329 @@
+//! Closed-world algebra extension. Tags in this module are independent of core tags.
+
+use crate::plan::{Expr, NodeId, Slot, Var};
+
+/// Boolean expressions containing correlated existence tests.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Predicate {
+    Expression(Expr),
+    Exists(Vec<NodeId>),
+    Not(Box<Predicate>),
+    And(Box<Predicate>, Box<Predicate>),
+    Or(Box<Predicate>, Box<Predicate>),
+}
+
+/// New closed operators extend this enum without changing core dispatch again.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ClosedOperator {
+    LeftJoin {
+        left: NodeId,
+        right: NodeId,
+        condition: Option<Expr>,
+        context: Option<NodeId>,
+    },
+    Minus {
+        left: NodeId,
+        right: NodeId,
+    },
+    Union {
+        left: NodeId,
+        right: NodeId,
+    },
+    Extend {
+        input: NodeId,
+        variable: Var,
+        value: Slot,
+        context: Option<NodeId>,
+    },
+    Substitute {
+        input: NodeId,
+        context: NodeId,
+    },
+    Filter {
+        input: NodeId,
+        predicate: Predicate,
+        context: Option<NodeId>,
+    },
+    /// One constrained outer row, overlaid on any enclosing substitution.
+    Capture {
+        input: NodeId,
+        row: u32,
+        parent: Option<NodeId>,
+    },
+    /// A substituted BGP scan. Bound captures constrain terms but do not bind columns.
+    Scan {
+        pattern: [Slot; 3],
+        context: NodeId,
+        credential: Option<u32>,
+    },
+    GraphSeed {
+        context: NodeId,
+        credential: u32,
+        name: u32,
+        selector: Slot,
+    },
+    Graph {
+        input: NodeId,
+        context: NodeId,
+        name: u32,
+        selector: Slot,
+    },
+    Unit {
+        context: NodeId,
+    },
+}
+
+impl ClosedOperator {
+    pub fn inputs(&self) -> Vec<NodeId> {
+        match self {
+            Self::LeftJoin {
+                left,
+                right,
+                context,
+                ..
+            } => {
+                let mut ids = vec![*left, *right];
+                ids.extend(context);
+                ids
+            }
+            Self::Minus { left, right } | Self::Union { left, right } => vec![*left, *right],
+            Self::Extend { input, context, .. } => {
+                let mut ids = vec![*input];
+                ids.extend(context);
+                ids
+            }
+            Self::Substitute { input, context } => vec![*input, *context],
+            Self::Filter {
+                input,
+                predicate,
+                context,
+            } => {
+                let mut ids = vec![*input];
+                ids.extend(context);
+                predicate.inputs(&mut ids);
+                ids
+            }
+            Self::Capture { input, parent, .. } => {
+                let mut ids = vec![*input];
+                ids.extend(parent);
+                ids
+            }
+            Self::Scan { context, .. }
+            | Self::Unit { context }
+            | Self::GraphSeed { context, .. } => vec![*context],
+            Self::Graph { input, context, .. } => vec![*input, *context],
+        }
+    }
+
+    /// A tagged, length-prefixed encoding; constants remain public parameter slots.
+    pub(crate) fn canonical_bytes(&self) -> Vec<u8> {
+        let mut w = Writer(vec![]);
+        match self {
+            Self::LeftJoin {
+                left,
+                right,
+                condition,
+                context,
+            } => {
+                w.byte(0);
+                w.id(*left);
+                w.id(*right);
+                w.optional(*context);
+                w.byte(u8::from(condition.is_some()));
+                if let Some(e) = condition {
+                    w.expr(e);
+                }
+            }
+            Self::Minus { left, right } => {
+                w.byte(1);
+                w.id(*left);
+                w.id(*right);
+            }
+            Self::Union { left, right } => {
+                w.byte(2);
+                w.id(*left);
+                w.id(*right);
+            }
+            Self::Extend {
+                input,
+                variable,
+                value,
+                context,
+            } => {
+                w.byte(3);
+                w.id(*input);
+                w.id(*variable);
+                w.slot(value);
+                w.optional(*context);
+            }
+            Self::Substitute { input, context } => {
+                w.byte(10);
+                w.id(*input);
+                w.id(*context);
+            }
+            Self::Filter {
+                input,
+                predicate,
+                context,
+            } => {
+                w.byte(4);
+                w.id(*input);
+                w.optional(*context);
+                w.predicate(predicate);
+            }
+            Self::Capture { input, row, parent } => {
+                w.byte(5);
+                w.id(*input);
+                w.id(*row);
+                w.optional(*parent);
+            }
+            Self::Scan {
+                pattern,
+                context,
+                credential,
+            } => {
+                w.byte(6);
+                w.id(*context);
+                w.optional(*credential);
+                for s in pattern {
+                    w.slot(s);
+                }
+            }
+            Self::GraphSeed {
+                context,
+                credential,
+                name,
+                selector,
+            } => {
+                w.byte(8);
+                w.id(*context);
+                w.id(*credential);
+                w.id(*name);
+                w.slot(selector);
+            }
+            Self::Graph {
+                input,
+                context,
+                name,
+                selector,
+            } => {
+                w.byte(9);
+                w.id(*input);
+                w.id(*context);
+                w.id(*name);
+                w.slot(selector);
+            }
+            Self::Unit { context } => {
+                w.byte(7);
+                w.id(*context);
+            }
+        }
+        w.0
+    }
+}
+impl Predicate {
+    fn inputs(&self, ids: &mut Vec<NodeId>) {
+        match self {
+            Self::Expression(_) => (),
+            Self::Exists(rights) => ids.extend(rights),
+            Self::Not(a) => a.inputs(ids),
+            Self::And(a, b) | Self::Or(a, b) => {
+                a.inputs(ids);
+                b.inputs(ids);
+            }
+        }
+    }
+}
+struct Writer(Vec<u8>);
+impl Writer {
+    fn byte(&mut self, n: u8) {
+        self.0.push(n);
+    }
+    fn id(&mut self, n: u32) {
+        self.0.extend(n.to_le_bytes());
+    }
+    fn optional(&mut self, n: Option<u32>) {
+        self.byte(u8::from(n.is_some()));
+        if let Some(n) = n {
+            self.id(n);
+        }
+    }
+    fn slot(&mut self, s: &Slot) {
+        match s {
+            Slot::Variable(v) => {
+                self.byte(0);
+                self.id(*v);
+            }
+            Slot::Parameter(p) => {
+                self.byte(1);
+                self.id(*p);
+            }
+        }
+    }
+    fn expr(&mut self, e: &Expr) {
+        use crate::plan::Compare;
+        match e {
+            Expr::Term(s) => {
+                self.byte(0);
+                self.slot(s);
+            }
+            Expr::Compare(op, a, b) => {
+                self.byte(1);
+                self.byte(match op {
+                    Compare::Equal => 0,
+                    Compare::Less => 1,
+                    Compare::LessOrEqual => 2,
+                    Compare::Greater => 3,
+                    Compare::GreaterOrEqual => 4,
+                });
+                self.expr(a);
+                self.expr(b);
+            }
+            Expr::And(a, b) | Expr::Or(a, b) => {
+                self.byte(if matches!(e, Expr::And(..)) { 2 } else { 3 });
+                self.expr(a);
+                self.expr(b);
+            }
+            Expr::Not(a) => {
+                self.byte(4);
+                self.expr(a);
+            }
+            Expr::In(a, bs) => {
+                self.byte(5);
+                self.expr(a);
+                self.id(bs.len() as u32);
+                for b in bs {
+                    self.expr(b);
+                }
+            }
+        }
+    }
+    fn predicate(&mut self, p: &Predicate) {
+        match p {
+            Predicate::Expression(e) => {
+                self.byte(0);
+                self.expr(e);
+            }
+            Predicate::Exists(ids) => {
+                self.byte(1);
+                self.id(ids.len() as u32);
+                for id in ids {
+                    self.id(*id);
+                }
+            }
+            Predicate::Not(a) => {
+                self.byte(2);
+                self.predicate(a);
+            }
+            Predicate::And(a, b) | Predicate::Or(a, b) => {
+                self.byte(if matches!(p, Predicate::And(..)) {
+                    3
+                } else {
+                    4
+                });
+                self.predicate(a);
+                self.predicate(b);
+            }
+        }
+    }
+}

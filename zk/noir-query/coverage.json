@@ -147,8 +147,10 @@
     {
       "id": "exists",
       "spec": "https://www.w3.org/TR/sparql11-query/#neg-exists",
-      "status": "not_attempted",
-      "positive_cases": [],
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "exists-filter-only-outer-variable"
+      ],
       "rejection_cases": [],
       "guest_proof_evidence": "not_asserted"
     },
@@ -211,8 +213,11 @@
     {
       "id": "minus",
       "spec": "https://www.w3.org/TR/sparql11-query/#neg-minus",
-      "status": "not_attempted",
-      "positive_cases": [],
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "minus-removes-compatible",
+        "minus-disjoint-domains-keeps-left"
+      ],
       "rejection_cases": [],
       "guest_proof_evidence": "not_asserted"
     },
@@ -227,8 +232,11 @@
     {
       "id": "not_exists",
       "spec": "https://www.w3.org/TR/sparql11-query/#neg-notexists",
-      "status": "not_attempted",
-      "positive_cases": [],
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "not-exists-correlated",
+        "not-exists-fixed-pattern-removes-all"
+      ],
       "rejection_cases": [],
       "guest_proof_evidence": "not_asserted"
     },
@@ -245,8 +253,10 @@
     {
       "id": "optional",
       "spec": "https://www.w3.org/TR/sparql11-query/#optionals",
-      "status": "not_attempted",
-      "positive_cases": [],
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "optional-unbound-versus-empty"
+      ],
       "rejection_cases": [],
       "guest_proof_evidence": "not_asserted"
     },
@@ -323,7 +333,8 @@
       "spec": "https://www.w3.org/TR/sparql11-query/#BasicGraphPatterns",
       "status": "partial_fixture_coverage",
       "positive_cases": [
-        "bgp-projection-bag"
+        "bgp-projection-bag",
+        "subquery-project-scope"
       ],
       "rejection_cases": [],
       "guest_proof_evidence": "not_asserted"
@@ -371,8 +382,10 @@
     {
       "id": "subqueries",
       "spec": "https://www.w3.org/TR/sparql11-query/#subqueries",
-      "status": "not_attempted",
-      "positive_cases": [],
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "subquery-project-scope"
+      ],
       "rejection_cases": [],
       "guest_proof_evidence": "not_asserted"
     },
@@ -387,8 +400,10 @@
     {
       "id": "union",
       "spec": "https://www.w3.org/TR/sparql11-query/#alternatives",
-      "status": "not_attempted",
-      "positive_cases": [],
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "union-keeps-duplicates"
+      ],
       "rejection_cases": [],
       "guest_proof_evidence": "not_asserted"
     },
@@ -493,8 +508,10 @@
     {
       "id": "exists_minus_domains",
       "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#defn_substitute",
-      "status": "not_attempted",
-      "positive_cases": [],
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "exists-minus-disjoint-domain-after-substitution"
+      ],
       "rejection_cases": [],
       "guest_proof_evidence": "not_asserted"
     }
@@ -1094,13 +1111,12 @@
     },
     {
       "id": "union-keeps-duplicates",
-      "status": "refused",
-      "refusal": "UNION is not yet supported by the query method"
+      "status": "passing"
     },
     {
       "id": "values-undef-duplicate-bind",
       "status": "refused",
-      "refusal": "BIND / SELECT expression is not yet supported by the query method"
+      "refusal": "arithmetic expression ?x + \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> is not yet supported by the query method"
     },
     {
       "id": "values-tuple-compatible-join",
@@ -1113,7 +1129,7 @@
     {
       "id": "bind-error-keeps-mapping-unbound",
       "status": "refused",
-      "refusal": "BIND / SELECT expression is not yet supported by the query method"
+      "refusal": "arithmetic expression ?x + \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> is not yet supported by the query method"
     },
     {
       "id": "error-or-true",
@@ -1143,78 +1159,72 @@
     },
     {
       "id": "optional-unbound-versus-empty",
-      "status": "refused",
-      "refusal": "OPTIONAL is not yet supported by the query method"
+      "status": "passing"
     },
     {
       "id": "optional-filter-correlated",
       "status": "refused",
-      "refusal": "OPTIONAL is not yet supported by the query method"
+      "refusal": "arithmetic expression ?score + \"10\"^^<http://www.w3.org/2001/XMLSchema#integer> is not yet supported by the query method"
     },
     {
       "id": "minus-removes-compatible",
-      "status": "refused",
-      "refusal": "MINUS is not yet supported by the query method"
+      "status": "passing"
     },
     {
       "id": "minus-disjoint-domains-keeps-left",
-      "status": "refused",
-      "refusal": "MINUS is not yet supported by the query method"
+      "status": "passing"
     },
     {
       "id": "not-exists-correlated",
-      "status": "refused",
-      "refusal": "EXISTS / NOT EXISTS is not yet supported by the query method"
+      "status": "passing"
     },
     {
       "id": "not-exists-fixed-pattern-removes-all",
-      "status": "refused",
-      "refusal": "EXISTS / NOT EXISTS is not yet supported by the query method"
+      "status": "passing"
     },
     {
       "id": "exists-correlated-filter",
       "status": "refused",
-      "refusal": "EXISTS / NOT EXISTS is not yet supported by the query method"
+      "refusal": "arithmetic expression ?n + \"10\"^^<http://www.w3.org/2001/XMLSchema#integer> is not yet supported by the query method"
     },
     {
       "id": "aggregate-group-having",
       "status": "refused",
-      "refusal": "BIND / SELECT expression is not yet supported by the query method"
+      "refusal": "GROUP BY / aggregate / HAVING is not yet supported by the query method"
     },
     {
       "id": "aggregate-empty-count",
       "status": "refused",
-      "refusal": "BIND / SELECT expression is not yet supported by the query method"
+      "refusal": "GROUP BY / aggregate / HAVING is not yet supported by the query method"
     },
     {
       "id": "aggregate-count-distinct-unbound",
       "status": "refused",
-      "refusal": "BIND / SELECT expression is not yet supported by the query method"
+      "refusal": "GROUP BY / aggregate / HAVING is not yet supported by the query method"
     },
     {
       "id": "aggregate-min-max",
       "status": "refused",
-      "refusal": "BIND / SELECT expression is not yet supported by the query method"
+      "refusal": "GROUP BY / aggregate / HAVING is not yet supported by the query method"
     },
     {
       "id": "aggregate-average-value",
       "status": "refused",
-      "refusal": "subquery is not yet supported by the query method"
+      "refusal": "GROUP BY / aggregate / HAVING is not yet supported by the query method"
     },
     {
       "id": "aggregate-sample-unambiguous",
       "status": "refused",
-      "refusal": "BIND / SELECT expression is not yet supported by the query method"
+      "refusal": "GROUP BY / aggregate / HAVING is not yet supported by the query method"
     },
     {
       "id": "aggregate-group-concat-unambiguous",
       "status": "refused",
-      "refusal": "BIND / SELECT expression is not yet supported by the query method"
+      "refusal": "GROUP BY / aggregate / HAVING is not yet supported by the query method"
     },
     {
       "id": "subquery-project-scope",
-      "status": "refused",
-      "refusal": "subquery is not yet supported by the query method"
+      "status": "passing"
     },
     {
       "id": "ordered-limit-offset",
@@ -1412,8 +1422,7 @@
     },
     {
       "id": "reject-named-graph",
-      "status": "refused",
-      "refusal": "GRAPH is not yet supported by the query method"
+      "status": "not_attempted"
     },
     {
       "id": "reject-from-default",
@@ -1448,7 +1457,7 @@
     {
       "id": "reject-custom-function",
       "status": "refused",
-      "refusal": "BIND / SELECT expression is not yet supported by the query method"
+      "refusal": "<http://example.org/custom> is not yet supported by the query method"
     },
     {
       "id": "reject-now",
@@ -1473,7 +1482,7 @@
     {
       "id": "reject-bnode",
       "status": "refused",
-      "refusal": "BIND / SELECT expression is not yet supported by the query method"
+      "refusal": "BNODE is not yet supported by the query method"
     },
     {
       "id": "reject-dataset-blank-subject",
@@ -1511,12 +1520,12 @@
     {
       "id": "reject-rdf12-triple-function",
       "status": "refused",
-      "refusal": "BIND / SELECT expression is not yet supported by the query method"
+      "refusal": "TRIPLE is excluded by the query method"
     },
     {
       "id": "reject-rdf12-direction-function",
       "status": "refused",
-      "refusal": "BIND / SELECT expression is not yet supported by the query method"
+      "refusal": "STRLANGDIR is not yet supported by the query method"
     },
     {
       "id": "reject-rdf12-direction-literal",
@@ -1526,77 +1535,72 @@
     {
       "id": "not-exists-correlated-filter",
       "status": "refused",
-      "refusal": "EXISTS / NOT EXISTS is not yet supported by the query method"
+      "refusal": "arithmetic expression ?n + \"10\"^^<http://www.w3.org/2001/XMLSchema#integer> is not yet supported by the query method"
     },
     {
       "id": "exists-filter-only-outer-variable",
-      "status": "refused",
-      "refusal": "EXISTS / NOT EXISTS is not yet supported by the query method"
+      "status": "passing"
     },
     {
       "id": "subquery-order-does-not-order-outer-bag",
       "status": "refused",
-      "refusal": "subquery is not yet supported by the query method"
+      "refusal": "ORDER BY is not yet supported by the query method"
     },
     {
       "id": "exists-minus-disjoint-domain-after-substitution",
-      "status": "refused",
-      "refusal": "EXISTS / NOT EXISTS is not yet supported by the query method"
+      "status": "passing"
     },
     {
       "id": "reject-exists-optional",
-      "status": "refused",
-      "refusal": "EXISTS / NOT EXISTS is not yet supported by the query method"
+      "status": "not_attempted"
     },
     {
       "id": "reject-exists-values",
-      "status": "refused",
-      "refusal": "EXISTS / NOT EXISTS is not yet supported by the query method"
+      "status": "not_attempted"
     },
     {
       "id": "reject-exists-bind",
       "status": "refused",
-      "refusal": "EXISTS / NOT EXISTS is not yet supported by the query method"
+      "refusal": "arithmetic expression ?n + \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> is not yet supported by the query method"
     },
     {
       "id": "reject-exists-subquery",
-      "status": "refused",
-      "refusal": "EXISTS / NOT EXISTS is not yet supported by the query method"
+      "status": "not_attempted"
     },
     {
       "id": "reject-exists-aggregate",
       "status": "refused",
-      "refusal": "EXISTS / NOT EXISTS is not yet supported by the query method"
+      "refusal": "GROUP BY / aggregate / HAVING is not yet supported by the query method"
     },
     {
       "id": "reject-exists-ordered-slice",
       "status": "refused",
-      "refusal": "EXISTS / NOT EXISTS is not yet supported by the query method"
+      "refusal": "ORDER BY is not yet supported by the query method"
     },
     {
       "id": "reject-exists-nullable-path",
       "status": "refused",
-      "refusal": "EXISTS / NOT EXISTS is not yet supported by the query method"
+      "refusal": "property path is not yet supported by the query method"
     },
     {
       "id": "reject-exists-residual-path",
       "status": "refused",
-      "refusal": "EXISTS / NOT EXISTS is not yet supported by the query method"
+      "refusal": "property path is not yet supported by the query method"
     },
     {
       "id": "reject-exists-nested-exists",
       "status": "refused",
-      "refusal": "EXISTS / NOT EXISTS is not yet supported by the query method"
+      "refusal": "capacity refusal: plan structure"
     },
     {
       "id": "reject-exists-nested-not-exists",
       "status": "refused",
-      "refusal": "EXISTS / NOT EXISTS is not yet supported by the query method"
+      "refusal": "capacity refusal: plan structure"
     },
     {
       "id": "reject-exists-nested-in-function",
       "status": "refused",
-      "refusal": "EXISTS / NOT EXISTS is not yet supported by the query method"
+      "refusal": "EXISTS in a value expression is not yet supported by the query method"
     },
     {
       "id": "nullable-path-alternative-absent-constant",

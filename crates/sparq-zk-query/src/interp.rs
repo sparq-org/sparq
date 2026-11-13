@@ -3,6 +3,9 @@
 //! Credential cells are a stand-in pending the suite lane's `open_credential`.
 //! This module does not authenticate a credential or implement a cryptosuite.
 
+#[path = "interp_closed.rs"]
+mod closed;
+
 use crate::{plan::*, Error};
 use oxrdf::Term;
 use std::collections::BTreeSet;
@@ -142,6 +145,7 @@ pub fn evaluate(
         let input = |id: NodeId| &tables[id as usize].rows;
         let schema = |id: NodeId| &plan.nodes[id as usize].output.variables;
         let mut rows = match &node.operator {
+            Operator::Closed(op) => closed::evaluate(op, node, plan, &tables, &dataset, credentials, &params)?,
             Operator::Unit => vec![vec![]],
             Operator::Scan(pattern) => {
                 let mut rows = vec![];

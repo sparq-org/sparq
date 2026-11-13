@@ -7,6 +7,7 @@ pub mod driver;
 pub mod interp;
 pub mod lower;
 pub mod plan;
+pub mod plan_closed;
 pub mod request;
 pub mod statement;
 pub mod witness;
