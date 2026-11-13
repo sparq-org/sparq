@@ -1,5 +1,10 @@
 //! Admission from the workspace SPARQL parser. Refusals always name the construct.
 
+pub mod expr;
+#[cfg(test)]
+mod expr_semantics;
+#[cfg(test)]
+mod expr_tests;
 mod n0;
 
 use crate::{capacity::Bounds, plan::*, Error};

@@ -1,6 +1,6 @@
 #[path = "support/authenticated.rs"]
 mod authenticated;
-#[path = "support/mod.rs"]
+#[path = "support/fixture.rs"]
 mod fixture_support;
 #[path = "../../sparq-zk-compose/tests/support/mod.rs"]
 mod support;
@@ -189,7 +189,7 @@ fn suite_program_checks_authentication_membership_keys_and_credential_limits() {
     let narrow = plan.clone().with_credential_quad_bounds(&[1]).unwrap();
     let statement = Statement {
         request_digest: [7; 32],
-        input_commitment: sparq_zk_query::credential::dataset_commitment(&data, [3; 32]),
+        input_commitment: sparq_zk_query::credential::dataset_commitment(&data, [3; 32]).unwrap(),
         signature_mode: 1,
         result: trace.result.clone(),
     };
@@ -260,6 +260,7 @@ fn incorrect_key_signed_witness(
         credential.credential.count,
         hash_root,
         &config,
+        credential.metadata().unwrap().digest,
     );
     let key = sig::SecretKey::from_seed(19);
     let signature = sig::sign_deterministic(&key, &message);

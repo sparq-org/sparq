@@ -1,4 +1,4 @@
-#[path = "support/mod.rs"]
+#[path = "support/fixture.rs"]
 mod fixture_support;
 #[path = "../../sparq-zk-compose/tests/support/mod.rs"]
 mod support;
@@ -801,4 +801,56 @@ fn authenticated_issuer_policy_is_part_of_the_canonical_request() {
     assert_ne!(request.digest(), other.digest());
     assert!(request.canonical_rdf().contains("issuerRoot"));
     assert_eq!(request.issuer_root().unwrap(), authenticated::issuer_root());
+}
+
+#[test]
+fn authenticated_request_admits_and_binds_typed_envelope_properties() {
+    use sparq_zk_query::statement::EnvelopeInputs;
+    let plan = sparq_zk_query::lower::lower("ASK {}", B).unwrap();
+    let key = vec![1, 2, 3];
+    let prepared = Prepared {
+        descriptor: sparq_zk_query::request::descriptor(&plan, &key).unwrap(),
+        plan,
+        verification_key: key.clone(),
+        artifact: serde_json::Value::Null,
+    };
+    let base = stored(&prepared, "ASK {}", 7, "urn:verifier", None);
+    let mut requirements = requirements_spec(base.requirements());
+    requirements.source_evidence = Some(SourceEvidence::IssuerAuthenticated);
+    requirements.accepted_suites = vec![id(sparq_zk_query::request::SUITE)];
+    requirements.holder = Some(HolderPolicy::Required);
+    requirements.status = Some(StatusPolicy::Required);
+    let mut spec = request_spec(&base);
+    spec.requirements = QueryRequirements::new(requirements).unwrap();
+    let stored = StoredRequest::new(spec).unwrap();
+    let mut policy = EnvelopeInputs::issuer_only(authenticated::issuer_root());
+    policy.holder_required = true;
+    policy.status_required = true;
+    policy.validity_required = true;
+    policy.now = 1u64 << 40;
+    policy.freshness_required = true;
+    policy.earliest_created = 1u64 << 39;
+    policy.snapshot_root[31] = 7;
+    let request = Request::new_authenticated_with_policy(
+        stored.clone(),
+        B,
+        key.clone(),
+        policy.clone(),
+        None,
+    )
+    .unwrap();
+    assert_eq!(request.envelope_inputs().unwrap(), policy);
+    assert_eq!(request.plan().unwrap().canonical_bytes(), prepared.plan.canonical_bytes());
+    let mut altered = policy.clone();
+    altered.earliest_created += 1;
+    let other =
+        Request::new_authenticated_with_policy(stored.clone(), B, key.clone(), altered, None)
+            .unwrap();
+    assert_ne!(request.digest(), other.digest());
+    let mut altered = policy;
+    altered.holder_required = false;
+    assert_eq!(
+        Request::new_authenticated_with_policy(stored, B, key, altered, None).unwrap_err(),
+        Error::Invalid("request and envelope policy".into())
+    );
 }

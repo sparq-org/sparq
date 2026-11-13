@@ -48,7 +48,7 @@ fn join_values_membership_and_ask_are_gadget_calls() {
     for op in ["join", "values", "ask"] {
         assert!(source.contains(&format!("ops_core::{op}(")));
     }
-    assert!(source.contains("ops_core_expr::evaluate("));
+    assert!(source.contains("ops_core_expr::evaluate_indexed("));
     assert_eq!(p.files.len(), 3);
 }
 
@@ -111,4 +111,35 @@ fn heterogeneous_credential_buckets_are_shape_and_their_limits_are_public_inputs
     }
     assert!(a.clone().with_credential_quad_bounds(&[8, 16]).is_err());
     assert!(a.with_credential_quad_bounds(&[0, 16, 64, 8]).is_err());
+}
+
+#[test]
+fn public_constant_lists_and_rule_values_do_not_change_the_program_shape() {
+    let mut reference = None;
+    for length in 0..=sparq_zk_query::plan::IN_CAPACITY {
+        let members = (0..length)
+            .map(|i| format!("\"medicine-{i}\""))
+            .collect::<Vec<_>>()
+            .join(",");
+        let query=format!("SELECT ?s WHERE {{ ?g <urn:issuer-predicate:{length}> <urn:issuer:{length}> . ?s <urn:n:{length}> ?n . ?s <urn:date:{length}> ?d . ?s <urn:med:{length}> ?m . FILTER(?n >= {length} && ?d >= \"2026-11-13\"^^<http://www.w3.org/2001/XMLSchema#date> && ?m IN ({members})) }}");
+        let plan = lower(&query, B).unwrap();
+        let current = (plan.hash(), generate(&plan).unwrap());
+        if let Some(reference) = &reference {
+            assert_eq!(&current, reference);
+        } else {
+            reference = Some(current);
+        }
+    }
+    let members = (0..=sparq_zk_query::plan::IN_CAPACITY)
+        .map(|i| i.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    assert_eq!(
+        lower(
+            &format!("ASK {{?s <urn:p> ?x FILTER(?x IN ({members}))}}"),
+            B
+        )
+        .unwrap_err(),
+        sparq_zk_query::Error::Capacity("IN list".into())
+    );
 }

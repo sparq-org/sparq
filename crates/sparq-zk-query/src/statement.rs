@@ -27,6 +27,106 @@ pub struct Statement {
     pub result: ResultValue,
 }
 
+/// Verifier-stored envelope policy in its public-input order.
+/// Lane E derives these values from its typed policy; presentations never supply them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnvelopeInputs {
+    pub issuer_root: Word,
+    pub issuer_depth: u32,
+    pub holder_required: bool,
+    pub holder_issuers_present: bool,
+    pub holder_issuer_count: u32,
+    pub holder_issuers: [Word; 4],
+    pub status_required: bool,
+    pub allow_missing_status: bool,
+    pub snapshot_root: Word,
+    pub snapshot_depth: u32,
+    pub validity_required: bool,
+    pub now: u64,
+    pub freshness_required: bool,
+    pub earliest_created: u64,
+}
+impl EnvelopeInputs {
+    /// Existing issuer-membership profile, pending the canonical policy-root integration.
+    pub fn issuer_only(issuer_root: Word) -> Self {
+        Self {
+            issuer_root,
+            issuer_depth: crate::credential::ISSUER_DEPTH,
+            holder_required: false,
+            holder_issuers_present: false,
+            holder_issuer_count: 0,
+            holder_issuers: [[0; 32]; 4],
+            status_required: false,
+            allow_missing_status: false,
+            snapshot_root: [0; 32],
+            snapshot_depth: 0,
+            validity_required: false,
+            now: 0,
+            freshness_required: false,
+            earliest_created: 0,
+        }
+    }
+    pub fn validate(&self) -> Result<(), Error> {
+        field(self.issuer_root)?;
+        field(self.snapshot_root)?;
+        let n = self.holder_issuer_count as usize;
+        if n > self.holder_issuers.len()
+            || (!self.holder_required && self.holder_issuers_present)
+            || (!self.holder_issuers_present && n != 0)
+            || self.holder_issuers[n..].iter().any(|w| *w != [0; 32])
+            || self.holder_issuers[..n]
+                .iter()
+                .any(|w| *w == [0; 32] || field(*w).is_err())
+            || self.holder_issuers[..n].windows(2).any(|p| p[0] >= p[1])
+            || (!self.status_required
+                && (self.allow_missing_status
+                    || self.snapshot_root != [0; 32]
+                    || self.snapshot_depth != 0))
+            || (!self.validity_required && self.now != 0)
+            || (!self.freshness_required && self.earliest_created != 0)
+        {
+            return Err(Error::Invalid("noncanonical envelope policy".into()));
+        }
+        Ok(())
+    }
+    pub fn words(&self) -> Result<Vec<Word>, Error> {
+        self.validate()?;
+        let mut words = vec![
+            self.issuer_root,
+            number(u64::from(self.issuer_depth)),
+            number(u64::from(self.holder_required)),
+            number(u64::from(self.holder_issuers_present)),
+            number(u64::from(self.holder_issuer_count)),
+        ];
+        words.extend(self.holder_issuers);
+        words.extend([
+            number(u64::from(self.status_required)),
+            number(u64::from(self.allow_missing_status)),
+            self.snapshot_root,
+            number(u64::from(self.snapshot_depth)),
+            number(u64::from(self.validity_required)),
+            number(self.now),
+            number(u64::from(self.freshness_required)),
+            number(self.earliest_created),
+        ]);
+        Ok(words)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn require_consumer(&self) -> Result<(), Error> {
+        if self.issuer_depth != crate::credential::ISSUER_DEPTH
+            || self.holder_required
+            || self.status_required
+            || self.validity_required
+            || self.freshness_required
+        {
+            return Err(Error::Unsupported(
+                "credential envelope policy integration".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// One source for public declarations, field flattening and ABI auditing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Layout {
@@ -79,7 +179,9 @@ impl Layout {
     }
     fn groups_authenticated(&self) -> Vec<(&'static str, Abi)> {
         let mut groups = self.groups();
-        groups.insert(groups.len() - 1, ("issuer_root", Abi::Field));
+        for group in Self::envelope_groups() {
+            groups.insert(groups.len() - 1, group);
+        }
         groups.insert(
             groups.len() - 1,
             (
@@ -88,6 +190,31 @@ impl Layout {
             ),
         );
         groups
+    }
+    fn envelope_groups() -> Vec<(&'static str, Abi)> {
+        vec![
+            ("issuer_root", Abi::Field),
+            ("issuer_depth", Abi::UInt(32)),
+            ("holder_required", Abi::Bool),
+            ("holder_issuers_present", Abi::Bool),
+            ("holder_issuer_count", Abi::UInt(32)),
+            ("holder_issuers", Abi::array(Abi::Field, 4)),
+            ("status_required", Abi::Bool),
+            ("allow_missing_status", Abi::Bool),
+            ("snapshot_root", Abi::Field),
+            ("snapshot_depth", Abi::UInt(32)),
+            ("validity_required", Abi::Bool),
+            ("now", Abi::UInt(64)),
+            ("freshness_required", Abi::Bool),
+            ("earliest_created", Abi::UInt(64)),
+        ]
+    }
+    pub(crate) fn envelope_arguments() -> String {
+        Self::envelope_groups()
+            .iter()
+            .map(|(name, _)| *name)
+            .collect::<Vec<_>>()
+            .join(", ")
     }
     pub fn declarations_authenticated(&self) -> String {
         self.groups_authenticated()
@@ -101,10 +228,21 @@ impl Layout {
         statement: &Statement,
         issuer_root: Word,
     ) -> Result<Vec<Word>, Error> {
-        crate::credential::field(issuer_root)?;
+        self.reconstruct_authenticated_with_envelope(
+            plan,
+            statement,
+            &EnvelopeInputs::issuer_only(issuer_root),
+        )
+    }
+    pub fn reconstruct_authenticated_with_envelope(
+        &self,
+        plan: &Plan,
+        statement: &Statement,
+        envelope: &EnvelopeInputs,
+    ) -> Result<Vec<Word>, Error> {
         let mut words =
             self.reconstruct_words(plan, statement, &crate::credential::SuiteEncoder, 1)?;
-        words.push(issuer_root);
+        words.extend(envelope.words()?);
         let mut bounds = plan.credential_quad_bounds();
         bounds.resize(self.credentials, 0);
         words.extend(bounds.into_iter().map(|n| number(u64::from(n))));
@@ -387,6 +525,35 @@ fn structure(value: &serde_json::Value, expected: &[(&str, Abi)]) -> bool {
 #[cfg(test)]
 mod literal_tests {
     use super::*;
+
+    #[test]
+    fn noir_expression_numeric_offset_matches_the_suite() {
+        use crate::interp::EncodeTerm;
+        let zero = oxrdf::Literal::new_typed_literal(
+            "0",
+            oxrdf::NamedNode::new_unchecked("http://www.w3.org/2001/XMLSchema#integer"),
+        );
+        let expected = crate::credential::SuiteEncoder
+            .encode(&zero.into())
+            .unwrap()
+            .key;
+        for source in [
+            include_str!("../../../zk/noir-query/core/src/ops_core_expr.nr"),
+            include_str!("../../../zk/noir-query/core/src/ops_core_tests.nr"),
+        ] {
+            let literal = source
+                .split("let zero: Field = ")
+                .nth(1)
+                .unwrap()
+                .split(';')
+                .next()
+                .unwrap();
+            assert_eq!(
+                field(expected).unwrap(),
+                field_from_hex_str_strict(literal).unwrap()
+            );
+        }
+    }
 
     #[test]
     fn noir_domains_are_literals_equal_to_the_host_domains() {

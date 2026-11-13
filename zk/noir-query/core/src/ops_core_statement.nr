@@ -84,26 +84,90 @@ pub fn check_suite_dataset<let C: u32>(messages: [Field; C], count: u32, salt: [
     assert(hash_sha256::sha256_var(bytes, 48 + count * 32) == commitment, "suite dataset commitment");
 }
 
+/// Canonical policy words. Policy enforcement is supplied by the envelope consumer.
+pub fn envelope_words(
+    issuer_root: Field, issuer_depth: u32, holder_required: bool, holder_issuers_present: bool,
+    holder_issuer_count: u32, holder_issuers: [Field;4], status_required: bool,
+    allow_missing_status: bool, snapshot_root: Field, snapshot_depth: u32,
+    validity_required: bool, now: u64, freshness_required: bool, earliest_created: u64,
+) -> [Field;17] {
+    assert(holder_issuer_count <= 4, "holder issuer capacity");
+    assert(holder_required | !holder_issuers_present, "inactive holder policy");
+    assert(holder_issuers_present | (holder_issuer_count == 0), "holder issuer presence");
+    for i in 0..4 {
+        if i < holder_issuer_count {
+            assert(holder_issuers[i] != 0, "zero holder issuer");
+            if i > 0 { assert(crate::term::field_lt(holder_issuers[i-1], holder_issuers[i]), "holder issuer order"); }
+        } else { assert(holder_issuers[i] == 0, "holder issuer padding"); }
+    }
+    assert(status_required | (!allow_missing_status & (snapshot_root == 0) & (snapshot_depth == 0)), "inactive status policy");
+    assert(validity_required | (now == 0), "inactive validity policy");
+    assert(freshness_required | (earliest_created == 0), "inactive freshness policy");
+    [issuer_root, issuer_depth as Field, holder_required as Field, holder_issuers_present as Field,
+        holder_issuer_count as Field, holder_issuers[0], holder_issuers[1], holder_issuers[2], holder_issuers[3],
+        status_required as Field, allow_missing_status as Field, snapshot_root, snapshot_depth as Field,
+        validity_required as Field, now as Field, freshness_required as Field, earliest_created as Field]
+}
+#[test]
+fn envelope_word_order_and_wide_timestamps() {
+    assert(envelope_words(9, 4, true, true, 2, [3,5,0,0], true, true, 7, 3, true,
+        0x100000000, true, 0x100000001) == [9,4,1,1,2,3,5,0,0,1,1,7,3,1,0x100000000,1,0x100000001]);
+}
+#[test]
+fn envelope_inactive_values_are_zero() {
+    assert(envelope_words(9,4,false,false,0,[0;4],false,false,0,0,false,0,false,0)
+        == [9,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]);
+}
+#[test(should_fail_with = "inactive holder policy")]
+fn envelope_inactive_holder() { let _ = envelope_words(9,4,false,true,1,[3,0,0,0],false,false,0,0,false,0,false,0); }
+#[test(should_fail_with = "holder issuer presence")]
+fn envelope_issuer_presence() { let _ = envelope_words(9,4,true,false,1,[3,0,0,0],false,false,0,0,false,0,false,0); }
+#[test(should_fail_with = "holder issuer capacity")]
+fn envelope_issuer_capacity() { let _ = envelope_words(9,4,true,true,5,[3,5,7,9],false,false,0,0,false,0,false,0); }
+#[test(should_fail_with = "zero holder issuer")]
+fn envelope_zero_issuer() { let _ = envelope_words(9,4,true,true,1,[0;4],false,false,0,0,false,0,false,0); }
+#[test(should_fail_with = "holder issuer padding")]
+fn envelope_issuer_padding() { let _ = envelope_words(9,4,true,true,1,[3,5,0,0],false,false,0,0,false,0,false,0); }
+#[test(should_fail_with = "holder issuer order")]
+fn envelope_issuer_order() { let _ = envelope_words(9,4,true,true,2,[5,3,0,0],false,false,0,0,false,0,false,0); }
+#[test(should_fail_with = "holder issuer order")]
+fn envelope_issuer_unique() { let _ = envelope_words(9,4,true,true,2,[3,3,0,0],false,false,0,0,false,0,false,0); }
+#[test(should_fail_with = "inactive status policy")]
+fn envelope_inactive_status() { let _ = envelope_words(9,4,false,false,0,[0;4],false,true,0,0,false,0,false,0); }
+#[test(should_fail_with = "inactive status policy")]
+fn envelope_inactive_snapshot_root() { let _ = envelope_words(9,4,false,false,0,[0;4],false,false,7,0,false,0,false,0); }
+#[test(should_fail_with = "inactive status policy")]
+fn envelope_inactive_snapshot_depth() { let _ = envelope_words(9,4,false,false,0,[0;4],false,false,0,3,false,0,false,0); }
+#[test(should_fail_with = "inactive validity policy")]
+fn envelope_inactive_time() { let _ = envelope_words(9,4,false,false,0,[0;4],false,false,0,0,false,1,false,0); }
+#[test(should_fail_with = "inactive freshness policy")]
+fn envelope_inactive_freshness() { let _ = envelope_words(9,4,false,false,0,[0;4],false,false,0,0,false,0,false,1); }
+fn issuer_only_envelope(root: Field) -> [Field;17] {
+    envelope_words(root,4,false,false,0,[0;4],false,false,0,0,false,0,false,0)
+}
+
 pub fn bind_select_authenticated<let C: u32, let P: u32, let I: u32, let R: u32, let V: u32>(
-    issuer_root: Field, credential_quad_bounds: [u32; C], request_digest: [u8; 32], input_commitment: [u8; 32], signature_mode: u8,
+    envelope: [Field;17], credential_quad_bounds: [u32; C], request_digest: [u8; 32], input_commitment: [u8; 32], signature_mode: u8,
     bounds: [u32; 3], parameters: [TermCell; P], indices: [u32; I],
     result: Table<R, V>, statement_binding: Field,
 ) {
     let mut state = prefix(request_digest, input_commitment, signature_mode, bounds, parameters, indices);
     for row in result.rows { for cell in row { state = absorb_cell(state, cell); } }
     state = h2(state, result.len as Field);
-    let mut state = h2(state, issuer_root);
+    let mut state = state;
+    for word in envelope { state = h2(state, word); }
     for bound in credential_quad_bounds { state = h2(state, bound as Field); }
     assert(state == statement_binding, "authenticated statement binding");
 }
 
 pub fn bind_ask_authenticated<let C: u32, let P: u32, let I: u32>(
-    issuer_root: Field, credential_quad_bounds: [u32; C], request_digest: [u8; 32], input_commitment: [u8; 32], signature_mode: u8,
+    envelope: [Field;17], credential_quad_bounds: [u32; C], request_digest: [u8; 32], input_commitment: [u8; 32], signature_mode: u8,
     bounds: [u32; 3], parameters: [TermCell; P], indices: [u32; I],
     result: bool, statement_binding: Field,
 ) {
     let state = h2(prefix(request_digest, input_commitment, signature_mode, bounds, parameters, indices), result as Field);
-    let mut state = h2(state, issuer_root);
+    let mut state = state;
+    for word in envelope { state = h2(state, word); }
     for bound in credential_quad_bounds { state = h2(state, bound as Field); }
     assert(state == statement_binding, "authenticated statement binding");
 }
@@ -120,32 +184,39 @@ fn suite_dataset_message_padding_is_canonical() {
 fn suite_dataset_commitment_is_bound() { check_suite_dataset([0],0,[0;32],[0;32]); }
 #[test]
 fn authenticated_ask_vector_matches_the_host() {
-    bind_ask_authenticated(9,[4],[0;32],[0;32],1,[1,4,2],[crate::table::unbound()],[0],true,
-        0x2b935ec2af78e8ecc1c6e20422008a2f38b105b86cd3d6b1670a70d2aa93606d);
+    bind_ask_authenticated(issuer_only_envelope(9),[4],[0;32],[0;32],1,[1,4,2],[crate::table::unbound()],[0],true,
+        0x24f30c25df1c0fc5b5f48ffa5334cf17f017543a3de15e9efd687707e13ec18d);
 }
 #[test(should_fail_with = "authenticated statement binding")]
 fn authenticated_ask_binds_the_issuer_root() {
-    bind_ask_authenticated(10,[4],[0;32],[0;32],1,[1,4,2],[crate::table::unbound()],[0],true,
-        0x2b935ec2af78e8ecc1c6e20422008a2f38b105b86cd3d6b1670a70d2aa93606d);
+    bind_ask_authenticated(issuer_only_envelope(10),[4],[0;32],[0;32],1,[1,4,2],[crate::table::unbound()],[0],true,
+        0x24f30c25df1c0fc5b5f48ffa5334cf17f017543a3de15e9efd687707e13ec18d);
 }
 #[test(should_fail_with = "authenticated statement binding")]
 fn authenticated_ask_binds_each_quad_limit() {
-    bind_ask_authenticated(9,[3],[0;32],[0;32],1,[1,4,2],[crate::table::unbound()],[0],true,
-        0x2b935ec2af78e8ecc1c6e20422008a2f38b105b86cd3d6b1670a70d2aa93606d);
+    bind_ask_authenticated(issuer_only_envelope(9),[3],[0;32],[0;32],1,[1,4,2],[crate::table::unbound()],[0],true,
+        0x24f30c25df1c0fc5b5f48ffa5334cf17f017543a3de15e9efd687707e13ec18d);
 }
 
 #[test]
 fn authenticated_select_vector_matches_the_host() {
-    bind_select_authenticated(9,[4],[0;32],[0;32],1,[1,4,2],[crate::table::unbound()],[0],crate::table::empty::<2,1>(),
-        0x184c7bfc730c1ca93b627200ff585a102373ceddfb799a10f18ae1e0ace96220);
+    bind_select_authenticated(issuer_only_envelope(9),[4],[0;32],[0;32],1,[1,4,2],[crate::table::unbound()],[0],crate::table::empty::<2,1>(),
+        0x2838f9a4ff1acbd2604d8b50f2ddd4e8073784c67a8c56d8a7368d13a0239b5d);
 }
 #[test(should_fail_with = "authenticated statement binding")]
 fn authenticated_select_binds_the_issuer_root() {
-    bind_select_authenticated(10,[4],[0;32],[0;32],1,[1,4,2],[crate::table::unbound()],[0],crate::table::empty::<2,1>(),
-        0x184c7bfc730c1ca93b627200ff585a102373ceddfb799a10f18ae1e0ace96220);
+    bind_select_authenticated(issuer_only_envelope(10),[4],[0;32],[0;32],1,[1,4,2],[crate::table::unbound()],[0],crate::table::empty::<2,1>(),
+        0x2838f9a4ff1acbd2604d8b50f2ddd4e8073784c67a8c56d8a7368d13a0239b5d);
 }
 #[test(should_fail_with = "authenticated statement binding")]
 fn authenticated_select_binds_each_quad_limit() {
-    bind_select_authenticated(9,[3],[0;32],[0;32],1,[1,4,2],[crate::table::unbound()],[0],crate::table::empty::<2,1>(),
-        0x184c7bfc730c1ca93b627200ff585a102373ceddfb799a10f18ae1e0ace96220);
+    bind_select_authenticated(issuer_only_envelope(9),[3],[0;32],[0;32],1,[1,4,2],[crate::table::unbound()],[0],crate::table::empty::<2,1>(),
+        0x2838f9a4ff1acbd2604d8b50f2ddd4e8073784c67a8c56d8a7368d13a0239b5d);
+}
+
+#[test]
+fn explicit_empty_holder_scope_differs_from_all_trusted_issuers() {
+    let all=envelope_words(9,4,true,false,0,[0;4],false,false,0,0,false,0,false,0);
+    let none=envelope_words(9,4,true,true,0,[0;4],false,false,0,0,false,0,false,0);
+    assert(all[3] == 0);assert(none[3] == 1);
 }

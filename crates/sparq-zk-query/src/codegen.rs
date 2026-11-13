@@ -124,7 +124,7 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
         )
         .unwrap();
         for (c, n) in capacities.iter().enumerate() {
-            writeln!(source,"    let opened_{c} = core::ops_core_suite::open_one(credential_{c}, credential_proof_{c}, counts[{c}], credential_flags[{c}], credential_quad_bounds[{c}], {c}, issuer_root);").unwrap();
+            writeln!(source,"    let opened_{c} = core::ops_core_suite::open_one(credential_{c}, credential_proof_{c}, counts[{c}], credential_flags[{c}], credential_quad_bounds[{c}], {c}, issuer_root, request_digest);").unwrap();
             let prior = if c == 0 {
                 "dataset_start".to_owned()
             } else {
@@ -201,11 +201,12 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
                     expr,
                     &plan.nodes[*a as usize].output.variables,
                     &term_ids,
+                    &index_ids,
                     &mut steps,
                 );
                 writeln!(
                     source,
-                    "    let predicate_{i} = ops_core_expr::evaluate(t{a}, parameters, {});",
+                    "    let predicate_{i} = ops_core_expr::evaluate_indexed(t{a}, parameters, indices, {});",
                     array(steps.iter().map(Step::source))
                 )
                 .unwrap();
@@ -254,8 +255,16 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
     } else {
         binder.to_owned()
     };
+    if authenticated {
+        writeln!(
+            source,
+            "    let envelope = ops_core_statement::envelope_words({});",
+            crate::statement::Layout::envelope_arguments()
+        )
+        .unwrap();
+    }
     let issuer_argument = if authenticated {
-        "issuer_root, credential_quad_bounds, "
+        "envelope, credential_quad_bounds, "
     } else {
         ""
     };
@@ -289,7 +298,13 @@ impl Step {
     }
 }
 
-fn expression(e: &Expr, schema: &[Var], parameters: &[u32], steps: &mut Vec<Step>) -> usize {
+fn expression(
+    e: &Expr,
+    schema: &[Var],
+    parameters: &[u32],
+    indices: &[u32],
+    steps: &mut Vec<Step>,
+) -> usize {
     let step = match e {
         Expr::Term(Slot::Variable(v)) => Step {
             op: 0,
@@ -306,8 +321,8 @@ fn expression(e: &Expr, schema: &[Var], parameters: &[u32], steps: &mut Vec<Step
         },
         Expr::Compare(op, a, b) => Step {
             op: 2,
-            a: expression(a, schema, parameters, steps),
-            b: expression(b, schema, parameters, steps),
+            a: expression(a, schema, parameters, indices, steps),
+            b: expression(b, schema, parameters, indices, steps),
             comparison: match op {
                 Compare::Equal => 0,
                 Compare::Less => 1,
@@ -319,12 +334,12 @@ fn expression(e: &Expr, schema: &[Var], parameters: &[u32], steps: &mut Vec<Step
         },
         Expr::And(a, b) | Expr::Or(a, b) => Step {
             op: if matches!(e, Expr::And(..)) { 3 } else { 4 },
-            a: expression(a, schema, parameters, steps),
-            b: expression(b, schema, parameters, steps),
+            a: expression(a, schema, parameters, indices, steps),
+            b: expression(b, schema, parameters, indices, steps),
             ..Step::default()
         },
         Expr::Not(a) => {
-            let a = expression(a, schema, parameters, steps);
+            let a = expression(a, schema, parameters, indices, steps);
             Step {
                 op: 5,
                 a,
@@ -332,18 +347,35 @@ fn expression(e: &Expr, schema: &[Var], parameters: &[u32], steps: &mut Vec<Step
                 ..Step::default()
             }
         }
+        Expr::InList {
+            value,
+            start,
+            count,
+        } => Step {
+            op: 8,
+            a: expression(value, schema, parameters, indices, steps),
+            b: indices
+                .iter()
+                .position(|p| p == count)
+                .expect("IN length parameter"),
+            parameter: parameters
+                .iter()
+                .position(|p| p == start)
+                .expect("IN term parameter"),
+            ..Step::default()
+        },
         Expr::In(a, bs) => {
-            let operand = expression(a, schema, parameters, steps);
+            let operand = expression(a, schema, parameters, indices, steps);
             let mut accumulator = steps.len();
             steps.push(Step {
                 op: 7,
                 ..Step::default()
             });
             for b in bs {
-                let rhs = expression(b, schema, parameters, steps);
+                let rhs = expression(b, schema, parameters, indices, steps);
                 let comparison = steps.len();
                 steps.push(Step {
-                    op: 2,
+                    op: 6,
                     a: operand,
                     b: rhs,
                     ..Step::default()

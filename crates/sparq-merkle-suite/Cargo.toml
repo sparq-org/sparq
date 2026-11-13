@@ -8,6 +8,11 @@ publish = false
 description = "Research-grade RDF Merkle credential suites shared by native and Noir callers"
 readme = "README.md"
 
+[features]
+default = ["os-random"]
+# Entropy acquisition stays outside the deterministic suite implementation.
+os-random = ["dep:getrandom"]
+
 [dependencies]
 oxrdf.workspace = true
 oxttl.workspace = true
@@ -16,6 +21,14 @@ ed25519-dalek = "2"
 sparq-canon = { path = "../sparq-canon" }
 sparq-zk = { path = "../sparq-zk" }
 ark-ff = { version = "0.6", default-features = false }
+getrandom = { version = "0.4", optional = true }
+
+# Existing RDF and curve dependencies use these entropy backends. Selecting
+# their supported JS implementations keeps the same core buildable for Node.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.4", features = ["wasm_js"] }
+getrandom_legacy = { package = "getrandom", version = "0.2", features = ["js"] }
+getrandom_current = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
 
 [dev-dependencies]
 sparq-core = { path = "../sparq-core" }

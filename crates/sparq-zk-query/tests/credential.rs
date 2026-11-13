@@ -1,6 +1,6 @@
 #[path = "support/authenticated.rs"]
 mod authenticated;
-#[path = "support/mod.rs"]
+#[path = "support/fixture.rs"]
 mod fixture_support;
 use sparq_zk_query::{
     capacity::Bounds,
@@ -73,7 +73,8 @@ fn suite_credentials_feed_the_same_exact_interpreter_and_public_layout() {
         );
         let statement = Statement {
             request_digest: [7; 32],
-            input_commitment: sparq_zk_query::credential::dataset_commitment(&data, [3; 32]),
+            input_commitment: sparq_zk_query::credential::dataset_commitment(&data, [3; 32])
+                .unwrap(),
             signature_mode: 1,
             result: trace.result,
         };
@@ -207,4 +208,27 @@ fn suite_value_keys_preserve_false_ebv_and_refuse_pending_lexical_ebv() {
         evaluate(&plan, &[], &SuiteEncoder).unwrap_err(),
         Error::Unsupported("language-tagged effective boolean value".into())
     );
+}
+
+#[test]
+fn credentials_cannot_supply_the_method_issuer_assertion() {
+    let credential = authenticated::sign(
+        "<urn:s> <https://w3id.org/sparq/vcq#verifiedIssuer> <urn:issuer> .",
+        0,
+    );
+    assert_eq!(
+        credential.cells(0).unwrap_err(),
+        Error::Excluded("credential verifiedIssuer assertion".into())
+    );
+}
+#[test]
+fn presentation_graph_names_use_the_shared_suite_constructor() {
+    let first = sparq_zk_query::credential::credential_graph([7; 32], 0).unwrap();
+    let other_slot = sparq_zk_query::credential::credential_graph([7; 32], 1).unwrap();
+    let other_request = sparq_zk_query::credential::credential_graph([8; 32], 0).unwrap();
+    assert_eq!(first.kind, 2);
+    assert_eq!(first.scope, 1);
+    assert_ne!(first.enc, other_slot.enc);
+    assert_ne!(first.enc, other_request.enc);
+    assert!(sparq_zk_query::credential::credential_graph([7; 32], u32::MAX).is_err());
 }

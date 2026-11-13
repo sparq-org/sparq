@@ -8,3 +8,5 @@ compiler_version = ">=1.0.0"
 poseidon = { git = "https://github.com/noir-lang/poseidon", tag = "v0.3.0" }
 compose = { path = "../../compose/compose_core" }
 hash_sha256 = { git = "https://github.com/noir-lang/sha256", tag = "v0.3.0" }
+sparq_ieee754 = { git = "https://github.com/sparq-org/noir_IEEE754", tag = "v0.11.0" }
+sparq_xpath = { git = "https://github.com/sparq-org/noir_XPath", tag = "v0.3.0", directory = "xpath" }
