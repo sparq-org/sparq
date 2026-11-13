@@ -7,13 +7,13 @@
 // proves it with `@aztec/bb.js` (UltraHonk, the same prover the native crate drives
 // over its `bb` subprocess) entirely in your tab:
 //
-//   private witness: the holder's exact age (the decimal digits)
+//   witness:         the holder's exact age (the decimal digits)
 //   public inputs:   challenge, operand_enc (the committed term anchor), op (≥),
-//                    bound (25), expected (true)  — the age itself is NEVER public.
+//                    bound (25), expected (true).
 //
 // The circuit (`sparq_zk_compose_core::filter_int`) rebuilds the canonical
 // `"<digits>"^^xsd:integer` N-Triples token in-circuit, hashes it (blake3 blackbox),
-// and asserts `h2(LITERAL, hs) == operand_enc` — binding the hidden value to the
+// and asserts `h2(LITERAL, hs) == operand_enc` — binding the witness value to the
 // committed credential — then asserts the comparison verdict. A false claim
 // (e.g. age 24 proving "≥ 25 = true") is UNSATISFIABLE: the witness solve fails, so
 // no proof can be produced. That is the soundness the demo demonstrates live.
@@ -29,7 +29,7 @@
 /** Field encodings of `"<age>"^^xsd:integer`, precomputed natively via
  *  `sparq_zk_compose::build::encode_int_literal` (the SAME encoder the scan proof
  *  uses for the operand column). Each is the `operand_enc` public input that binds
- *  the hidden age to the committed credential.
+ *  the age to the committed credential.
  *
  *  DRIFT GUARD (sq-1s2.4): these values are pinned against the native encoder by
  *  `crates/sparq-zk-compose/tests/site_age_enc_drift.rs`. If a circuit / encoder bump
@@ -99,11 +99,11 @@ export interface VerifyResult {
 }
 
 export interface ProofResult {
-  /** The disclosed eligibility verdict (the only age-derived bit revealed). */
+  /** The disclosed eligibility verdict. */
   eligible: boolean;
   /** The proof bytes. This demo path does not keep the compared age confidential. */
   proofByteLength: number;
-  /** The public inputs the verifier sees (NOT the age). */
+  /** The public inputs the verifier sees. */
   publicInputs: string[];
   /** Independent in-tab verification of the proof against the same circuit. */
   verified: boolean;
@@ -120,10 +120,10 @@ interface NoirModule {
 }
 /** Subset of `@aztec/bb.js`'s `UltraHonkBackendOptions` we use. We pass
  *  `verifierTarget: 'evm'` (the keccak-oracle flavour) to BOTH prove and verify —
- *  it leaves `disableZk` at its default `false`, so the proof stays FULLY
- *  zero-knowledge (age-hiding), while shrinking the wire proof ~43% (14656 → 8384 B).
+ *  it leaves `disableZk` at its default `false`, so the proof keeps its
+ *  ZK masking, while shrinking the wire proof ~43% (14656 → 8384 B).
  *  We NEVER pass any `*-no-zk` flavour: those set `disableZk:true` and strip the
- *  ZK masking, which would make the private age recoverable in principle. */
+ *  ZK masking. */
 type VerifierTarget = "evm" | "noir-recursive" | "starknet";
 interface BbBackendOptions {
   verifierTarget?: VerifierTarget;
@@ -152,9 +152,8 @@ interface BbModule {
  * [OPUS-4.8] The UltraHonk proving/verifying flavour. `verifierTarget: 'evm'` selects
  * the keccak transcript oracle and yields a ~43% smaller proof (8384 B vs the default
  * poseidon2 flavour's 14656 B) at no measured time cost, while keeping `disableZk`
- * false — i.e. the proof is STILL zero-knowledge and the private age is still hidden
- * (verified by a Node re-measurement: two proofs of the same witness differ, and the
- * age digits never appear in the 5 public inputs).
+ * false — i.e. the proof keeps its ZK masking
+ * (verified by a Node re-measurement: two proofs of the same witness differ).
  *
  * Prove and verify MUST be passed the SAME options or the in-tab self-verify fails.
  *
@@ -275,14 +274,14 @@ function maxThreads(): number {
   return Math.min(navigator.hardwareConcurrency || 1, 8);
 }
 
-/** Two ASCII decimal digit-bytes of a 2-digit age (the private witness). */
+/** Two ASCII decimal digit-bytes of a 2-digit age (the witness). */
 function ageDigits(age: number): string[] {
   const s = String(age).padStart(2, "0");
   return [String(s.charCodeAt(0)), String(s.charCodeAt(1))];
 }
 
 /**
- * Generate AND verify a real UltraHonk proof that the holder's hidden age
+ * Generate AND verify a real UltraHonk proof that the holder's age
  * satisfies `age ≥ 25`, entirely in the browser. Throws if `age` is not one of
  * {@link PROVABLE_AGES}. For an under-age value the circuit is unsatisfiable, so
  * `execute` throws — which is the honest "you cannot forge eligibility" outcome.
@@ -305,7 +304,7 @@ export async function proveAgeEligibility(age: number): Promise<ProofResult> {
     op: "3", // OP_GE
     bound: String(AGE_THRESHOLD),
     expected: eligible,
-    digits: ageDigits(age), // PRIVATE — the exact age, never disclosed
+    digits: ageDigits(age), // witness: the exact age
   };
 
   const noir = new Noir(circuit);

@@ -315,7 +315,7 @@ export function ZkCarHire() {
                 htmlFor="zk-age"
                 className="flex items-center justify-between text-sm font-medium"
               >
-                <span>Your real age (the private witness)</span>
+                <span>Your real age (the witness)</span>
                 <span className="tabular text-muted-foreground">{age}</span>
               </label>
               <div className="flex flex-wrap gap-1.5" role="group" aria-label="Choose age">
@@ -344,8 +344,8 @@ export function ZkCarHire() {
                   </>
                 ) : (
                   <>
-                    {age} ≥ {AGE_THRESHOLD} — provable. The age value itself is the
-                    private witness and is never disclosed.
+                    {age} ≥ {AGE_THRESHOLD} — provable. This demo path is not designed
+                    to keep the age confidential.
                   </>
                 )}
               </p>
@@ -808,7 +808,7 @@ function VerdictPanel({ phase, age }: { phase: Phase; age: number }) {
         >
           {/* [FABLE-5] opacity-100 (was 80): same low-contrast muted-verdict-card label as above (color-contrast, sq-0rbfn) */}
           <p className="text-xs uppercase tracking-wide">
-            Eligibility verdict (the only age-derived bit revealed)
+            Eligibility verdict
           </p>
           <p className="text-2xl font-semibold">
             ELIGIBLE: {r.eligible ? "true" : "false"}
@@ -839,9 +839,9 @@ function VerdictPanel({ phase, age }: { phase: Phase; age: number }) {
               </li>
             ))}
           </ul>
-          <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-[var(--success)]">
-            <EyeOff className="size-3.5" /> The age {age} is the private witness — it
-            is <span className="font-mono">not</span> among the public inputs.
+          <p className="mt-2 text-xs text-muted-foreground">
+            The age {age} is a witness input. This demo path is not designed to
+            keep it confidential.
           </p>
         </div>
       </CardContent>
@@ -1097,8 +1097,7 @@ function HonestyPanel() {
           UltraHonk proof of the sparq{" "}
           <code className="font-mono">filter_int</code> circuit, generated and
           verified by <code className="font-mono">@aztec/bb.js</code> in your
-          browser. The exact age is the private witness and never appears in the
-          public inputs.
+          browser. This demo path is not designed to keep the compared age confidential.
         </p>
         <p>
           <strong className="text-foreground">On proof size and speed.</strong>{" "}
@@ -1108,11 +1107,10 @@ function HonestyPanel() {
           there is no compact mode (a sub-KB single proof would need recursive
           aggregation, which is out of scope here). This page uses the keccak-oracle
           flavour (<code className="font-mono">verifierTarget:&nbsp;&apos;evm&apos;</code>),
-          which is ~43% smaller than the default while staying{" "}
-          <strong>fully zero-knowledge</strong>. As a hard guardrail, the demo never
+          which is ~43% smaller than the default while keeping its ZK masking. As a hard guardrail, the demo never
           uses any <code className="font-mono">*-no-zk</code> flavour
           (<code className="font-mono">disableZk:&nbsp;true</code>): those strip the
-          ZK masking and would make the private age recoverable in principle. On plain
+          ZK masking. On plain
           GitHub Pages a service-worker shim is the only lever that unlocks
           multithreaded proving (timings are non-canonical and host-dependent).
         </p>

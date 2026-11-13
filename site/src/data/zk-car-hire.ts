@@ -1,11 +1,10 @@
 // [OPUS-4.8] sq-13rg / sq-4r4b — fixture data for the ZK car-hire flagship.
-// The RDF credentials are the PRIVATE inputs; the SPARQL eligibility query is the
-// public relation; the proof discloses only the boolean verdict.
+// The RDF credentials are the witness inputs; the SPARQL eligibility query is the
+// public relation. This demo path is not designed to keep the compared age confidential.
 
 /** The renter's two W3C Verifiable Credentials, as Turtle. These are the holder's
- *  PRIVATE data — they never leave the device and are never disclosed to the desk;
- *  only commitments to them and the eligibility verdict are. (Shown here purely to
- *  make the demo concrete.) */
+ *  witness data, shown here purely to make the demo concrete. This demo path is
+ *  not designed to keep the compared age confidential. */
 export const CREDENTIAL_TURTLE = `@prefix cred: <https://www.w3.org/2018/credentials#> .
 @prefix sch:  <https://schema.org/> .
 @prefix ex:   <https://example.org/vc/> .
@@ -16,7 +15,7 @@ ex:govId a cred:VerifiableCredential ;
     cred:issuer    <https://gov.uk/issuers/hmpo> ;
     cred:holder    ex:holder ;
     sch:birthDate  "1994-04-02"^^xsd:date ;
-    ex:age         "30"^^xsd:integer .          # ← the value proven hidden
+    ex:age         "30"^^xsd:integer .          # ← the value compared    
 
 # ── Driving-licence credential (issued by the DVLA) ───────────────
 ex:licence a cred:VerifiableCredential ;
@@ -27,14 +26,14 @@ ex:licence a cred:VerifiableCredential ;
     ex:statusListIndex "48172"^^xsd:integer .    # ← revocation slot (hidden)`;
 
 /** The eligibility query the car-hire desk asks. It is the PUBLIC relation: the
- *  desk learns only its boolean answer, proven over the committed credentials. */
-export const ELIGIBILITY_QUERY = `# Car-hire desk eligibility — answered with ZERO disclosure of the data.
+ *  desk receives its boolean answer, proven over the committed credentials. */
+export const ELIGIBILITY_QUERY = `# Car-hire desk eligibility query.
 ASK {
   ?id      ex:age          ?age ;
            cred:holder     ?person .
   ?licence cred:holder     ?person ;          # same holder across both VCs
            ex:licenceValid true .
-  FILTER( ?age >= 25 )                         # ← the only age fact revealed: ≥ 25
+  FILTER( ?age >= 25 )                         # ← the age predicate: ≥ 25
 }`;
 
 export interface DisclosureRow {
@@ -49,7 +48,7 @@ export interface DisclosureRow {
 export const DISCLOSURE: DisclosureRow[] = [
   {
     reveals: "Eligible: true — the holder may hire a car",
-    hides: "The exact date of birth and age (only “≥ 25 is true” leaks)",
+    hides: "The date of birth (this demo path is not designed to keep the compared age confidential)",
   },
   {
     reveals: "The predicates asked (age ≥ 25; a valid licence; one shared holder)",
@@ -240,10 +239,10 @@ export const CIRCUIT_FAMILY_EXPLAINER: CircuitFamilyExplainer[] = [
     family: "filter",
     representative: "filter_int_d2",
     proves:
-      "A hidden value satisfies a predicate — here, that the renter’s age is ≥ 25.",
+      "A committed value satisfies a predicate — here, that the renter’s age is ≥ 25.",
     publicInputs: "challenge, operand_enc, op, bound, expected (the verdict)",
-    hidden: "the value’s exact decimal digits (the age)",
-    primitive: "range / comparison over a hidden integer (in-circuit blake3 token binding)",
+    hidden: "not designed to be confidential on this demo path",
+    primitive: "range / comparison over a committed integer (in-circuit blake3 token binding)",
     status: "live",
     statusNote:
       "the age-gate is the ONLY statement proven live in your browser tab (filter_int_d2); d1/d3/d4 are wired",
