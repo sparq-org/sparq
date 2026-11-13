@@ -144,8 +144,46 @@ conformance coverage and remaining features belong to zkp-10.
 
 ## Toolchain and use
 
+Guest execution reproducibility is checked in the exact-evaluator evidence lane:
+
+```sh
+python3 -m unittest discover -s zk/sparql-evaluator/scripts -p test_guest_determinism.py
+python3 zk/sparql-evaluator/scripts/guest_determinism.py --output /tmp/guest-repeat-check
+```
+
+The second command requires the pinned, unstripped x86-64 runtime in
+`RISC0_SERVER_PATH`, plus `gdb` and `nm`. It builds the `phase-cycles` example
+unless `--binary` supplies an existing `paper_sweep` executable beside its
+`canon_differential` companion. The output
+directory must be new. It executes every main configuration and a configuration
+from each sweep class repeatedly, checking identities, journal hashes, user and
+padded cycles, segment counts, and every phase count. Rejected cases must abort
+consistently; the SDK returns no session counts or journal for those cases.
+
+The observer permits exactly the SDK's guest-start entropy request, varies its
+reply between samples, checks the reply by reading its buffer back, and stops
+execution on any later randomness request.
+This checks that application execution requests no randomness and that measured
+counts are independent of the sampled startup entropy. It does **not** claim
+zero SDK syscalls or exhaustively quantify over all possible entropy values.
+The observer is test infrastructure; production execution retains SDK entropy.
+Missing symbols, unsupported ABI, incomplete coverage and debugger failures
+fail the check. Raw executor records and syscall observations are artifacts.
+The phase-enabled harness also hashes the native journal independently and
+requires it to match both guest images.
+The same command also compares canonical N-Quads from the unchanged native
+backend and a separate regression guest over the vendored canonicalisation
+suite and RDF query fixtures. That diagnostic image is never accepted as an
+authenticated-RDF evaluator image.
+Additional operator cases in `fixtures/paper/determinism.json` force general
+DISTINCT and aggregate paths, cyclic planning, blank-node table encoding and
+capture replacement. The simple indexed DISTINCT query in the paper sweep can
+use an index shortcut. These guards also run repeatedly under the observer.
+The example's additive `--set determinism` option selects these cases; its
+existing main and sweep selections and configuration filters are unchanged.
+
 Pins: RISC Zero SDK/build/server 3.0.6, guest Rust 1.97.0, host repository Rust
-1.97.1. Both Cargo lockfiles are checked in. The build uses the local toolchain
+1.97.1. The workspace and guest Cargo lockfiles are checked in. The build uses the local toolchain
 selected by `RISC0_HOME` and requires an explicitly supplied local `r0vm` path.
 It never delegates private inputs to a hosted prover.
 

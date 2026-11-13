@@ -182,6 +182,17 @@ jobs:
         # Native fixture/adapter tests; this step generates no receipt.
         run: cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator --example exact_experiment
 
+      - name: Guest execution reproducibility and randomness boundary
+        if: steps.changes.outputs.required == 'true'
+        # Executor only: retain the SDK startup entropy call, vary its reply,
+        # and stop on every later randomness request.
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes gdb binutils
+          python3 -m unittest discover -s zk/sparql-evaluator/scripts -p 'test_guest_determinism.py'
+          python3 zk/sparql-evaluator/scripts/guest_determinism.py --output "$RUNNER_TEMP/sparq-guest-determinism"
+
       - name: Export source-bound actual guest and genuine proof evidence
         if: steps.changes.outputs.required == 'true'
         # Executes native regressions, every real guest/proof test, and Clippy.
@@ -204,5 +215,6 @@ jobs:
           path: |
             ${{ runner.temp }}/sparq-exact-evidence
             ${{ runner.temp }}/sparq-exact-originals
+            ${{ runner.temp }}/sparq-guest-determinism
           if-no-files-found: error
           retention-days: 30

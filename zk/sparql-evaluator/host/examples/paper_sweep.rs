@@ -4,7 +4,7 @@
 //! object per configuration to stdout.
 //!
 //! ```text
-//! paper_sweep [--set main|sweep] [--execute] [--phases] [--prove N]
+//! paper_sweep [--set main|sweep|determinism] [--execute] [--phases] [--prove N]
 //!             [--only ID] [--suite eddsa|merkle] [--mode hidden|revealed]
 //!             [--n N] [--size Q]
 //! ```
@@ -248,14 +248,17 @@ fn execute(witness: &Witness, artifact: &[u8], stdout: Option<&mut Vec<u8>>) -> 
         "segments": session.segments.len(),
         "journal_bytes": session.journal.bytes.len(),
         "witness_bytes": bytes.len(),
+        "witness_sha256": format!("{:x}", Sha256::digest(&bytes)),
+        "artifact_sha256": format!("{:x}", Sha256::digest(artifact)),
+        "journal_sha256": format!("{:x}", Sha256::digest(&session.journal.bytes)),
         "execute_ns": elapsed,
     }))
 }
 
 #[cfg(feature = "phase-cycles")]
-fn phases(witness: &Witness) -> Result<Value, String> {
+fn phases(witness: &Witness) -> Result<(Value, Value), String> {
     let mut out = Vec::new();
-    execute(witness, sparq_proved_evaluator_methods::SPARQ_AUTHRDF_PHASES_GUEST_ELF, Some(&mut out))?;
+    let execution = execute(witness, sparq_proved_evaluator_methods::SPARQ_AUTHRDF_PHASES_GUEST_ELF, Some(&mut out))?;
     let words: Vec<u32> = out.chunks_exact(4).map(|c| u32::from_le_bytes(c.try_into().unwrap())).collect();
     let marks: Vec<(Option<auth::Phase>, u64)> = risc0_zkvm::serde::from_slice(&words).map_err(|e| e.to_string())?;
     let mut totals = serde_json::Map::new();
@@ -267,11 +270,11 @@ fn phases(witness: &Witness) -> Result<Value, String> {
         *entry = json!(entry.as_u64().unwrap() + (at - previous));
         previous = *at;
     }
-    Ok(Value::Object(totals))
+    Ok((Value::Object(totals), execution))
 }
 
 #[cfg(not(feature = "phase-cycles"))]
-fn phases(_: &Witness) -> Result<Value, String> {
+fn phases(_: &Witness) -> Result<(Value, Value), String> {
     unreachable!("checked in args()")
 }
 
@@ -356,6 +359,11 @@ fn run(args: &Args, set: &str, id: &str, query: &str, config: &Config, guest: &A
         }
     };
     record["admitted"] = json!(true);
+    if args.phases {
+        let native_bytes: Vec<u8> = risc0_zkvm::serde::to_vec(&journal)
+            .unwrap().into_iter().flat_map(u32::to_le_bytes).collect();
+        record["native_journal_sha256"] = json!(format!("{:x}", Sha256::digest(native_bytes)));
+    }
     record["result_bytes"] = json!(serde_json::to_vec(&journal.result).unwrap().len());
     if config.mode == SignatureMode::Revealed {
         // The holder presents signatures in the journal's credential order.
@@ -385,7 +393,13 @@ fn run(args: &Args, set: &str, id: &str, query: &str, config: &Config, guest: &A
         record["execution"] = execute(&witness, guest_artifact(), None).unwrap_or_else(|e| json!({"error": e}));
     }
     if args.phases {
-        record["phase_cycles"] = phases(&witness).unwrap_or_else(|e| json!({"error": e}));
+        match phases(&witness) {
+            Ok((counts, execution)) => {
+                record["phase_cycles"] = counts;
+                record["phase_execution"] = execution;
+            }
+            Err(error) => record["phase_cycles"] = json!({"error": error}),
+        }
     }
     if args.prove > 0 && profile.is_ok() {
         let r0vm = PathBuf::from(std::env::var_os("RISC0_SERVER_PATH").expect("RISC0_SERVER_PATH"));
@@ -445,7 +459,8 @@ fn main() {
             .map(|n| (n.trim_end_matches(".rq").to_owned(), std::fs::read_to_string(root.join(&n)).unwrap()))
             .collect()
     } else {
-        let sweep: Value = serde_json::from_str(&std::fs::read_to_string(root.join("sweep.json")).unwrap()).unwrap();
+        let filename = if args.set == "determinism" { "determinism.json" } else { "sweep.json" };
+        let sweep: Value = serde_json::from_str(&std::fs::read_to_string(root.join(filename)).unwrap()).unwrap();
         sweep["cases"]
             .as_array()
             .unwrap()
