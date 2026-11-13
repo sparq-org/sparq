@@ -1,0 +1,7 @@
+# Generated artifacts for this separate workspace, excluded from sparq-vc.
+/contexts/
+/target/
+/Cargo.lock
+/.vercel/
+/.env*
+__pycache__/

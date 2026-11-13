@@ -6051,9 +6051,13 @@ dependencies = [
 name = "sparq-vc"
 version = "0.1.8"
 dependencies = [
+ "axum",
+ "base64 0.22.1",
  "bs58",
+ "chrono",
  "ed25519-dalek",
  "hex",
+ "oxjsonld",
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
  "proptest",
@@ -6062,6 +6066,9 @@ dependencies = [
  "sha2 0.10.9",
  "sparq-canon",
  "sparq-core",
+ "sparq-jsonld",
+ "tokio",
+ "tower",
 ]
 
 [[package]]
