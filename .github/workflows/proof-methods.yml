@@ -94,3 +94,5 @@ jobs:
           npm pack "$RUNNER_TEMP/aggregate-node" --offline --ignore-scripts --pack-destination "$RUNNER_TEMP/aggregate-dist"
           npm install --prefix "$RUNNER_TEMP/aggregate-install" --offline --ignore-scripts --no-audit --no-fund "$RUNNER_TEMP"/aggregate-dist/*.tgz
           AGGREGATE_PACKAGE="$RUNNER_TEMP/aggregate-install/node_modules/sparq-verifiable-aggregate" node --test proof-methods/aggregate/tests/node-smoke.cjs
+          cp proof-methods/aggregate/tests/node-smoke.mjs "$RUNNER_TEMP/aggregate-install/node-smoke.mjs"
+          node --test "$RUNNER_TEMP/aggregate-install/node-smoke.mjs"
