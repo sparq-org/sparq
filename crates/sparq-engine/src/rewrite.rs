@@ -35,10 +35,10 @@
 //! substitution, and it re-checks every well-formedness condition before firing.
 
 use oxrdf::{NamedNode, Variable};
-use rustc_hash::FxHashSet;
 use spargebra::algebra::{AggregateExpression, Expression, GraphPattern, OrderExpression, PropertyPathExpression};
 use spargebra::term::{NamedNodePattern, TermPattern, TriplePattern};
 use spargebra::Query;
+use std::borrow::Cow;
 
 /// Rewrites a parsed query's graph pattern with the two result-equivalent
 /// rewrites (see the module docs), moving an unchanged query through verbatim.
@@ -96,19 +96,6 @@ pub fn rewrite_query_ref(query: &Query) -> Option<Query> {
     }
 }
 
-/// Bottom-up transform. `Some` propagates every local or descendant rewrite;
-/// `None` means the original subtree can be borrowed unchanged.
-fn rewrite_pattern(p: &GraphPattern) -> Option<GraphPattern> {
-    let rewritten_children = map_children(p);
-    let current = rewritten_children.as_ref().unwrap_or(p);
-    if let GraphPattern::Filter { expr, inner } = current {
-        if let Some(rewritten) = rewrite_filter(expr, inner) {
-            return Some(rewritten);
-        }
-    }
-    rewritten_children
-}
-
 /// Rewrites both children, cloning an unchanged sibling only if the other changed.
 fn rewrite_pair(
     left: &GraphPattern,
@@ -125,9 +112,11 @@ fn rewrite_pair(
     ))
 }
 
-/// Reconstructs only ancestors of actual child rewrites. Expressions (including
-/// EXISTS sub-patterns) remain untouched, matching the pass's scope boundary.
-fn map_children(p: &GraphPattern) -> Option<GraphPattern> {
+/// Bottom-up transform. `Some` propagates every local or descendant rewrite;
+/// `None` borrows the original subtree. A FILTER consumes an already rewritten
+/// child directly, without cloning it or materializing a throwaway expression.
+/// EXISTS sub-patterns remain untouched, matching the pass's scope boundary.
+fn rewrite_pattern(p: &GraphPattern) -> Option<GraphPattern> {
     use GraphPattern as G;
     let r = |inner: &G| rewrite_pattern(inner).map(Box::new);
     match p {
@@ -147,10 +136,10 @@ fn map_children(p: &GraphPattern) -> Option<GraphPattern> {
         G::Lateral { left, right } => {
             rewrite_pair(left, right).map(|(left, right)| G::Lateral { left, right })
         }
-        G::Filter { expr, inner } => r(inner).map(|inner| G::Filter {
-            expr: expr.clone(),
-            inner,
-        }),
+        G::Filter { expr, inner } => rewrite_filter(
+            expr,
+            rewrite_pattern(inner).map_or(Cow::Borrowed(inner.as_ref()), Cow::Owned),
+        ),
         G::Union { left, right } => {
             rewrite_pair(left, right).map(|(left, right)| G::Union { left, right })
         }
@@ -210,24 +199,36 @@ fn map_children(p: &GraphPattern) -> Option<GraphPattern> {
     }
 }
 
-/// Reports a local FILTER rewrite, checking anti-join eligibility first.
-fn rewrite_filter(expr: &Expression, inner: &GraphPattern) -> Option<GraphPattern> {
+/// Reports a local or descendant rewrite, checking anti-join eligibility first.
+/// An owned child has already been rebuilt and must be moved through either
+/// pass (or retained under the original FILTER when both passes decline).
+fn rewrite_filter(expr: &Expression, inner: Cow<'_, GraphPattern>) -> Option<GraphPattern> {
     if let Some(v) = as_not_bound(expr) {
         if let GraphPattern::LeftJoin {
             left,
             right,
             expression: None,
-        } = inner
+        } = inner.as_ref()
         {
             if antijoin_ok(v, left, right) {
-                return Some(GraphPattern::Minus {
-                    left: left.clone(),
-                    right: right.clone(),
-                });
+                let GraphPattern::LeftJoin { left, right, .. } = inner.into_owned() else {
+                    unreachable!()
+                };
+                return Some(GraphPattern::Minus { left, right });
             }
         }
     }
-    equality_substitute(expr, inner)
+    let applied = equality_substitutions(expr, &inner);
+    if !applied.is_empty() {
+        return Some(equality_substitute(expr, inner, applied));
+    }
+    match inner {
+        Cow::Owned(inner) => Some(GraphPattern::Filter {
+            expr: expr.clone(),
+            inner: Box::new(inner),
+        }),
+        Cow::Borrowed(_) => None,
+    }
 }
 
 /// `Some(v)` iff `e` is exactly `!BOUND(?v)` (`Not(Bound(v))`).
@@ -252,91 +253,96 @@ fn antijoin_ok(v: &Variable, left: &GraphPattern, right: &GraphPattern) -> bool 
         return false;
     }
     let left_certain = certain_vars(left);
-    left_certain.iter().any(|w| right_certain.contains(w))
+    let mut shared = false;
+    left.on_in_scope_variable(|w| {
+        shared = shared || (left_certain.contains(w) && right_certain.contains(w));
+    });
+    shared
 }
 
-/// Equality-substitution rewrite over `Filter(expr, inner)`.
-fn equality_substitute(expr: &Expression, inner: &GraphPattern) -> Option<GraphPattern> {
-    let conjuncts = conjuncts(expr);
-
-    // Collect candidate IRI-equality conjuncts, keyed by variable. A variable
+/// Eligible IRI substitutions in conjunct order. A declined pass returns an
+/// empty vector without cloning or allocating.
+fn equality_substitutions<'a>(
+    expr: &'a Expression,
+    inner: &GraphPattern,
+) -> Vec<(&'a Variable, &'a NamedNode)> {
+    // Check candidate IRI-equality conjuncts, keyed by variable. A variable
     // that appears in more than one equality conjunct is dropped (a possible
     // contradiction, e.g. `?v = <a> && ?v = <b>`), keeping those conjuncts as
     // residual — conservative.
-    let mut candidate_iri: Vec<(&Variable, &NamedNode, usize)> = Vec::new();
-    for (i, c) in conjuncts.iter().enumerate() {
-        if let Some((var, iri)) = as_iri_equality(c) {
-            candidate_iri.push((var, iri, i));
-        }
-    }
-    // Which candidate variables are unique (appear in exactly one candidate).
     let mut applied: Vec<(&Variable, &NamedNode)> = Vec::new();
-    let mut consumed: FxHashSet<usize> = FxHashSet::default();
-    for (var, iri, idx) in &candidate_iri {
-        let dup = candidate_iri.iter().filter(|(v, ..)| v == var).count() > 1;
-        if dup {
-            continue;
+    visit_conjuncts(expr, &mut |c| {
+        let Some((var, iri)) = as_iri_equality(c) else {
+            return;
+        };
+        let mut occurrences = 0;
+        visit_conjuncts(expr, &mut |other| {
+            if as_iri_equality(other).is_some_and(|(v, _)| v == var) {
+                occurrences += 1;
+            }
+        });
+        if occurrences != 1 {
+            return;
         }
         // The variable must occur in a substitutable spine position and NOWHERE
         // inside an opaque scope boundary.
         let (in_spine, in_opaque) = scan_var(inner, var);
         if in_spine && !in_opaque {
             applied.push((var, iri));
-            consumed.insert(*idx);
         }
-    }
+    });
 
-    if applied.is_empty() {
-        return None;
-    }
+    applied
+}
 
+/// Applies known eligible substitutions, consuming the child rebuilt below us.
+fn equality_substitute(
+    expr: &Expression,
+    inner: Cow<'_, GraphPattern>,
+    applied: Vec<(&Variable, &NamedNode)>,
+) -> GraphPattern {
     // Eligibility only borrows the input. Once a substitution is known to fire,
-    // materialize its spine and re-bind each variable so it stays in scope.
-    let mut inner = inner.clone();
+    // materialize a borrowed spine or reuse an already rebuilt owned spine.
+    let mut inner = inner.into_owned();
     for (var, iri) in &applied {
         apply_sub_spine(&mut inner, var, iri);
     }
-    for (var, iri) in applied {
+    for (var, iri) in &applied {
         inner = GraphPattern::Extend {
             inner: Box::new(inner),
-            variable: var.clone(),
-            expression: Expression::NamedNode(iri.clone()),
+            variable: (*var).clone(),
+            expression: Expression::NamedNode((*iri).clone()),
         };
     }
 
     // Rebuild the residual FILTER from the non-consumed conjuncts (in order).
-    let residual: Vec<Expression> = conjuncts
-        .into_iter()
-        .enumerate()
-        .filter(|(i, _)| !consumed.contains(i))
-        .map(|(_, c)| c.clone())
-        .collect();
-    Some(match fold_and(residual) {
+    let mut residual = Vec::new();
+    visit_conjuncts(expr, &mut |c| {
+        if !as_iri_equality(c).is_some_and(|(v, _)| applied.iter().any(|(var, _)| *var == v)) {
+            residual.push(c.clone());
+        }
+    });
+    match fold_and(residual) {
         Some(residual_expr) => GraphPattern::Filter {
             expr: residual_expr,
             inner: Box::new(inner),
         },
         None => inner,
-    })
-}
-
-/// Borrows a top-level AND tree's conjuncts in left-to-right order.
-fn conjuncts(e: &Expression) -> Vec<&Expression> {
-    fn collect<'a>(e: &'a Expression, out: &mut Vec<&'a Expression>) {
-        match e {
-            Expression::And(a, b) => {
-                collect(a, out);
-                collect(b, out);
-            }
-            other => out.push(other),
-        }
     }
-    let mut out = Vec::new();
-    collect(e, &mut out);
-    out
 }
 
-/// Left-associative `&&`-fold of a conjunct list (inverse of [`conjuncts`]).
+/// Visits a top-level AND tree's conjuncts in left-to-right order without a buffer.
+fn visit_conjuncts<'a>(e: &'a Expression, visit: &mut impl FnMut(&'a Expression)) {
+    match e {
+        Expression::And(a, b) => {
+            visit_conjuncts(a, visit);
+            visit_conjuncts(b, visit);
+        }
+        other => visit(other),
+    }
+}
+
+/// Left-associative `&&`-fold of a conjunct list (inverse of [`visit_conjuncts`]).
 /// `None` for an empty list (the FILTER is fully consumed).
 fn fold_and(conjuncts: Vec<Expression>) -> Option<Expression> {
     let mut it = conjuncts.into_iter();
@@ -574,97 +580,54 @@ fn expr_has_var(e: &Expression, var: &Variable) -> bool {
 /// (the "certain" / definitely-bound variables). Used only by the anti-join
 /// guard; being conservative (omitting a genuinely-certain variable) can only
 /// make the rewrite decline, never fire wrongly.
-fn certain_vars(p: &GraphPattern) -> FxHashSet<&Variable> {
-    let mut s = FxHashSet::default();
-    match p {
-        GraphPattern::Bgp { patterns } => {
-            for t in patterns {
-                collect_triple_vars(t, &mut s);
-            }
-        }
-        GraphPattern::Path { subject, object, .. } => {
-            collect_term_vars(subject, &mut s);
-            collect_term_vars(object, &mut s);
-        }
-        GraphPattern::Join { left, right } | GraphPattern::Lateral { left, right } => {
-            s = certain_vars(left);
-            s.extend(certain_vars(right));
-        }
-        GraphPattern::LeftJoin { left, .. } | GraphPattern::Minus { left, .. } => {
-            s = certain_vars(left);
-        }
-        GraphPattern::Filter { inner, .. }
-        | GraphPattern::Distinct { inner }
-        | GraphPattern::Reduced { inner }
-        | GraphPattern::Slice { inner, .. }
-        | GraphPattern::OrderBy { inner, .. } => s = certain_vars(inner),
-        GraphPattern::Union { left, right } => {
-            let l = certain_vars(left);
-            let r = certain_vars(right);
-            s = l.intersection(&r).copied().collect();
-        }
-        GraphPattern::Graph { name, inner } => {
-            s = certain_vars(inner);
-            if let NamedNodePattern::Variable(v) = name {
-                s.insert(v);
-            }
-        }
-        // Extend's variable may be left unbound on an evaluation error, so it is
-        // NOT certain — conservatively use only the inner certain set.
-        GraphPattern::Extend { inner, .. } => s = certain_vars(inner),
-        GraphPattern::Project { inner, variables } => {
-            let c = certain_vars(inner);
-            s = variables.iter().filter(|v| c.contains(v)).collect();
-        }
-        GraphPattern::Values { variables, bindings } => {
-            for (i, v) in variables.iter().enumerate() {
-                if bindings.iter().all(|row| row.get(i).is_some_and(|cell| cell.is_some())) {
-                    s.insert(v);
-                }
-            }
-        }
-        GraphPattern::Group { inner, variables, aggregates: _ } => {
-            // GROUP BY keys that are certain in `inner` stay certain. Aggregate
-            // OUTPUTS are intentionally EXCLUDED: an aggregate (e.g. SUM/AVG over a
-            // non-numeric term) can error and leave its output variable UNBOUND, so
-            // it is not bound in every solution. Including it would over-approximate
-            // and could let the anti-join guard fire unsoundly on a
-            // `Filter(!bound(?agg), LeftJoin(A, B))` where `?agg` is an aggregate
-            // output inside `B`. Omitting it is a strictly-safe under-approximation.
-            //
-            let c = certain_vars(inner);
-            for v in variables {
-                if c.contains(v) {
-                    s.insert(v);
-                }
-            }
-        }
-        // A `SILENT` SERVICE may yield the unit solution (nothing certain); a
-        // non-silent one binds its inner certain set (best-effort, static view).
-        GraphPattern::Service { inner, silent, .. } => {
-            if !silent {
-                s = certain_vars(inner);
-            }
-        }
-    }
-    s
+fn certain_vars(p: &GraphPattern) -> CertainVars<'_> {
+    CertainVars(p)
 }
 
-fn collect_triple_vars<'a>(t: &'a TriplePattern, out: &mut FxHashSet<&'a Variable>) {
-    collect_term_vars(&t.subject, out);
-    if let NamedNodePattern::Variable(v) = &t.predicate {
-        out.insert(v);
-    }
-    collect_term_vars(&t.object, out);
-}
+/// A borrowed set view keeps declined anti-join checks allocation-free.
+struct CertainVars<'a>(&'a GraphPattern);
 
-fn collect_term_vars<'a>(tp: &'a TermPattern, out: &mut FxHashSet<&'a Variable>) {
-    match tp {
-        TermPattern::Variable(v) => {
-            out.insert(v);
+impl CertainVars<'_> {
+    fn contains(&self, var: &Variable) -> bool {
+        match self.0 {
+            GraphPattern::Bgp { patterns } => patterns.iter().any(|t| triple_has_var(t, var)),
+            GraphPattern::Path { subject, object, .. } => {
+                term_has_var(subject, var) || term_has_var(object, var)
+            }
+            GraphPattern::Join { left, right } | GraphPattern::Lateral { left, right } => {
+                certain_vars(left).contains(var) || certain_vars(right).contains(var)
+            }
+            GraphPattern::LeftJoin { left, .. } | GraphPattern::Minus { left, .. } => {
+                certain_vars(left).contains(var)
+            }
+            GraphPattern::Filter { inner, .. }
+            | GraphPattern::Distinct { inner }
+            | GraphPattern::Reduced { inner }
+            | GraphPattern::Slice { inner, .. }
+            | GraphPattern::OrderBy { inner, .. }
+            // Extend may error, so its output is not certain.
+            | GraphPattern::Extend { inner, .. } => certain_vars(inner).contains(var),
+            GraphPattern::Union { left, right } => {
+                certain_vars(left).contains(var) && certain_vars(right).contains(var)
+            }
+            GraphPattern::Graph { name, inner } => {
+                nnp_has_var(name, var) || certain_vars(inner).contains(var)
+            }
+            GraphPattern::Project { inner, variables }
+            // Aggregate outputs may error; only certain grouping keys survive.
+            | GraphPattern::Group { inner, variables, .. } => {
+                variables.contains(var) && certain_vars(inner).contains(var)
+            }
+            GraphPattern::Values { variables, bindings } => {
+                variables.iter().enumerate().any(|(i, v)| {
+                    v == var && bindings.iter().all(|row| row.get(i).is_some_and(|cell| cell.is_some()))
+                })
+            }
+            // SILENT SERVICE may yield the unit solution (nothing certain).
+            GraphPattern::Service { inner, silent, .. } => {
+                !silent && certain_vars(inner).contains(var)
+            }
         }
-        TermPattern::Triple(t) => collect_triple_vars(t, out),
-        _ => {}
     }
 }
 
@@ -740,7 +703,7 @@ mod tests {
         assert!(as_iri_equality(&Expression::Equal(Box::new(ev), Box::new(lit))).is_none());
     }
 
-    // ---- into_conjuncts / fold_and round trip ----
+    // ---- visit_conjuncts / fold_and round trip ----
     #[test]
     fn conjunct_split_and_fold_roundtrip() {
         assert!(fold_and(Vec::new()).is_none());
@@ -752,12 +715,13 @@ mod tests {
             Box::new(Expression::And(Box::new(a.clone()), Box::new(b.clone()))),
             Box::new(c.clone()),
         );
-        let cs = conjuncts(&e);
+        let mut cs = Vec::new();
+        visit_conjuncts(&e, &mut |c| cs.push(c));
         assert_eq!(cs.len(), 3, "three top-level && conjuncts");
         assert_eq!(cs[0], &a);
         assert_eq!(cs[1], &b);
         assert_eq!(cs[2], &c);
-        assert_eq!(fold_and(cs.into_iter().cloned().collect()), Some(e), "fold_and is the left-assoc inverse of into_conjuncts");
+        assert_eq!(fold_and(cs.into_iter().cloned().collect()), Some(e), "fold_and is the left-assoc inverse of visit_conjuncts");
     }
 
     // ---- residual conjunct is preserved when only part of the AND is IRI-eq ----
@@ -904,6 +868,138 @@ mod tests {
         assert!(cv.contains(&Variable::new("a").unwrap()));
         assert!(cv.contains(&Variable::new("b").unwrap()));
         assert!(!cv.contains(&Variable::new("c").unwrap()), "optional ?c is not certain");
+    }
+
+    #[test]
+    fn nested_filter_rewrites_move_owned_subtrees() {
+        use GraphPattern as G;
+
+        let leaf = Box::new(G::Bgp {
+            patterns: Vec::new(),
+        });
+        let leaf_allocation = std::ptr::from_ref(leaf.as_ref());
+        let mut rewritten = G::Distinct { inner: leaf };
+        let mut raw = rewritten.clone();
+        for depth in 0..128 {
+            let variable = Variable::new(format!("v{depth}")).unwrap();
+            let iri = NamedNode::new("http://ex/target").unwrap();
+            let expr = Expression::Equal(
+                Box::new(Expression::Variable(variable.clone())),
+                Box::new(Expression::NamedNode(iri.clone())),
+            );
+            let bgp = G::Bgp {
+                patterns: vec![TriplePattern {
+                    subject: TermPattern::NamedNode(NamedNode::new("http://ex/s").unwrap()),
+                    predicate: NamedNodePattern::NamedNode(NamedNode::new("http://ex/p").unwrap()),
+                    object: TermPattern::Variable(variable.clone()),
+                }],
+            };
+            raw = G::Filter {
+                expr: expr.clone(),
+                inner: Box::new(G::Join {
+                    left: Box::new(raw),
+                    right: Box::new(bgp.clone()),
+                }),
+            };
+
+            // The bottom-up traversal hands each FILTER an already rebuilt child.
+            // Keep its Box identity across the next local substitution.
+            let left = Box::new(rewritten);
+            let allocation = std::ptr::from_ref(left.as_ref());
+            rewritten = rewrite_filter(
+                &expr,
+                Cow::Owned(G::Join {
+                    left,
+                    right: Box::new(bgp),
+                }),
+            )
+            .expect("the equality must be substituted");
+            let G::Extend {
+                inner,
+                variable: rebound,
+                expression,
+            } = &rewritten
+            else {
+                panic!("the substituted variable must stay bound")
+            };
+            assert_eq!(rebound, &variable);
+            assert_eq!(expression, &Expression::NamedNode(iri.clone()));
+            let G::Join { left, right } = inner.as_ref() else {
+                unreachable!()
+            };
+            assert_eq!(
+                std::ptr::from_ref(left.as_ref()),
+                allocation,
+                "an already rebuilt subtree was cloned at layer {depth}"
+            );
+            let G::Bgp { patterns } = right.as_ref() else {
+                unreachable!()
+            };
+            assert_eq!(patterns[0].object, TermPattern::NamedNode(iri));
+        }
+
+        // Check the innermost allocation too, and compare the entire chain with
+        // the public borrowed entry point's output (not just the local helper).
+        let mut current = &rewritten;
+        while let G::Extend { inner, .. } = current {
+            let G::Join { left, .. } = inner.as_ref() else {
+                unreachable!()
+            };
+            current = left;
+        }
+        let G::Distinct { inner } = current else {
+            unreachable!()
+        };
+        assert_eq!(std::ptr::from_ref(inner.as_ref()), leaf_allocation);
+        let query = Query::Ask {
+            dataset: None,
+            pattern: raw,
+            base_iri: None,
+        };
+        let output = rewrite_query_ref(&query).expect("nested filters must rewrite");
+        assert_eq!(pattern_of(&output), &rewritten);
+        assert!(rewrite_query_ref(&output).is_none());
+    }
+
+    #[test]
+    fn antijoin_and_declined_filter_move_owned_children() {
+        let query = parse(&format!(
+            "{PFX} ASK {{ \
+            ?s ex:p ?o OPTIONAL {{ ?s ex:q ?v }} FILTER(!bound(?v)) }}"
+        ));
+        let mut filter = pattern_of(&query);
+        while let GraphPattern::Project { inner, .. } = filter {
+            filter = inner;
+        }
+        let GraphPattern::Filter { expr, inner } = filter else {
+            unreachable!()
+        };
+        let owned = inner.as_ref().clone();
+        let GraphPattern::LeftJoin { left, right, .. } = &owned else {
+            unreachable!()
+        };
+        let left_allocation = std::ptr::from_ref(left.as_ref());
+        let right_allocation = std::ptr::from_ref(right.as_ref());
+        let rewritten = rewrite_filter(expr, Cow::Owned(owned)).expect("anti-join must fire");
+        let GraphPattern::Minus { left, right } = &rewritten else {
+            unreachable!()
+        };
+        assert_eq!(std::ptr::from_ref(left.as_ref()), left_allocation);
+        assert_eq!(std::ptr::from_ref(right.as_ref()), right_allocation);
+        assert_eq!(rewrite_pattern(filter).as_ref(), Some(&rewritten));
+
+        let expr = Expression::Literal(oxrdf::Literal::from(true));
+        let rewritten = rewrite_filter(&expr, Cow::Owned(rewritten))
+            .expect("a descendant rewrite must still be reported");
+        let GraphPattern::Filter { inner, .. } = rewritten else {
+            unreachable!()
+        };
+        let GraphPattern::Minus { left, right } = inner.as_ref() else {
+            unreachable!()
+        };
+        assert_eq!(std::ptr::from_ref(left.as_ref()), left_allocation);
+        assert_eq!(std::ptr::from_ref(right.as_ref()), right_allocation);
+        assert!(rewrite_filter(&expr, Cow::Borrowed(&inner)).is_none());
     }
 
     #[test]
