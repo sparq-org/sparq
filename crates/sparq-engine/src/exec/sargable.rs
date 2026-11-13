@@ -141,7 +141,7 @@ pub(super) fn inline_pass_values(cmp: ScanCmp) -> Option<(u32, u32)> {
 /// and the comparison to push down.
 ///
 /// (sq-lr2ii) A NUMERIC comparison is DECLINED (returns `None`) when the graph
-/// holds an f64-inexact decimal ([`Graph::has_high_precision_decimal`]): the f64 `numerics`
+/// holds an f64-inexact decimal ([`Graph::has_decimal_needing_exact_comparison`]): the f64 `numerics`
 /// cache the scan probes could then decide `=`/`<`/`>`/`<=`/`>=` wrongly for that value (e.g.
 /// `"1.000000000000000001"^^xsd:decimal` collapses onto the f64 `1.0`), so such comparisons
 /// fall back to the exact general evaluator instead. Temporal pushdown is unaffected, and a
@@ -159,10 +159,10 @@ pub(super) fn extract_sargable<'a>(graph: &Graph, e: &'a Expression) -> Option<(
                 // matching the reference semantics (a sargable f64 threshold would instead
                 // compare against it, over-including).
                 let v: f64 = numeric_cache_f64(l)?;
-                // A threshold f64 can't represent precisely (> 15 significant digits —
-                // large integers or high-precision decimals) makes the sargable f64 scan
-                // unsafe; decline so the filter takes the exact general comparison path.
-                if sig_digits(l.value()) > 15 {
+                // Share the graph-side precision AND magnitude decision. A nonzero
+                // decimal threshold may collapse to zero or lose digits as a subnormal;
+                // decline so the filter takes the exact general comparison path.
+                if sparq_core::decimal_needs_exact_comparison(l.value()) {
                     return None;
                 }
                 // XPath compares an `xs:float` against a non-double operand in the FLOAT tier,
@@ -221,7 +221,7 @@ pub(super) fn extract_sargable<'a>(graph: &Graph, e: &'a Expression) -> Option<(
             // constant is never also a temporal one, so declining here yields `None` for this
             // orientation; the exact general evaluator handles the residual FILTER correctly.
             // Likewise when a float row would compare against an `f32`-rounded constant.
-            if !graph.has_high_precision_decimal() && !(float_tier_rounds && graph.has_float_literal()) {
+            if !graph.has_decimal_needing_exact_comparison() && !(float_tier_rounds && graph.has_float_literal()) {
                 return Some((v, num_cmp(op, c)));
             }
             continue;

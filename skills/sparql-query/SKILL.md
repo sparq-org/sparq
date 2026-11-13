@@ -769,16 +769,15 @@ SPARQL Update `USING` identity behavior.
   (a vendored) `spargebra` with `sparql-12` + `sep-0006`.
 - **Only SELECT/ASK** go through `query`/`query_json`/`count`; CONSTRUCT/DESCRIBE have their own
   functions, and a form mismatch is a clean `Err` (e.g. `ask()` on a SELECT).
-- **Numeric FILTER comparisons are VALUE-EXACT, incl. high-precision `xsd:decimal`** (`sq-lr2ii`).
-  A single-pattern `?v OP const` numeric FILTER is normally pushed into the scan and decided via the
-  O(1) f64 `numerics` cache (`extract_sargable`). Because an f64 cannot represent a decimal with
-  `> 15` significant digits exactly (e.g. `"1.000000000000000001"^^xsd:decimal` shares the f64 `1.0`
-  with the integer `1`), that fast path is **declined** whenever the graph holds such a decimal
-  (`Graph::has_high_precision_decimal`) OR the constant itself has `> 15` significant digits — the
-  comparison then falls back to the exact evaluator (`=`/`<`/`>`/`<=`/`>=` decided by exact decimal
-  string arithmetic, matching the `BIND((?v = c) AS ?b)` expression path). The decline is
-  graph-wide/conservative (correctness first): a graph carrying one high-precision decimal skips the
-  numeric-pushdown optimisation for all its numeric FILTERs, never the wrong answer.
+- **Numeric FILTERs preserve exact decimal comparisons**, including underflowing values.
+  A single-pattern `?v OP const` numeric FILTER normally uses the f64 `numerics` cache.
+  `sparq_core::decimal_needs_exact_comparison` declines this path for more than
+  `f64::DIGITS` significant digits or a nonzero decimal whose image is zero/subnormal
+  (below `f64::MIN_POSITIVE`). Zero remains safe. Constants use that predicate directly;
+  `Graph::has_decimal_needing_exact_comparison()` memoizes it over cached decimal terms
+  and invalidates it on dictionary growth. An unsafe operand takes the exact evaluator,
+  matching BIND for `=`/`<`/`>`/`<=`/`>=`. The graph decision is conservative: one unsafe
+  decimal disables numeric pushdown across that graph; ordinary stores retain it.
 - **`SELECT *`** never exposes blank-node "variables" (`_:x` in a pattern is an existential var).
 - **Non-deterministic builtins** (`sq-98w7z.1`) — `NOW()` is **query-constant** per SPARQL 1.1
   §17.4.5.1: every evaluation within one execution (across rows, parallel workers, `EXISTS`

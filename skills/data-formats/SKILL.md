@@ -36,6 +36,16 @@ range of `xsd:byte` and unsigned integer types. It does not impose the evaluator
 finite mantissa capacity. `numeric_cache_value` can return `None` for a valid large
 number; a missing cache value is not a datatype-validity result.
 
+`sparq_core::decimal_needs_exact_comparison(lexical)` conservatively flags plain
+decimals with more than `f64::DIGITS` significant digits or a nonzero value whose
+cached image is zero/subnormal (below `f64::MIN_POSITIVE`). Zero remains safe.
+`Graph::has_decimal_needing_exact_comparison()` memoizes that decision over cached
+decimal terms; dictionary growth invalidates it. This replaces
+`has_high_precision_decimal()`. The engine uses the same predicate for FILTER
+constants and declines numeric pushdown when either side needs exact comparison.
+Numeric cache values and the `numerics-v3.bin` format are unchanged; reopening an
+existing store computes the new guard in memory.
+
 `temporal::Timeline::parse_datetime`, `parse_date`, `parse_civil_date` and
 `parse_tz` reject raw boundary whitespace, malformed calendar/timezone values and timestamps outside their
 representation, including the existing checked BCE range. For exact value decisions,

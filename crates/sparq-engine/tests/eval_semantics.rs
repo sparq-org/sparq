@@ -1164,14 +1164,14 @@ mod numeric_raw_whitespace_consistency {
 ///
 /// Method: each case runs against a graph WITH the fast path (sargable numeric pushdown
 /// enabled) and a graph carrying a high-precision decimal that DISABLES sargable numeric
-/// pushdown (`Graph::has_high_precision_decimal` → the exact general comparison path), and
+/// pushdown (`Graph::has_decimal_needing_exact_comparison` → the exact general comparison path), and
 /// asserts identical results — AND against the `of_literal` reference expectation.
 mod numeric_fast_slow_path_agreement {
     use super::*;
 
     /// Build a one-triple graph `ex:s ex:v <object>`; when `force_slow`, also add a
     /// high-precision decimal object on a DIFFERENT subject/predicate so
-    /// `has_high_precision_decimal()` is true (which makes `extract_sargable` decline the
+    /// `has_decimal_needing_exact_comparison()` is true (which makes `extract_sargable` decline the
     /// numeric fast path) WITHOUT changing the `ex:s ex:v ?o` row under test.
     fn graph_with(object: &str, force_slow: bool) -> Graph {
         let mut ttl = String::from(
