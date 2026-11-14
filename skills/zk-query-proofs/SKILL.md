@@ -69,6 +69,26 @@ and registers no method. See [query-method contracts](references/query-method-co
 The research Noir query compiler additionally exposes portable host reconstruction
 and typed envelope inputs there, including dataset assembly for the graph lane
 and parameterized membership lists; its subprocess method driver remains native.
+Its experimental `credential_graphs::canonical_credentials` now returns `Result`:
+propagate metadata-validation failures before assigning credential ranks.
+Authenticated graph evaluation and witness rendering require that canonical
+credential order and refuse an unsorted presentation.
+`credential_graphs::evaluate_for_request(plan, credentials, request_digest)` uses
+request-scoped blank node graph names; use the same digest when rendering through
+`witness_closed::prover_toml`. The default graph adds only the reserved
+`https://w3id.org/sparq/vcq#verifiedIssuer` assertions; signed credentials using
+that predicate are refused. The local issuer adapter reads the suite vocabulary
+`https://www.w3.org/2018/credentials#issuer` from signed content. Boolean expression
+BIND retains an unbound variable on a SPARQL error. The closed profile admits
+correlated EXISTS in boolean FILTER/BIND, implicit-group MIN/COUNT expressions,
+and exact integer/decimal SUM subqueries and grouped HAVING. Its document lexical
+openings admit at most 64 bytes; longer terms receive a capacity refusal. Supplied-cell operator fixtures use
+`credential_graphs::evaluate_cells` to preserve credential graph boundaries; that
+entry point authenticates no cells. Use `evaluate_cells_for_request` with the
+fixture witness digest when testing request-scoped graph results. Exact aggregate
+arithmetic uses the shared expression numeric capacity and refuses overflow. These operator interfaces remain research grade,
+not externally audited; envelope integration and full target-capacity evidence
+are required before making a whole-method claim.
 
 The detached exact-evaluator host crate's optional `vcq` feature (off by default) adds
 the first `QueryMethod` adapter, `sparq_proved_evaluator::vcq::Risc0ExactV3`, over the V3 relation:

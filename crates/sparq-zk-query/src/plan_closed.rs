@@ -6,7 +6,7 @@ use crate::plan::{Expr, NodeId, Slot, Var};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Predicate {
     Expression(Expr),
-    Arithmetic(crate::closed_arith_standin::Comparison),
+    Arithmetic(crate::closed_arith::Comparison),
     Exists(Vec<NodeId>),
     Not(Box<Predicate>),
     And(Box<Predicate>, Box<Predicate>),
@@ -62,6 +62,12 @@ pub enum ClosedOperator {
         input: NodeId,
         variable: Var,
         value: Slot,
+        context: Option<NodeId>,
+    },
+    BindBoolean {
+        input: NodeId,
+        variable: Var,
+        predicate: Predicate,
         context: Option<NodeId>,
     },
     Substitute {
@@ -125,7 +131,13 @@ impl ClosedOperator {
                 ids
             }
             Self::Substitute { input, context } => vec![*input, *context],
-            Self::Filter {
+            Self::BindBoolean {
+                input,
+                predicate,
+                context,
+                ..
+            }
+            | Self::Filter {
                 input,
                 predicate,
                 context,
@@ -240,6 +252,18 @@ impl ClosedOperator {
                 w.id(*variable);
                 w.slot(value);
                 w.optional(*context);
+            }
+            Self::BindBoolean {
+                input,
+                variable,
+                predicate,
+                context,
+            } => {
+                w.byte(15);
+                w.id(*input);
+                w.id(*variable);
+                w.optional(*context);
+                w.predicate(predicate);
             }
             Self::Substitute { input, context } => {
                 w.byte(10);
@@ -372,6 +396,16 @@ impl Writer {
             Expr::Not(a) => {
                 self.byte(4);
                 self.expr(a);
+            }
+            Expr::InList {
+                value,
+                start,
+                count,
+            } => {
+                self.byte(6);
+                self.expr(value);
+                self.id(*start);
+                self.id(*count);
             }
             Expr::In(a, bs) => {
                 self.byte(5);

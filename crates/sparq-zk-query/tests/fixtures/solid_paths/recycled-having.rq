@@ -1,0 +1,14 @@
+PREFIX vcq: <https://w3id.org/sparq/vcq#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+# 3c. GROUP BY / HAVING form
+SELECT ?lot WHERE {
+  ?g vcq:verifiedIssuer ?iss .
+  FILTER(?iss IN (<urn:fictional:recycled-content:tier>,
+                  <urn:fictional:recycled-content:tier-2>,
+                  <urn:fictional:recycled-content:tier-3>))
+  GRAPH ?g { ?lot <urn:claim:material.recycled-mass> ?mass . }
+  FILTER(?lot = <urn:fictional:recycled-content:lot>)
+}
+GROUP BY ?lot
+HAVING (SUM(?mass) >= 500 && COUNT(DISTINCT ?iss) = 3 && COUNT(?mass) = 3)

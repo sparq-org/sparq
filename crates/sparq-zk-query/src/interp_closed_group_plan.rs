@@ -36,7 +36,7 @@ impl NumericCodec for Codec {
     }
     fn encode_numeric(&self, key: Word, decimal: bool) -> Result<Cell, Error> {
         let lexical = key_lexical(key, decimal)?;
-        // Lane D owns replacement of this bounded integer/decimal-result adapter.
+        // Mirror the exact scaled capacity used by the shared expression encoder.
         let offset: Fr = "883423532389192164791648750371459257913741948437809479060803100646309888"
             .parse()
             .unwrap();
@@ -46,8 +46,8 @@ impl NumericCodec for Codec {
         } else {
             n
         });
-        if magnitude[..16] != [0; 16] || magnitude[16] >= 128 {
-            return Err(Error::Capacity("lane D stand-in numeric range".into()));
+        if magnitude[..18] != [0; 18] {
+            return Err(Error::Capacity("aggregate numeric capacity".into()));
         }
         let datatype = if decimal { "decimal" } else { "integer" };
         normalize(

@@ -6,7 +6,7 @@ pub mod codegen;
 pub mod credential;
 pub mod credential_graphs;
 pub mod witness_closed;
-pub mod closed_arith_standin;
+pub mod closed_arith;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod driver;
 pub mod envelope_policy;

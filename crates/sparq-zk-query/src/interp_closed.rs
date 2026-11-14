@@ -10,9 +10,38 @@ pub(super) fn evaluate(
     plan: &Plan,
     tables: &[Table],
     _dataset: &[[Cell; 4]],
-    credentials: &[CredentialCells],
+    input_dataset: &Dataset,
     params: &[Option<Cell>],
 ) -> Result<Vec<Row>, Error> {
+    let needs_graphs = crate::credential_graphs::is_profile(plan)
+        || matches!(
+            op,
+            C::GraphScan { .. }
+                | C::GraphSeed { .. }
+                | C::Graph { .. }
+                | C::Scan { credential: Some(_), .. }
+        );
+    if needs_graphs
+        && !input_dataset.counts.is_empty()
+        && !input_dataset.quads.iter().any(|q| q[3].bound)
+    {
+        return Err(Error::Unsupported(
+            "complete credential graph view; use evaluate_cells_for_request or evaluate_for_request"
+                .into(),
+        ));
+    }
+    let credentials = complete_credentials(input_dataset)?;
+    let credentials = credentials.as_slice();
+    let names = (0..credentials.len())
+        .map(|i| {
+            input_dataset
+                .quads
+                .iter()
+                .find(|q| q[3].bound && q[3].scope == i as u32 + 1)
+                .map(|q| Ok(q[3]))
+                .unwrap_or_else(|| crate::credential_graphs::name(i as u32))
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
     let rows = |id: NodeId| &tables[id as usize].rows;
     let schema = |id: NodeId| plan.nodes[id as usize].output.variables.as_slice();
     let vars = &node.output.variables;
@@ -53,7 +82,7 @@ pub(super) fn evaluate(
             } else {
                 let mut output = vec![];
                 for (c, data) in credentials.iter().enumerate() {
-                    let name = crate::credential_graphs::name(c as u32)?;
+                    let name = names[c];
                     let captured = context
                         .and_then(|id| {
                             rows(id).first().map(|r| match selector {
@@ -78,6 +107,7 @@ pub(super) fn evaluate(
                         (Some(c as u32), false),
                         credentials,
                         params,
+                        &names,
                     )?;
                     if let Slot::Variable(v) = selector {
                         if !captured.bound {
@@ -103,6 +133,7 @@ pub(super) fn evaluate(
             (None, true),
             credentials,
             params,
+            &names,
         )?,
         C::Group {
             input,
@@ -171,7 +202,10 @@ pub(super) fn evaluate(
                         let (eval_vars, eval_row) = context_row(*context, vars, &merged);
                         let (pass, error) = condition
                             .as_ref()
-                            .map(|e| eval(e, &eval_vars, &eval_row, params).and_then(Value::ebv))
+                            .map(|e| {
+                                eval(e, &eval_vars, &eval_row, params, &plan.parameters)
+                                    .and_then(Value::ebv)
+                            })
                             .transpose()?
                             .unwrap_or((true, false));
                         if pass && !error {
@@ -259,7 +293,10 @@ pub(super) fn evaluate(
             name,
             selector,
         } => {
-            let graph = crate::credential_graphs::name(*name)?;
+            let graph = names
+                .get(*name as usize)
+                .copied()
+                .unwrap_or(crate::credential_graphs::name(*name)?);
             let selected = match selector {
                 Slot::Parameter(p) => params[*p as usize].expect("graph selector"),
                 Slot::Variable(v) => rows(*context)
@@ -281,7 +318,10 @@ pub(super) fn evaluate(
             name,
             selector,
         } => {
-            let graph = crate::credential_graphs::name(*name)?;
+            let graph = names
+                .get(*name as usize)
+                .copied()
+                .unwrap_or(crate::credential_graphs::name(*name)?);
             let mut output = vec![];
             if let Some(c) = rows(*context).first() {
                 for row in rows(*input) {
@@ -324,8 +364,46 @@ pub(super) fn evaluate(
                     (*credential, crate::credential_graphs::is_profile(plan)),
                     credentials,
                     params,
+                    &names,
                 )?
             }
+        }
+        C::BindBoolean {
+            input,
+            variable,
+            predicate,
+            context,
+        } => {
+            let mut output = vec![];
+            for (i, r) in rows(*input).iter().enumerate() {
+                let (eval_vars, eval_row) = context_row(*context, schema(*input), r);
+                let (value, error) = predicate_value(
+                    predicate,
+                    i,
+                    &eval_vars,
+                    &eval_row,
+                    params,
+                    tables,
+                    &plan.parameters,
+                )?;
+                let bound = if error {
+                    Cell::default()
+                } else {
+                    crate::credential::SuiteEncoder.encode(&oxrdf::Literal::from(value).into())?
+                };
+                output.push(
+                    vars.iter()
+                        .map(|v| {
+                            if v == variable {
+                                bound
+                            } else {
+                                lookup(schema(*input), r, *v)
+                            }
+                        })
+                        .collect(),
+                );
+            }
+            output
         }
         C::Filter {
             input,
@@ -335,7 +413,8 @@ pub(super) fn evaluate(
             let mut output = vec![];
             for (i, r) in rows(*input).iter().enumerate() {
                 let (vars, row) = context_row(*context, schema(*input), r);
-                let (v, e) = predicate_value(predicate, i, &vars, &row, params, tables)?;
+                let (v, e) =
+                    predicate_value(predicate, i, &vars, &row, params, tables, &plan.parameters)?;
                 if v && !e {
                     output.push(r.clone());
                 }
@@ -351,18 +430,19 @@ fn predicate_value(
     row: &[Cell],
     params: &[Option<Cell>],
     tables: &[Table],
+    public: &[Parameter],
 ) -> Result<(bool, bool), Error> {
     Ok(match p {
         Predicate::Arithmetic(e) => e.evaluate(vars, row, params)?,
-        Predicate::Expression(e) => eval(e, vars, row, params)?.ebv()?,
+        Predicate::Expression(e) => eval(e, vars, row, params, public)?.ebv()?,
         Predicate::Exists(ids) => (!tables[ids[index] as usize].rows.is_empty(), false),
         Predicate::Not(a) => {
-            let (v, e) = predicate_value(a, index, vars, row, params, tables)?;
+            let (v, e) = predicate_value(a, index, vars, row, params, tables, public)?;
             (!v, e)
         }
         Predicate::And(a, b) | Predicate::Or(a, b) => {
-            let (a, ae) = predicate_value(a, index, vars, row, params, tables)?;
-            let (b, be) = predicate_value(b, index, vars, row, params, tables)?;
+            let (a, ae) = predicate_value(a, index, vars, row, params, tables, public)?;
+            let (b, be) = predicate_value(b, index, vars, row, params, tables, public)?;
             if matches!(p, Predicate::And(..)) {
                 (a && b, (ae || be) && !(!a && !ae || !b && !be))
             } else {
@@ -370,4 +450,22 @@ fn predicate_value(
             }
         }
     })
+}
+
+fn complete_credentials(dataset: &Dataset) -> Result<Vec<CredentialCells>, Error> {
+    let mut credentials = vec![CredentialCells { quads: vec![] }; dataset.counts.len()];
+    let named = dataset.quads.iter().any(|q| q[3].bound);
+    for q in &dataset.quads {
+        if q[3].bound {
+            if q[3].kind != 2 || q[3].scope == 0 || q[3].scope as usize > credentials.len() {
+                return Err(Error::Invalid("credential graph identity".into()));
+            }
+            credentials[q[3].scope as usize - 1]
+                .quads
+                .push([q[0], q[1], q[2], Cell::default()]);
+        } else if !named && !credentials.is_empty() {
+            credentials[0].quads.push(*q);
+        }
+    }
+    Ok(credentials)
 }

@@ -44,11 +44,13 @@ pub fn combine<let R: u32>(a: [Boolean; R], b: [Boolean; R], op: u8) -> [Boolean
     assert(op <= 2, "closed boolean opcode");
     let mut out = a;
     for i in 0..R {
-        if op == 0 {out[i] = Boolean {value: !a[i].value, is_error: a[i].is_error};}
-        else if op == 1 {out[i] = Boolean {value: a[i].value & b[i].value,
-            is_error: (a[i].is_error | b[i].is_error) & !((!a[i].value & !a[i].is_error) | (!b[i].value & !b[i].is_error))};}
-        else {out[i] = Boolean {value: a[i].value | b[i].value,
-            is_error: (a[i].is_error | b[i].is_error) & !((a[i].value & !a[i].is_error) | (b[i].value & !b[i].is_error))};}
+        let av=crate::expr_core::truth(a[i].value,a[i].is_error);
+        let bv=crate::expr_core::truth(b[i].value,b[i].is_error);
+        let result=if op==0 {crate::expr_core::logical_not(av)}
+            else if op==1 {crate::expr_core::logical_and(av,bv)}
+            else {crate::expr_core::logical_or(av,bv)};
+        let (value,error)=result;assert(!value.capacity,"closed expression capacity");
+        out[i]=Boolean{value:value.value,is_error:error};
     }
     out
 }

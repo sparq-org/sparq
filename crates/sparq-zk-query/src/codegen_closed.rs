@@ -19,9 +19,15 @@ fn term(p: u32, ids: &[u32]) -> String {
         ids.iter().position(|x| *x == p).expect("term parameter")
     )
 }
-fn steps(e: &Expr, vars: &[Var], ids: &[u32]) -> String {
+fn steps(e: &Expr, vars: &[Var], ids: &[u32], plan: &Plan) -> String {
     let mut out = vec![];
-    expression(e, vars, ids, &mut out);
+    let indices = plan
+        .parameters
+        .iter()
+        .enumerate()
+        .filter_map(|(i, p)| matches!(p, Parameter::Index(_)).then_some(i as u32))
+        .collect::<Vec<_>>();
+    expression(e, vars, ids, &indices, &mut out);
     array(out.iter().map(Step::source))
 }
 pub(super) fn generate(
@@ -50,7 +56,8 @@ pub(super) fn generate(
             let opener = match (literal_types, literal_capacity) {
                 (1, 16) => "open_integer",
                 (6, 16) => "open_date_boolean",
-                (7, 64) => "open_one",
+                (7, 64) => "open_request",
+                (31, 64) => "open_target",
                 _ => {
                     return Err(Error::Unsupported(
                         "closed credential literal profile".into(),
@@ -100,6 +107,7 @@ pub(super) fn generate(
             )
             .unwrap();
             writeln!(out, "    ops_core::unit(t{i});").unwrap();
+            *out = out.replace("ops_core_expr::evaluate_indexed(", "core::ops_closed_expr::evaluate_indexed(");
         }
         C::GraphScan {
             pattern,
@@ -199,7 +207,7 @@ pub(super) fn generate(
                 ),
                 Slot::Parameter(p) => (schema(*context).len().max(1), term(*p, ids)),
             };
-            writeln!(out,"    core::ops_closed_graph::seed(t{context}, credential_count, {credential}, {}, {column}, {constant}, t{i});",format_args!("core::ops_closed_dataset::graph_name({name})")).unwrap();
+            writeln!(out,"    core::ops_closed_graph::seed(t{context}, credential_count, {credential}, {}, {column}, {constant}, t{i});",format_args!("core::ops_closed_dataset::graph_name_request({name}, request_digest)")).unwrap();
         }
         C::Graph {
             input,
@@ -217,7 +225,7 @@ pub(super) fn generate(
                 ),
                 _ => (vars.len().max(1), schema(*context).len().max(1)),
             };
-            writeln!(out,"    core::ops_closed_graph::graph(t{input}, t{context}, {}, {target}, {capture}, {}, t{i});",cols(*input),format_args!("core::ops_closed_dataset::graph_name({name})")).unwrap();
+            writeln!(out,"    core::ops_closed_graph::graph(t{input}, t{context}, {}, {target}, {capture}, {}, t{i});",cols(*input),format_args!("core::ops_closed_dataset::graph_name_request({name}, request_digest)")).unwrap();
         }
         C::Scan {
             pattern,
@@ -247,7 +255,7 @@ pub(super) fn generate(
             };
             let program = condition
                 .as_ref()
-                .map(|e| steps(e, &ev, ids))
+                .map(|e| steps(e, &ev, ids, plan))
                 .unwrap_or_else(|| {
                     array([Step {
                         op: 7,
@@ -255,7 +263,25 @@ pub(super) fn generate(
                     }
                     .source()])
                 });
-            writeln!(out,"    core::ops_closed_negation::left_join(t{left}, t{right}, {}, {}, {ctx}, {}, {cc}, parameters, {program}, {}, t{i});",cols(*left),cols(*right),columns(vars,&ev),condition.is_some()).unwrap();
+            writeln!(out,"    core::ops_closed_negation::left_join_indexed(t{left}, t{right}, {}, {}, {ctx}, {}, {cc}, parameters, indices, {program}, {}, t{i});",cols(*left),cols(*right),columns(vars,&ev),condition.is_some()).unwrap();
+        }
+        C::BindBoolean {
+            input,
+            variable,
+            predicate,
+            context,
+        } => {
+            let value = predicate_source(predicate, *input, *context, i, &mut 0, plan, ids, out);
+            let target = vars
+                .iter()
+                .position(|v| v == variable)
+                .expect("BIND column");
+            writeln!(
+                out,
+                "    core::ops_closed_extend::boolean(t{input}, {}, {target}, {value}, t{i});",
+                cols(*input)
+            )
+            .unwrap();
         }
         C::Filter {
             input,
@@ -303,7 +329,7 @@ fn predicate_source(
                 format!("t{input}")
             };
             let (program, left, right) = arithmetic_steps(e, &vars, ids);
-            writeln!(out,"    let {name} = core::ops_closed_arith_standin::evaluate({source}, parameters, {program}, {}, {left}, {right});",e.op as u8).unwrap();
+            writeln!(out,"    let {name} = core::ops_closed_arith::evaluate({source}, parameters, {program}, {}, {left}, {right});",e.op as u8).unwrap();
         }
         Predicate::Expression(e) => {
             let input_vars = &plan.nodes[input as usize].output.variables;
@@ -320,8 +346,8 @@ fn predicate_source(
             };
             writeln!(
                 out,
-                "    let {name} = ops_core_expr::evaluate({source}, parameters, {});",
-                steps(e, &vars, ids)
+                "    let {name} = core::ops_closed_expr::evaluate_indexed({source}, parameters, indices, {});",
+                steps(e, &vars, ids, plan)
             )
             .unwrap();
         }
@@ -446,7 +472,7 @@ fn scan_source(
             capacities[c as usize]
         )
     } else if crate::credential_graphs::is_profile(plan) {
-        format!("core::ops_closed_dataset::default_graph::<{total}, {}, {}>({source}, {offsets}, {lens}, credential_count)",capacities.len(),total+capacities.len() as u32)
+        format!("core::ops_closed_dataset::default_graph::<{total}, {}, {}>(core::ops_closed_dataset::request_graphs({source},{offsets},{lens},request_digest), {offsets}, {lens}, credential_count)",capacities.len(),total+capacities.len() as u32)
     } else {
         source
     };
@@ -457,17 +483,17 @@ fn scan_source(
 }
 
 fn arithmetic_steps(
-    e: &crate::closed_arith_standin::Comparison,
+    e: &crate::closed_arith::Comparison,
     schema: &[Var],
     ids: &[u32],
 ) -> (String, usize, usize) {
     fn emit(
-        e: &crate::closed_arith_standin::Integer,
+        e: &crate::closed_arith::Integer,
         schema: &[Var],
         ids: &[u32],
         steps: &mut Vec<String>,
     ) -> usize {
-        use crate::closed_arith_standin::Integer as I;
+        use crate::closed_arith::Integer as I;
         let (op, a, b, parameter) = match e {
             I::Term(Slot::Variable(v)) => (
                 0,
@@ -498,7 +524,7 @@ fn arithmetic_steps(
         };
         let i = steps.len();
         steps.push(format!(
-            "core::ops_closed_arith_standin::Step {{op:{op},a:{a},b:{b},parameter:{parameter}}}"
+            "core::ops_closed_arith::Step {{op:{op},a:{a},b:{b},parameter:{parameter}}}"
         ));
         i
     }
@@ -573,5 +599,5 @@ fn graph_scan_source(
     let ctx = context
         .map(|id| format!("t{id}"))
         .unwrap_or_else(|| "core::ops_closed_dataset::unit_context()".into());
-    writeln!(out,"    core::ops_closed_dataset::graph_scan({source}, {offsets}, {lengths}, {ctx}, {mapping}, {captures}, {constants}, t{i});").unwrap();
+    writeln!(out,"    core::ops_closed_dataset::graph_scan(core::ops_closed_dataset::request_graphs({source},{offsets},{lengths},request_digest), {offsets}, {lengths}, {ctx}, {mapping}, {captures}, {constants}, t{i});").unwrap();
 }

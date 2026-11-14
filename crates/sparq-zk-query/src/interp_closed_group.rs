@@ -3,8 +3,8 @@
 //! Groups use RDF term identity, including blank-node credential scope, and
 //! cover the whole supplied table. Expression errors are an explicit input
 //! lane; the plan integration must wire it from checked expression outputs.
-//! Integer SUM and integer-input AVG use exact scaled keys. Decimal and double
-//! input arithmetic and GROUP_CONCAT receive named refusals.
+//! Integer and decimal aggregates mirror the shared exact scaled numeric bucket.
+//! Floating input arithmetic and GROUP_CONCAT receive named refusals.
 
 use crate::interp::{row_key, Cell, EncodeTerm, Row, Table, Word};
 use crate::interp_closed_order::{order_cell, order_pair, table_shape, term_relation};
@@ -117,7 +117,7 @@ pub enum HavingComparison {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-/// Local numeric-comparison HAVING seam; general expressions wire from lane D.
+/// Standalone numeric HAVING adapter; generated plans use expression FILTER.
 pub struct Having {
     pub column: usize,
     pub comparison: HavingComparison,
@@ -154,6 +154,19 @@ fn numeric_contract(c: Cell, key: Word, decimal: bool, types: NumericTypes) -> R
     Ok(())
 }
 
+fn check_magnitude(magnitude: Fr) -> Result<(), Error> {
+    let bytes = field_to_be_bytes_32(&magnitude);
+    if bytes[..18] != [0; 18] {
+        return Err(Error::Capacity(
+            "aggregate numeric capacity or precision".into(),
+        ));
+    }
+    Ok(())
+}
+fn check_total(n: Fr) -> Result<(), Error> {
+    let key = field_to_be_bytes_32(&(field(offset()) + n));
+    check_magnitude(if key < offset() { -n } else { n })
+}
 fn numeric(key: Fr, decimal: bool, codec: &impl NumericCodec) -> Result<Cell, Error> {
     let key = field_to_be_bytes_32(&key);
     if key[..2] != [0; 2] {
@@ -161,15 +174,16 @@ fn numeric(key: Fr, decimal: bool, codec: &impl NumericCodec) -> Result<Cell, Er
             "aggregate numeric range or AVG precision".into(),
         ));
     }
+    check_total(field(key) - field(offset()))?;
     let cell = codec.encode_numeric(key, decimal)?;
     numeric_contract(cell, key, decimal, codec.types())?;
     Ok(cell)
 }
 
 fn integer_key(c: Cell, types: NumericTypes) -> Result<Fr, Error> {
-    if c.kind != 3 || c.key_class != 1 || c.dt != types.integer_dt {
+    if c.kind != 3 || c.key_class != 1 || ![types.integer_dt, types.decimal_dt].contains(&c.dt) {
         return Err(Error::Unsupported(
-            "integer aggregate arithmetic required".into(),
+            "exact aggregate arithmetic required".into(),
         ));
     }
     if c.key[..2] != [0; 2] {
@@ -177,6 +191,10 @@ fn integer_key(c: Cell, types: NumericTypes) -> Result<Fr, Error> {
     }
     let n = field(c.key) - field(offset());
     let magnitude = if c.key < offset() { -n } else { n };
+    check_magnitude(magnitude)?;
+    if c.dt == types.decimal_dt {
+        return Ok(n);
+    }
     let quotient = field_to_be_bytes_32(&(magnitude / Fr::from(SCALE)));
     if quotient[..9] != [0; 9] || quotient[9] >= 16 {
         return Err(Error::Invalid("aggregate integer key is fractional".into()));
@@ -241,6 +259,7 @@ fn aggregate(
         for &c in &vals {
             if c.kind == 3 && matches!(c.key_class, 1 | 2 | 127) {
                 sum += integer_key(c, codec.types())?;
+                check_total(sum)?;
             } else {
                 error = true;
             }
@@ -252,8 +271,13 @@ fn aggregate(
         if error {
             return Ok(Cell::default());
         }
-        let decimal = spec.kind == K::Avg && !vals.is_empty();
-        let divisor = if decimal { vals.len() } else { 1 };
+        let decimal = spec.kind == K::Avg && !vals.is_empty()
+            || vals.iter().any(|c| c.dt == codec.types().decimal_dt);
+        let divisor = if spec.kind == K::Avg && !vals.is_empty() {
+            vals.len()
+        } else {
+            1
+        };
         return numeric(
             field(offset()) + sum / Fr::from(divisor as u64),
             decimal,
@@ -297,23 +321,16 @@ fn having_keeps(row: &[Cell], having: Having) -> Result<bool, Error> {
     let a = row[having.column];
     let b = having.rhs;
     b.validate()?;
-    let compatible = a.bound
-        && b.bound
-        && a.kind == 3
-        && b.kind == 3
-        && a.key_class == b.key_class
-        && matches!(a.key_class, 1 | 5);
+    let compatible =
+        a.bound && b.bound && a.kind == 3 && b.kind == 3 && a.key_class == 1 && b.key_class == 1;
     if !compatible {
-        if a.bound && b.bound {
-            return Err(Error::Unsupported(
-                "HAVING numeric comparison required".into(),
-            ));
-        }
         return Ok(false);
     }
     if a.key[..2] != [0; 2] || b.key[..2] != [0; 2] {
         return Err(Error::Capacity("HAVING comparison capacity".into()));
     }
+    check_total(field(a.key) - field(offset()))?;
+    check_total(field(b.key) - field(offset()))?;
     let cmp = a.key.cmp(&b.key);
     Ok(match having.comparison {
         HavingComparison::Equal => cmp == Ordering::Equal,

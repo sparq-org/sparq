@@ -1,7 +1,7 @@
-//! STAND-IN: lane D replaces this integer-only typed expression lowerer.
+//! Arithmetic shape lowering for the shared expression gadgets.
 use super::Builder;
 use crate::{
-    closed_arith_standin::{Comparison, Integer},
+    closed_arith::{Comparison, Integer},
     plan::{Compare, Expr},
     Error,
 };
@@ -41,7 +41,11 @@ impl Builder {
                         if let crate::plan::Parameter::Term(oxrdf::Term::Literal(l)) =
                             &self.plan.parameters[p as usize]
                         {
-                            if l.datatype().as_str() != "http://www.w3.org/2001/XMLSchema#integer" {
+                            if !matches!(
+                                l.datatype().as_str(),
+                                "http://www.w3.org/2001/XMLSchema#integer"
+                                    | "http://www.w3.org/2001/XMLSchema#decimal"
+                            ) {
                                 return Err(Error::Unsupported(
                                     "lane D integer arithmetic operands".into(),
                                 ));
@@ -65,11 +69,7 @@ impl Builder {
             E::LessOrEqual(a, b) => (Compare::LessOrEqual, a, b),
             E::Greater(a, b) => (Compare::Greater, a, b),
             E::GreaterOrEqual(a, b) => (Compare::GreaterOrEqual, a, b),
-            _ => {
-                return Err(Error::Unsupported(
-                    "lane D integer arithmetic FILTER comparison".into(),
-                ))
-            }
+            _ => return Err(Error::Unsupported(format!("arithmetic expression {e}"))),
         };
         Ok(Comparison {
             op,
