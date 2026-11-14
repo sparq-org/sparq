@@ -1782,6 +1782,21 @@ fn four_credentials_status_component() {
     four_status(four_normal());
 }
 #[test]
+fn four_credentials_holder_status_together() {
+    let cs = four_normal();
+    four_issuer(cs);
+    four_holder(cs, [0, 0, 1, 0]);
+    four_status(cs);
+}
+#[test]
+fn envelope_protocol_vectors_match_rust() {
+    assert(holder_message(digest()) == fixtures::holder_message_vector());
+    assert(status_leaf(false) == fixtures::status_leaf_false_vector());
+    assert(status_leaf(true) == fixtures::status_leaf_true_vector());
+    assert(snapshot_digest::<2>(snapshot(false)) == fixtures::snapshot_revocation_vector());
+    assert(snapshot_digest::<2>(snapshot(true)) == fixtures::snapshot_suspension_vector());
+}
+#[test]
 fn four_credentials_validity_component() {
     four_validity(four_normal(), period());
 }

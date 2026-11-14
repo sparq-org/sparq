@@ -5966,6 +5966,26 @@ pub fn complete_expired<let N: u32>() -> CredentialOpening<N, 160> {
         },
     }
 }
+pub fn holder_message_vector() -> Field {
+    0x08c6ffb618ee18ec5ec60e7d9c3b57c542b77525b42b125cf598b2b1b5e89f79
+}
+
+pub fn status_leaf_false_vector() -> Field {
+    0x114bf384aa610956ed6dd328b5939111dffda58b1e99c0d93f85163f4c26c13f
+}
+
+pub fn status_leaf_true_vector() -> Field {
+    0x1e75bd080f713e905b25453060e11841299ed17e08b31f96c414c54b273bbc2a
+}
+
+pub fn snapshot_revocation_vector() -> Field {
+    0x0557ffcd90dbbca2a28d0694254cc3b99dcf033c012553479e2ca42ed1306822
+}
+
+pub fn snapshot_suspension_vector() -> Field {
+    0x2e8fb9dd29e5a43e6696826f612a0fe628d2dc1c6b267d136e68e44c03fdf801
+}
+
 pub fn holder_signature_11() -> Signature {
     Signature {
         present: true,

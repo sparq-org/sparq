@@ -3,7 +3,9 @@ use oxrdf::{Literal, Term};
 use sha2::{Digest, Sha256};
 use sparq_merkle_suite::{metadata, poseidon as p};
 use sparq_zk::{field::field_to_hex, sig};
-use sparq_zk_query::envelope_policy::{trust_member_digest, TrustMember};
+use sparq_zk_query::envelope_policy::{
+    holder_message, snapshot_digest, status_leaf, trust_member_digest, TrustMember,
+};
 use std::fmt::Write;
 
 fn raw(term: Option<&Term>) -> String {
@@ -511,13 +513,49 @@ fn main() {
         }
     }
     let digest = [7u8; 32];
-    let high = u128::from_be_bytes(digest[..16].try_into().unwrap());
-    let low = u128::from_be_bytes(digest[16..].try_into().unwrap());
-    let message = sparq_zk::poseidon2::hash(&[
-        sparq_merkle_suite::Fr::from(0x5643515f45484f4cu64),
-        high.into(),
-        low.into(),
-    ]);
+    let message = holder_message(&digest);
+    writeln!(
+        out,
+        "pub fn holder_message_vector() -> Field {{{}}}",
+        field_to_hex(&message)
+    )
+    .unwrap();
+    for bit in [false, true] {
+        writeln!(
+            out,
+            "pub fn status_leaf_{bit}_vector() -> Field {{{}}}",
+            field_to_hex(&status_leaf(bit))
+        )
+        .unwrap();
+    }
+    let left = sparq_zk::poseidon2::hash(&[status_leaf(true), status_leaf(false)]);
+    let right = sparq_zk::poseidon2::hash(&[status_leaf(false), status_leaf(true)]);
+    let root = sparq_zk::poseidon2::hash(&[left, right]);
+    for purpose in ["revocation", "suspension"] {
+        let list = p::term_cell(
+            &Term::NamedNode(oxrdf::NamedNode::new_unchecked(format!(
+                "urn:list:{purpose}"
+            ))),
+            0,
+        )
+        .unwrap();
+        let purpose_cell =
+            p::term_cell(&Term::Literal(Literal::new_simple_literal(purpose)), 0).unwrap();
+        let digest = snapshot_digest(
+            p::field_bytes(list.enc),
+            p::field_bytes(purpose_cell.enc),
+            4,
+            2,
+            p::field_bytes(root),
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "pub fn snapshot_{purpose}_vector() -> Field {{0x{}}}",
+            digest.map(|b| format!("{b:02x}")).concat()
+        )
+        .unwrap();
+    }
     for n in [11, 12] {
         writeln!(
             out,

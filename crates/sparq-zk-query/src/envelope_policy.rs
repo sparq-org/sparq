@@ -6,6 +6,47 @@ use oxrdf::{NamedNode, Term};
 use sparq_merkle_suite::{poseidon as suite, Fr};
 use sparq_zk::{field::field_to_be_bytes_32, poseidon2, sig};
 
+const KEY_SET_LEAF: u64 = 0x5643515f454b4559;
+const SNAPSHOT: u64 = 0x5643515f45534e50;
+const STATUS_LEAF: u64 = 0x5643515f45534c46;
+const HOLDER_REQUEST: u64 = 0x5643515f45484f4c;
+
+/// Message signed by each required holder over the complete request digest.
+pub fn holder_message(digest: &[u8; 32]) -> Fr {
+    let high = u128::from_be_bytes(digest[..16].try_into().unwrap());
+    let low = u128::from_be_bytes(digest[16..].try_into().unwrap());
+    poseidon2::hash(&[Fr::from(HOLDER_REQUEST), high.into(), low.into()])
+}
+
+/// Tagged status bit, before ordered status-tree hashing.
+pub fn status_leaf(bit: bool) -> Fr {
+    poseidon2::hash(&[
+        Fr::from(STATUS_LEAF),
+        Fr::from(u64::from(bit)),
+        Fr::from(0u64),
+    ])
+}
+
+/// Match the envelope snapshot encoding after snapshot authentication.
+/// List and purpose are suite term encodings; depth is the status-bit tree depth.
+/// This encoding alone does not authenticate or admit a status list.
+pub fn snapshot_digest(
+    list: Word,
+    purpose: Word,
+    bit_len: u32,
+    depth: u32,
+    root: Word,
+) -> Result<Word, Error> {
+    Ok(suite::field_bytes(poseidon2::hash(&[
+        Fr::from(SNAPSHOT),
+        field(list)?,
+        field(purpose)?,
+        Fr::from(bit_len),
+        Fr::from(depth),
+        field(root)?,
+    ])))
+}
+
 /// An issuer, its assertion verification method and the authorized suite key.
 #[derive(Clone, Debug)]
 pub struct TrustMember {
@@ -106,7 +147,7 @@ pub fn trust_member_digest(member: &TrustMember) -> Result<Word, Error> {
     let assertion = NamedNode::new_unchecked("https://w3id.org/security#assertionMethod");
     let key = poseidon2::hash(&[suite::suite_id(), member.key.0.x, member.key.0.y]);
     Ok(suite::field_bytes(poseidon2::hash(&[
-        Fr::from(0x5643515f454b4559u64),
+        Fr::from(KEY_SET_LEAF),
         field(issuer_encoding(&member.issuer)?)?,
         field(issuer_encoding(&member.verification_method)?)?,
         key,
@@ -231,6 +272,59 @@ pub fn public_words(input: &PolicyInput) -> Result<[Word; 17], Error> {
 mod tests {
     use super::*;
     use sparq_zk::field::field_from_hex_str_strict;
+
+    #[test]
+    fn envelope_protocol_constants_equal_their_rust_sources() {
+        let source = include_str!("../../../zk/noir-query/core/src/envelope.nr");
+        let mut actual = std::collections::BTreeMap::new();
+        for line in source.lines() {
+            let code = line.split("//").next().unwrap().trim();
+            if let Some(declaration) = code.strip_prefix("global ") {
+                let (name, rest) = declaration.split_once(':').unwrap();
+                let (kind, rest) = rest.split_once('=').unwrap();
+                assert_eq!(kind.trim(), "Field");
+                let value = rest.trim().strip_suffix(';').unwrap().trim();
+                let value = u64::from_str_radix(value.strip_prefix("0x").unwrap(), 16).unwrap();
+                assert!(actual.insert(name.trim(), value).is_none());
+            }
+        }
+        let expected = std::collections::BTreeMap::from([
+            ("KEY_SET_LEAF", KEY_SET_LEAF),
+            ("SNAPSHOT", SNAPSHOT),
+            ("STATUS_LEAF", STATUS_LEAF),
+            ("HOLDER_REQUEST", HOLDER_REQUEST),
+        ]);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn envelope_encodings_bind_each_input() {
+        let digest = std::array::from_fn(|i| i as u8);
+        let message = holder_message(&digest);
+        for i in 0..digest.len() {
+            let mut changed = digest;
+            changed[i] ^= 1;
+            assert_ne!(message, holder_message(&changed));
+        }
+        assert_ne!(status_leaf(false), status_leaf(true));
+        let snapshot = snapshot_digest(number(11), number(13), 4, 2, number(17)).unwrap();
+        for changed in [
+            snapshot_digest(number(19), number(13), 4, 2, number(17)),
+            snapshot_digest(number(11), number(23), 4, 2, number(17)),
+            snapshot_digest(number(11), number(13), 8, 2, number(17)),
+            snapshot_digest(number(11), number(13), 4, 3, number(17)),
+            snapshot_digest(number(11), number(13), 4, 2, number(29)),
+        ] {
+            assert_ne!(snapshot, changed.unwrap());
+        }
+        for (list, purpose, root) in [
+            ([255; 32], number(13), number(17)),
+            (number(11), [255; 32], number(17)),
+            (number(11), number(13), [255; 32]),
+        ] {
+            assert!(snapshot_digest(list, purpose, 4, 2, root).is_err());
+        }
+    }
 
     fn iri(text: &str) -> NamedNode {
         NamedNode::new(text).unwrap()

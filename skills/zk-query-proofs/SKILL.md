@@ -201,6 +201,9 @@ a capacity of four before deduplication. An empty list is refused with
 `Invalid("empty holder issuer list")`. To require no holder keys, omit `holderBinding`.
 `AcceptedSnapshots` takes verifier-curated digests. The helper sorts canonical set
 members, computes minimal roots/depths and emits zero words for disabled conditions.
+`holder_message` hashes the complete request digest for holder signing. `status_leaf`
+and `snapshot_digest` reproduce the tagged status-tree encodings; callers authenticate
+and admit the status list separately. The fixture generator uses these same helpers.
 The digest remains a separate host-computed public input. This helper is not yet
 admitted as a complete generated method. The envelope consumes authenticated suite metadata,
 uses exact Unix epoch milliseconds for request instants, and scopes graph names by the public

@@ -38,7 +38,8 @@ The small status trees exercise tagged leaves, depth-bound snapshots and members
 admission must still authenticate the W3C list, minimum length, purpose, bit order and freshness.
 Default component cases authenticate the same four signed credentials at full capacity. They
 cover shared/distinct holder keys, issuer scope, both status purposes, validity, freshness, each
-complete credential graph view and merge behavior on their signed shared fact. The named
+complete credential graph view and merge behavior on their signed shared fact. A default case
+checks issuer membership, holder scope and status together on the same authenticated inputs. The named
 combined case retains the whole-dataset merge and every condition together; it needs a larger
 machine. Default triples are
 set members; named copies remain in each credential graph. The graph builder uses a sorting
