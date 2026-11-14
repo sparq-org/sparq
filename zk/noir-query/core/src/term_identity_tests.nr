@@ -170,4 +170,6 @@ fn fixed_vocabulary_identities_match_constrained_openings() {
     assert_fixed(crate::term::iri_status_purpose(), "https://www.w3.org/ns/credentials/status#statusPurpose".as_bytes());
     assert_fixed(crate::term::iri_status_size(), "https://www.w3.org/ns/credentials/status#statusSize".as_bytes());
     assert_fixed(crate::term::iri_assertion_method(), "https://w3id.org/security#assertionMethod".as_bytes());
+    assert_fixed(crate::term::iri_confidence_method(), "https://www.w3.org/2018/credentials#confidenceMethod".as_bytes());
+    assert_fixed(crate::term::iri_verified_issuer(), "https://w3id.org/sparq/vcq#verifiedIssuer".as_bytes());
 }
