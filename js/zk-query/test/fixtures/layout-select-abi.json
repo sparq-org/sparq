@@ -953,11 +953,35 @@
               "name": "status",
               "type": {
                 "kind": "array",
-                "length": 4,
+                "length": 1,
                 "type": {
                   "kind": "struct",
                   "path": "core::ops_core_envelope::RawStatus",
                   "fields": [
+                    {
+                      "name": "row",
+                      "type": {
+                        "kind": "integer",
+                        "sign": "unsigned",
+                        "width": 32
+                      }
+                    },
+                    {
+                      "name": "list_row",
+                      "type": {
+                        "kind": "integer",
+                        "sign": "unsigned",
+                        "width": 32
+                      }
+                    },
+                    {
+                      "name": "purpose_row",
+                      "type": {
+                        "kind": "integer",
+                        "sign": "unsigned",
+                        "width": 32
+                      }
+                    },
                     {
                       "name": "depth",
                       "type": {
@@ -1344,10 +1368,6 @@
         "error_kind": "string",
         "string": "non-zero key tail"
       },
-      "217363528233175563": {
-        "error_kind": "string",
-        "string": "status entry type"
-      },
       "251540777268511422": {
         "error_kind": "string",
         "string": "issuer authorization set"
@@ -1376,29 +1396,13 @@
         "error_kind": "string",
         "string": "boolean key payload"
       },
-      "838946152528579956": {
-        "error_kind": "string",
-        "string": "status evidence coverage"
-      },
       "842086612280710690": {
         "error_kind": "string",
         "string": "table capacity"
       },
-      "888645548405645662": {
-        "error_kind": "string",
-        "string": "validity bounds reversed"
-      },
       "992401946138144806": {
         "error_kind": "string",
         "string": "Attempted to read past end of BoundedVec"
-      },
-      "1040567045895277544": {
-        "error_kind": "string",
-        "string": "holder issuer presence"
-      },
-      "1460931902187194732": {
-        "error_kind": "string",
-        "string": "set depth capacity"
       },
       "1499104929359656741": {
         "error_kind": "string",
@@ -1416,17 +1420,13 @@
         "error_kind": "string",
         "string": "created must be a literal"
       },
-      "2291598804592980985": {
-        "error_kind": "string",
-        "string": "status path"
-      },
       "2336531439293059733": {
         "error_kind": "string",
         "string": "subject kind"
       },
-      "2552883656872229536": {
+      "2855781945539169777": {
         "error_kind": "string",
-        "string": "snapshot capacity"
+        "string": "compiled status policy"
       },
       "3172986584152997763": {
         "error_kind": "string",
@@ -1439,6 +1439,10 @@
       "3536672719099076685": {
         "error_kind": "string",
         "string": "disabled validity policy"
+      },
+      "3577854068984886288": {
+        "error_kind": "string",
+        "string": "disabled holder evidence"
       },
       "4451024933570688834": {
         "error_kind": "string",
@@ -1456,10 +1460,6 @@
         "error_kind": "string",
         "string": "encoded byte length"
       },
-      "5117566846955228068": {
-        "error_kind": "string",
-        "string": "status index is not decimal"
-      },
       "5421095327929394772": {
         "error_kind": "string",
         "string": "attempt to bit-shift with overflow"
@@ -1472,18 +1472,6 @@
         "error_kind": "string",
         "string": "credential padding count"
       },
-      "5672375127437064635": {
-        "error_kind": "string",
-        "string": "holder key type"
-      },
-      "5709057177320904959": {
-        "error_kind": "string",
-        "string": "unbound lexical opening"
-      },
-      "5788035872685603941": {
-        "error_kind": "string",
-        "string": "status list kind"
-      },
       "6132436094257717876": {
         "error_kind": "string",
         "string": "credential method lexical capacity"
@@ -1495,10 +1483,6 @@
       "6430945733921947325": {
         "error_kind": "string",
         "string": "issuer identity kind"
-      },
-      "6646923907971692980": {
-        "error_kind": "string",
-        "string": "creation time unavailable"
       },
       "6720759575836586765": {
         "error_kind": "string",
@@ -1516,21 +1500,13 @@
         "error_kind": "string",
         "string": "empty key payload"
       },
-      "7239656552545164798": {
+      "7229332138680411635": {
         "error_kind": "string",
-        "string": "before earliestCreated"
-      },
-      "7317169856629387956": {
-        "error_kind": "string",
-        "string": "holder evidence slot"
+        "string": "compiled validity policy"
       },
       "7327296941349474725": {
         "error_kind": "string",
         "string": "credential blank-node scope"
-      },
-      "7349627402254687046": {
-        "error_kind": "string",
-        "string": "status bit set"
       },
       "7393549285676195791": {
         "error_kind": "string",
@@ -1540,17 +1516,9 @@
         "error_kind": "string",
         "string": "credential resource lexical capacity"
       },
-      "7660926222831601634": {
-        "error_kind": "string",
-        "string": "snapshot identity"
-      },
       "7840128645460606212": {
         "error_kind": "string",
         "string": "revealed input padding"
-      },
-      "8086167173253898483": {
-        "error_kind": "string",
-        "string": "inactive holder policy"
       },
       "8112738790394919314": {
         "error_kind": "string",
@@ -1559,10 +1527,6 @@
       "8143291516721459587": {
         "error_kind": "string",
         "string": "dataset credential index"
-      },
-      "8159112315749594310": {
-        "error_kind": "string",
-        "string": "status entry kind"
       },
       "8189835557297515222": {
         "error_kind": "string",
@@ -1576,10 +1540,6 @@
         "error_kind": "string",
         "string": "default graph lexical"
       },
-      "8515871937511137518": {
-        "error_kind": "string",
-        "string": "holder issuer capacity"
-      },
       "8553246644756511612": {
         "error_kind": "string",
         "string": "credential subject cardinality"
@@ -1588,17 +1548,9 @@
         "error_kind": "string",
         "string": "predicate kind"
       },
-      "9061869317984665486": {
-        "error_kind": "string",
-        "string": "status index depth"
-      },
       "9141357195180953097": {
         "error_kind": "string",
         "string": "credential root"
-      },
-      "9166290017500746695": {
-        "error_kind": "string",
-        "string": "validFrom unavailable"
       },
       "9230457233189587827": {
         "error_kind": "string",
@@ -1616,25 +1568,9 @@
         "error_kind": "string",
         "string": "leaf salt not derived from tree salt"
       },
-      "9636088263192316034": {
-        "error_kind": "string",
-        "string": "status path padding"
-      },
-      "9698390346799968641": {
-        "error_kind": "string",
-        "string": "holder issuer order"
-      },
-      "9855430026576497868": {
-        "error_kind": "string",
-        "string": "before validFrom"
-      },
       "9881629358342848834": {
         "error_kind": "string",
         "string": "public constant"
-      },
-      "10024990329989078242": {
-        "error_kind": "string",
-        "string": "holder issuer encoding"
       },
       "10196830150746269029": {
         "error_kind": "string",
@@ -1647,10 +1583,6 @@
       "10563278183002598649": {
         "error_kind": "string",
         "string": "scan first payload"
-      },
-      "10581609047269650812": {
-        "error_kind": "string",
-        "string": "empty holder issuer list"
       },
       "10843810106516118511": {
         "error_kind": "string",
@@ -1676,9 +1608,9 @@
         "error_kind": "string",
         "string": "lexical opening differs"
       },
-      "11719761390931738595": {
+      "11486688139626992279": {
         "error_kind": "string",
-        "string": "signature evidence absent"
+        "string": "compiled freshness policy"
       },
       "11802504474959304239": {
         "error_kind": "string",
@@ -1716,13 +1648,9 @@
         "error_kind": "string",
         "string": "credential normalization count"
       },
-      "12509613417476919003": {
+      "12618042871270482668": {
         "error_kind": "string",
-        "string": "status entry absent"
-      },
-      "12514726124350553137": {
-        "error_kind": "string",
-        "string": "validity instant range"
+        "string": "compiled holder policy"
       },
       "12659316033304120378": {
         "error_kind": "string",
@@ -1735,10 +1663,6 @@
       "12833444161294236327": {
         "error_kind": "string",
         "string": "snapshot depth capacity"
-      },
-      "12918602609685938255": {
-        "error_kind": "string",
-        "string": "status size"
       },
       "12952428654475462531": {
         "error_kind": "string",
@@ -1756,10 +1680,6 @@
         "error_kind": "string",
         "string": "credential method backing padding"
       },
-      "13521209128316054856": {
-        "error_kind": "string",
-        "string": "status depth capacity"
-      },
       "13659395267648872468": {
         "error_kind": "string",
         "string": "key requires literal"
@@ -1771,10 +1691,6 @@
       "14009049794313929848": {
         "error_kind": "string",
         "string": "point is not on Baby-JubJub"
-      },
-      "14104280402947080833": {
-        "error_kind": "string",
-        "string": "snapshot policy"
       },
       "14194756468325654588": {
         "error_kind": "string",
@@ -1796,22 +1712,6 @@
         "error_kind": "string",
         "string": "nonliteral position"
       },
-      "15215172504614181957": {
-        "error_kind": "string",
-        "string": "snapshot root absent"
-      },
-      "15234203208541285942": {
-        "error_kind": "string",
-        "string": "holder evidence coverage"
-      },
-      "15457454885491140981": {
-        "error_kind": "string",
-        "string": "time range"
-      },
-      "15501030217011103958": {
-        "error_kind": "string",
-        "string": "subject node kind"
-      },
       "15541584675956317957": {
         "error_kind": "string",
         "string": "disabled holder policy"
@@ -1831,10 +1731,6 @@
       "16270386280290530395": {
         "error_kind": "string",
         "string": "canonical payload"
-      },
-      "16428046575412425272": {
-        "error_kind": "string",
-        "string": "after validUntil"
       },
       "16431471497789672479": {
         "error_kind": "string",
@@ -1860,14 +1756,6 @@
         "error_kind": "string",
         "string": "row request capacity"
       },
-      "17181756395128801499": {
-        "error_kind": "string",
-        "string": "status index length"
-      },
-      "17195033557018834870": {
-        "error_kind": "string",
-        "string": "unknown status purpose"
-      },
       "17200572207616664197": {
         "error_kind": "string",
         "string": "key width"
@@ -1880,17 +1768,9 @@
         "error_kind": "string",
         "string": "scan extra binding"
       },
-      "17334641987208650760": {
-        "error_kind": "string",
-        "string": "empty status index"
-      },
       "17367058671652236164": {
         "error_kind": "string",
         "string": "required property absent"
-      },
-      "17372963129703188075": {
-        "error_kind": "string",
-        "string": "key node kind"
       },
       "17558050003890529665": {
         "error_kind": "string",
@@ -1900,10 +1780,6 @@
         "error_kind": "string",
         "string": "credential graph identity"
       },
-      "17782774924881496107": {
-        "error_kind": "string",
-        "string": "status index binding"
-      },
       "17885380776686846557": {
         "error_kind": "string",
         "string": "row request bound"
@@ -1912,17 +1788,9 @@
         "error_kind": "string",
         "string": "property cardinality"
       },
-      "17928045010679114796": {
-        "error_kind": "string",
-        "string": "freshness instant range"
-      },
       "17993512535712032858": {
         "error_kind": "string",
         "string": "literal datatype"
-      },
-      "18428925459967321240": {
-        "error_kind": "string",
-        "string": "validUntil unavailable"
       }
     }
   }
