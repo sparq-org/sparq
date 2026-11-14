@@ -102,7 +102,7 @@ fn property_row(
 }
 
 fn empty_status() -> Value {
-    json!({"list_row":0,"purpose_row":0,"depth":0,"present":false,"bit_len":0,"root":"0","accepted":{"index":"0","siblings":vec!["0";4]},"bit":false,
+    json!({"row":0,"list_row":0,"purpose_row":0,"depth":0,"present":false,"bit_len":0,"root":"0","accepted":{"index":"0","siblings":vec!["0";4]},"bit":false,
         "path":{"index":"0","siblings":vec!["0";32]},"purpose":vec![0;16],"purpose_len":0,
         "index":vec![0;20],"index_len":0,"size":vec![0;20],"size_len":0})
 }
@@ -174,10 +174,23 @@ fn raw_credential(
                 "index":index,"index_len":index_len,"size":size,"size_len":size_len});
         }
     }
+    // The circuit checks entries through STATUS_SLOTS selected rows in tree
+    // order and proves the count covers every signed entry; more is no proof.
+    let mut slots = Vec::with_capacity(crate::plan::STATUS_SLOTS);
+    for (row, mut entry) in status.into_iter().enumerate() {
+        if entry["present"] == true {
+            entry["row"] = json!(row);
+            slots.push(entry);
+        }
+    }
+    if slots.len() > crate::plan::STATUS_SLOTS {
+        return Err(Error::Capacity("status entry slots".into()));
+    }
+    slots.resize(crate::plan::STATUS_SLOTS, empty_status());
     let (from, from_len) = bytes(&from, 32)?;
     let (until, until_len) = bytes(&until, 32)?;
     Ok(
-        json!({"holder_slot":e.map_or(0,|e|e.holder_slot),"status":status,
+        json!({"holder_slot":e.map_or(0,|e|e.holder_slot),"status":slots,
         "validity":{"from":from,"from_len":from_len,"until":until,"until_len":until_len}}),
     )
 }

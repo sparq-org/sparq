@@ -1187,13 +1187,14 @@ fn canonical_status_depth_binds_the_snapshot_and_padding() {
         .unwrap();
         let row = evidence.credentials[0].statuses[0].quad_index;
         let parsed = parse(&input);
-        assert_eq!(parsed["envelope_0"]["status"][row]["depth"], json!(depth));
+        assert_eq!(parsed["envelope_0"]["status"][0]["row"], json!(row));
+        assert_eq!(parsed["envelope_0"]["status"][0]["depth"], json!(depth));
         driver
             .execute(&input, &format!("status_depth_{depth}"))
             .unwrap();
         for changed_depth in [if depth == 0 { 1 } else { depth - 1 }, 33] {
             let mut altered = parsed.clone();
-            altered["envelope_0"]["status"][row]["depth"] = json!(changed_depth);
+            altered["envelope_0"]["status"][0]["depth"] = json!(changed_depth);
             assert!(driver
                 .execute(
                     &render(&altered),
@@ -1203,7 +1204,7 @@ fn canonical_status_depth_binds_the_snapshot_and_padding() {
         }
         if depth == 1 {
             let mut altered = parsed.clone();
-            altered["envelope_0"]["status"][row]["path"]["siblings"][1] = json!("1");
+            altered["envelope_0"]["status"][0]["path"]["siblings"][1] = json!("1");
             assert!(driver.execute(&render(&altered), "status_padding").is_err());
         }
     }
@@ -1423,12 +1424,21 @@ fn canonical_envelope_executes_complete_private_evidence_and_policy_controls() {
         }),
         ("status bit", {
             let mut p = parsed.clone();
-            p["envelope_0"]["status"][quad_index]["bit"] = json!(true);
+            p["envelope_0"]["status"][0]["bit"] = json!(true);
             p
         }),
         ("status coverage", {
             let mut p = parsed.clone();
-            p["envelope_0"]["status"][quad_index]["present"] = json!(false);
+            // A well-formed empty slot: the remaining signed entry is uncovered.
+            let slot = &mut p["envelope_0"]["status"][0];
+            slot["present"] = json!(false);
+            slot["row"] = json!(0);
+            slot["depth"] = json!(0);
+            p
+        }),
+        ("status slot row", {
+            let mut p = parsed.clone();
+            p["envelope_0"]["status"][0]["row"] = json!(unrelated_list);
             p
         }),
         ("issuer path", {
@@ -1454,7 +1464,7 @@ fn canonical_envelope_executes_complete_private_evidence_and_policy_controls() {
         ("status property capacity", "list_row", 16),
     ] {
         let mut changed=parsed.clone();
-        changed["envelope_0"]["status"][quad_index][field]=json!(row);
+        changed["envelope_0"]["status"][0][field]=json!(row);
         controls.push((name, changed));
     }
     let other_holder = sig::SecretKey::from_seed(29);

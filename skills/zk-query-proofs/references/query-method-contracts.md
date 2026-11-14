@@ -260,6 +260,10 @@ parameters, so changing a time or accepted root preserves the shape.
 The public layout stays the same for every selection. Generated circuits bind
 public flags to the compiled selection and require disabled policy values to be
 zero. The holder signature consumer runs once over distinct required keys.
+The status consumer checks `plan::STATUS_SLOTS` entries per credential through
+private row selectors and proves they cover every signed `credentialStatus`
+entry. A credential with more entries has no proof; witness rendering returns
+a capacity error. The slot count is committed with the status feature.
 Fixture entry points retain their explicit contracts.
 
 The additive envelope seam is `authenticate_bounded` followed by its consumer

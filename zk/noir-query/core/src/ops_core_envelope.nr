@@ -1,11 +1,15 @@
 //! Generated wiring between raw witnesses and the owned envelope consumer.
-use crate::envelope::{PublicPolicy, HolderEvidence, Membership, BoundedStatusEvidence, Snapshot, ValidityOpening};
+use crate::envelope::{PublicPolicy, HolderEvidence, Membership, BoundedStatusEvidence, SlotStatusEvidence, Snapshot, ValidityOpening};
 use crate::ops_core_profile::QuadOpening;
 use crate::ops_core_suite::{OpenedCredential, BoundedCredentialProof};
 use std::collections::bounded_vec::BoundedVec;
 
+/// Status entries per credential, committed through the plan's status feature.
+/// More signed entries than slots refuse; no entry is skipped.
+pub global STATUS_SLOTS:u32=1;
+
 pub struct RawStatus<let D:u32,let A:u32> {
-    pub list_row:u32,pub purpose_row:u32,
+    pub row:u32,pub list_row:u32,pub purpose_row:u32,
     pub depth:u32, pub present:bool, pub bit_len:u32, pub root:Field,
     pub accepted:Membership<A>, pub bit:bool, pub path:Membership<D>,
     pub purpose:[u8;16], pub purpose_len:u32,
@@ -16,7 +20,7 @@ pub struct RawValidity {
     pub from:[u8;32], pub from_len:u32, pub until:[u8;32], pub until_len:u32,
 }
 pub struct CredentialEvidence<let N:u32> {
-    pub holder_slot:u32, pub status:[RawStatus<32,4>;N], pub validity:RawValidity,
+    pub holder_slot:u32, pub status:[RawStatus<32,4>;STATUS_SLOTS], pub validity:RawValidity,
 }
 fn selected_status_property<let N:u32>(quads:[[crate::term::TermCell;4];N],count:u32,
     entry:crate::term::TermCell,predicate:crate::term::TermCell,row:u32) -> crate::term::TermCell {
@@ -27,26 +31,28 @@ fn selected_status_property<let N:u32>(quads:[[crate::term::TermCell;4];N],count
     selected[2]
 }
 
-fn status_evidence<let N:u32,let D:u32,let A:u32>(
-    c:crate::suite_metadata::OpenedCredential<N>,raw:[RawStatus<D,A>;N]) -> [BoundedStatusEvidence<D,A>;N] {
-    let absent=BoundedStatusEvidence {depth:0,present:false,
+fn status_evidence<let N:u32,let T:u32,let D:u32,let A:u32>(
+    c:crate::suite_metadata::OpenedCredential<N>,raw:[RawStatus<D,A>;T]) -> [SlotStatusEvidence<D,A>;T] {
+    let absent=SlotStatusEvidence {row:0,status:BoundedStatusEvidence {depth:0,present:false,
         snapshot:Snapshot {list:crate::term::padding(),purpose:crate::term::padding(),bit_len:0,root:0},
         accepted:Membership {index:0,siblings:[0;A]},bit:false,path:Membership {index:0,siblings:[0;D]},
-        purpose:BoundedVec::new(),index:BoundedVec::new(),size:BoundedVec::new()};
-    let mut result=[absent;N];let quads=c.quads();
-    for i in 0..N {
-        let e=raw[i];let mut list=crate::term::padding();let mut purpose=crate::term::padding();
+        purpose:BoundedVec::new(),index:BoundedVec::new(),size:BoundedVec::new()}};
+    let mut result=[absent;T];let quads=c.quads();
+    for s in 0..T {
+        let e=raw[s];let mut list=crate::term::padding();let mut purpose=crate::term::padding();
         // Row references are constrained to the signed entry and predicate. The
-        // consumer retains complete presence and singleton-property checks.
+        // consumer binds each slot row to a status entry and checks complete coverage.
         if e.present {
-            list=selected_status_property(quads,c.count(),quads[i][2],crate::term::iri_status_list(),e.list_row);
-            purpose=selected_status_property(quads,c.count(),quads[i][2],crate::term::iri_status_purpose(),e.purpose_row);
+            assert(e.row<N,"status row range");
+            let entry=quads[e.row][2];
+            list=selected_status_property(quads,c.count(),entry,crate::term::iri_status_list(),e.list_row);
+            purpose=selected_status_property(quads,c.count(),entry,crate::term::iri_status_purpose(),e.purpose_row);
         }
-        result[i]=BoundedStatusEvidence {depth:e.depth,present:e.present,snapshot:Snapshot {list,purpose,bit_len:e.bit_len,root:e.root},
+        result[s]=SlotStatusEvidence {row:e.row,status:BoundedStatusEvidence {depth:e.depth,present:e.present,snapshot:Snapshot {list,purpose,bit_len:e.bit_len,root:e.root},
             accepted:e.accepted,bit:e.bit,path:e.path,
             purpose:BoundedVec::from_parts_unchecked(e.purpose,e.purpose_len),
             index:BoundedVec::from_parts_unchecked(e.index,e.index_len),
-            size:BoundedVec::from_parts_unchecked(e.size,e.size_len)};
+            size:BoundedVec::from_parts_unchecked(e.size,e.size_len)}};
     }
     result
 }
@@ -113,7 +119,7 @@ fn open_slot_inner<let N:u32,let R:u32,let L:u32,let M:u32,let C:u32,
             used[evidence.holder_slot]=true;
         }
         if (S==1)&policy.status_required {
-            crate::envelope::check_status_bounded(c,policy.snapshot_root,policy.snapshot_depth,policy.allow_missing_status,
+            crate::envelope::check_status_slots(c,policy.snapshot_root,policy.snapshot_depth,policy.allow_missing_status,
                 status_evidence(c,evidence.status));
         }
         if (V==1)&policy.validity_required {

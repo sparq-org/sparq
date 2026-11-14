@@ -373,3 +373,17 @@ fn optional_consumers_select_gadgets_without_changing_public_layout() {
         assert!(!source.contains("for "));
     }
 }
+
+#[test]
+fn status_slot_count_matches_the_noir_consumer() {
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../zk/noir-query/core/src/ops_core_envelope.nr"),
+    )
+    .unwrap();
+    let expected = format!(
+        "pub global STATUS_SLOTS:u32={};",
+        sparq_zk_query::plan::STATUS_SLOTS
+    );
+    assert!(source.contains(&expected), "{expected}");
+}

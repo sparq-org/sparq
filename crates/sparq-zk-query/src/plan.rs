@@ -112,6 +112,11 @@ pub enum ResultForm {
     Ask,
 }
 
+/// Status entries checked per credential when the status consumer is selected.
+/// The circuit proves these slots cover every signed entry, so a credential with
+/// more entries has no proof. Committed in the plan hash with the status feature.
+pub const STATUS_SLOTS: usize = 1;
+
 /// Verifier-selected optional consumers. Issuer authorization is always enforced.
 /// Policy values remain public parameters; this selection is circuit structure.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -279,6 +284,9 @@ impl Plan {
         }
         w.u32(crate::credential::ISSUER_DEPTH);
         w.u8(self.envelope_features.mask());
+        if self.envelope_features.status {
+            w.u32(STATUS_SLOTS as u32);
+        }
         w.u8(match self.form {
             ResultForm::Select => 0,
             ResultForm::Ask => 1,
