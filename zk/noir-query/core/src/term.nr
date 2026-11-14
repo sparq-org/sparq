@@ -138,14 +138,37 @@ pub fn recompute_key_for<let L: u32, let D: u32, let G: u32>(
     check_opened_key(cell, lexical, expected_datatype)
 }
 
+/// A literal and its exact lexical opening, constructed together in-circuit.
+pub struct OpenedLiteral<let L: u32> {
+    constructed: [u8; 0],
+    cell: TermCell,
+    lexical: BoundedVec<u8, L>,
+}
+impl<let L: u32> OpenedLiteral<L> {
+    pub fn cell(self) -> TermCell { self.cell }
+}
+
+/// Open a literal once before fixed-datatype key dispatch.
+pub fn open_literal_for_key_check<let L: u32, let D: u32, let G: u32>(
+    raw: crate::suite_entry::BoundedTermOpening<L, D, G>, credential: u32,
+) -> OpenedLiteral<L> {
+    let cell = crate::suite_entry::open_bounded_cell(raw, credential);
+    assert(cell.kind == KIND_LITERAL, "key requires literal");
+    let lexical = BoundedVec::from_parts_unchecked(raw.lexical, raw.lexical_len);
+    OpenedLiteral { constructed: [], cell, lexical }
+}
+
+/// Check the sealed lexical opening with a fixed datatype parser.
+pub fn check_literal_key_for<let L: u32>(opened: OpenedLiteral<L>, expected_dt: Field) -> KeyCheckedCell {
+    check_opened_key(opened.cell, opened.lexical, expected_dt)
+}
+
 /// Build and check a raw literal with one lexical hash. Pass a fixed datatype
 /// identifier so unrelated value parsers fold away in the generated circuit.
 pub fn open_key_checked<let L: u32, let D: u32, let G: u32>(
     raw: crate::suite_entry::BoundedTermOpening<L, D, G>, credential: u32, expected_dt: Field,
 ) -> KeyCheckedCell {
-    let cell = crate::suite_entry::open_bounded_cell(raw, credential);
-    let lexical = BoundedVec::from_parts_unchecked(raw.lexical, raw.lexical_len);
-    check_opened_key(cell, lexical, expected_dt)
+    check_literal_key_for(open_literal_for_key_check(raw, credential), expected_dt)
 }
 
 // Only fresh construction or a checked full lexical opening reaches this helper.
