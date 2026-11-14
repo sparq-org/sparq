@@ -65,7 +65,9 @@ results contain `variables` and ordered `rows` of RDF term strings or `null` for
 unbound positions. Duplicate rows are retained when the query requires them.
 `verify` returns `{ verified, released, reason?, report }`. Refusals contain no
 report. Successful reports contain `rule` with the exact query and plan hash,
-`issuers` with the trusted public-key set relied on for membership authorization,
+`issuers` with the whole trusted public-key set relied on for membership
+authorization (this differs from `@sparq-org/zk-result`, whose `issuers` lists the
+slots the proof used, so do not read the two fields the same way),
 `subject` empty because holder binding is unavailable, `fresh` with the consumed
 challenge, `complete` relative to the presented roots, and the bound `issuerRoot`
 and canonical `trustMembers` authorization set.

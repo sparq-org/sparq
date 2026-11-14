@@ -68,8 +68,9 @@ Use a shared namespace across methods. A `Set` is only an in-memory test store.
 The method consumes the original challenge last, after proof and final validity.
 Missing stores fail closed; refusals carry no report.
 
-Successful reports bind `rule` to the query and plan hash, `issuers` to the trusted
-key set used for membership authorization, `subject` to an empty list, `fresh` to
+Successful reports bind `rule` to the query and plan hash, `issuers` to the whole trusted
+key set used for membership authorization (unlike `@sparq-org/zk-result`, where
+`issuers` lists the slots the proof used), `subject` to an empty list, `fresh` to
 the consumed challenge, and `complete` to the presented roots. `issuerRoot` names
 the bound trust root; `trustMembers` records the authorized identities, methods
 and keys. The membership proof does not identify each hidden signer.

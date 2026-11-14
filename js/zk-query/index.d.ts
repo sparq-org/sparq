@@ -24,8 +24,16 @@ export interface Presentation {
   result: QueryResult; proof: string;
 }
 export interface VerificationReport {
-  rule: { query: string; planHash: string }; issuers: string[]; subject: string[];
-  fresh: string; complete: true; issuerRoot: string; trustMembers: TrustMember[];
+  rule: { query: string; planHash: string };
+  /** The whole trusted public-key set relied on for membership authorization, not the
+   *  keys that signed the presented credentials (unlike `@sparq-org/zk-result`, whose
+   *  `issuers` lists the slots the proof used). */
+  issuers: string[];
+  subject: string[];
+  fresh: string;
+  /** Complete relative to the presented signed roots only (closed world). */
+  complete: true;
+  issuerRoot: string; trustMembers: TrustMember[];
 }
 export type Verification =
   | { verified: true; released: QueryResult; report: VerificationReport }
