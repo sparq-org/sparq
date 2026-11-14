@@ -76,6 +76,7 @@ pub(crate) fn verify(
     let accepted = json!({"verified":true,"released":AnswerWire::from_answer(&input.presentation.result.answer()?),
         "report":{"rule":{"query":request.stored().query(),"planHash":hex(&plan.hash())},
         "issuers":input.request.policy.trusted_issuers,"subject":[],"fresh":hex(request.stored().challenge().as_bytes()),"complete":true,
+        "trustMembers":input.request.policy.trust_members,
         "issuerRoot":hex(&request.issuer_root().map_err(err)?)}});
     request::freshness(&request, clock()?)?;
     consume_challenge(store, request.stored()).map_err(err)?;

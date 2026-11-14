@@ -19,6 +19,10 @@ test('XPath known failures cannot hide a different compiler error', () => {
   assert.equal(knownXPathFailure(diagnostic + warning, sources), true);
   assert.equal(knownXPathFailure(diagnostic + warning + '\n    main.nr:8: unrelated', sources), false);
   assert.equal(knownXPathFailure(diagnostic + warning.replace('unused import unbound', 'unrelated error'), sources), false);
+  const expressionWarning = warning.replaceAll('unbound', 'ops_core_expr');
+  assert.equal(knownXPathFailure(diagnostic + expressionWarning, sources), true);
+  assert.equal(knownXPathFailure(diagnostic + expressionWarning + '\n    main.nr:8: unrelated', sources), false);
+  assert.equal(knownXPathFailure(diagnostic + expressionWarning.replace('unused import ops_core_expr', 'unrelated error'), sources), false);
   assert.equal(knownXPathFailure('different compiler error', sources), false);
   assert.equal(knownXPathFailure(diagnostic, {}), false);
 });

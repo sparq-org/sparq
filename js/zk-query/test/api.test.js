@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import { issuerKeygen, testIssuerKeygen, issue, testIssue, request, prove, verify } from '../index.js';
+import { canonicalGraph, issueFixture, trustMembers } from '../scripts/test-credentials.mjs';
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/authenticated.json', import.meta.url)));
 const vector = JSON.parse(readFileSync(new URL('./fixtures/issuance.json', import.meta.url)));
 const clone = x => structuredClone(x);
@@ -38,6 +39,26 @@ test('holder refuses a key mismatch before decoding credentials', async () => {
   const r = clone(fixture.request); r.verificationKey = '00';
   await assert.rejects(prove({ request: r, credentials: null }), /request reconstruction|key mismatch/);
 });
+test('canonical authorization refuses missing members and inconsistent trusted keys', () => {
+  const r = fixture.request;
+  const policy = clone(r.policy); delete policy.trustMembers;
+  assert.throws(() => request({ query: r.query, policy, nonce: r.nonce }), /canonical trust members required/);
+  policy.trustMembers = trustMembers(testIssuerKeygen('02'.repeat(32)));
+  assert.throws(() => request({ query: r.query, policy, nonce: r.nonce }), /trust member keys differ/);
+});
+test('canonical witness refuses an unauthorized issuer or verification method', () => {
+  const issuer = testIssuerKeygen('00'.repeat(32));
+  const credential = issueFixture(issuer, canonicalGraph(''), '01'.repeat(32));
+  const host = createRequire(import.meta.url)('../wasm/sparq_zk_query_wasm.cjs');
+  for (const field of ['issuer', 'verificationMethod']) {
+    const r = fixture.request, policy = clone(r.policy);
+    policy.trustMembers[0][field] = 'urn:unauthorized';
+    const stored = request({ query: r.query, policy, nonce: r.nonce });
+    assert.throws(() => host.hostCall('prepareProof', JSON.stringify({ request: stored, credentials: [credential], clock: r.policy.notBefore })), /issuer authorization set/);
+  }
+  const graphOnly = issueFixture(issuer, '<urn:a> <urn:p> <urn:b> .', '01'.repeat(32));
+  assert.throws(() => host.hostCall('prepareProof', JSON.stringify({ request: fixture.request, credentials: [graphOnly], clock: fixture.request.policy.notBefore })), /credential root cardinality/);
+});
 test('holder refuses missing native binaries with the expected version and digest', async () => {
   await assert.rejects(prove({ request: fixture.request, credentials: null, backend: { type: 'native', nargoPath: '/missing-sparq-binary' } }), /missing.*nargo expected.*SHA-256/);
 });
@@ -57,6 +78,7 @@ test('native authenticated proof verifies in Node and reports only the bound gua
   assert.deepEqual(answer.released, fixture.result);
   assert.deepEqual(answer.report.rule, { query: fixture.request.query, planHash: fixture.request.planHash });
   assert.deepEqual(answer.report.issuers, fixture.request.policy.trustedIssuers);
+  assert.deepEqual(answer.report.trustMembers, fixture.request.policy.trustMembers);
   assert.deepEqual(answer.report.subject, []);
   assert.equal(answer.report.complete, true);
   assert.equal(answer.report.fresh, fixture.request.nonce);
@@ -89,7 +111,7 @@ test('invalid proof cannot consume a nonce even when the store would fail', asyn
 test('agreed commitments use the supplied presentation salt and reject a different salt', () => {
   const host = createRequire(import.meta.url)('../wasm/sparq_zk_query_wasm.cjs');
   const issuer = testIssuerKeygen('00'.repeat(32));
-  const credentials = [testIssue({ issuer, graphNQuads: '<a:> <b:> <c:> .', seedHex: '01'.repeat(32) })];
+  const credentials = [issueFixture(issuer, canonicalGraph(''), '01'.repeat(32))];
   const salt = '03'.repeat(32);
   const prepare = (stored, presentationSaltHex) => JSON.parse(host.hostCall('prepareProof', JSON.stringify({ request: stored, credentials, clock: 1, presentationSaltHex })));
   const prepared = prepare(fixture.request, salt);

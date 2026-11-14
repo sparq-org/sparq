@@ -351,6 +351,37 @@
         "visibility": "public"
       },
       {
+        "name": "revealed_count",
+        "type": {
+          "kind": "integer",
+          "sign": "unsigned",
+          "width": 32
+        },
+        "visibility": "public"
+      },
+      {
+        "name": "revealed_messages",
+        "type": {
+          "kind": "array",
+          "length": 1,
+          "type": {
+            "kind": "field"
+          }
+        },
+        "visibility": "public"
+      },
+      {
+        "name": "revealed_keys",
+        "type": {
+          "kind": "array",
+          "length": 1,
+          "type": {
+            "kind": "field"
+          }
+        },
+        "visibility": "public"
+      },
+      {
         "name": "statement_binding",
         "type": {
           "kind": "field"
@@ -384,7 +415,7 @@
                       "name": "lexical",
                       "type": {
                         "kind": "array",
-                        "length": 128,
+                        "length": 64,
                         "type": {
                           "kind": "integer",
                           "sign": "unsigned",
@@ -421,7 +452,7 @@
                       "name": "lexical",
                       "type": {
                         "kind": "array",
-                        "length": 128,
+                        "length": 64,
                         "type": {
                           "kind": "integer",
                           "sign": "unsigned",
@@ -458,7 +489,7 @@
                       "name": "lexical",
                       "type": {
                         "kind": "array",
-                        "length": 160,
+                        "length": 65,
                         "type": {
                           "kind": "integer",
                           "sign": "unsigned",
@@ -816,6 +847,311 @@
         "visibility": "private"
       },
       {
+        "name": "holder_evidence",
+        "type": {
+          "kind": "array",
+          "length": 1,
+          "type": {
+            "kind": "struct",
+            "path": "core::envelope::HolderEvidence",
+            "fields": [
+              {
+                "name": "pk",
+                "type": {
+                  "kind": "struct",
+                  "path": "core::compose::issuer::Point",
+                  "fields": [
+                    {
+                      "name": "x",
+                      "type": {
+                        "kind": "field"
+                      }
+                    },
+                    {
+                      "name": "y",
+                      "type": {
+                        "kind": "field"
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "sig",
+                "type": {
+                  "kind": "struct",
+                  "path": "core::envelope::Signature",
+                  "fields": [
+                    {
+                      "name": "present",
+                      "type": {
+                        "kind": "boolean"
+                      }
+                    },
+                    {
+                      "name": "r",
+                      "type": {
+                        "kind": "struct",
+                        "path": "core::compose::issuer::Point",
+                        "fields": [
+                          {
+                            "name": "x",
+                            "type": {
+                              "kind": "field"
+                            }
+                          },
+                          {
+                            "name": "y",
+                            "type": {
+                              "kind": "field"
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "s",
+                      "type": {
+                        "kind": "field"
+                      }
+                    },
+                    {
+                      "name": "e",
+                      "type": {
+                        "kind": "field"
+                      }
+                    },
+                    {
+                      "name": "e_k",
+                      "type": {
+                        "kind": "field"
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "visibility": "private"
+      },
+      {
+        "name": "envelope_0",
+        "type": {
+          "kind": "struct",
+          "path": "core::ops_core_envelope::CredentialEvidence",
+          "fields": [
+            {
+              "name": "holder_slot",
+              "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 32
+              }
+            },
+            {
+              "name": "status",
+              "type": {
+                "kind": "array",
+                "length": 4,
+                "type": {
+                  "kind": "struct",
+                  "path": "core::ops_core_envelope::RawStatus",
+                  "fields": [
+                    {
+                      "name": "present",
+                      "type": {
+                        "kind": "boolean"
+                      }
+                    },
+                    {
+                      "name": "bit_len",
+                      "type": {
+                        "kind": "integer",
+                        "sign": "unsigned",
+                        "width": 32
+                      }
+                    },
+                    {
+                      "name": "root",
+                      "type": {
+                        "kind": "field"
+                      }
+                    },
+                    {
+                      "name": "accepted",
+                      "type": {
+                        "kind": "struct",
+                        "path": "core::envelope::Membership",
+                        "fields": [
+                          {
+                            "name": "index",
+                            "type": {
+                              "kind": "field"
+                            }
+                          },
+                          {
+                            "name": "siblings",
+                            "type": {
+                              "kind": "array",
+                              "length": 4,
+                              "type": {
+                                "kind": "field"
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "bit",
+                      "type": {
+                        "kind": "boolean"
+                      }
+                    },
+                    {
+                      "name": "path",
+                      "type": {
+                        "kind": "struct",
+                        "path": "core::envelope::Membership",
+                        "fields": [
+                          {
+                            "name": "index",
+                            "type": {
+                              "kind": "field"
+                            }
+                          },
+                          {
+                            "name": "siblings",
+                            "type": {
+                              "kind": "array",
+                              "length": 32,
+                              "type": {
+                                "kind": "field"
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "purpose",
+                      "type": {
+                        "kind": "array",
+                        "length": 16,
+                        "type": {
+                          "kind": "integer",
+                          "sign": "unsigned",
+                          "width": 8
+                        }
+                      }
+                    },
+                    {
+                      "name": "purpose_len",
+                      "type": {
+                        "kind": "integer",
+                        "sign": "unsigned",
+                        "width": 32
+                      }
+                    },
+                    {
+                      "name": "index",
+                      "type": {
+                        "kind": "array",
+                        "length": 20,
+                        "type": {
+                          "kind": "integer",
+                          "sign": "unsigned",
+                          "width": 8
+                        }
+                      }
+                    },
+                    {
+                      "name": "index_len",
+                      "type": {
+                        "kind": "integer",
+                        "sign": "unsigned",
+                        "width": 32
+                      }
+                    },
+                    {
+                      "name": "size",
+                      "type": {
+                        "kind": "array",
+                        "length": 20,
+                        "type": {
+                          "kind": "integer",
+                          "sign": "unsigned",
+                          "width": 8
+                        }
+                      }
+                    },
+                    {
+                      "name": "size_len",
+                      "type": {
+                        "kind": "integer",
+                        "sign": "unsigned",
+                        "width": 32
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "validity",
+              "type": {
+                "kind": "struct",
+                "path": "core::ops_core_envelope::RawValidity",
+                "fields": [
+                  {
+                    "name": "from",
+                    "type": {
+                      "kind": "array",
+                      "length": 32,
+                      "type": {
+                        "kind": "integer",
+                        "sign": "unsigned",
+                        "width": 8
+                      }
+                    }
+                  },
+                  {
+                    "name": "from_len",
+                    "type": {
+                      "kind": "integer",
+                      "sign": "unsigned",
+                      "width": 32
+                    }
+                  },
+                  {
+                    "name": "until",
+                    "type": {
+                      "kind": "array",
+                      "length": 32,
+                      "type": {
+                        "kind": "integer",
+                        "sign": "unsigned",
+                        "width": 8
+                      }
+                    }
+                  },
+                  {
+                    "name": "until_len",
+                    "type": {
+                      "kind": "integer",
+                      "sign": "unsigned",
+                      "width": 32
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "visibility": "private"
+      },
+      {
         "name": "t0",
         "type": {
           "kind": "struct",
@@ -1000,6 +1336,14 @@
         "error_kind": "string",
         "string": "non-zero key tail"
       },
+      "217363528233175563": {
+        "error_kind": "string",
+        "string": "status entry type"
+      },
+      "251540777268511422": {
+        "error_kind": "string",
+        "string": "issuer authorization set"
+      },
       "361444214588792908": {
         "error_kind": "string",
         "string": "attempt to multiply with overflow"
@@ -1024,9 +1368,17 @@
         "error_kind": "string",
         "string": "boolean key payload"
       },
+      "838946152528579956": {
+        "error_kind": "string",
+        "string": "status evidence coverage"
+      },
       "842086612280710690": {
         "error_kind": "string",
         "string": "table capacity"
+      },
+      "888645548405645662": {
+        "error_kind": "string",
+        "string": "validity bounds reversed"
       },
       "992401946138144806": {
         "error_kind": "string",
@@ -1035,6 +1387,10 @@
       "1040567045895277544": {
         "error_kind": "string",
         "string": "holder issuer presence"
+      },
+      "1460931902187194732": {
+        "error_kind": "string",
+        "string": "set depth capacity"
       },
       "1499104929359656741": {
         "error_kind": "string",
@@ -1052,33 +1408,49 @@
         "error_kind": "string",
         "string": "created must be a literal"
       },
+      "2291598804592980985": {
+        "error_kind": "string",
+        "string": "status path"
+      },
       "2336531439293059733": {
         "error_kind": "string",
         "string": "subject kind"
       },
-      "2960901383740330075": {
+      "2552883656872229536": {
         "error_kind": "string",
-        "string": "N0 credential literal datatype"
+        "string": "snapshot capacity"
       },
       "3172986584152997763": {
         "error_kind": "string",
         "string": "suite dataset commitment"
       },
+      "3247388049886375233": {
+        "error_kind": "string",
+        "string": "scan distinct bindings"
+      },
+      "3536672719099076685": {
+        "error_kind": "string",
+        "string": "disabled validity policy"
+      },
       "4451024933570688834": {
         "error_kind": "string",
         "string": "operator length"
-      },
-      "4459504348015329672": {
-        "error_kind": "string",
-        "string": "inactive freshness policy"
       },
       "4465767467112793850": {
         "error_kind": "string",
         "string": "per-credential quad count"
       },
+      "4545926173329839976": {
+        "error_kind": "string",
+        "string": "reserved issuer predicate"
+      },
       "4949284470474153701": {
         "error_kind": "string",
         "string": "encoded byte length"
+      },
+      "5117566846955228068": {
+        "error_kind": "string",
+        "string": "status index is not decimal"
       },
       "5421095327929394772": {
         "error_kind": "string",
@@ -1092,9 +1464,33 @@
         "error_kind": "string",
         "string": "credential padding count"
       },
+      "5672375127437064635": {
+        "error_kind": "string",
+        "string": "holder key type"
+      },
+      "5709057177320904959": {
+        "error_kind": "string",
+        "string": "unbound lexical opening"
+      },
+      "5788035872685603941": {
+        "error_kind": "string",
+        "string": "status list kind"
+      },
+      "6132436094257717876": {
+        "error_kind": "string",
+        "string": "credential method lexical capacity"
+      },
       "6276453858708207445": {
         "error_kind": "string",
         "string": "index padding"
+      },
+      "6430945733921947325": {
+        "error_kind": "string",
+        "string": "issuer identity kind"
+      },
+      "6646923907971692980": {
+        "error_kind": "string",
+        "string": "creation time unavailable"
       },
       "6720759575836586765": {
         "error_kind": "string",
@@ -1104,10 +1500,6 @@
         "error_kind": "string",
         "string": "chunk split width"
       },
-      "6943261920537458947": {
-        "error_kind": "string",
-        "string": "credential scalar lexical capacity"
-      },
       "6954557700313815613": {
         "error_kind": "string",
         "string": "identity key is not admitted"
@@ -1116,9 +1508,21 @@
         "error_kind": "string",
         "string": "empty key payload"
       },
+      "7239656552545164798": {
+        "error_kind": "string",
+        "string": "before earliestCreated"
+      },
+      "7317169856629387956": {
+        "error_kind": "string",
+        "string": "holder evidence slot"
+      },
       "7327296941349474725": {
         "error_kind": "string",
         "string": "credential blank-node scope"
+      },
+      "7349627402254687046": {
+        "error_kind": "string",
+        "string": "status bit set"
       },
       "7393549285676195791": {
         "error_kind": "string",
@@ -1128,9 +1532,29 @@
         "error_kind": "string",
         "string": "credential resource lexical capacity"
       },
+      "7660926222831601634": {
+        "error_kind": "string",
+        "string": "snapshot identity"
+      },
+      "7840128645460606212": {
+        "error_kind": "string",
+        "string": "revealed input padding"
+      },
       "8086167173253898483": {
         "error_kind": "string",
         "string": "inactive holder policy"
+      },
+      "8112738790394919314": {
+        "error_kind": "string",
+        "string": "revealed credential key"
+      },
+      "8143291516721459587": {
+        "error_kind": "string",
+        "string": "dataset credential index"
+      },
+      "8159112315749594310": {
+        "error_kind": "string",
+        "string": "status entry kind"
       },
       "8189835557297515222": {
         "error_kind": "string",
@@ -1148,21 +1572,29 @@
         "error_kind": "string",
         "string": "holder issuer capacity"
       },
-      "8624037060145050868": {
+      "8553246644756511612": {
         "error_kind": "string",
-        "string": "issuer key is not a member of the committed key set"
+        "string": "credential subject cardinality"
       },
       "8762780884288702032": {
         "error_kind": "string",
         "string": "predicate kind"
       },
+      "9141357195180953097": {
+        "error_kind": "string",
+        "string": "credential root"
+      },
+      "9166290017500746695": {
+        "error_kind": "string",
+        "string": "validFrom unavailable"
+      },
       "9230457233189587827": {
         "error_kind": "string",
         "string": "credential verifiedIssuer assertion"
       },
-      "9395804461053827540": {
+      "9459240211206046829": {
         "error_kind": "string",
-        "string": "operator capacity"
+        "string": "canonical permutation"
       },
       "9537330626372423756": {
         "error_kind": "string",
@@ -1176,13 +1608,29 @@
         "error_kind": "string",
         "string": "holder issuer order"
       },
+      "9855430026576497868": {
+        "error_kind": "string",
+        "string": "before validFrom"
+      },
       "9881629358342848834": {
         "error_kind": "string",
         "string": "public constant"
       },
-      "9942088503165521683": {
+      "10024990329989078242": {
         "error_kind": "string",
-        "string": "inactive status policy"
+        "string": "holder issuer encoding"
+      },
+      "10196830150746269029": {
+        "error_kind": "string",
+        "string": "verified issuer is an IRI"
+      },
+      "10535434732981984699": {
+        "error_kind": "string",
+        "string": "issuer root absent"
+      },
+      "10563278183002598649": {
+        "error_kind": "string",
+        "string": "scan first payload"
       },
       "10581609047269650812": {
         "error_kind": "string",
@@ -1200,21 +1648,33 @@
         "error_kind": "string",
         "string": "Field failed to decompose into specified 4 limbs"
       },
+      "11103991777033949171": {
+        "error_kind": "string",
+        "string": "disabled status policy"
+      },
+      "11262028598500960660": {
+        "error_kind": "string",
+        "string": "suite signature mode"
+      },
       "11316893427002657865": {
         "error_kind": "string",
         "string": "lexical opening differs"
       },
-      "11555026550892079673": {
+      "11719761390931738595": {
         "error_kind": "string",
-        "string": "zero holder issuer"
+        "string": "signature evidence absent"
       },
-      "11632851800199474294": {
+      "11802504474959304239": {
         "error_kind": "string",
-        "string": "inactive validity policy"
+        "string": "revealed credential count"
       },
       "12136842887374738062": {
         "error_kind": "string",
         "string": "credential signature padding"
+      },
+      "12286746961802029698": {
+        "error_kind": "string",
+        "string": "scan completeness or capacity"
       },
       "12345605179889702996": {
         "error_kind": "string",
@@ -1223,6 +1683,10 @@
       "12382077634043642117": {
         "error_kind": "string",
         "string": "message padding"
+      },
+      "12447640644778949410": {
+        "error_kind": "string",
+        "string": "revealed credential message"
       },
       "12469291177396340830": {
         "error_kind": "string",
@@ -1236,6 +1700,10 @@
         "error_kind": "string",
         "string": "credential normalization count"
       },
+      "12509613417476919003": {
+        "error_kind": "string",
+        "string": "status entry absent"
+      },
       "12514726124350553137": {
         "error_kind": "string",
         "string": "validity instant range"
@@ -1243,6 +1711,18 @@
       "12659316033304120378": {
         "error_kind": "string",
         "string": "authenticated statement binding"
+      },
+      "12712994401900360598": {
+        "error_kind": "string",
+        "string": "disabled freshness policy"
+      },
+      "12833444161294236327": {
+        "error_kind": "string",
+        "string": "snapshot depth capacity"
+      },
+      "12918602609685938255": {
+        "error_kind": "string",
+        "string": "status size"
       },
       "12952428654475462531": {
         "error_kind": "string",
@@ -1256,9 +1736,9 @@
         "error_kind": "string",
         "string": "term kind"
       },
-      "13655139524061473406": {
+      "13177482699382835398": {
         "error_kind": "string",
-        "string": "hidden suite signature mode"
+        "string": "credential method backing padding"
       },
       "13659395267648872468": {
         "error_kind": "string",
@@ -1272,6 +1752,10 @@
         "error_kind": "string",
         "string": "point is not on Baby-JubJub"
       },
+      "14104280402947080833": {
+        "error_kind": "string",
+        "string": "snapshot policy"
+      },
       "14194756468325654588": {
         "error_kind": "string",
         "string": "identity issuer key rejected"
@@ -1279,6 +1763,10 @@
       "14364392314410679675": {
         "error_kind": "string",
         "string": "datatype specialization differs"
+      },
+      "14503113700240496183": {
+        "error_kind": "string",
+        "string": "revealed signature witness padding"
       },
       "14990209321349310352": {
         "error_kind": "string",
@@ -1288,6 +1776,30 @@
         "error_kind": "string",
         "string": "nonliteral position"
       },
+      "15215172504614181957": {
+        "error_kind": "string",
+        "string": "snapshot root absent"
+      },
+      "15234203208541285942": {
+        "error_kind": "string",
+        "string": "holder evidence coverage"
+      },
+      "15457454885491140981": {
+        "error_kind": "string",
+        "string": "time range"
+      },
+      "15501030217011103958": {
+        "error_kind": "string",
+        "string": "subject node kind"
+      },
+      "15541584675956317957": {
+        "error_kind": "string",
+        "string": "disabled holder policy"
+      },
+      "15553396510925455371": {
+        "error_kind": "string",
+        "string": "verification key opening differs"
+      },
       "15835548349546956319": {
         "error_kind": "string",
         "string": "Field failed to decompose into specified 32 limbs"
@@ -1296,17 +1808,29 @@
         "error_kind": "string",
         "string": "unbound padding"
       },
+      "16270386280290530395": {
+        "error_kind": "string",
+        "string": "canonical payload"
+      },
+      "16428046575412425272": {
+        "error_kind": "string",
+        "string": "after validUntil"
+      },
       "16431471497789672479": {
         "error_kind": "string",
         "string": "Index out of bounds"
+      },
+      "16489769712596123397": {
+        "error_kind": "string",
+        "string": "issuer depth capacity"
       },
       "16615973362395562352": {
         "error_kind": "string",
         "string": "table padding"
       },
-      "16647017619936182857": {
+      "16855481816200726226": {
         "error_kind": "string",
-        "string": "operator rows"
+        "string": "set path padding"
       },
       "16971163814709147110": {
         "error_kind": "string",
@@ -1316,6 +1840,14 @@
         "error_kind": "string",
         "string": "row request capacity"
       },
+      "17181756395128801499": {
+        "error_kind": "string",
+        "string": "status index length"
+      },
+      "17195033557018834870": {
+        "error_kind": "string",
+        "string": "unknown status purpose"
+      },
       "17200572207616664197": {
         "error_kind": "string",
         "string": "key width"
@@ -1324,13 +1856,41 @@
         "error_kind": "string",
         "string": "byte prefix length"
       },
+      "17295857793337647986": {
+        "error_kind": "string",
+        "string": "scan extra binding"
+      },
+      "17334641987208650760": {
+        "error_kind": "string",
+        "string": "empty status index"
+      },
+      "17367058671652236164": {
+        "error_kind": "string",
+        "string": "required property absent"
+      },
+      "17372963129703188075": {
+        "error_kind": "string",
+        "string": "key node kind"
+      },
       "17558050003890529665": {
         "error_kind": "string",
         "string": "object kind"
       },
+      "17561292188288578026": {
+        "error_kind": "string",
+        "string": "credential graph identity"
+      },
+      "17782774924881496107": {
+        "error_kind": "string",
+        "string": "status index binding"
+      },
       "17885380776686846557": {
         "error_kind": "string",
         "string": "row request bound"
+      },
+      "17917179939041785066": {
+        "error_kind": "string",
+        "string": "property cardinality"
       },
       "17928045010679114796": {
         "error_kind": "string",
@@ -1339,6 +1899,10 @@
       "17993512535712032858": {
         "error_kind": "string",
         "string": "literal datatype"
+      },
+      "18428925459967321240": {
+        "error_kind": "string",
+        "string": "validUntil unavailable"
       }
     }
   }

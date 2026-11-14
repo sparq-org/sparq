@@ -36,21 +36,11 @@ pub(crate) fn prepare(input: &str) -> Result<Value> {
     request::checked_key(&plan, request.key())?;
     let input: Input = serde_json::from_value(envelope).map_err(err)?;
     request::freshness(&request, input.clock)?;
-    let keys = request_wire.policy.keys()?;
+    let policy = request_wire.policy.envelope_policy()?;
     let mut data = vec![];
     let mut vocabulary = vec![];
     for credential in &input.credentials {
         let (credential, key) = credential.open()?;
-        let index = keys
-            .iter()
-            .position(|k| k == &key)
-            .ok_or("credential issuer is outside the trusted set")?;
-        let siblings = sparq_zk_compose::issuer::key_membership_witness(
-            &keys,
-            sparq_zk_query::credential::ISSUER_DEPTH,
-            index as u64,
-        )
-        .ok_or("issuer membership rejected")?;
         let graph = Graph::load_str(&credential.document, "nquads").map_err(err)?;
         for triple in graph.iter_ids() {
             for id in triple {
@@ -60,16 +50,19 @@ pub(crate) fn prepare(input: &str) -> Result<Value> {
         data.push(sparq_zk_query::credential::Credential {
             credential,
             issuer: key,
-            issuer_index: index as u64,
-            issuer_siblings: siblings,
+            issuer_index: 0,
+            issuer_siblings: vec![],
         });
     }
-    let cells = data
-        .iter()
-        .enumerate()
-        .map(|(i, c)| c.cells(i as u32).map_err(err))
-        .collect::<Result<Vec<_>>>()?;
-    let trace = interp::evaluate(&plan, &cells, &SuiteEncoder).map_err(err)?;
+    let dataset = sparq_zk_query::credential::assemble_issuer_dataset(
+        &data,
+        &policy.trust_members,
+        request.digest(),
+    )
+    .map_err(err)?;
+    let trace = interp::evaluate_dataset(&plan, &dataset, &SuiteEncoder).map_err(err)?;
+    vocabulary
+        .push(oxrdf::NamedNode::new_unchecked(sparq_zk_query::credential::VERIFIED_ISSUER).into());
     let result = Answer::release(&trace.result, &plan, &vocabulary, &SuiteEncoder).map_err(err)?;
     let salt = if let Some(salt) = input.presentation_salt_hex {
         crate::codec::word(&salt)?
@@ -90,13 +83,17 @@ pub(crate) fn prepare(input: &str) -> Result<Value> {
     let public = Layout::new(&plan)
         .reconstruct_authenticated_with_envelope(&plan, &statement, &envelope)
         .map_err(err)?;
-    let toml = witness::prover_toml_authenticated_with_envelope(
+    let toml = witness::prover_toml_enveloped(
         &plan,
         &data,
         &trace,
         request.digest(),
         salt,
-        &envelope,
+        witness::EnvelopeInput {
+            policy: &policy,
+            evidence: &witness::EnvelopeWitness::default(),
+            revealed: None,
+        },
     )
     .map_err(err)?;
     let presentation = PresentationWire::from_native(&Presentation {

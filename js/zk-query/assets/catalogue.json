@@ -10,29 +10,29 @@
   },
   "entries": [
     {
-      "planHash": "18f1e50f8314c66e1f2e80dfa3f5ac71d121babc3cd938fcc989ec7515143210",
-      "packageName": "query_18f1e50f8314c66e1f2e80dfa3f5ac71d121babc3cd938fcc989ec7515143210",
-      "acir": "18f1e50f8314c66e1f2e80dfa3f5ac71d121babc3cd938fcc989ec7515143210.json",
-      "vk": "18f1e50f8314c66e1f2e80dfa3f5ac71d121babc3cd938fcc989ec7515143210.vk.hex",
-      "acirSha256": "1a3906d3a84e9c1a0832ab091c4330ee4acdc8bd5b20405486a94808709ccfff",
-      "vkSha256": "68cc2cbf4518ca2fd4171f98d0c40d77bdd70038383e004b47c0fac702e981d4",
+      "planHash": "3ef37537cbebab7dacff42a2246a046abf73637e6cb9880a0c9d565d653885d6",
+      "packageName": "query_3ef37537cbebab7dacff42a2246a046abf73637e6cb9880a0c9d565d653885d6",
+      "acir": "3ef37537cbebab7dacff42a2246a046abf73637e6cb9880a0c9d565d653885d6.json",
+      "vk": "3ef37537cbebab7dacff42a2246a046abf73637e6cb9880a0c9d565d653885d6.vk.hex",
+      "acirSha256": "17d63500b8e1b5ae49112bb12c8b6a950bc6eea323155c3001fadd6ff9300b21",
+      "vkSha256": "78b6474b43e01873c9488d449936d2cfbb3bbaa87585412b0417448b0e1b8166",
       "wasmProving": true,
       "example": {
         "query": "ASK {}",
         "bounds": {
           "credentials": 1,
-          "quadsPerCredential": 1,
+          "quadsPerCredential": 2,
           "rowsPerTable": 1
         }
       }
     },
     {
-      "planHash": "f4be0bfb23545961099597734c2855c60e3efd13463f7eb81be0ebfba05fb637",
-      "packageName": "query_f4be0bfb23545961099597734c2855c60e3efd13463f7eb81be0ebfba05fb637",
-      "acir": "f4be0bfb23545961099597734c2855c60e3efd13463f7eb81be0ebfba05fb637.json",
-      "vk": "f4be0bfb23545961099597734c2855c60e3efd13463f7eb81be0ebfba05fb637.vk.hex",
-      "acirSha256": "cfe5dd5381847b2b8d785d1da2ef55966b3cb02d727ff2a3c815bcbf585641bd",
-      "vkSha256": "5ec49517de1746d47b87fabe24ce4f6a05a600b08bd4c93aed262b606e0feebc",
+      "planHash": "1a2ff64d6fd4b20f6491896a5a59be524472e9b9857cb8b18e40d59954991d27",
+      "packageName": "query_1a2ff64d6fd4b20f6491896a5a59be524472e9b9857cb8b18e40d59954991d27",
+      "acir": "1a2ff64d6fd4b20f6491896a5a59be524472e9b9857cb8b18e40d59954991d27.json",
+      "vk": "1a2ff64d6fd4b20f6491896a5a59be524472e9b9857cb8b18e40d59954991d27.vk.hex",
+      "acirSha256": "be0362e26b365a98369a1abf937d06489a37cc29536a5047a16b31fb6dcc1e7b",
+      "vkSha256": "38b61b381e8de9872ada983d1a0bb35ed216809be058d7fbfbc5d7e519988f41",
       "wasmProving": true,
       "example": {
         "query": "SELECT ?s ?x WHERE {?s <urn:p> ?x}",
@@ -44,29 +44,29 @@
       }
     },
     {
-      "planHash": "269128f9fff952d5a0860b33a1ef5c7985f32697ea9ae0e712652ff7505ec6ec",
-      "packageName": "query_269128f9fff952d5a0860b33a1ef5c7985f32697ea9ae0e712652ff7505ec6ec",
-      "acir": "269128f9fff952d5a0860b33a1ef5c7985f32697ea9ae0e712652ff7505ec6ec.json",
-      "vk": "269128f9fff952d5a0860b33a1ef5c7985f32697ea9ae0e712652ff7505ec6ec.vk.hex",
-      "acirSha256": "10663351f19e65756c22b8653b6f1cad52bcefbae48cc0923b07968f9458caee",
-      "vkSha256": "5a55bf6d90f74d0e35f6a265d6acfd23937b0404ea5abff11b5e11289c9a108d",
+      "planHash": "0ec1254103eabf8b9f2632195fe56b059b9269b3371f37e281c26d3f300826a1",
+      "packageName": "query_0ec1254103eabf8b9f2632195fe56b059b9269b3371f37e281c26d3f300826a1",
+      "acir": "0ec1254103eabf8b9f2632195fe56b059b9269b3371f37e281c26d3f300826a1.json",
+      "vk": "0ec1254103eabf8b9f2632195fe56b059b9269b3371f37e281c26d3f300826a1.vk.hex",
+      "acirSha256": "493eafe4cee684a734e3160d28eb1661fcf089a2d07b7b2ae3714679cdd48db8",
+      "vkSha256": "1ae2962a5ecd26ba374ead31480ec426fd398cfed8d7dc68e7c0d6e34a54e4dc",
       "wasmProving": true,
       "example": {
         "query": "SELECT ?s WHERE {?s <urn:p> ?x . ?s <urn:q> ?y}",
         "bounds": {
           "credentials": 1,
-          "quadsPerCredential": 4,
+          "quadsPerCredential": 8,
           "rowsPerTable": 4
         }
       }
     },
     {
-      "planHash": "cf14fc19d26e4cb75a0189a2b59dc4f1fe77c708ee6bb4f15c221fa7a826c5b8",
-      "packageName": "query_cf14fc19d26e4cb75a0189a2b59dc4f1fe77c708ee6bb4f15c221fa7a826c5b8",
-      "acir": "cf14fc19d26e4cb75a0189a2b59dc4f1fe77c708ee6bb4f15c221fa7a826c5b8.json",
-      "vk": "cf14fc19d26e4cb75a0189a2b59dc4f1fe77c708ee6bb4f15c221fa7a826c5b8.vk.hex",
-      "acirSha256": "396e3b9ab7231910fb1721bcdcd4b9455edbbf5af8da493cbd98d1f6a0228211",
-      "vkSha256": "eb16b63f5e657eed60fce4dfbe45392c73d809c8138c02c2261b52c46aa74790",
+      "planHash": "abf1ed072a39a52a49995a22aefd87a36dbfe2b0c0c5bbad8d3e26659bd4497a",
+      "packageName": "query_abf1ed072a39a52a49995a22aefd87a36dbfe2b0c0c5bbad8d3e26659bd4497a",
+      "acir": "abf1ed072a39a52a49995a22aefd87a36dbfe2b0c0c5bbad8d3e26659bd4497a.json",
+      "vk": "abf1ed072a39a52a49995a22aefd87a36dbfe2b0c0c5bbad8d3e26659bd4497a.vk.hex",
+      "acirSha256": "d7cb1ecb9768b7715ca7149f5148bb418e543f4739fcfd7c41854b9941c21606",
+      "vkSha256": "63d4c0e278b6c0618f644c878554d111222226931fd04a5f87977d82fed4a9a9",
       "wasmProving": true,
       "example": {
         "query": "SELECT ?s WHERE {?s <urn:p> ?x . ?s <urn:q> ?y}",
@@ -78,12 +78,12 @@
       }
     },
     {
-      "planHash": "6409d4ef6b04098a7b3c3f45cb5491295dbc5abd942b5f0a74dfaa1379e1fc41",
-      "packageName": "query_6409d4ef6b04098a7b3c3f45cb5491295dbc5abd942b5f0a74dfaa1379e1fc41",
-      "acir": "6409d4ef6b04098a7b3c3f45cb5491295dbc5abd942b5f0a74dfaa1379e1fc41.json",
-      "vk": "6409d4ef6b04098a7b3c3f45cb5491295dbc5abd942b5f0a74dfaa1379e1fc41.vk.hex",
-      "acirSha256": "ef804f829b4f27736f33cad9859d8a8367617ce21fa906c84b98f1ad7bc958a4",
-      "vkSha256": "27f25ab5c2c38fa023cfb3dcafac663d95b04dc59023d962875135e8b03cbd3a",
+      "planHash": "fb8ae5835f05280bf93c80cf10ef748659c31542d88c04ee904720373745cefc",
+      "packageName": "query_fb8ae5835f05280bf93c80cf10ef748659c31542d88c04ee904720373745cefc",
+      "acir": "fb8ae5835f05280bf93c80cf10ef748659c31542d88c04ee904720373745cefc.json",
+      "vk": "fb8ae5835f05280bf93c80cf10ef748659c31542d88c04ee904720373745cefc.vk.hex",
+      "acirSha256": "2a7c8329209597073e7627ed77861c0105c7482fd5988f0a5c8a349ca83ffa55",
+      "vkSha256": "adb1029b884de56b2f78f6de83c35f91dddc35ae38f75288a3b58be7687691e5",
       "wasmProving": true,
       "example": {
         "query": "SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x >= 1 && ?x < 2)}",
@@ -95,12 +95,12 @@
       }
     },
     {
-      "planHash": "df2bf3db2f2b1896b734cbea2d98568eabbaebfd89f703f1334452faff9f37ab",
-      "packageName": "query_df2bf3db2f2b1896b734cbea2d98568eabbaebfd89f703f1334452faff9f37ab",
-      "acir": "df2bf3db2f2b1896b734cbea2d98568eabbaebfd89f703f1334452faff9f37ab.json",
-      "vk": "df2bf3db2f2b1896b734cbea2d98568eabbaebfd89f703f1334452faff9f37ab.vk.hex",
-      "acirSha256": "98e5573f6213f5b0289eebfa74f312717fd820d5e20402bf22a01a3bb86e5f3a",
-      "vkSha256": "84857282bfb7399f805cc380aebc03d2417cac8a7f2f104b31ca1f1c69bc06f7",
+      "planHash": "253617f70d451656a199da343b93d541b400c172b6b1893e8f043940db029783",
+      "packageName": "query_253617f70d451656a199da343b93d541b400c172b6b1893e8f043940db029783",
+      "acir": "253617f70d451656a199da343b93d541b400c172b6b1893e8f043940db029783.json",
+      "vk": "253617f70d451656a199da343b93d541b400c172b6b1893e8f043940db029783.vk.hex",
+      "acirSha256": "d334dbda323eeaee26a5f7c8724d9e16365c0b363f24d881d9d3fccc55044d1d",
+      "vkSha256": "d7b1774a7de47624d2da8c542f3e1daf2383fd48c458fdbf53b724cc749289d7",
       "wasmProving": true,
       "example": {
         "query": "SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x IN (1,3))}",
@@ -112,12 +112,12 @@
       }
     },
     {
-      "planHash": "c3a86629c45eca7ad1ddb0d03fc85a875bc16128ca49478095f0f038c92ed363",
-      "packageName": "query_c3a86629c45eca7ad1ddb0d03fc85a875bc16128ca49478095f0f038c92ed363",
-      "acir": "c3a86629c45eca7ad1ddb0d03fc85a875bc16128ca49478095f0f038c92ed363.json",
-      "vk": "c3a86629c45eca7ad1ddb0d03fc85a875bc16128ca49478095f0f038c92ed363.vk.hex",
-      "acirSha256": "58a18727fa9634a277526669341d5d4b455f3461a81ed0d1448009060db7d4e5",
-      "vkSha256": "dbf7f9477ddd5b07b3b0d44ec7124714524a0b9ef5ea5e2047fcd3eab80ff8ab",
+      "planHash": "e0af48cd5288d1147a1ebfc16a9bd13f433cbab198f71b95f25a6577ad0c04a7",
+      "packageName": "query_e0af48cd5288d1147a1ebfc16a9bd13f433cbab198f71b95f25a6577ad0c04a7",
+      "acir": "e0af48cd5288d1147a1ebfc16a9bd13f433cbab198f71b95f25a6577ad0c04a7.json",
+      "vk": "e0af48cd5288d1147a1ebfc16a9bd13f433cbab198f71b95f25a6577ad0c04a7.vk.hex",
+      "acirSha256": "1a94be6f47776232420a9e241bd44f9621fa93e5ee375ebfdd776cd6db95c174",
+      "vkSha256": "d2f1c1c73cd04be1fbbd66ef7d6281fb9dc317f37c3bc89cbfa16d50c790c5bd",
       "wasmProving": true,
       "example": {
         "query": "SELECT ?s WHERE {?s <urn:p> ?x VALUES ?x {1 UNDEF}}",
@@ -129,46 +129,46 @@
       }
     },
     {
-      "planHash": "c70aa99aaf7af6effdc9ea62f1b741c0afde8e143b6e833a5c45ef5004645ff7",
-      "packageName": "query_c70aa99aaf7af6effdc9ea62f1b741c0afde8e143b6e833a5c45ef5004645ff7",
-      "acir": "c70aa99aaf7af6effdc9ea62f1b741c0afde8e143b6e833a5c45ef5004645ff7.json",
-      "vk": "c70aa99aaf7af6effdc9ea62f1b741c0afde8e143b6e833a5c45ef5004645ff7.vk.hex",
-      "acirSha256": "0ca6f334fa38d598220fea8a8937a1f75662c63f5764cf3321398e3a7e709d2e",
-      "vkSha256": "e0f69f88cf14c4e657dafa5e31e5f5af228ce4268503e54608aeaee1b390bc04",
+      "planHash": "37acdc9560a356c949259c359fad67f8ddbf1434d194bfb5bafa8abea89163ef",
+      "packageName": "query_37acdc9560a356c949259c359fad67f8ddbf1434d194bfb5bafa8abea89163ef",
+      "acir": "37acdc9560a356c949259c359fad67f8ddbf1434d194bfb5bafa8abea89163ef.json",
+      "vk": "37acdc9560a356c949259c359fad67f8ddbf1434d194bfb5bafa8abea89163ef.vk.hex",
+      "acirSha256": "7c9d13d82123823ed260583db02feefc22a88cef718883766946a9eb4b63cf27",
+      "vkSha256": "fb3b49efb0a37349188089112bd31ec58b08fead85a70bdfc99feaa66f792d38",
       "wasmProving": true,
       "example": {
         "query": "SELECT ?p WHERE {?s ?p ?o}",
         "bounds": {
           "credentials": 1,
           "quadsPerCredential": 4,
-          "rowsPerTable": 4
+          "rowsPerTable": 8
         }
       }
     },
     {
-      "planHash": "8e8ec6c2dc6b4d37b773d8912c2a4dfb6d9dfcbb2ece23c5ac3aac95986bdb52",
-      "packageName": "query_8e8ec6c2dc6b4d37b773d8912c2a4dfb6d9dfcbb2ece23c5ac3aac95986bdb52",
-      "acir": "8e8ec6c2dc6b4d37b773d8912c2a4dfb6d9dfcbb2ece23c5ac3aac95986bdb52.json",
-      "vk": "8e8ec6c2dc6b4d37b773d8912c2a4dfb6d9dfcbb2ece23c5ac3aac95986bdb52.vk.hex",
-      "acirSha256": "b175dee8d455b5a3d852c305b1e3cfcb7ee0fe03f0c738befcf77ce352ff8610",
-      "vkSha256": "a352f19ebb5e01c9e4f1fb18111eca57c92f37b3914d6da5f34c9bd6dca0e2a1",
+      "planHash": "7f03eba09cc4df4e7e86615e2f5cb656022feac84d109754c2b3462fc6c7eb74",
+      "packageName": "query_7f03eba09cc4df4e7e86615e2f5cb656022feac84d109754c2b3462fc6c7eb74",
+      "acir": "7f03eba09cc4df4e7e86615e2f5cb656022feac84d109754c2b3462fc6c7eb74.json",
+      "vk": "7f03eba09cc4df4e7e86615e2f5cb656022feac84d109754c2b3462fc6c7eb74.vk.hex",
+      "acirSha256": "3660a557f31a419325992696d7aa244e5b187248125a7cbf51bc37f14b5ffb5c",
+      "vkSha256": "1014688abbd25e11d05b7f488de054bc365b5728e42aa06f46937430c7f4d105",
       "wasmProving": true,
       "example": {
         "query": "SELECT DISTINCT ?p WHERE {?s ?p ?o}",
         "bounds": {
           "credentials": 1,
           "quadsPerCredential": 4,
-          "rowsPerTable": 4
+          "rowsPerTable": 8
         }
       }
     },
     {
-      "planHash": "57edf42454c145acd9d1ce784ce98ba57867cbdd39afe19ec7a1b7c5c7b31a3a",
-      "packageName": "query_57edf42454c145acd9d1ce784ce98ba57867cbdd39afe19ec7a1b7c5c7b31a3a",
-      "acir": "57edf42454c145acd9d1ce784ce98ba57867cbdd39afe19ec7a1b7c5c7b31a3a.json",
-      "vk": "57edf42454c145acd9d1ce784ce98ba57867cbdd39afe19ec7a1b7c5c7b31a3a.vk.hex",
-      "acirSha256": "181c73c11e9a3388f8e04e4d78672fb6afc5be9fe5948c33ed10bc4120d81e8f",
-      "vkSha256": "cced7dd70e767f968646dff29b0edf024daa764729a3a56ead70db7764e3dc72",
+      "planHash": "26dfc126d68303792c9d8c4a6d43fa03febf75d9567947d9b3d23246349b1fd5",
+      "packageName": "query_26dfc126d68303792c9d8c4a6d43fa03febf75d9567947d9b3d23246349b1fd5",
+      "acir": "26dfc126d68303792c9d8c4a6d43fa03febf75d9567947d9b3d23246349b1fd5.json",
+      "vk": "26dfc126d68303792c9d8c4a6d43fa03febf75d9567947d9b3d23246349b1fd5.vk.hex",
+      "acirSha256": "cbab1ab4c7e9e4cc0546f7d92c2a865e2b814e79f8195f942dfb850569b0bff3",
+      "vkSha256": "b5a35f849f2dc5a745a9e8d23eae6ecb9d8ba86781e35f3366fe0aa558ee02a9",
       "wasmProving": true,
       "example": {
         "query": "SELECT ?s WHERE {?s <urn:p> ?x} LIMIT 1 OFFSET 1",
@@ -180,12 +180,12 @@
       }
     },
     {
-      "planHash": "8bbf5639808fbab2c7bc9ab8a762cb44b47035dca47f9c3559ea618ea74cc7cf",
-      "packageName": "query_8bbf5639808fbab2c7bc9ab8a762cb44b47035dca47f9c3559ea618ea74cc7cf",
-      "acir": "8bbf5639808fbab2c7bc9ab8a762cb44b47035dca47f9c3559ea618ea74cc7cf.json",
-      "vk": "8bbf5639808fbab2c7bc9ab8a762cb44b47035dca47f9c3559ea618ea74cc7cf.vk.hex",
-      "acirSha256": "36245c76cb8326141ff9de0f63892ff084eab0be73849c5c76bece1017ab5cf0",
-      "vkSha256": "a0a1639f8d412969b570b33abe1c901749a4613e8ccfced21146250d3986ea25",
+      "planHash": "135c367b94a913ad2f7e0f3c4b74ac2c17156fda2456efd6cd33a2ba5b5d9e60",
+      "packageName": "query_135c367b94a913ad2f7e0f3c4b74ac2c17156fda2456efd6cd33a2ba5b5d9e60",
+      "acir": "135c367b94a913ad2f7e0f3c4b74ac2c17156fda2456efd6cd33a2ba5b5d9e60.json",
+      "vk": "135c367b94a913ad2f7e0f3c4b74ac2c17156fda2456efd6cd33a2ba5b5d9e60.vk.hex",
+      "acirSha256": "d29dbb093ac219659b0247a2f76e0fd2c6d14bc73480984283ea3291c571c4c5",
+      "vkSha256": "5248038d29f5fa5503c3ab1e66df995db66c7226d088163f49bfe079a0155f4f",
       "wasmProving": true,
       "example": {
         "query": "ASK {?s <urn:p> ?x}",
@@ -197,12 +197,12 @@
       }
     },
     {
-      "planHash": "3362346230644f35055b1045c3eb0a7a9931a9f961c5daedc09402f28c274f5a",
-      "packageName": "query_3362346230644f35055b1045c3eb0a7a9931a9f961c5daedc09402f28c274f5a",
-      "acir": "3362346230644f35055b1045c3eb0a7a9931a9f961c5daedc09402f28c274f5a.json",
-      "vk": "3362346230644f35055b1045c3eb0a7a9931a9f961c5daedc09402f28c274f5a.vk.hex",
-      "acirSha256": "033e01b8f143a15b1958bb48d08a51c8293bcc1e9d738c7ea0acaf5401aa0079",
-      "vkSha256": "7081752b74f9c671449c3bff6ea2d1e7c568fb72a7ef1862c65c9fdcc658facf",
+      "planHash": "686f1aa9f79069b9eadca2455f1d7de21607fda64e332884fa1463364ccd8ecf",
+      "packageName": "query_686f1aa9f79069b9eadca2455f1d7de21607fda64e332884fa1463364ccd8ecf",
+      "acir": "686f1aa9f79069b9eadca2455f1d7de21607fda64e332884fa1463364ccd8ecf.json",
+      "vk": "686f1aa9f79069b9eadca2455f1d7de21607fda64e332884fa1463364ccd8ecf.vk.hex",
+      "acirSha256": "d83339c375ee763d42defc996bb4dd8459b9555c65ab39b75e9fef5f1975d483",
+      "vkSha256": "fc4692059d0b0e6753320363bc7a7dcce6b91d8b5ce6e4bdb56e53c76eda212b",
       "wasmProving": true,
       "example": {
         "query": "ASK {?s <urn:p> ?x FILTER(?x > 8)}",
@@ -214,8 +214,8 @@
       }
     }
   ],
-  "sourceBundleSha256": "293e4a52f03a27bcd6258cf5c962e41b6f87875164006f31ce3089ebd61ca43f",
-  "crsPinsSha256": "a55f3432e56bad219cd34d54c02adfce00c441c916a5bfa4045751fadf3c9d24",
+  "sourceBundleSha256": "ac207c13ec73b7e64732665727f751b3c5a23429aaf38d65bb0353b887fe4684",
+  "crsPinsSha256": "261dbd696cb86060421ae74cefe9967e2940517a1dd52cd30df0c7a08da88f40",
   "notYetCatalogued": [],
   "nativeKnownFailures": []
 }

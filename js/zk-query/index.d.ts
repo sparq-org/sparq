@@ -7,8 +7,9 @@ export interface Credential {
   count: number; issuer: string; signatureHex: string;
 }
 export interface Bounds { credentials: number; quadsPerCredential: number; rowsPerTable: number }
+export interface TrustMember { issuer: string; verificationMethod: string; publicKey: string }
 export interface Policy {
-  bounds: Bounds; trustedIssuers: string[]; audience: string;
+  bounds: Bounds; trustedIssuers: string[]; trustMembers: TrustMember[]; audience: string;
   notBefore?: number; notAfter?: number; credentialQuadBounds?: number[];
   inputCommitment?: string; maxPresentationBytes?: number; maxResultSize?: number;
   holderBinding?: unknown; acceptedSnapshots?: unknown; validityTime?: number; earliestCreated?: number;
@@ -24,7 +25,7 @@ export interface Presentation {
 }
 export interface VerificationReport {
   rule: { query: string; planHash: string }; issuers: string[]; subject: string[];
-  fresh: string; complete: true; issuerRoot: string;
+  fresh: string; complete: true; issuerRoot: string; trustMembers: TrustMember[];
 }
 export type Verification =
   | { verified: true; released: QueryResult; report: VerificationReport }

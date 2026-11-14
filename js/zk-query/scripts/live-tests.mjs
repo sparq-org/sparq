@@ -8,8 +8,10 @@ import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { prove as wasmProve } from '../wasm-prover.mjs';
 import { testIssuerKeygen, testIssue, request, prove, verify } from '../index.js';
+import { canonicalGraph, issueFixture, trustMembers } from './test-credentials.mjs';
 import { sha256 } from '../internal/runtime.mjs';
 import { agreement } from './compiler-agreement.mjs';
+import { proofContract } from './proof-contract.mjs';
 import '../test/binary.live.js';
 test('split prover, seeded issuance and compiler agreement live contracts', async () => {
 const root = fileURLToPath(new URL('../../../', import.meta.url));
@@ -20,7 +22,7 @@ const host = createRequire(import.meta.url)('../wasm/sparq_zk_query_wasm.cjs');
 const table = JSON.parse(readFileSync(new URL('../assets/catalogue.json', import.meta.url)));
 const cases = JSON.parse(readFileSync(new URL('../test/fixtures/n0.json', import.meta.url)));
 const issuer = testIssuerKeygen('00'.repeat(32));
-const profiles = [{ name: 'authenticated-smoke', query: 'ASK {}', bounds: { credentials: 1, quadsPerCredential: 1, rowsPerTable: 1 }, sources: ['<a:> <b:> <c:> .'] }, ...cases];
+const profiles = [{ name: 'authenticated-smoke', query: 'ASK {}', bounds: { credentials: 1, quadsPerCredential: 2, rowsPerTable: 1 }, sources: [canonicalGraph('')] }, ...cases];
 function rustSources(path) {
   return readdirSync(path, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)).flatMap(entry => entry.isDirectory() ? rustSources(join(path, entry.name)) : entry.name.endsWith('.rs') ? [readFileSync(join(path, entry.name))] : []);
 }
@@ -36,12 +38,12 @@ for (const [index, sample] of profiles.entries()) {
   const entryHash = profile ? sha256(JSON.stringify([profile.acirSha256, profile.vkSha256, table.sourceBundleSha256])) : '';
   if (existsSync(path)) { const cached = JSON.parse(readFileSync(path)); if (cached.verified && cached.runtimeHash === runtimeHash && cached.entryHash === entryHash) { const checked = await verify({ request: cached.request, presentation: cached.presentation, seenNonces: new Set() }); assert.equal(checked.verified, true, checked.reason); continue; } }
   if (sample.planHash && !table.entries.some(e => e.planHash === sample.planHash)) {
-    assert.throws(() => request({ query: sample.query, policy: { bounds: sample.bounds, trustedIssuers: [issuer.publicKey], audience: 'urn:sparq:test:missing' }, nonce: '09'.repeat(32) }), /missing catalogue plan/);
+    assert.throws(() => request({ query: sample.query, policy: { bounds: sample.bounds, trustedIssuers: [issuer.publicKey], trustMembers: trustMembers(issuer), audience: 'urn:sparq:test:missing' }, nonce: '09'.repeat(32) }), /missing catalogue plan/);
     pending.push({ case: sample.name, status: 'not-yet-catalogued', reason: table.notYetCatalogued.find(c => c.case === sample.name)?.reason });
     continue;
   }
-  const credentials = sample.sources.map((graphNQuads, slot) => testIssue({ issuer, graphNQuads, seedHex: (index + slot + 1).toString(16).padStart(2, '0').repeat(32) }));
-  let stored = request({ query: sample.query, policy: { bounds: sample.bounds, trustedIssuers: [issuer.publicKey], audience: 'urn:sparq:test:verifier', notBefore: 0, notAfter: 32503680000 }, nonce: (index + 30).toString(16).padStart(2, '0').repeat(32) });
+  const credentials = sample.sources.map((graphNQuads, slot) => issueFixture(issuer, graphNQuads, (index + slot + 1).toString(16).padStart(2, '0').repeat(32)));
+  let stored = request({ query: sample.query, policy: { bounds: sample.bounds, trustedIssuers: [issuer.publicKey], trustMembers: trustMembers(issuer), audience: 'urn:sparq:test:verifier', notBefore: 0, notAfter: 32503680000 }, nonce: (index + 30).toString(16).padStart(2, '0').repeat(32) });
   const backend = { type: 'native' };
   if (sample.name === 'authenticated-smoke') {
     backend.presentationSaltHex = '03'.repeat(32);
@@ -65,14 +67,22 @@ for (const [index, sample] of profiles.entries()) {
   writeFileSync(path, JSON.stringify({ verified: true, runtimeHash, entryHash, request: stored, ...result, report: checked.report, nativeOperationMs: proofMs, nodeVerifyMs: performance.now() - verifyStart }, null, 2));
   console.log('Authenticated native backend and Node verification passed:', sample.name);
 }
+for (const [index, sample] of profiles.entries()) {
+  const path = join(directory, sample.name + '.json');
+  if (!existsSync(path)) continue;
+  const result = JSON.parse(readFileSync(path));
+  if (!result.verified) continue;
+  const credentials = sample.sources.map((graphNQuads, slot) => issueFixture(issuer, graphNQuads, (index + slot + 1).toString(16).padStart(2, '0').repeat(32)));
+  await proofContract({ stored: result.request, result, credentials, backend: 'native' });
+}
 writeFileSync(join(directory, 'not-yet-catalogued.json'), JSON.stringify(pending, null, 2));
 for (const [index, sample] of profiles.entries()) {
   const profile = table.entries.find(entry => entry.planHash === (sample.planHash || table.entries[0].planHash));
   if (!profile) continue;
   const knownFailure = table.nativeKnownFailures?.find(failure => failure.case === sample.name);
   const nativeResult = JSON.parse(readFileSync(join(directory, sample.name + '.json')));
-  if (knownFailure) nativeResult.request = request({ query: sample.query, policy: { bounds: sample.bounds, trustedIssuers: [issuer.publicKey], audience: 'urn:sparq:test:verifier', notBefore: 0, notAfter: 32503680000 }, nonce: (index + 30).toString(16).padStart(2, '0').repeat(32) });
-  const credentials = sample.sources.map((graphNQuads, slot) => testIssue({ issuer, graphNQuads, seedHex: (index + slot + 1).toString(16).padStart(2, '0').repeat(32) }));
+  if (knownFailure) nativeResult.request = request({ query: sample.query, policy: { bounds: sample.bounds, trustedIssuers: [issuer.publicKey], trustMembers: trustMembers(issuer), audience: 'urn:sparq:test:verifier', notBefore: 0, notAfter: 32503680000 }, nonce: (index + 30).toString(16).padStart(2, '0').repeat(32) });
+  const credentials = sample.sources.map((graphNQuads, slot) => issueFixture(issuer, graphNQuads, (index + slot + 1).toString(16).padStart(2, '0').repeat(32)));
   if (!profile.wasmProving) {
     await assert.rejects(prove({ request: nativeResult.request, credentials, backend: 'wasm' }), /requires the native prover backend/);
     continue;
@@ -89,7 +99,7 @@ for (const [index, sample] of profiles.entries()) {
   if (knownFailure) { assert.equal(result.status, 'known-failure'); continue; }
   assert.equal(result.verified, true);
   assert.deepEqual(result.report, nativeResult.report);
-  assert.equal((await verify({ request: result.request, presentation: result.presentation, seenNonces: new Set() })).verified, true);
+  await proofContract({ stored: result.request, result, credentials, backend: 'wasm' });
   console.log('Opt-in authenticated WebAssembly contracts passed:', sample.name);
 }
 // Independently call the suite in native Rust, rather than compare two adapters.

@@ -71,6 +71,9 @@ on:
       - "crates/sparq-zk/**"
       - "crates/sparq-zk-compose/**"
       - "crates/sparq-zk-query/**"
+      - "crates/sparq-zk-query-wasm/**"
+      - "js/zk-query/**"
+      - "js/zk-shared/**"
       - "zk/noir-query/**"
       # sq-5reoy: narrowed from zk/** to zk/compose/** — the zk/ieee754 and
       # zk/xpath trees were externalized to the sparq-org/noir_IEEE754 and
@@ -90,6 +93,7 @@ on:
       - "scripts/zk_query_ci.py"
       - "scripts/check-zk-toolchain-gate.py"
       - "scripts/tests/test_zk_query_ci.py"
+      - "scripts/tests/test_zk_query_package_ci.py"
       - "scripts/tests/test_zk_toolchain_gate.py"
   # (2026-07-18 maintainer directive, merge-queue subset) merge_group
   # REMOVED: the forge suite already ran + gated on any zk-touching PR (paths filter
@@ -105,6 +109,9 @@ on:
       - "crates/sparq-zk/**"
       - "crates/sparq-zk-compose/**"
       - "crates/sparq-zk-query/**"
+      - "crates/sparq-zk-query-wasm/**"
+      - "js/zk-query/**"
+      - "js/zk-shared/**"
       - "zk/noir-query/**"
       # sq-5reoy: narrowed from zk/** to zk/compose/** (see the pull_request
       # paths note above — the ieee754/xpath trees moved to their face repos, #1599).
@@ -120,6 +127,7 @@ on:
       - "scripts/zk_query_ci.py"
       - "scripts/check-zk-toolchain-gate.py"
       - "scripts/tests/test_zk_query_ci.py"
+      - "scripts/tests/test_zk_query_package_ci.py"
       - "scripts/tests/test_zk_toolchain_gate.py"
 
 # Least-privilege: this lane only reads the repo + runs tests.
@@ -163,6 +171,56 @@ env:
   BBUP_REF: "e80a3ada0bdc5501ff74fb2df7c9c99a19167049" # AztecProtocol/aztec-packages @ next (the bbup script is pinned to this SHA)
 
 jobs:
+  query-package:
+    name: Noir query Node package contracts
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: "3"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_PROFILE_RELEASE_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+      SPARQ_ZK_LIVE_LEDGER: ${{ github.workspace }}/.zk-query-package-${{ github.run_id }}-${{ github.run_attempt }}.txt
+      SPARQ_QUERY_TEST_DIR: ${{ runner.temp }}/query-package-evidence
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+      - name: Restore package build cache
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+        with:
+          key: zk-query-package
+      - name: Install package gate dependencies
+        run: python3 -m pip install --require-hashes -r .github/requirements/docs-quality.txt
+      - uses: ./.github/actions/noir-toolchain
+      - name: Add portable package target
+        run: rustup target add wasm32-unknown-unknown
+      - name: Cache native query catalogue compilations
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: /tmp/sparq-query-catalogue
+          key: query-catalogue-${{ runner.os }}-${{ hashFiles('js/zk-query/assets/catalogue.json', 'js/zk-query/scripts/build-circuits.mjs', 'js/zk-query/scripts/artifact.mjs', 'js/zk-query/scripts/cache.mjs') }}
+      - name: Build and exercise the split query prover package offline
+        run: |
+          set -euo pipefail
+          export SPARQ_NARGO="$(command -v nargo)"
+          export SPARQ_BB="$(command -v bb)"
+          bindgen_version="$(python3 -c 'import tomllib; print(next(p["version"] for p in tomllib.load(open("Cargo.lock", "rb"))["package"] if p["name"] == "wasm-bindgen"))')"
+          cargo install wasm-bindgen-cli --version "=$bindgen_version" --locked -j 2
+          npm ci --prefix js/zk-query --ignore-scripts
+          node js/zk-query/scripts/build.mjs
+          node js/zk-query/scripts/build-circuits.mjs
+          cargo build --locked -p sparq-zk-query-wasm --example issuance_reference
+          export SPARQ_ISSUANCE_REFERENCE="$GITHUB_WORKSPACE/target/debug/examples/issuance_reference"
+          python3 js/zk-query/scripts/offline.py cargo test --locked -p sparq-zk-query-wasm --test live -- --test-threads=1
+      - name: Verify query package ledger
+        run: python3 scripts/check-zk-toolchain-gate.py --verify-ledger "${{ github.workspace }}/.zk-query-package-${{ github.run_id }}-${{ github.run_attempt }}.txt" --profile query-package
+
   query-hosted:
     name: Noir query hosted contracts
     needs: forge-suite
@@ -238,8 +296,8 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     name: zk forge + anchor suite (nargo/bb)
     runs-on: ubuntu-latest
-    # Toolchain install + real bb proving is the long pole; generous headroom.
-    timeout-minutes: 60
+    # The estate proof sweep retains its independent timeout.
+    timeout-minutes: 360
     outputs:
       zk: ${{ steps.changes.outputs.zk }}
     env:
@@ -304,7 +362,7 @@ jobs:
               # ZK-relevant paths — SAME set as the pull_request/push paths filter.
               # sq-5reoy: zk/ narrowed to zk/compose/ (ieee754/xpath externalized, #1599).
               if printf '%s\n' "${changed}" | grep -Eq \
-                '^(crates/sparq-merkle-suite/|zk/noir-query/|crates/sparq-zk/|crates/sparq-zk-compose/|zk/compose/|zk/dual-leaf-v2/|bench/zk-compose/campaigns/|bench/zk-bindings/|crates/sparq-conformance/examples/proof_corpus\.rs$|zk/sparql-evaluator/model/|\.github/workflows/zk-toolchain\.yml$|\.github/actions/noir-toolchain/|scripts/(zk_query_ci\.py|check-zk-toolchain-gate\.py|tests/test_zk_query_ci\.py|tests/test_zk_toolchain_gate\.py)$|crates/sparq-zk-query/)'; then
+                '^(crates/sparq-merkle-suite/|zk/noir-query/|crates/sparq-zk/|crates/sparq-zk-compose/|zk/compose/|zk/dual-leaf-v2/|bench/zk-compose/campaigns/|bench/zk-bindings/|crates/sparq-conformance/examples/proof_corpus\.rs$|zk/sparql-evaluator/model/|\.github/workflows/zk-toolchain\.yml$|\.github/actions/noir-toolchain/|scripts/(zk_query_ci\.py|check-zk-toolchain-gate\.py|tests/test_zk_query_ci\.py|tests/test_zk_query_package_ci\.py|tests/test_zk_toolchain_gate\.py)$|crates/sparq-zk-query/|crates/sparq-zk-query-wasm/|js/zk-query/|js/zk-shared/)'; then
                 zk=true
               else
                 zk=false

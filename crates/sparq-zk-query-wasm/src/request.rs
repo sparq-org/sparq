@@ -5,10 +5,19 @@ use sparq_query_protocol::*;
 use sparq_zk::sig;
 use sparq_zk_query::{
     capacity::Bounds,
+    envelope_policy::{PolicyInput, TrustMember},
     lower::lower,
     plan::{Plan, ResultForm},
     request::{self, Request},
 };
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct TrustMemberWire {
+    pub issuer: String,
+    pub verification_method: String,
+    pub public_key: String,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -31,6 +40,8 @@ impl Limits {
 pub(crate) struct Policy {
     pub bounds: Limits,
     pub trusted_issuers: Vec<String>,
+    #[serde(default)]
+    pub trust_members: Vec<TrustMemberWire>,
     pub audience: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub not_before: Option<u64>,
@@ -69,7 +80,51 @@ impl Policy {
         if p.trusted_issuers.is_empty() {
             return Err("trusted issuer set is empty".into());
         }
+        for member in &mut p.trust_members {
+            let key =
+                sig::public_key_from_hex(&member.public_key).ok_or("trust member key rejected")?;
+            member.public_key = sig::public_key_to_hex(&key);
+        }
+        p.trust_members.sort();
+        p.trust_members.dedup();
+        if !p.trust_members.is_empty() {
+            p.envelope_policy()?;
+        }
         Ok(p)
+    }
+    pub fn envelope_policy(&self) -> Result<PolicyInput> {
+        if self.trust_members.is_empty() {
+            return Err("canonical trust members required".into());
+        }
+        let mut keys: Vec<_> = self
+            .trust_members
+            .iter()
+            .map(|m| m.public_key.clone())
+            .collect();
+        keys.sort();
+        keys.dedup();
+        if keys != self.trusted_issuers {
+            return Err("trust member keys differ from trusted issuers".into());
+        }
+        let trust_members = self
+            .trust_members
+            .iter()
+            .map(|m| {
+                Ok(TrustMember {
+                    issuer: oxrdf::NamedNode::new(m.issuer.clone()).map_err(err)?,
+                    verification_method: oxrdf::NamedNode::new(m.verification_method.clone())
+                        .map_err(err)?,
+                    key: sig::public_key_from_hex(&m.public_key)
+                        .ok_or("trust member key rejected")?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let policy = PolicyInput {
+            trust_members,
+            ..PolicyInput::default()
+        };
+        sparq_zk_query::envelope_policy::derive(&policy).map_err(err)?;
+        Ok(policy)
     }
     pub fn keys(&self) -> Result<Vec<sig::PublicKey>> {
         self.trusted_issuers
@@ -104,10 +159,7 @@ fn id(s: &str) -> Result<Identifier> {
 }
 fn native(query: &str, p: &Policy, nonce: &str, key: &[u8]) -> Result<Request> {
     let plan = p.plan(query)?;
-    let keys = p.keys()?;
-    let root =
-        sparq_zk_compose::issuer::key_set_root(&keys, sparq_zk_query::credential::ISSUER_DEPTH)
-            .ok_or("issuer set capacity or key rejected")?;
+    let envelope = p.envelope_policy()?;
     let anchor = p
         .input_commitment
         .as_deref()
@@ -167,19 +219,14 @@ fn native(query: &str, p: &Policy, nonce: &str, key: &[u8]) -> Result<Request> {
         describe_policy: None,
     })
     .map_err(err)?;
-    let root = sparq_merkle_suite::poseidon::field_bytes(root);
-    if let Some(limits) = &p.credential_quad_bounds {
-        Request::new_authenticated_with_quad_bounds(
-            stored,
-            p.bounds.bounds(),
-            key.to_vec(),
-            root,
-            limits,
-        )
-        .map_err(err)
-    } else {
-        Request::new_authenticated(stored, p.bounds.bounds(), key.to_vec(), root).map_err(err)
-    }
+    Request::new_authenticated_with_envelope(
+        stored,
+        p.bounds.bounds(),
+        key.to_vec(),
+        envelope,
+        p.credential_quad_bounds.as_deref(),
+    )
+    .map_err(err)
 }
 pub(crate) fn checked_key(plan: &Plan, key: &[u8]) -> Result<()> {
     let table: Value = serde_json::from_str(crate::CATALOGUE).map_err(err)?;

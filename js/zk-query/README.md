@@ -23,6 +23,17 @@ The verifier stores its own request and supplies that copy to `verify`.
 `policy` requires `bounds`, `trustedIssuers` and `audience`. Bounds contain
 `credentials`, `quadsPerCredential` and `rowsPerTable`; trusted issuers are suite
 public keys. `credentialQuadBounds` optionally refines ordered credential slots.
+`trustMembers` supplies the verifier's complete authorization entries as
+`{ issuer, verificationMethod, publicKey }`. Its key set must equal
+`trustedIssuers`; missing entries or mismatched keys refuse. Rust derives the
+canonical authorization root and membership paths from these entries.
+Issuance signs the supplied graph without adding credential properties. For
+query proving, it must include a credential root typed as VerifiableCredential
+and its issuer IRI. The proof configuration must name its verification-method
+IRI. Both must match an authorized trust member; arbitrary signed graphs without
+these properties receive a named refusal.
+Canonical evaluation also includes the method's verified issuer assertions,
+constructed in Rust from the authenticated trust members.
 `notBefore` and `notAfter` are Unix seconds; defaults start at request creation
 and end an hour later. `maxResultSize` defaults to the table bound and
 `maxPresentationBytes` to sixteen mebibytes. `inputCommitment` optionally binds
@@ -40,9 +51,12 @@ draws a fresh platform-CSPRNG salt and refuses an issuance seed.
 `status`, when supplied to issuance, is `{ proofConfigNQuads }`: the exact Data
 Integrity proof configuration, including the suite declaration, with optional
 creation and verification-method metadata. Omission selects the suite-only
-configuration. This argument is a configuration carrier; credential status
-checking requires the envelope integration. Required holder binding, accepted
-status snapshots, validity time and freshness policies are currently refused.
+configuration. This argument is a configuration carrier. The catalogue uses the
+canonical envelope consumer with issuer authentication and bearer acceptance.
+The native Rust witness renderer supplies its private envelope fields with empty
+holder and status evidence, so ordinary `prove({ request, credentials })` needs no
+extra caller evidence. Required holder binding, accepted status snapshots,
+validity time and freshness policies are refused by this Node adapter.
 The underlying credential policy uses epoch milliseconds for validity and
 freshness instants; request-window instants retain their seconds representation.
 
@@ -53,7 +67,8 @@ unbound positions. Duplicate rows are retained when the query requires them.
 report. Successful reports contain `rule` with the exact query and plan hash,
 `issuers` with the trusted public-key set relied on for membership authorization,
 `subject` empty because holder binding is unavailable, `fresh` with the consumed
-challenge, `complete` relative to the presented roots, and the bound `issuerRoot`.
+challenge, `complete` relative to the presented roots, and the bound `issuerRoot`
+and canonical `trustMembers` authorization set.
 Membership keeps the individual signer hidden; the trust list does not claim that
 every listed key signed a presented credential. No status roots, times or
 per-predicate issuer guarantees are reported without their enforcement.
@@ -181,6 +196,9 @@ Bounds flatten as credential, quad and row limits.
 - `freshness_required: bool`
 - `earliest_created: u64`
 - `credential_quad_bounds: [u32; length]`
+- `revealed_count: u32`
+- `revealed_messages: [Field; length]`
+- `revealed_keys: [Field; length]`
 - `statement_binding: Field`
 
 Cell field order: `bound`, `kind`, `enc`, `key_class`, `key`, `dt`, `lang`, `scope`.

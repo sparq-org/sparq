@@ -1915,6 +1915,32 @@ def check_query_workflow(root: Path, doc: dict) -> list[Finding]:
             findings.append(Finding(jid, "D", "query job must install the shared pinned tools"))
         if any(step.get("shell") not in (None, "bash") for step in steps):
             findings.append(Finding(jid, "D", "query steps require the normal bash failure behavior"))
+    job = jobs.get("query-package") or {}
+    ledger = '${{ github.workspace }}/.zk-query-package-${{ github.run_id }}-${{ github.run_attempt }}.txt'
+    steps = job.get("steps") or []
+    verify = f'python3 scripts/check-zk-toolchain-gate.py --verify-ledger "{ledger}" --profile query-package'
+    if job.get("if") != "github.event_name != 'pull_request' || github.event.pull_request.draft != true" or job.get("needs") is not None:
+        findings.append(Finding("query-package", "D", "package execution admission changed"))
+    if (job.get("env") or {}).get(LEDGER_ENV) != ledger:
+        findings.append(Finding("query-package", "D", "package ledger must be set literally at job level"))
+    if job.get("continue-on-error") or job.get("defaults") is not None:
+        findings.append(Finding("query-package", "D", "package execution must propagate failures"))
+    if not any(step.get("uses") == "./.github/actions/noir-toolchain" for step in steps):
+        findings.append(Finding("query-package", "D", "package job must install the shared pinned tools"))
+    bridges = [step for step in steps if step.get("name") == "Build and exercise the split query prover package offline"]
+    required = (
+        "set -euo pipefail",
+        "node js/zk-query/scripts/build.mjs",
+        "node js/zk-query/scripts/build-circuits.mjs",
+        "cargo build --locked -p sparq-zk-query-wasm --example issuance_reference",
+        "python3 js/zk-query/scripts/offline.py cargo test --locked -p sparq-zk-query-wasm --test live -- --test-threads=1",
+    )
+    if len(bridges) != 1 or set(bridges[0]) != {"name", "run"} or not all(command in bridges[0].get("run", "").splitlines() for command in required):
+        findings.append(Finding("query-package", "D", "unconditional offline package bridge is missing or changed"))
+    if not steps or steps[-1] != {"name": "Verify query package ledger", "run": verify}:
+        findings.append(Finding("query-package", "D", "package ledger verification must be unconditional and last"))
+    if any(step.get("shell") not in (None, "bash") for step in steps):
+        findings.append(Finding("query-package", "D", "package steps require normal bash failure behavior"))
     return findings
 
 
@@ -1927,8 +1953,11 @@ def profile_keys(root: Path, sites: list[Site], profile: str) -> set[str]:
     policy = query_policy(root)
     policy["live_tests"](root)
     query = {site.key for site in sites if site.key.startswith(policy["QUERY_PREFIX"])}
+    package = {site.key for site in sites if site.key.startswith("crates/sparq-zk-query-wasm/")}
     if profile == "estate":
-        return keys - query
+        return keys - query - package
+    if profile == "query-package":
+        return keys & package
     if profile == "query-full":
         return keys & query
     if profile == "query-hosted":
@@ -3213,7 +3242,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--check", action="store_true", help="check the tree (default)")
     ap.add_argument("--self-test", action="store_true", help="run the negative fixtures")
     ap.add_argument("--verify-ledger", metavar="PATH", help="verify a runtime ledger")
-    ap.add_argument("--profile", choices=("all", "estate", "query-hosted", "query-full"), default="all", help="explicit workflow execution profile")
+    ap.add_argument("--profile", choices=("all", "estate", "query-hosted", "query-full", "query-package"), default="all", help="explicit workflow execution profile")
     ap.add_argument("--root", default=None, help="root to check (default: this repo)")
     args = ap.parse_args(argv)
     if args.self_test:
