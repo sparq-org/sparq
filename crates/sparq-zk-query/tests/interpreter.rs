@@ -243,3 +243,57 @@ fn differential(seed: u64) {
         fixture_support::assert_engine(q, &rdf, &result);
     }
 }
+
+#[test]
+fn mixed_string_equality_uses_recommendation_dispatch_and_records_engine_extension() {
+    for (query, expected, engine_expected) in fixture_support::mixed_string_queries() {
+        let plan = lower(&query, BOUNDS).unwrap();
+        let result = evaluate(&plan, &[], &FixtureEncoder).unwrap().result;
+        assert_eq!(result, ResultValue::Ask(expected), "{query}");
+        fixture_support::assert_engine(&query, "", &ResultValue::Ask(engine_expected));
+    }
+}
+
+#[test]
+fn malformed_numeric_and_boolean_ebv_is_false_without_a_sparql_error() {
+    for datatype in [
+        "integer",
+        "decimal",
+        "boolean",
+        "double",
+        "float",
+        "unsignedByte",
+    ] {
+        let query =
+            format!("ASK {{FILTER(!\"bad\"^^<http://www.w3.org/2001/XMLSchema#{datatype}>)}}");
+        let plan = lower(&query, BOUNDS).unwrap();
+        let result = evaluate(&plan, &[], &FixtureEncoder).unwrap().result;
+        assert_eq!(result, ResultValue::Ask(true));
+        fixture_support::assert_engine(&query, "", &result);
+    }
+}
+
+#[test]
+fn zero_bytes_in_strings_preserve_ebv_and_identity_without_implying_lexical_order() {
+    for (query, expected) in [
+        (r#"ASK { FILTER("\u0000") }"#, true),
+        (r#"ASK { FILTER(!"\u0000") }"#, false),
+        (r#"ASK { FILTER("" = "\u0000") }"#, false),
+        (r#"ASK { FILTER("a" = "a\u0000") }"#, false),
+    ] {
+        let expected = ResultValue::Ask(expected);
+        fixture_support::assert_engine(query, "", &expected);
+        assert_eq!(
+            evaluate(&lower(query, BOUNDS).unwrap(), &[], &FixtureEncoder)
+                .unwrap()
+                .result,
+            expected
+        );
+    }
+    let query = r#"ASK { FILTER("a" < "a\u0000") }"#;
+    fixture_support::assert_engine(query, "", &ResultValue::Ask(true));
+    assert_eq!(
+        evaluate(&lower(query, BOUNDS).unwrap(), &[], &FixtureEncoder).unwrap_err(),
+        sparq_zk_query::Error::Unsupported("string comparison capacity".into())
+    );
+}

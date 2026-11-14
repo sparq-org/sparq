@@ -147,7 +147,7 @@ fn suite_program_checks_authentication_membership_keys_and_credential_limits() {
             driver
                 .execute(&render(&changed), "altered_authentication")
                 .is_err(),
-            "{field}"
+            "altered authentication field accepted: {field}"
         );
     }
     for field in ["salts", "issuer_siblings", "config"] {
@@ -157,7 +157,7 @@ fn suite_program_checks_authentication_membership_keys_and_credential_limits() {
             driver
                 .execute(&render(&changed), "altered_membership")
                 .is_err(),
-            "{field}"
+            "altered membership field accepted: {field}"
         );
     }
     for field in ["pk", "r"] {
@@ -171,13 +171,13 @@ fn suite_program_checks_authentication_membership_keys_and_credential_limits() {
         );
     }
     let mut changed = parsed.clone();
-    changed["credential_0"][0][0]["lexical"][0] = json!(1);
+    changed["credential_0"][0]["subject"]["lexical"][0] = json!(1);
     assert!(driver
         .execute(&render(&changed), "altered_lexical")
         .is_err());
     let mut changed = parsed.clone();
     let padding = data[0].credential.count as usize;
-    changed["credential_0"][padding][0]["lexical"][0] = json!(1);
+    changed["credential_0"][padding]["subject"]["lexical"][0] = json!(1);
     assert!(driver
         .execute(&render(&changed), "altered_opening_padding")
         .is_err());
@@ -199,13 +199,69 @@ fn suite_program_checks_authentication_membership_keys_and_credential_limits() {
     let mut changed = parsed.clone();
     changed["credential_quad_bounds"] = json!([1]);
     changed["statement_binding"] = json!(sparq_zk_query::statement::hex(*words.last().unwrap()));
-    assert!(driver
-        .execute(&render(&changed), "credential_limit_exceeded")
-        .is_err());
+    assert!(
+        driver
+            .execute(&render(&changed), "credential_limit_exceeded")
+            .is_err(),
+        "altered credential limit accepted"
+    );
     let forged = incorrect_key_signed_witness(&plan, &data[0], &parsed, &trace.result);
-    assert!(driver
-        .execute(&render(&forged), "issuer_key_disagrees_with_lexical_form")
-        .is_err());
+    assert!(
+        driver
+            .execute(&render(&forged), "issuer_key_disagrees_with_lexical_form")
+            .is_err(),
+        "altered signed value key accepted"
+    );
+    support::complete(gate);
+}
+
+#[test]
+#[ignore = "requires the pinned native query toolchain"]
+fn suite_constant_scan_normalizes_literal_identity_keys() {
+    let Some(gate) = support::gate(
+        "suite_constant_scan_normalizes_literal_identity_keys",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
+    let plan = lower(
+        "ASK {?s <urn:p> 1}",
+        Bounds {
+            credentials: 1,
+            quads_per_credential: 4,
+            rows_per_table: 2,
+        },
+    )
+    .unwrap();
+    let data = authenticated::fixture();
+    let cells = vec![data[0].cells(0).unwrap()];
+    let trace = evaluate(&plan, &cells, &SuiteEncoder).unwrap();
+    assert_eq!(trace.result, sparq_zk_query::interp::ResultValue::Ask(true));
+    let honest = parse(
+        &prover_toml_authenticated(
+            &plan,
+            &data,
+            &trace,
+            [7; 32],
+            [3; 32],
+            authenticated::issuer_root(),
+        )
+        .unwrap(),
+    );
+    let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+    let workspace = fixture_support::Workspace::new(&package);
+    let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+    driver.compile().unwrap();
+    driver
+        .execute(&render(&honest), "constant_scan_honest")
+        .unwrap();
+    let altered = incorrect_key_signed_witness(&plan, &data[0], &honest, &trace.result);
+    assert!(
+        driver
+            .execute(&render(&altered), "constant_scan_changed_key")
+            .is_err(),
+        "altered signed identity key accepted"
+    );
     support::complete(gate);
 }
 
@@ -243,7 +299,7 @@ fn incorrect_key_signed_witness(
                 suite::hash_bytes(suite::TERM_DOMAIN, &cells[2].bytes),
                 cells[2].key,
             ]);
-            raw[2]["key"] = json!(key.as_slice());
+            raw["object"]["key"] = json!(key.as_slice());
         }
         let hash = suite::hash_quad(cells.clone().map(|c| c.enc));
         rows.push((suite::field_bytes(hash), hash, cells, raw));

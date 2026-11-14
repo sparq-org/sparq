@@ -325,6 +325,8 @@ fn expression_cell(class: u8, key: Field, enc: Field) -> TermCell {
         0x800000000000000000000000000000000000000000000000000000000000 + key * 1000000000000000000
     } else if (class == 5) | (class == 6) {
         key * 0x10000000000000000000000000000000000000000000000000000000000
+    } else if (class == 3) | (class == 4) | (class == 8) {
+        key * 0x100000000000000000000000000000000000000000000
     } else { key };
     TermCell {bound:true, kind:3, enc, key_class:class, key: payload + class as Field * 0x1000000000000000000000000000000000000000000000000000000000000, dt:0, lang:0, scope:0}
 }
@@ -382,6 +384,7 @@ fn expression_comparison_refuses_the_pending_float_lane() { expression_compare_c
 fn expression_comparison_refuses_mixed_timezone_classes() { expression_compare_case(expression_cell(3,0,1),expression_cell(4,2,2),1); }
 #[test(should_fail_with = "literal equality without a supported value key")]
 fn expression_comparison_refuses_pending_literal_equality() { expression_compare_case(expression_cell(0,0,1),expression_cell(0,0,1),0); }
+
 #[test(should_fail_with = "string comparison capacity")]
 fn expression_comparison_refuses_prefix_only_ordering() { expression_compare_case(expression_cell(7,1,1),expression_cell(7,2,2),1); }
 #[test]
@@ -582,4 +585,108 @@ fn membership_cannot_release_a_match_from_inactive_padding() {
     let mut parameters=[expression_cell(1,0,11);16];parameters[0]=expression_cell(1,1,12);
     let result=bounded_membership(parameters[1],parameters,1);
     assert(result.value,"IN exact result");
+}
+
+fn mixed_string_equality(a:TermCell,b:TermCell) -> ops_core::Boolean {
+    crate::ops_core_expr::evaluate(Table {rows:[[a]],len:1},[b],
+        [expr_step(0,0,0,0,0),expr_step(1,0,0,0,0),expr_step(2,0,1,0,0)])[0]
+}
+fn plain_string_cell(class:u8) -> TermCell {
+    let mut cell=expression_cell(class,1,11);cell.dt=crate::suite_constants::DT_STRING;cell
+}
+#[test]
+fn expression_plain_and_language_string_equality_uses_its_type_class() {
+    let mut language=expression_cell(0,0,12);
+    language.dt=crate::suite_constants::DT_LANGSTRING;language.lang=7;
+    for plain in [plain_string_cell(6),plain_string_cell(7)] {
+        for pair in [[plain,language],[language,plain]] {
+            let result=mixed_string_equality(pair[0],pair[1]);
+            assert(!result.value & result.is_error);
+        }
+    }
+}
+#[test]
+fn expression_string_numeric_equality_preserves_type_error() {
+    for plain in [plain_string_cell(6),plain_string_cell(7)] {
+        for pair in [[plain,expression_cell(1,1,12)],[expression_cell(1,1,12),plain]] {
+            let result=mixed_string_equality(pair[0],pair[1]);
+            assert(!result.value & result.is_error);
+        }
+    }
+}
+#[test]
+fn expression_string_date_equality_preserves_type_error() {
+    for plain in [plain_string_cell(6),plain_string_cell(7)] {
+        let result=mixed_string_equality(plain,expression_cell(8,1,12));
+        assert(!result.value & result.is_error);
+    }
+}
+#[test]
+fn expression_string_boolean_equality_preserves_type_error() {
+    let result=mixed_string_equality(plain_string_cell(7),expression_cell(5,1,12));
+    assert(!result.value & result.is_error);
+}
+#[test]
+fn expression_string_iri_equality_is_false_without_error() {
+    let result=mixed_string_equality(plain_string_cell(7),iri(12));
+    assert(!result.value & !result.is_error);
+}
+#[test]
+fn expression_language_string_equality_preserves_term_identity() {
+    let mut a=expression_cell(0,0,11);a.dt=crate::suite_constants::DT_LANGSTRING;a.lang=7;
+    let mut b=a;b.enc=12;
+    let equal=mixed_string_equality(a,a);let different=mixed_string_equality(a,b);
+    assert(equal.value & !equal.is_error);assert(!different.value & different.is_error);
+}
+
+#[test]
+fn expression_padding_does_not_evaluate_values() {
+    let huge=expression_cell(1,1000000000000000000,11);
+    let result=crate::ops_core_expr::evaluate(empty::<2,1>(),[huge],[expr_step(1,0,0,0,0)]);
+    assert(!result[0].value & result[0].is_error);
+    assert(!result[1].value & result[1].is_error);
+}
+#[test(should_fail_with="expression capacity")]
+fn expression_active_rows_keep_their_value_capacity() {
+    let huge=expression_cell(1,1000000000000000000,11);
+    let _result=crate::ops_core_expr::evaluate(Table {rows:[[unbound()]],len:1},[huge],[expr_step(1,0,0,0,0)]);
+}
+#[test(should_fail_with="expression opcode")]
+fn expression_empty_input_still_checks_its_instruction_structure() {
+    let _result=crate::ops_core_expr::evaluate(empty::<2,1>(),[unbound()],
+        [expr_step(7,0,0,0,0),expr_step(9,0,0,0,0)]);
+}
+
+
+#[test]
+fn expression_invalid_numeric_and_boolean_ebv_is_false_without_error() {
+    for dt in [crate::suite_constants::DT_INTEGER,crate::suite_constants::DT_DECIMAL,
+        crate::suite_constants::DT_BOOLEAN,crate::suite_constants::DT_DOUBLE,crate::suite_constants::DT_FLOAT] {
+        let mut invalid=expression_cell(0,0,11);invalid.dt=dt;
+        let result=crate::ops_core_expr::evaluate(Table {rows:[[invalid]],len:1},[unbound()],
+            [expr_step(0,0,0,0,0),expr_step(5,0,0,0,0)])[0];
+        assert(result.value & !result.is_error);
+    }
+}
+
+#[test]
+fn expression_temporal_key_normalizes_the_suite_payload() {
+    for class in [3,4,8] {
+        let a=expression_cell(class,100,11);let b=expression_cell(class,101,12);
+        let result=crate::ops_core_expr::evaluate(Table {rows:[[a]],len:1},[b],
+            [expr_step(0,0,0,0,0),expr_step(1,0,0,0,0),expr_step(2,0,1,0,1)]);
+        assert(result[0].value & !result[0].is_error);
+    }
+}
+#[test(should_fail_with="temporal key zero tail")]
+fn expression_temporal_key_tail_is_exact() {
+    let mut a=expression_cell(8,100,11);a.key=a.key+1;
+    let _result=mixed_string_equality(a,a);
+}
+
+#[test]
+fn expression_string_prefix_with_zero_payload_is_nonempty() {
+    let mut cell=expression_cell(7,0,11);cell.dt=crate::suite_constants::DT_STRING;
+    let result=crate::ops_core_expr::evaluate(Table {rows:[[cell]],len:1},[unbound()],[expr_step(0,0,0,0,0)]);
+    assert(result[0].value & !result[0].is_error);
 }

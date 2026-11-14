@@ -188,7 +188,7 @@ impl Plan {
     /// Length-prefixed, tagged, little-endian shape encoding. No serializer defaults.
     /// Parameter kinds and occurrence positions are encoded; their values are not.
     pub fn canonical_bytes(&self) -> Vec<u8> {
-        let mut w = Encoding(b"sparq.noir-query.plan\0\x02".to_vec());
+        let mut w = Encoding(b"sparq.noir-query.plan\0\x03".to_vec());
         for n in [
             self.capacity.credentials,
             self.capacity.quads_per_credential,
@@ -199,7 +199,17 @@ impl Plan {
         for n in self.credential_quad_capacities() {
             w.u32(n);
         }
-        w.u32(crate::credential::LEXICAL_CAPACITY as u32);
+        for capacity in [
+            crate::credential::RESOURCE_CAPACITY,
+            crate::credential::LEXICAL_CAPACITY,
+            crate::credential::SCALAR_CAPACITY,
+            crate::credential::DATATYPE_CAPACITY,
+            crate::credential::LANGUAGE_CAPACITY,
+            crate::credential::CREATION_CAPACITY,
+            crate::credential::METHOD_CAPACITY,
+        ] {
+            w.u32(capacity as u32);
+        }
         w.u32(crate::credential::ISSUER_DEPTH);
         w.u8(match self.form {
             ResultForm::Select => 0,

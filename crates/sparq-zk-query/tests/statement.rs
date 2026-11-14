@@ -197,12 +197,57 @@ fn envelope_policy_has_canonical_optional_values_and_binds_wide_times() {
 }
 
 #[test]
-fn explicit_empty_holder_scope_is_distinct_from_an_absent_scope() {
+fn explicit_empty_holder_scope_is_refused_while_an_absent_scope_selects_all() {
     let mut all = sparq_zk_query::statement::EnvelopeInputs::issuer_only([7; 32]);
     all.holder_required = true;
     let mut none = all.clone();
     none.holder_issuers_present = true;
     assert!(all.words().is_ok());
-    assert!(none.words().is_ok());
-    assert_ne!(all.words().unwrap(), none.words().unwrap());
+    assert_eq!(
+        none.words().unwrap_err(),
+        sparq_zk_query::Error::Invalid("empty holder issuer list".into())
+    );
+}
+
+#[test]
+fn envelope_instants_use_the_authenticated_timestamp_range() {
+    use sparq_zk_query::{statement::EnvelopeInputs, Error};
+    let mut policy = EnvelopeInputs::issuer_only([7; 32]);
+    policy.validity_required = true;
+    policy.freshness_required = true;
+    policy.now = i64::MAX as u64;
+    policy.earliest_created = i64::MAX as u64;
+    assert!(policy.words().is_ok());
+    for freshness in [false, true] {
+        let mut invalid = policy.clone();
+        if freshness {
+            invalid.earliest_created += 1;
+        } else {
+            invalid.now += 1;
+        }
+        assert_eq!(
+            invalid.words().unwrap_err(),
+            Error::Invalid("envelope instant range".into())
+        );
+    }
+}
+
+#[test]
+fn computed_boolean_answers_do_not_require_a_source_vocabulary_entry() {
+    use sparq_zk_query::{answer::Answer, credential::SuiteEncoder, interp::EncodeTerm};
+    let plan = lower("SELECT ?result WHERE {VALUES ?result {}}", B).unwrap();
+    for value in [true, false] {
+        let term: oxrdf::Term = oxrdf::Literal::from(value).into();
+        let result = ResultValue::Select {
+            variables: vec!["result".into()],
+            rows: vec![vec![SuiteEncoder.encode(&term).unwrap()]],
+        };
+        assert_eq!(
+            Answer::release(&result, &plan, &[], &SuiteEncoder).unwrap(),
+            Answer::Select {
+                variables: vec!["result".into()],
+                rows: vec![vec![Some(term)]]
+            }
+        );
+    }
 }

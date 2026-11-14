@@ -66,11 +66,55 @@ fn bounded_quads_match_legacy() {
     let old = open_quads([[legacy(a),legacy(b),legacy(a),legacy(b)];2], 5);
     for i in 0..2 { for j in 0..4 { equal_cell(bounded[i][j], old[i][j]); } }
 }
-#[test(should_fail_with = "non-zero byte padding")]
+
+#[test]
+fn credential_role_cells_match_general_constructors() {
+    let subject = raw::<32,64,8,5,0,0>(2, "label".as_bytes(), "".as_bytes(), "".as_bytes(), [0;31]);
+    let predicate = raw::<32,64,8,5,0,0>(1, "urn:p".as_bytes(), "".as_bytes(), "".as_bytes(), [0;31]);
+    let graph = raw::<32,64,8,0,0,0>(0, "".as_bytes(), "".as_bytes(), "".as_bytes(), [0;31]);
+    let named = raw::<32,64,8,5,0,0>(2, "graph".as_bytes(), "".as_bytes(), "".as_bytes(), [0;31]);
+    let rows = [[subject,predicate,integer(),graph],[predicate,predicate,predicate,named],[absent();4]];
+    let specialized = crate::suite_entry::open_credential_bounded_quads(rows, 5);
+    let general = open_bounded_quads(rows, 5);
+    for i in 0..3 { for j in 0..4 { equal_cell(specialized[i][j], general[i][j]); } }
+}
+#[test(should_fail_with = "predicate kind")]
+fn credential_predicate_refuses_literal() {
+    let p=raw::<32,64,8,5,0,0>(1,"urn:p".as_bytes(),"".as_bytes(),"".as_bytes(),[0;31]);
+    let _cells=crate::suite_entry::open_credential_bounded_quads([[p,integer(),p,p]],5);
+}
+#[test(should_fail_with = "predicate kind")]
+fn credential_predicate_refuses_blank_node() {
+    let p=raw::<32,64,8,5,0,0>(1,"urn:p".as_bytes(),"".as_bytes(),"".as_bytes(),[0;31]);
+    let mut changed=p;changed.kind=2;
+    let _cells=crate::suite_entry::open_credential_bounded_quads([[p,changed,p,p]],5);
+}
+#[test(should_fail_with = "nonliteral position")]
+fn credential_subject_refuses_literal() {
+    let p=raw::<32,64,8,5,0,0>(1,"urn:p".as_bytes(),"".as_bytes(),"".as_bytes(),[0;31]);
+    let _cells=crate::suite_entry::open_credential_bounded_quads([[integer(),p,p,p]],5);
+}
+#[test(should_fail_with = "nonliteral position")]
+fn credential_graph_refuses_literal() {
+    let p=raw::<32,64,8,5,0,0>(1,"urn:p".as_bytes(),"".as_bytes(),"".as_bytes(),[0;31]);
+    let _cells=crate::suite_entry::open_credential_bounded_quads([[p,p,p,integer()]],5);
+}
+#[test(should_fail_with = "non-literal metadata")]
+fn credential_role_nonliteral_key_is_checked() {
+    let p=raw::<32,64,8,5,0,0>(1,"urn:p".as_bytes(),"".as_bytes(),"".as_bytes(),[0;31]);
+    let mut changed=p;changed.key[1]=1;
+    let _cells=crate::suite_entry::open_credential_bounded_quads([[changed,p,p,p]],5);
+}
+#[test(should_fail_with = "non-zero padding")]
+fn credential_role_absent_padding_is_checked() {
+    let mut changed=absent();changed.key[1]=1;
+    let _cells=crate::suite_entry::open_credential_bounded_quads([[changed,absent(),absent(),absent()]],5);
+}
+#[test(should_fail_with = "call to assert_max_bit_size")]
 fn bounded_lexical_padding_is_rejected() { let mut a=integer();a.lexical[1]=1;let _cell=open_bounded_cell(a,5); }
-#[test(should_fail_with = "non-zero byte padding")]
+#[test(should_fail_with = "call to assert_max_bit_size")]
 fn bounded_datatype_padding_is_rejected() { let mut a=integer();a.datatype[63]=1;let _cell=open_bounded_cell(a,5); }
-#[test(should_fail_with = "non-zero byte padding")]
+#[test(should_fail_with = "call to assert_max_bit_size")]
 fn bounded_language_padding_is_rejected() { let mut a=integer();a.language[7]=1;let _cell=open_bounded_cell(a,5); }
 #[test(should_fail_with = "non-zero padding")]
 fn absent_bounded_lexical_padding_is_rejected() { let mut a=absent();a.lexical[0]=1;let _cell=open_bounded_cell(a,5); }

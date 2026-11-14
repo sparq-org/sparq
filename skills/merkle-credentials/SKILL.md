@@ -126,6 +126,26 @@ accepts signature/reduction witnesses and checks Schnorr. Both return an opaque
 its exact `message()` using the same public key. Never witness that opaque object
 or a `TermCell` directly.
 
+`suite::{open_credential_hidden_from_quads, open_credential_revealed_from_quads}`
+authenticate an internal `[[TermCell; 4]; N]` produced by constrained constructors.
+Their remaining arguments follow the existing credential entry points. They share
+the full tree/count/order/padding/salt and metadata relation, check blank-node scope
+against the fixed dataset position, and preserve each signature mode's contract.
+Opaque cells have a private empty-storage marker that prohibits ABI witnessing;
+do not produce them through unconstrained hints. This seam avoids reopening quad term
+bytes after construction and key checking for a profile.
+
+For caller-selected backing bounds, use
+`suite::{open_bounded_credential_hidden, open_bounded_credential_revealed}`.
+Their quad cells are `BoundedTermOpening<L, D, G>`; creation and method openings
+are `BoundedTermOpening<C, D, G>` and `BoundedTermOpening<V, D, G>`.
+All other arguments and authenticated getters follow the existing entry points.
+Runtime lengths and every padding byte remain constrained. Choose capacities
+from the credential profile and emit separate credential calls directly in the
+generated program. The complete opener specializes subject, predicate and graph
+construction to their RDF roles; general cell/table constructors remain available
+with their existing signatures and behavior.
+
 Both fixture entry points expose the issuer-key coordinates and verifier-agreed
 configuration digest halves. Hidden mode returns nothing; revealed mode releases
 only the salted signed message. Raw metadata, terms, keys, count, root, salts and
@@ -181,3 +201,8 @@ emits both-mode witness material with independently varied salts and configurati
 digest halves. The live tests use the existing
 fail-closed gate and execute witnesses without proving. Gate measurements are
 external evidence, never constants or acceptance thresholds in this library.
+
+Resource-only openings may use empty datatype and language backing capacities
+when assembled from ABI-safe raw witnesses inside constrained code. Empty
+datatype capacity excludes literals; the constructor still checks metadata and
+canonical backing padding. Term identifiers and the byte encoding remain pinned.

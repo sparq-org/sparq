@@ -29,7 +29,7 @@ fn generation_is_byte_identical_and_constants_are_inputs() {
         );
     }
     assert!(source.contains("ops_core_statement::bind_select_authenticated("));
-    assert!(source.contains("core::ops_core_suite::open_one"));
+    assert!(source.contains("core::ops_core_suite::open_bounded_one"));
     assert!(!source.contains("urn:p"));
     assert!(!source.contains("assert("));
     assert!(!source.contains("for "));
@@ -79,6 +79,22 @@ fn committed_smoke_package_is_exactly_generated_with_its_original_manifest() {
 }
 
 #[test]
+fn source_scans_and_joins_use_the_normalized_literal_profile() {
+    for query in [
+        "ASK {?s <urn:p> 1}",
+        "SELECT ?s WHERE {?s <urn:p> ?x}",
+        "ASK {?s <urn:p> ?x . ?s <urn:q> ?x}",
+    ] {
+        let package = generate(&lower(query, B).unwrap()).unwrap();
+        let source = &package.files[&format!("{}/src/main.nr", package.name)];
+        assert!(source.contains("open_bounded_one::<4, 128, 160, 1>"));
+    }
+    let package = generate(&lower("ASK {}", B).unwrap()).unwrap();
+    let source = &package.files[&format!("{}/src/main.nr", package.name)];
+    assert!(source.contains("open_bounded_one::<4, 128, 160, 0>"));
+}
+
+#[test]
 fn heterogeneous_credential_buckets_are_shape_and_their_limits_are_public_inputs() {
     let b = Bounds {
         credentials: 4,
@@ -103,9 +119,9 @@ fn heterogeneous_credential_buckets_are_shape_and_their_limits_are_public_inputs
     assert_eq!(a.credential_quad_capacities(), vec![8, 16, 64, 8]);
     let p = generate(&a).unwrap();
     let source = &p.files[&format!("{}/src/main.nr", p.name)];
-    assert!(source.contains("TermOpening<32>; 4]; 8]"));
-    assert!(source.contains("CredentialProof<16>"));
-    assert!(source.contains("CredentialProof<64>"));
+    assert!(source.contains("QuadOpening<128, 160>; 8]"));
+    assert!(source.contains("BoundedCredentialProof<16>"));
+    assert!(source.contains("BoundedCredentialProof<64>"));
     for token in ["assert(", "for ", "if "] {
         assert!(!source.contains(token));
     }

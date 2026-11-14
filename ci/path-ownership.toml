@@ -522,12 +522,12 @@ crates = ["sparq-merkle-suite"]
 pattern = "zk/sparql-evaluator/model/tests/merkle_suite.rs"
 crates = ["sparq-merkle-suite"]
 
-# sparq-merkle-suite's live tests compile generated programs against compose_core.
-# The directory entry attributes the library root the tests name; the shared readers
+# sparq-merkle-suite's and sparq-zk-query's live tests compile generated programs
+# against compose_core and pass its root to nargo as a path dependency. The directory entry attributes the library root the tests name; the shared readers
 # entry above unions the crate into the run set for every file beneath it.
 [[map]]
 pattern = "zk/compose/compose_core"
-crates = ["sparq-merkle-suite"]
+crates = ["sparq-zk-query", "sparq-merkle-suite"]
 
 # The query adapter embeds catalogue and binary pins for independent validation.
 [[map]]

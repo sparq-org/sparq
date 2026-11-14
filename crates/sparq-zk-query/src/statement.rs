@@ -42,9 +42,31 @@ pub struct EnvelopeInputs {
     pub snapshot_root: Word,
     pub snapshot_depth: u32,
     pub validity_required: bool,
+    /// Unix epoch milliseconds when validity is requested.
     pub now: u64,
     pub freshness_required: bool,
+    /// Earliest acceptable creation instant in Unix epoch milliseconds.
     pub earliest_created: u64,
+}
+impl From<crate::envelope_policy::PublicPolicy> for EnvelopeInputs {
+    fn from(policy: crate::envelope_policy::PublicPolicy) -> Self {
+        Self {
+            issuer_root: policy.issuer_root,
+            issuer_depth: policy.issuer_depth,
+            holder_required: policy.holder_required,
+            holder_issuers_present: policy.holder_issuers_present,
+            holder_issuer_count: policy.holder_issuer_count,
+            holder_issuers: policy.holder_issuers,
+            status_required: policy.status_required,
+            allow_missing_status: policy.allow_missing_status,
+            snapshot_root: policy.snapshot_root,
+            snapshot_depth: policy.snapshot_depth,
+            validity_required: policy.validity_required,
+            now: policy.now,
+            freshness_required: policy.freshness_required,
+            earliest_created: policy.earliest_created,
+        }
+    }
 }
 impl EnvelopeInputs {
     /// Existing issuer-membership profile, pending the canonical policy-root integration.
@@ -69,7 +91,13 @@ impl EnvelopeInputs {
     pub fn validate(&self) -> Result<(), Error> {
         field(self.issuer_root)?;
         field(self.snapshot_root)?;
+        if self.now > i64::MAX as u64 || self.earliest_created > i64::MAX as u64 {
+            return Err(Error::Invalid("envelope instant range".into()));
+        }
         let n = self.holder_issuer_count as usize;
+        if self.holder_required && self.holder_issuers_present && n == 0 {
+            return Err(Error::Invalid("empty holder issuer list".into()));
+        }
         if n > self.holder_issuers.len()
             || (!self.holder_required && self.holder_issuers_present)
             || (!self.holder_issuers_present && n != 0)
@@ -112,8 +140,9 @@ impl EnvelopeInputs {
         Ok(words)
     }
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn require_consumer(&self) -> Result<(), Error> {
-        if self.issuer_depth != crate::credential::ISSUER_DEPTH
+    pub(crate) fn require_consumer(&self, canonical_policy: bool) -> Result<(), Error> {
+        if canonical_policy
+            || self.issuer_depth != crate::credential::ISSUER_DEPTH
             || self.holder_required
             || self.status_required
             || self.validity_required
@@ -525,6 +554,56 @@ fn structure(value: &serde_json::Value, expected: &[(&str, Abi)]) -> bool {
 #[cfg(test)]
 mod literal_tests {
     use super::*;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn require_consumer_refuses_each_pending_policy_independently() {
+        let base = EnvelopeInputs::issuer_only(number(1));
+        assert_eq!(base.require_consumer(false), Ok(()));
+        assert_eq!(
+            base.require_consumer(true),
+            Err(Error::Unsupported(
+                "credential envelope policy integration".into()
+            ))
+        );
+        for case in 0..5 {
+            let mut policy = base.clone();
+            match case {
+                0 => policy.issuer_depth = 0,
+                1 => policy.holder_required = true,
+                2 => policy.status_required = true,
+                3 => policy.validity_required = true,
+                4 => policy.freshness_required = true,
+                _ => unreachable!(),
+            }
+            assert_eq!(
+                policy.require_consumer(false),
+                Err(Error::Unsupported(
+                    "credential envelope policy integration".into()
+                )),
+                "policy case {case}"
+            );
+        }
+    }
+
+    #[test]
+    fn noir_verified_issuer_predicate_is_a_literal_equal_to_the_suite() {
+        use crate::interp::EncodeTerm;
+        let term = oxrdf::NamedNode::new_unchecked(crate::credential::VERIFIED_ISSUER).into();
+        let expected = crate::credential::SuiteEncoder.encode(&term).unwrap().enc;
+        let source = include_str!("../../../zk/noir-query/core/src/ops_core_suite.nr");
+        let literal = source
+            .split("pub global VERIFIED_ISSUER_ENCODING: Field = ")
+            .nth(1)
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap();
+        assert_eq!(
+            field(expected).unwrap(),
+            field_from_hex_str_strict(literal).unwrap()
+        );
+    }
 
     #[test]
     fn noir_expression_numeric_offset_matches_the_suite() {

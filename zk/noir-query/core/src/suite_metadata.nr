@@ -3,7 +3,7 @@ use std::collections::bounded_vec::BoundedVec;
 use compose::issuer::{Point, schnorr_verify, assert_on_curve, assert_in_prime_order_subgroup};
 use poseidon::poseidon2::Poseidon2;
 use crate::term::{TermCell, padding, same_term, open_term, recompute_key_for};
-use crate::suite_entry::{TermOpening, open_cell, open_quads};
+use crate::suite_entry::{TermOpening, open_cell, BoundedTermOpening, open_bounded_cell, open_credential_quads, open_credential_bounded_quads};
 use crate::suite::{credential_root, signed_message};
 use crate::suite_constants::{METADATA_DOMAIN, MULTIKEY_LENGTH, MULTIKEY_PREFIX_0, MULTIKEY_PREFIX_1, MULTIKEY_PREFIX_2, MULTIKEY_PREFIX_3, CLASS_STRING_PREFIX, DT_DATETIME, DT_STRING, CLASS_DATE_TIME};
 
@@ -114,23 +114,66 @@ pub fn open_credential_revealed<let N: u32, let L: u32, let C: u32, let V: u32>(
     configuration: [u128;2], created_raw: TermOpening<C>, method_raw: TermOpening<V>, pk: Point, credential_index: u32,
 ) -> OpenedCredential<N> {
     assert(credential_index < 0xffffffff, "credential scope capacity");
-    let quads = open_quads(raw, credential_index + 1);
+    open_credential_revealed_from_quads(open_credential_quads(raw, credential_index + 1), salts, salt, count,
+        configuration, created_raw, method_raw, pk, credential_index)
+}
+
+fn finish_opening<let N: u32, let C: u32>(quads: [[TermCell; 4]; N], salts: [Field; N],
+    salt: Field, count: u32, configuration: [u128; 2], created_at: TermCell,
+    created_lexical: BoundedVec<u8, C>, method: TermCell, pk: Point, credential_index: u32,
+) -> OpenedCredential<N> {
+    assert(credential_index < 0xffffffff, "credential scope capacity");
+    let scope = credential_index + 1;
+    for i in 0..N {
+        for j in 0..4 {
+            let cell = quads[i][j];
+            if cell.bound() & (cell.kind() == crate::suite_constants::KIND_BLANK_NODE) {
+                assert(cell.credential() == scope, "credential blank-node scope");
+            }
+        }
+    }
     let root = credential_root(quads, salts, salt, count);
-    let created_at = open_cell(created_raw, 0);
     assert(!created_at.bound() | (created_at.kind() == 3), "created must be a literal");
-    let created = open_time(created_at, BoundedVec::<u8,C>::from_parts_unchecked(created_raw.lexical, created_raw.lexical_len));
+    let created = open_time(created_at, created_lexical);
     let key = multikey_cell(pk);
-    let method = open_cell(method_raw, 0);
     assert(!method.bound() | (method.kind() == 1), "verification method must be an IRI");
     let message = signed_message(salt, count, root, configuration, metadata_digest(created_at, key, method));
     OpenedCredential { quads, count, root, message, created_at, created, verification_key: key, verification_method: method }
 }
+
 pub fn open_credential_hidden<let N: u32, let L: u32, let C: u32, let V: u32>(
     raw: [[TermOpening<L>;4];N], salts: [Field;N], salt: Field, count: u32,
     configuration: [u128;2], created_raw: TermOpening<C>, method_raw: TermOpening<V>, pk: Point, credential_index: u32,
     r: Point, s: Field, e: Field, e_k: Field,
 ) -> OpenedCredential<N> {
-    let opened = open_credential_revealed(raw, salts, salt, count, configuration, created_raw, method_raw, pk, credential_index);
+    assert(credential_index < 0xffffffff, "credential scope capacity");
+    open_credential_hidden_from_quads(open_credential_quads(raw, credential_index + 1), salts, salt, count,
+        configuration, created_raw, method_raw, pk, credential_index, r, s, e, e_k)
+}
+
+/// Authenticate constructor-produced cells without reopening their lexical bytes.
+/// Cells must come from constrained constructors, never an ABI or a hint.
+pub fn open_credential_revealed_from_quads<let N: u32, let C: u32, let V: u32>(
+    quads: [[TermCell; 4]; N], salts: [Field; N], salt: Field, count: u32,
+    configuration: [u128; 2], created_raw: TermOpening<C>, method_raw: TermOpening<V>,
+    pk: Point, credential_index: u32,
+) -> OpenedCredential<N> {
+    finish_opening(quads, salts, salt, count, configuration, open_cell(created_raw, 0),
+        BoundedVec::from_parts_unchecked(created_raw.lexical, created_raw.lexical_len), open_cell(method_raw, 0), pk, credential_index)
+}
+/// Hidden counterpart of the same complete table authentication relation.
+pub fn open_credential_hidden_from_quads<let N: u32, let C: u32, let V: u32>(
+    quads: [[TermCell; 4]; N], salts: [Field; N], salt: Field, count: u32,
+    configuration: [u128; 2], created_raw: TermOpening<C>, method_raw: TermOpening<V>,
+    pk: Point, credential_index: u32, r: Point, s: Field, e: Field, e_k: Field,
+) -> OpenedCredential<N> {
+    let opened = open_credential_revealed_from_quads(quads, salts, salt, count, configuration,
+        created_raw, method_raw, pk, credential_index);
+    authenticate_signature(opened, pk, r, s, e, e_k)
+}
+fn authenticate_signature<let N: u32>(opened: OpenedCredential<N>, pk: Point,
+    r: Point, s: Field, e: Field, e_k: Field,
+) -> OpenedCredential<N> {
     schnorr_verify(pk, r, s, e, e_k, opened.message);
     opened
 }
@@ -158,4 +201,26 @@ pub fn open_status_purpose<let L: u32>(cell: TermCell, lexical: BoundedVec<u8,L>
     let suspended = crate::term_key::equals(lexical, "suspension".as_bytes());
     assert(suspended | crate::term_key::equals(lexical, "revocation".as_bytes()), "unknown status purpose");
     suspended
+}
+
+/// Complete opening with caller-selected lexical, datatype and language bounds.
+/// Raw metadata shares the datatype/language bounds; its lexical bounds are separate.
+pub fn open_bounded_credential_revealed<let N: u32, let L: u32, let C: u32, let V: u32, let D: u32, let G: u32>(
+    raw: [[BoundedTermOpening<L, D, G>; 4]; N], salts: [Field; N], salt: Field, count: u32,
+    configuration: [u128; 2], created_raw: BoundedTermOpening<C, D, G>, method_raw: BoundedTermOpening<V, D, G>,
+    pk: Point, credential_index: u32,
+) -> OpenedCredential<N> {
+    assert(credential_index < 0xffffffff, "credential scope capacity");
+    finish_opening(open_credential_bounded_quads(raw, credential_index + 1), salts, salt, count, configuration,
+        open_bounded_cell(created_raw, 0), BoundedVec::from_parts_unchecked(created_raw.lexical, created_raw.lexical_len),
+        open_bounded_cell(method_raw, 0), pk, credential_index)
+}
+/// Hidden signature mode over the same bounded complete opening.
+pub fn open_bounded_credential_hidden<let N: u32, let L: u32, let C: u32, let V: u32, let D: u32, let G: u32>(
+    raw: [[BoundedTermOpening<L, D, G>; 4]; N], salts: [Field; N], salt: Field, count: u32,
+    configuration: [u128; 2], created_raw: BoundedTermOpening<C, D, G>, method_raw: BoundedTermOpening<V, D, G>,
+    pk: Point, credential_index: u32, r: Point, s: Field, e: Field, e_k: Field,
+) -> OpenedCredential<N> {
+    let opened = open_bounded_credential_revealed(raw, salts, salt, count, configuration, created_raw, method_raw, pk, credential_index);
+    authenticate_signature(opened, pk, r, s, e, e_k)
 }

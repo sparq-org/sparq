@@ -36,13 +36,6 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
     {
         source = source.replacen("\nfn main(", "\nuse core::ops_core_expr;\nfn main(", 1);
     }
-    if plan
-        .nodes
-        .iter()
-        .any(|n| matches!(n.operator, Operator::Scan(..) | Operator::Values(..)))
-    {
-        source = source.replacen("\nfn main(", "\nuse core::table::unbound;\nfn main(", 1);
-    }
     let term_ids: Vec<_> = plan
         .parameters
         .iter()
@@ -75,6 +68,17 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
     };
     let cap = plan.capacity;
     let lexical = crate::credential::LEXICAL_CAPACITY;
+    let resource = crate::credential::RESOURCE_CAPACITY;
+    let check_keys = u8::from(plan.nodes.iter().any(|n| {
+        !matches!(
+            n.operator,
+            Operator::Unit
+                | Operator::Project(_)
+                | Operator::Distinct(_)
+                | Operator::Slice { .. }
+                | Operator::Values(_)
+        )
+    }));
     let layout = crate::statement::Layout::new(plan);
     source.push_str(&if authenticated {
         layout.declarations_authenticated()
@@ -83,7 +87,7 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
     });
     if authenticated {
         for (c, n) in plan.credential_quad_capacities().into_iter().enumerate() {
-            writeln!(source,"    credential_{c}: [[core::suite_entry::TermOpening<{lexical}>; 4]; {n}],\n    credential_proof_{c}: core::ops_core_suite::CredentialProof<{n}>,").unwrap();
+            writeln!(source,"    credential_{c}: [core::ops_core_profile::QuadOpening<{resource}, {lexical}>; {n}],\n    credential_proof_{c}: core::ops_core_suite::BoundedCredentialProof<{n}>,").unwrap();
         }
         writeln!(
             source,
@@ -124,7 +128,7 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
         )
         .unwrap();
         for (c, n) in capacities.iter().enumerate() {
-            writeln!(source,"    let opened_{c} = core::ops_core_suite::open_one(credential_{c}, credential_proof_{c}, counts[{c}], credential_flags[{c}], credential_quad_bounds[{c}], {c}, issuer_root, request_digest);").unwrap();
+            writeln!(source,"    let opened_{c} = core::ops_core_suite::open_bounded_one::<{n}, {resource}, {lexical}, {check_keys}>(credential_{c}, credential_proof_{c}, counts[{c}], credential_flags[{c}], credential_quad_bounds[{c}], {c}, issuer_root, request_digest);").unwrap();
             let prior = if c == 0 {
                 "dataset_start".to_owned()
             } else {
@@ -269,6 +273,9 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
         ""
     };
     writeln!(source, "    ops_core_statement::{binder}({issuer_argument}request_digest, input_commitment, signature_mode, bounds, parameters, indices, result, statement_binding);\n}}\n").unwrap();
+    if source.contains("unbound()") {
+        source = source.replacen("\nfn main(", "\nuse core::table::unbound;\nfn main(", 1);
+    }
     let files=BTreeMap::from([
         ("Nargo.toml".into(),format!("[workspace]\nmembers = [\"{name}\"]\n")),
         (format!("{name}/Nargo.toml"),format!("[package]\nname = \"{name}\"\ntype = \"bin\"\nauthors = [\"sparq\"]\ncompiler_version = \">=1.0.0\"\n\n[dependencies]\ncore = {{ path = \"../zk/noir-query/core\" }}\n")),

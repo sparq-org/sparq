@@ -229,3 +229,47 @@ pub fn n0_cases() -> Vec<N0Case> {
         N0Case{name:"ask-false",query:"ASK {?s <urn:p> ?x FILTER(?x > 8)}",sources:vec![numeric.into()]},
     ]
 }
+
+#[allow(dead_code)]
+pub fn mixed_string_queries() -> Vec<(String, bool, bool)> {
+    let mut cases = vec![];
+    for lhs in [
+        "\"a\"",
+        "\"a-long-string-with-the-same-prefix-and-an-extra-suffix\"",
+    ] {
+        for (rhs, expected) in [
+            ("\"a\"@en", true),
+            ("1", false),
+            (
+                "\"2026-11-13\"^^<http://www.w3.org/2001/XMLSchema#date>",
+                false,
+            ),
+            ("true", false),
+            ("<urn:a>", true),
+        ] {
+            for (left, right) in [(lhs, rhs), (rhs, lhs)] {
+                cases.push((
+                    format!("ASK {{ FILTER(!({left} = {right})) }}"),
+                    expected && rhs != "\"a\"@en",
+                    expected,
+                ));
+            }
+        }
+    }
+    for (lhs, rhs, expected) in [
+        (
+            "\"same-prefix-that-is-long-enough-to-have-a-suffix-a\"",
+            "\"same-prefix-that-is-long-enough-to-have-a-suffix-b\"",
+            true,
+        ),
+        ("\"a\"@en", "\"a\"@en", false),
+        ("\"a\"@en", "\"a\"@fr", true),
+    ] {
+        cases.push((
+            format!("ASK {{ FILTER(!({lhs} = {rhs})) }}"),
+            expected && !lhs.ends_with("@en"),
+            expected,
+        ));
+    }
+    cases
+}

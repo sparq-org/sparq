@@ -21,7 +21,7 @@ impl CheckedOpening<4> for Fixture {
     }
 }
 fn cell(bound: bool, kind: u8, enc: Field) -> TermCell {
-    TermCell { bound, kind, enc, key_class: 0, key: 0, dt: 0, lang: 0 }
+    TermCell { bound, kind, enc, key_class: 0, key: 0, dt: 0, lang: 0, credential: 0 }
 }
 fn scalar(tag: u8) -> Scalar<4> {
     Scalar {
@@ -31,7 +31,7 @@ fn scalar(tag: u8) -> Scalar<4> {
         number: zero_numeric(),
         string: StringLane { bytes: [0; 4], len: 0, lang: 0 },
         temporal: TemporalLane { key_class: 3, key: 0 },
-        term: cell(true, 2, 1),
+        term: cell(true, 3, 1),
     }
 }
 fn number(n: Numeric) -> (Lane<Scalar<4>>, bool) {
@@ -228,7 +228,7 @@ fn term_equality_and_membership() {
         true,
         false,
     );
-    opaque.term.kind = 0; // IRI versus literal is false, without a type error.
+    opaque.term.kind = 1; // IRI versus literal is false, without a type error.
     check_bool(
         value_compare((lane(opaque), false), (lane(other), false), EQ),
         false,

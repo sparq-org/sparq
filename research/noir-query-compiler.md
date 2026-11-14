@@ -35,10 +35,11 @@ The crate README records the public-input layout. A shared schema in
 `statement::Layout` produces declarations and
 independent verifier reconstruction, and checks the locally compiled ABI before
 key creation. The generated main has no public return value. Intermediate tables,
-complete credential cells and the presentation salt are private. The statement
+raw credential openings and the presentation salt are private. The statement
 binding absorbs every public word in ABI order through the shared Poseidon sponge.
-The production opening delegates lexical binding, key recomputation, complete
-credential roots and hidden signatures to the shared suite library. Its private
+The production opening delegates lexical binding, complete credential roots and
+hidden signatures to the shared suite library. Value consumers use its fixed
+datatype checked-key constructors. Its private
 issuer membership path uses the existing compose relation and host helpers.
 The verifier-stored envelope policy and ordered per-credential quad limits follow
 the result in the public layout. The group carries issuer and snapshot roots,
@@ -58,9 +59,12 @@ query, key and parameter values, independently encodes the released RDF terms,
 checks dataset agreement and freshness, and consumes the original shared protocol
 challenge last. The authenticated constructor requires the supported suite and issuer-authenticated
 source policy. Typed envelope properties are admitted and bound to canonical request RDF.
-Enabled policy checks receive a named native refusal until the statement lane's
-consumer is integrated. Lane E supplies the public adapter, canonical trust-root
-construction and envelope consumer. The structural request constructor
+Typed policy inputs use the shared canonical policy derivation at admission and
+again at verifier reconstruction. Validity and freshness instants are Unix epoch
+milliseconds. A present-empty holder issuer list is refused. Enabled policy checks
+receive a named native refusal until the statement lane's consumer is integrated.
+The typed canonical relation is refused even at a matching issuer-only tree depth.
+Lane E supplies the public adapter, trust membership and envelope consumer. The structural request constructor
 cannot satisfy the authenticated proof path without a stored issuer root.
 
 The cache is indexed by plan shape and invalidated by a fingerprint of the trusted
@@ -82,11 +86,13 @@ lifecycle, filename validation and pinned-version matcher. Verification keys are
 derived from local generated source. The composed manifest is superseded by the
 query method.
 
-The native and WebAssembly compiler experiment agrees on bytecode and independently
-created verification keys for the initial operator programs. The dependency alias
-for SHA differs from its nested module basename so the unmodified WebAssembly
-resolver loads the same tagged source as the native compiler. Domain, datatype
-and suite identifiers are literals checked against Rust computations. Operator programs remain subject to the passing-case compiler-agreement ratchet.
+The initial native and WebAssembly compiler experiment agreed on bytecode and
+independently created keys for its recorded operator source. The current pinned
+XPath dependency has an approved named loading failure in its vendored hash alias.
+The ratchet records that failure per affected passing plan, without asserting
+bytecode or key agreement. An unrelated diagnostic or dependency revision remains
+an error; a changed pin makes comparison mandatory again. Domain, datatype and
+suite identifiers are literals checked against Rust computations.
 The delivery package uses a catalogue of natively compiled authenticated plans;
 native compile/key determinism remains required. Node derives the plan hash from
 its stored query and refuses an unknown entry or different key. Holder witness,
@@ -117,3 +123,30 @@ public-input reconstruction and presentation values. The compiler driver alone
 owns native subprocesses and temporary files. The target-query dataset and native
 capacity acceptance evidence remain integration work; they are not established
 by isolated operator or compiler tests.
+
+Constant membership lists occupy a fixed public term block and carry their active
+length in the index group. Their values and length are erased from the shape;
+the generator emits the indexed expression gadget call. Native controls rebind
+the statement while retaining a trace that would match inactive padding, and
+require the operator relation to refuse it.
+
+Dataset assembly retains complete named copies and original signed counts. Its
+default view merges those facts and the method's issuer assertions; ordinary scans
+deduplicate the merged triples. The Noir representation keeps a parallel graph
+array beside rows and active flags. Issuer terms enter only after the envelope
+layer's trust check. The production method awaits that consumer and graph dispatch;
+the assembly helpers alone do not establish a target-query proof.
+
+The production adapter contains raw witness structs and resource normalization.
+It constructs zero resource metadata and default graph openings, then calls the
+suite's bounded credential entry point once per credential. The suite owns term
+construction, packing, root/metadata binding and signature verification. B's value
+consumers use fixed datatype checked-key calls with separate scalar bounds.
+Shape encoding includes every resource, object and metadata capacity.
+
+String comparisons preserve false versus SPARQL error. Equality tokens are local
+to plain strings of the same datatype and never become character openings.
+Language-tagged literals retain the selected Recommendation's RDF term equality
+and error dispatch; explicit engine extension outcomes are recorded separately.
+Temporal keys pass the suite's first payload word to the shared temporal lane,
+with the remaining payload constrained to zero.

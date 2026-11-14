@@ -95,6 +95,8 @@ HELPERS = (
     "crates/sparq-zk-query/tests/support/mod.rs",
 )
 COPIED = (
+    "crates/sparq-merkle-suite/tests",
+    "crates/sparq-merkle-suite/Cargo.toml",
     "crates/sparq-zk/tests",
     "crates/sparq-zk/Cargo.toml",
     "crates/sparq-zk-compose/tests",

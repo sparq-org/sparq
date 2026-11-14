@@ -31,6 +31,7 @@ pub struct Request {
     digest: [u8; 32],
     canonical_rdf: String,
     envelope: Option<crate::statement::EnvelopeInputs>,
+    envelope_policy: Option<crate::envelope_policy::PolicyInput>,
     credential_quad_bounds: Vec<u32>,
 }
 
@@ -103,6 +104,20 @@ impl Request {
     ) -> Result<Self, Error> {
         envelope.validate()?;
         Self::new_inner(stored, bounds, key, Some(envelope), quad_bounds)
+    }
+    /// Derive policy roots and public words from verifier-stored typed properties.
+    /// Validity and freshness instants are Unix epoch milliseconds.
+    pub fn new_authenticated_with_envelope(
+        stored: StoredRequest,
+        bounds: Bounds,
+        key: Vec<u8>,
+        policy: crate::envelope_policy::PolicyInput,
+        quad_bounds: Option<&[u32]>,
+    ) -> Result<Self, Error> {
+        let envelope = crate::envelope_policy::derive(&policy)?.into();
+        let mut request = Self::new_inner(stored, bounds, key, Some(envelope), quad_bounds)?;
+        request.envelope_policy = Some(policy);
+        Ok(request)
     }
     fn new_inner(
         stored: StoredRequest,
@@ -189,6 +204,7 @@ impl Request {
             digest,
             canonical_rdf,
             envelope,
+            envelope_policy: None,
             credential_quad_bounds,
         })
     }
@@ -197,12 +213,22 @@ impl Request {
     }
     /// Single trusted seam for envelope public-input derivation.
     pub fn envelope_inputs(&self) -> Result<crate::statement::EnvelopeInputs, Error> {
-        let policy = self
-            .envelope
-            .clone()
-            .ok_or_else(|| Error::Unsupported("authenticated issuer policy required".into()))?;
+        let policy = if let Some(input) = &self.envelope_policy {
+            crate::envelope_policy::derive(input)?.into()
+        } else {
+            self.envelope
+                .clone()
+                .ok_or_else(|| Error::Unsupported("authenticated issuer policy required".into()))?
+        };
         policy.validate()?;
         Ok(policy)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn require_envelope_consumer(
+        &self,
+        envelope: &crate::statement::EnvelopeInputs,
+    ) -> Result<(), Error> {
+        envelope.require_consumer(self.envelope_policy.is_some())
     }
     pub fn stored(&self) -> &StoredRequest {
         &self.stored

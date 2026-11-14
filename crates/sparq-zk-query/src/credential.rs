@@ -15,7 +15,14 @@ use sparq_zk::{
 /// The initial issuer registry uses the shared membership relation.
 pub const ISSUER_DEPTH: u32 = 4;
 /// Opened lexical capacity of the initial query profile.
-pub const LEXICAL_CAPACITY: usize = 32;
+pub const LEXICAL_CAPACITY: usize = 160;
+/// Resource lexical backing in the bounded credential profile.
+pub const RESOURCE_CAPACITY: usize = 128;
+/// Scalar lexical backing used by value-key checks.
+pub const SCALAR_CAPACITY: usize = 32;
+/// Datatype and language backing in the bounded credential profile.
+pub const DATATYPE_CAPACITY: usize = 41;
+pub const LANGUAGE_CAPACITY: usize = 1;
 /// Creation and verification-method opening capacities.
 pub const CREATION_CAPACITY: usize = 32;
 pub const METHOD_CAPACITY: usize = 128;
@@ -85,14 +92,22 @@ impl Credential {
                 Term::NamedNode(quad.predicate.clone()),
                 quad.object.clone(),
             ];
-            for term in &terms {
+            for (position, term) in terms.iter().enumerate() {
                 let lexical = match term {
                     Term::NamedNode(n) => n.as_str(),
                     Term::BlankNode(n) => n.as_str(),
                     Term::Literal(l) => l.value(),
                     Term::Triple(_) => return Err(Error::Excluded("triple term".into())),
                 };
-                if lexical.len() > LEXICAL_CAPACITY {
+                let capacity = if position < 2 {
+                    RESOURCE_CAPACITY
+                } else if matches!(term, Term::Literal(l) if l.datatype().as_str() != "http://www.w3.org/2001/XMLSchema#string")
+                {
+                    SCALAR_CAPACITY
+                } else {
+                    LEXICAL_CAPACITY
+                };
+                if lexical.len() > capacity {
                     return Err(Error::Capacity("opened lexical bytes".into()));
                 }
                 if let Term::Literal(l) = term {
@@ -222,6 +237,68 @@ pub fn assemble_dataset(
         quads.push([graph, predicate, *issuer, Cell::default()]);
     }
     Ok(Dataset { quads, counts })
+}
+
+/// Assemble graph views from signed credentials and verifier-selected trust members.
+/// This host helper checks issuer identity, verification method and signing key.
+/// Other envelope conditions belong to their respective policy consumers.
+pub fn assemble_issuer_dataset(
+    credentials: &[Credential],
+    trust_members: &[crate::envelope_policy::TrustMember],
+    request_digest: Word,
+) -> Result<Dataset, Error> {
+    use crate::envelope_policy::{canonical_set_root, trust_member_digest};
+    let members = trust_members
+        .iter()
+        .map(trust_member_digest)
+        .collect::<Result<Vec<_>, _>>()?;
+    canonical_set_root(&members)?;
+    let mut opened = Vec::with_capacity(credentials.len());
+    let mut issuers = Vec::with_capacity(credentials.len());
+    for (index, credential) in credentials.iter().enumerate() {
+        let index = u32::try_from(index).map_err(|_| Error::Capacity("credential scope".into()))?;
+        opened.push(credential.cells(index)?);
+        let quads = credential.quads()?;
+        let roots: Vec<_> = quads
+            .iter()
+            .filter(|q| {
+                q.predicate.as_str() == "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
+                    && q.object
+                        == Term::NamedNode(oxrdf::NamedNode::new_unchecked(
+                            "https://www.w3.org/2018/credentials#VerifiableCredential",
+                        ))
+            })
+            .map(|q| &q.subject)
+            .collect();
+        let [subject] = roots.as_slice() else {
+            return Err(Error::Invalid("credential root cardinality".into()));
+        };
+        let claims: Vec<_> = quads
+            .iter()
+            .filter(|q| {
+                &q.subject == *subject
+                    && q.predicate.as_str() == "https://www.w3.org/2018/credentials#issuer"
+            })
+            .map(|q| &q.object)
+            .collect();
+        let [Term::NamedNode(issuer)] = claims.as_slice() else {
+            return Err(Error::Invalid(
+                "credential issuer cardinality or kind".into(),
+            ));
+        };
+        let Some(Term::NamedNode(method)) = credential.metadata()?.verification_method else {
+            return Err(Error::Invalid("credential verification method".into()));
+        };
+        if !trust_members.iter().any(|member| {
+            member.issuer == *issuer
+                && member.verification_method == method
+                && member.key == credential.issuer
+        }) {
+            return Err(Error::Invalid("issuer authorization set".into()));
+        }
+        issuers.push(SuiteEncoder.encode(&Term::NamedNode(issuer.clone()))?);
+    }
+    assemble_dataset(&opened, &issuers, request_digest)
 }
 
 /// Salted commitment to the ordered, authenticated suite messages.

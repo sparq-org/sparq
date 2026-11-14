@@ -161,7 +161,14 @@ envelope, quad_bounds)` and obtain it through `Request::envelope_inputs()`.
 The existing authenticated methods retain the issuer-only profile. Enabled
 holder, status, validity and freshness policies require the statement lane's
 consumer; the current native driver refuses them by name until it is integrated.
-The canonical policy-root module remains a neighbouring-lane integration.
+Typed canonical policy inputs also require that consumer, even when their tree
+depth happens to match the issuer-only relation.
+`Request::new_authenticated_with_envelope(stored, bounds, key, policy,
+quad_bounds)` takes `envelope_policy::PolicyInput`, derives its canonical roots
+and retains it for fresh `envelope_inputs()` derivation during verification.
+Validity and freshness times are exact nonnegative Unix epoch milliseconds within
+the suite's signed timestamp range. A present-empty
+holder issuer list is refused; omit holder binding to require no holder keys.
 
 Expression evaluation uses the shared typed gadgets, with a separate capacity
 channel. The generated-query coverage ratchet requires native and WebAssembly
@@ -177,3 +184,57 @@ method as private openings and uses the authenticated opener's returned message.
 `credential::credential_graph(request_digest, index)` shares the suite's
 presentation-local graph-name construction. Credentials using the reserved
 `vcq:verifiedIssuer` predicate are refused before dataset assembly.
+
+Constant membership lists use a fixed parameter block and a public active-length
+index, so changing their contents or admitted length preserves plan hash and
+program source. Oversized lists receive the named `IN list` capacity refusal.
+The existing parameter enum and envelope group order are unchanged.
+
+For the closed-world integration, `credential::assemble_dataset` takes complete
+opened credential cells, envelope-authenticated issuer cells and the request
+digest. Its `interp::Dataset` exposes `quads()` and `credential_counts()`;
+`interp::evaluate_dataset` evaluates the default merge while retaining named
+copies for the graph dispatcher. The method-generated issuer assertions occur
+only in the default view. These helpers await production wiring to the envelope
+consumer and graph dispatcher.
+
+`credential::assemble_issuer_dataset` accepts complete signed credentials, typed
+trust members and the request digest. It derives each assertion's issuer from
+the credential's unique root and issuer property, authenticated verification
+method and signing key. Trust roots use `envelope_policy`'s canonical set
+construction. This host helper prepares the issuer dataset; the generated
+consumer remains required to enforce its relation within a proof.
+
+The Noir seam is `ops_core_suite::authenticate` followed by the envelope checks
+and `from_authenticated`; inactive slots use `inactive_credential`. This reuses
+the authenticated suite object and its metadata getters. `Dataset` retains
+triple rows and active flags, with a parallel graph-name array.
+`append_verified_issuer` receives an issuer term already checked by the envelope
+and adds its default-only assertion. It does not supply that trust check itself.
+
+`Answer::release` includes canonical boolean terms for computed results, even if
+they were absent from the source vocabulary. Other result terms use the supplied
+vocabulary or the plan's public constants.
+
+The circuit library's `ops_core_profile` contains raw witness structs and
+resource normalization only. Generated credential openings call
+`ops_core_suite::open_bounded_one`, delegating the complete signed opening to
+`suite::open_bounded_credential_hidden` once per credential. Resource datatype,
+language and key bytes are zero; the default graph and active flags are derived.
+Source scans, joins and value consumers call `term::open_key_checked` with fixed datatype
+identifiers. Raw lexical backing is separately bounded for resources, objects
+and scalars. Shape encoding includes all these capacities.
+The additive envelope seam is `authenticate_bounded` followed by its consumer
+and `from_authenticated_bounded`. Existing unbounded fixture entry points remain
+available, with the same suite authentication relation.
+
+String equality keeps type errors distinct from false. Term-identity tokens are
+local to same-datatype string equality; mixed string types and value families
+pass through the shared comparison's type classes. These tokens must never be
+used as lexical input by string functions.
+
+The query proof tests default to `SPARQ_NOIR_QUERY_PROOF_PROFILE=full`.
+`smoke` selects a small authenticated ASK sample for hosted CI. Unknown values
+are refused; the workflow dispatch input `full_query_proofs` runs the complete
+acceptance sweep. Each selected proof still checks its engine result and refuses
+an altered answer. Local completion requires the full profile.

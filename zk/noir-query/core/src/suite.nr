@@ -71,4 +71,4 @@ pub(crate) fn check_credential_signature<let N: u32>(quads: [[TermCell; 4]; N], 
 }
 
 // Public credential entry points authenticate the envelope metadata as well.
-pub use crate::suite_metadata::{open_credential_hidden, open_credential_revealed};
+pub use crate::suite_metadata::{open_credential_hidden, open_credential_revealed, open_bounded_credential_hidden, open_bounded_credential_revealed, open_credential_hidden_from_quads, open_credential_revealed_from_quads};

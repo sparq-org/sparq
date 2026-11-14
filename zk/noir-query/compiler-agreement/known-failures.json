@@ -1,0 +1,12 @@
+{
+  "xpath-vendored-sha-alias": {
+    "git": "https://github.com/sparq-org/noir_XPath",
+    "tag": "v0.3.0",
+    "directory": "xpath",
+    "alias": "sha256",
+    "module": "sha256",
+    "diagnostic": "No module `constants` at path `sha256/constants.nr`",
+    "reason": "The pinned XPath dependency aliases its vendored hash package with a nested module name; the WebAssembly resolver cannot load that module.",
+    "tracking": "#7384"
+  }
+}
