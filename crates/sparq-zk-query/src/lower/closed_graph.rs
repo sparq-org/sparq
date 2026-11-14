@@ -71,7 +71,7 @@ impl Builder {
             }
             G::Filter { inner, expr } => {
                 let input = self.closed_graph_body(inner, context, selector)?;
-                let predicate = self.closed_predicate(expr, input, context, None)?;
+                let predicate = self.filter_predicate(expr, input, context, None)?;
                 self.push(
                     Operator::Closed(C::Filter {
                         input,

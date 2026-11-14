@@ -437,6 +437,25 @@ fn predicate_value(
         Predicate::Arithmetic(e) => e.evaluate(vars, row, params)?,
         Predicate::Expression(e) => eval(e, vars, row, params, &plan.parameters)?.ebv()?,
         Predicate::Exists(ids) => (!tables[ids[index] as usize].rows.is_empty(), false),
+        Predicate::Membership {
+            variable,
+            start,
+            count,
+        } => {
+            let Parameter::Index(count) = plan.parameters[*count as usize] else {
+                return Err(Error::Invalid("membership length parameter".into()));
+            };
+            if count as usize > crate::plan::IN_CAPACITY {
+                return Err(Error::Capacity("IN list".into()));
+            }
+            let cell = vars
+                .iter()
+                .position(|v| v == variable)
+                .map_or(Cell::default(), |i| row[i]);
+            let found = (*start..*start + count)
+                .any(|p| params[p as usize].is_some_and(|c| cell.same_term(c)));
+            (cell.bound && found, false)
+        }
         Predicate::SemiJoin(id) => {
             let schema = &plan.nodes[*id as usize].output.variables;
             let found = tables[*id as usize].rows.iter().any(|b| {

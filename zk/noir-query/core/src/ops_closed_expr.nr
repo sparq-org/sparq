@@ -3,6 +3,21 @@
 use crate::table::{TermCell,Table};
 use crate::ops_core::Boolean;
 use crate::ops_core_expr::Step;
+/// FILTER-only identity membership: bound and the same term as one of the
+/// first `count` constants.
+pub fn membership<let R: u32, let V: u32, let K: u32>(
+    input: Table<R, V>, column: u32, constants: [TermCell; K], count: u32,
+) -> [Boolean; R] {
+    assert(count <= K, "IN list");
+    let mut out = [Boolean {value: false, is_error: false}; R];
+    for i in 0..R {
+        let cell = input.rows[i][column];
+        let mut found = false;
+        for k in 0..K {found = found | ((k < count) & crate::table::same_term(cell, constants[k]));}
+        out[i].value = cell.bound & found;
+    }
+    out
+}
 fn temporal(cell:TermCell)->TermCell {
     if cell.bound & (cell.kind==3) & ((cell.dt==crate::suite_constants::DT_DATE)|(cell.dt==crate::suite_constants::DT_DATETIME)) & ((cell.key_class==3)|(cell.key_class==4)|(cell.key_class==8)) {
         let bytes=cell.key.to_be_bytes::<31>();

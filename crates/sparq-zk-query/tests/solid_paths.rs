@@ -227,6 +227,10 @@ fn fixtures(target: &str, case: &str) -> Vec<Credential> {
             "urn:claim:trial.medications",
             if case == "excluded" || case == "other-excluded" {
                 "\"excluded-x\""
+            } else if case == "excluded-lang" {
+                "\"excluded-x\"@en"
+            } else if case == "excluded-typed" {
+                "\"excluded-x\"^^<http://www.w3.org/2001/XMLSchema#token>"
             } else {
                 "\"medicine-a\""
             },
@@ -730,6 +734,76 @@ fn semi_join(p: &Predicate) -> bool {
         Predicate::Not(a) => semi_join(a),
         Predicate::And(a, b) | Predicate::Or(a, b) => semi_join(a) || semi_join(b),
         _ => false,
+    }
+}
+fn membership(p: &Predicate) -> bool {
+    match p {
+        Predicate::Membership { .. } => true,
+        Predicate::Not(a) => membership(a),
+        Predicate::And(a, b) | Predicate::Or(a, b) => membership(a) || membership(b),
+        _ => false,
+    }
+}
+#[test]
+fn canonical_membership_matches_only_the_same_term() {
+    let Some(gate) = support::gate("canonical_membership_matches_only_the_same_term", &["nargo"])
+    else {
+        return;
+    };
+    use sparq_zk_query::{credential::assemble_issuer_dataset, interp::evaluate_dataset};
+    let target = "trial-eligibility";
+    let plan = canonical_plan(target, Size::Small);
+    assert!(predicates(&plan).into_iter().any(membership));
+    let package = codegen::generate(&plan).unwrap();
+    let workspace = closed_native::Workspace::new(&package);
+    // Same lexical form, different term: a language tag or a non-string type.
+    // Credential openings carry no language tags, so that case is host-only.
+    for (case, expected) in [
+        ("excluded", false),
+        ("excluded-lang", true),
+        ("excluded-typed", true),
+    ] {
+        let (data, policy) = canonical_fixtures(target, case);
+        let dataset = assemble_issuer_dataset(&data, &policy.trust_members, DIGEST).unwrap();
+        let trace = evaluate_dataset(&plan, &dataset, &SuiteEncoder).unwrap();
+        assert_eq!(released_for(target, &trace.result), Some(expected), "{case}");
+        assert_eq!(engine(target, &data), Some(expected), "engine {case}");
+        if case == "excluded-lang" {
+            continue;
+        }
+        execute(
+            &gate,
+            workspace.0.path(),
+            &package.name,
+            &canonical_toml(&plan, &data, &policy, &trace),
+            "membership",
+        )
+        .unwrap_or_else(|e| panic!("{case}: {e}"));
+        let mut altered = trace.clone();
+        alter_result(target, &mut altered);
+        assert!(execute(
+            &gate,
+            workspace.0.path(),
+            &package.name,
+            &canonical_toml(&plan, &data, &policy, &altered),
+            "membership_altered",
+        )
+        .is_err());
+    }
+    support::complete(gate);
+}
+#[test]
+fn filter_constant_membership_compares_identity_only_in_filters() {
+    let p = prepare("trial-eligibility", true);
+    assert!(predicates(&p).into_iter().any(membership));
+    // BIND and NOT can observe error versus false, so they keep the comparison.
+    for text in [
+        r#"SELECT ?r WHERE { ?s <urn:p> ?m BIND(?m IN ("x", "y") AS ?r) }"#,
+        r#"ASK { ?s <urn:p> ?m FILTER(!(?m = "x")) }"#,
+        r#"ASK { ?s <urn:p> ?m FILTER(?m = "x"@en) }"#,
+    ] {
+        let p = graphs::lower(text, bounds()).unwrap();
+        assert!(!predicates(&p).into_iter().any(membership), "{text}");
     }
 }
 fn captures(p: &Plan) -> usize {
