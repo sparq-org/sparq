@@ -107,8 +107,8 @@ impl Credential {
                 "credential suite signature or opening".into(),
             ));
         }
-        if self.issuer_siblings.len() != ISSUER_DEPTH as usize
-            || self.issuer_index >= (1 << ISSUER_DEPTH)
+        if self.issuer_siblings.len() > ISSUER_DEPTH as usize
+            || self.issuer_index >= (1u64 << self.issuer_siblings.len())
         {
             return Err(Error::Invalid("issuer membership shape".into()));
         }
@@ -179,6 +179,89 @@ impl Credential {
             self.metadata()?.digest,
         ))
     }
+    pub(crate) fn vc_subject(&self) -> Result<oxrdf::NamedOrBlankNode, Error> {
+        let roots = self
+            .quads()?
+            .into_iter()
+            .filter(|q| {
+                q.predicate.as_str() == "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
+                    && q.object
+                        == Term::NamedNode(oxrdf::NamedNode::new_unchecked(
+                            "https://www.w3.org/2018/credentials#VerifiableCredential",
+                        ))
+            })
+            .map(|q| q.subject)
+            .collect::<Vec<_>>();
+        let [subject] = roots.as_slice() else {
+            return Err(Error::Invalid("credential root cardinality".into()));
+        };
+        Ok(subject.clone())
+    }
+    pub(crate) fn property(
+        &self,
+        subject: &oxrdf::NamedOrBlankNode,
+        predicate: &str,
+    ) -> Result<Option<Term>, Error> {
+        let values = self
+            .quads()?
+            .into_iter()
+            .filter(|q| &q.subject == subject && q.predicate.as_str() == predicate)
+            .map(|q| q.object)
+            .collect::<Vec<_>>();
+        if values.len() > 1 {
+            return Err(Error::Invalid("property cardinality".into()));
+        }
+        Ok(values.into_iter().next())
+    }
+    /// Derive the signed issuer, verification method and verifying key.
+    pub fn trust_member(&self) -> Result<crate::envelope_policy::TrustMember, Error> {
+        if !suite::verify(&self.credential, &self.issuer) {
+            return Err(Error::Invalid(
+                "credential suite signature or opening".into(),
+            ));
+        }
+        let subject = self.vc_subject()?;
+        let Some(Term::NamedNode(issuer)) = self
+            .property(&subject, "https://www.w3.org/2018/credentials#issuer")
+            .map_err(|_| Error::Invalid("credential issuer cardinality or kind".into()))?
+        else {
+            return Err(Error::Invalid(
+                "credential issuer cardinality or kind".into(),
+            ));
+        };
+        let Some(Term::NamedNode(method)) = self.metadata()?.verification_method else {
+            return Err(Error::Invalid("credential verification method".into()));
+        };
+        Ok(crate::envelope_policy::TrustMember {
+            issuer: issuer.clone(),
+            verification_method: method,
+            key: self.issuer,
+        })
+    }
+    /// Canonical authorization path from the verifier's complete trust members.
+    pub fn authorization_path(
+        &self,
+        trust_members: &[crate::envelope_policy::TrustMember],
+    ) -> Result<(crate::envelope_policy::CanonicalSet, u32, Vec<Word>), Error> {
+        use crate::envelope_policy::{canonical_set_membership, trust_member_digest};
+        let member = self.trust_member()?;
+        if !trust_members.iter().any(|m| {
+            m.issuer == member.issuer
+                && m.verification_method == member.verification_method
+                && m.key == member.key
+        }) {
+            return Err(Error::Invalid("issuer authorization set".into()));
+        }
+        let leaves = trust_members
+            .iter()
+            .map(trust_member_digest)
+            .collect::<Result<Vec<_>, _>>()?;
+        let result = canonical_set_membership(&leaves, trust_member_digest(&member)?)?;
+        if result.0.depth > ISSUER_DEPTH {
+            return Err(Error::Capacity("issuer set depth".into()));
+        }
+        Ok(result)
+    }
     pub fn issuer_root(&self) -> Result<Word, Error> {
         let mut node =
             sig::key_set_leaf(&self.issuer).ok_or_else(|| Error::Invalid("issuer key".into()))?;
@@ -187,6 +270,26 @@ impl Credential {
         {
             return Err(Error::Invalid("issuer membership shape".into()));
         }
+        for (i, sibling) in self.issuer_siblings.iter().enumerate() {
+            node = if (self.issuer_index >> i) & 1 == 0 {
+                sparq_zk::poseidon2::hash(&[node, *sibling])
+            } else {
+                sparq_zk::poseidon2::hash(&[*sibling, node])
+            };
+        }
+        Ok(field_to_be_bytes_32(&node))
+    }
+    /// Fold the canonical trust-member path at the verifier's public depth.
+    pub fn canonical_issuer_root(&self, depth: u32) -> Result<Word, Error> {
+        if depth > ISSUER_DEPTH
+            || self.issuer_siblings.len() != depth as usize
+            || self.issuer_index >= (1u64 << depth)
+        {
+            return Err(Error::Invalid("issuer membership shape".into()));
+        }
+        let mut node = field(crate::envelope_policy::trust_member_digest(
+            &self.trust_member()?,
+        )?)?;
         for (i, sibling) in self.issuer_siblings.iter().enumerate() {
             node = if (self.issuer_index >> i) & 1 == 0 {
                 sparq_zk::poseidon2::hash(&[node, *sibling])
@@ -289,45 +392,9 @@ pub fn assemble_issuer_dataset(
     for (index, credential) in credentials.iter().enumerate() {
         let index = u32::try_from(index).map_err(|_| Error::Capacity("credential scope".into()))?;
         opened.push(credential.cells(index)?);
-        let quads = credential.quads()?;
-        let roots: Vec<_> = quads
-            .iter()
-            .filter(|q| {
-                q.predicate.as_str() == "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
-                    && q.object
-                        == Term::NamedNode(oxrdf::NamedNode::new_unchecked(
-                            "https://www.w3.org/2018/credentials#VerifiableCredential",
-                        ))
-            })
-            .map(|q| &q.subject)
-            .collect();
-        let [subject] = roots.as_slice() else {
-            return Err(Error::Invalid("credential root cardinality".into()));
-        };
-        let claims: Vec<_> = quads
-            .iter()
-            .filter(|q| {
-                &q.subject == *subject
-                    && q.predicate.as_str() == "https://www.w3.org/2018/credentials#issuer"
-            })
-            .map(|q| &q.object)
-            .collect();
-        let [Term::NamedNode(issuer)] = claims.as_slice() else {
-            return Err(Error::Invalid(
-                "credential issuer cardinality or kind".into(),
-            ));
-        };
-        let Some(Term::NamedNode(method)) = credential.metadata()?.verification_method else {
-            return Err(Error::Invalid("credential verification method".into()));
-        };
-        if !trust_members.iter().any(|member| {
-            member.issuer == *issuer
-                && member.verification_method == method
-                && member.key == credential.issuer
-        }) {
-            return Err(Error::Invalid("issuer authorization set".into()));
-        }
-        issuers.push(SuiteEncoder.encode(&Term::NamedNode(issuer.clone()))?);
+        let member = credential.trust_member()?;
+        credential.authorization_path(trust_members)?;
+        issuers.push(SuiteEncoder.encode(&Term::NamedNode(member.issuer))?);
     }
     assemble_dataset(&opened, &issuers, request_digest)
 }

@@ -1,7 +1,7 @@
 //! Compatibility and rejection controls for caller-selected raw bounds.
 use std::collections::bounded_vec::BoundedVec;
 use crate::suite_entry::{BoundedTermOpening, TermOpening, open_bounded_cell, open_bounded_quads, open_cell, open_quads};
-use crate::term::{TermCell, open_key_checked, recompute_key_for};
+use crate::term::{TermCell, open_key_checked, recompute_key_for, open_literal_for_key_check, check_literal_key_for};
 use crate::suite_constants::{DATATYPE_CAPACITY, LANGUAGE_CAPACITY};
 
 fn raw<let L: u32, let D: u32, let G: u32, let A: u32, let B: u32, let C: u32>(
@@ -41,6 +41,11 @@ fn checked<let L: u32, let D: u32, let G: u32>(a: BoundedTermOpening<L,D,G>, dt:
         BoundedVec::from_parts_unchecked(a.datatype, a.datatype_len),
         BoundedVec::from_parts_unchecked(a.language, a.language_len), dt).cell();
     equal_cell(fresh, prior);
+    let opened = open_literal_for_key_check(a, 5);
+    equal_cell(opened.cell(), open_bounded_cell(a, 5));
+    let split = check_literal_key_for(opened, dt).cell();
+    equal_cell(split, fresh);
+    assert(split.identity() == fresh.identity(), "checked identity differs");
     assert(fresh.key_class() == class, "checked class differs");
 }
 fn integer() -> BoundedTermOpening<32,64,8> {
@@ -138,6 +143,42 @@ fn checked_opening_rejects_another_datatype() { let _cell=open_key_checked(integ
 fn checked_opening_rejects_another_key() { let mut a=integer();a.lexical[0]=56;let _cell=open_key_checked(a,5,crate::suite_constants::DT_INTEGER); }
 #[test(should_fail_with = "key requires literal")]
 fn checked_opening_requires_a_literal() { let _cell=open_key_checked(absent(),5,0); }
+
+#[test(should_fail_with = "datatype specialization differs")]
+fn opened_literal_rejects_another_datatype() {
+    let opened = open_literal_for_key_check(integer(), 5);
+    let _checked = check_literal_key_for(opened, crate::suite_constants::DT_DECIMAL);
+}
+#[test(should_fail_with = "key disagrees with lexical form")]
+fn opened_literal_rejects_another_key() {
+    let mut raw = integer(); raw.lexical[0] = 56;
+    let _checked = check_literal_key_for(open_literal_for_key_check(raw, 5), crate::suite_constants::DT_INTEGER);
+}
+#[test(should_fail_with = "key requires literal")]
+fn opened_literal_requires_a_literal() {
+    let iri = raw::<32,64,8,5,0,0>(1, "urn:a".as_bytes(), "".as_bytes(), "".as_bytes(), [0;31]);
+    let _opened = open_literal_for_key_check(iri, 5);
+}
+#[test(should_fail_with = "key requires literal")]
+fn opened_literal_refuses_absence() { let _opened = open_literal_for_key_check(absent(), 5); }
+#[test(should_fail_with = "call to assert_max_bit_size")]
+fn opened_literal_checks_canonical_padding() {
+    let mut raw = integer(); raw.lexical[31] = 1;
+    let _opened = open_literal_for_key_check(raw, 5);
+}
+#[test]
+fn opened_literals_keep_independent_lexical_associations() {
+    let a = integer(); let mut b = a; b.lexical[0] = 56;
+    let mut key: Field = 0; for i in 0..31 { key = key * 256 + b.key[i] as Field; }
+    let bytes = (key + 1000000000000000000).to_be_bytes::<32>();
+    for i in 0..31 { b.key[i] = bytes[i + 1]; }
+    let first = open_literal_for_key_check(a, 5);
+    let second = open_literal_for_key_check(b, 5);
+    let ca = check_literal_key_for(first, crate::suite_constants::DT_INTEGER).cell();
+    let cb = check_literal_key_for(second, crate::suite_constants::DT_INTEGER).cell();
+    assert(ca.key() != cb.key()); assert(ca.identity() != cb.identity());
+    assert(ca.key() == first.cell().key()); assert(cb.key() == second.cell().key());
+}
 
 #[test]
 fn checked_opening_matches_recompute_decimal() {

@@ -5,8 +5,7 @@ Research grade Noir query compiler; not externally audited, unpublished and opt-
 ## ✨ Compiler contracts
 
 Public request bounds choose the smallest fitting credential, quad and table buckets.
-The key reveals those capacities and the query structure. Private counts cannot
-select another bucket; exceeding a bound yields a named refusal, never truncation.
+The key reveals capacities and query structure. Private counts cannot select another bucket; exceeding a bound yields a named refusal, never truncation.
 Separate public quad limits select buckets for the ordered credential slots. The
 verifier also selects an `OpeningProfile`: `Solid` uses the compact resource
 and object bounds; `LongObjects` admits holder Multikey lexicals with compact
@@ -17,9 +16,12 @@ operator wiring, schemas, orders and capacities, while excluding parameter value
 and variable names. Constant membership lists use a fixed parameter block and public
 active length, so values and list lengths preserve the shape within the profile.
 Rows are ordered lexicographically by term encoding in schema order; duplicates
-remain unless DISTINCT is requested. Scans deduplicate complete matching bindings
-within the emitted table. Stable sorting networks preserve the first payload of
-equal bindings; DISTINCT compares adjacent rows after validating canonical input. The composed manifest is superseded by the query method.
+remain unless DISTINCT is requested. Scans check canonical bindings directly,
+including completeness, uniqueness and the first matching source payload.
+Joins consume one output occurrence per compatible source pair.
+FILTER checks its complete stable subsequence with computed destination ranks.
+Leading projections preserve row order; other projections and SELECT check stable
+permutations. DISTINCT checks adjacent identities. The composed manifest is superseded by the query method.
 
 The expression dispatcher uses the shared comparison, boolean and membership
 gadgets. Its value, SPARQL error and capacity channels remain separate. Capacity is
@@ -54,14 +56,13 @@ Use `prepare_with_opening_profile` and
 properties as well. Oversized lexical forms receive a capacity refusal.
 
 The current suite profile opens complete credentials, checks hidden signatures
-and issuer key membership. Source identities are key-independent; value consumers check complete active inputs, including rejected rows. Released RDF clears value-key metadata. Overflow refuses.
+and canonical trust-member membership. Source identities are key-independent; value consumers check complete active inputs, including rejected rows. Released RDF clears value-key metadata. Overflow refuses.
 The verifier reconstructs the plan and constants from its stored request, re-encodes the released RDF answer,
 and consumes the shared challenge after proof verification and a final validity check.
 Supplied-cell programs are isolated operator fixtures.
 
 The request digest is SHA-256 over RDFC canonical N-Quads of this method's request.
-The exact typed protocol encoding is a named method parameter within that RDF.
-Public inputs, in order, are request digest, salted input commitment, signature
+The typed protocol encoding is a named method parameter within that RDF. Public inputs, in order, are request digest, salted input commitment, signature
 mode, request bounds, constant cells, index parameters, canonical result, envelope
 policy group, ordered credential quad bounds, revealed count/messages/keys and
 statement binding. The envelope
@@ -82,11 +83,11 @@ domain and presentation salt, separately from the detached evaluator's profile.
 `envelope_policy::derive` for admission and verifier reconstruction. Time values
 are Unix epoch milliseconds. Present-empty holder issuer lists are refused.
 The existing `new_authenticated_with_policy` accepts verifier-stored policy words.
-Canonical policy inputs and enabled envelope requirements retain a named native
-integration refusal until the statement lane's consumer is connected.
-The dataset helpers retain named credential copies and a default merge with
-method-generated issuer assertions. Their production wiring awaits the graph
-dispatcher and canonical issuer trust consumer.
+Generated programs use the canonical issuer and envelope consumers. `prove_with_envelope`
+adds private holder signatures and status paths; `prove` uses empty private evidence.
+Both reconstruct public policy from the stored request. Each credential opens once;
+its named graph and default verified-issuer assertion share one fixed slot index.
+Graph operators remain subject to their named lowering admission.
 
 The host plan, lowering, interpreter, generator, layout, request and presentation
 values build for WebAssembly. `method::Prepared`, `method::Presentation`,
@@ -94,7 +95,6 @@ values build for WebAssembly. `method::Prepared`, `method::Presentation`,
 Authenticated Node delivery follows the native catalogue and prover-backend decision.
 The agreement ratchet compares native/WebAssembly bytecode and keys for each passing
 operator plan, recording the approved XPath failure; committed manifests load unchanged.
-
 Native execution uses the shared live-toolchain gate. Run it with
 `cargo test -p sparq-zk-query --test execution -- --ignored`, or use
 `cargo test -p sparq-zk-query -- --include-ignored` for the full live suite.

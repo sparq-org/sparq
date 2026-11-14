@@ -30,3 +30,38 @@ pub fn sign(source: &str, index: u64) -> Credential {
 pub fn fixture() -> Vec<Credential> {
     vec![sign("<urn:a> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:b> <urn:p> \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n",0)]
 }
+
+#[allow(dead_code)]
+pub fn canonical_policy() -> sparq_zk_query::envelope_policy::PolicyInput {
+    use oxrdf::NamedNode;
+    sparq_zk_query::envelope_policy::PolicyInput {
+        trust_members: vec![sparq_zk_query::envelope_policy::TrustMember {
+            issuer: NamedNode::new_unchecked("urn:issuer"),
+            verification_method: NamedNode::new_unchecked("urn:method"),
+            key: sig::SecretKey::from_seed(19).public_key(),
+        }],
+        ..Default::default()
+    }
+}
+#[allow(dead_code)]
+pub fn canonical_sign(source: &str, index: u64) -> Credential {
+    let key = sig::SecretKey::from_seed(19);
+    let document = format!("{source}\n<urn:credential> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://www.w3.org/2018/credentials#VerifiableCredential> .\n<urn:credential> <https://www.w3.org/2018/credentials#issuer> <urn:issuer> .\n<urn:credential> <https://www.w3.org/2018/credentials#credentialSubject> <urn:subject> .\n");
+    let config = "_:proof <https://w3id.org/security#cryptosuite> \"schnorr-poseidon2-merkle-2026\" .\n_:proof <https://w3id.org/security#verificationMethod> <urn:method> .\n";
+    Credential {
+        credential: sparq_merkle_suite::poseidon::issue(
+            &document,
+            config,
+            &key,
+            sparq_merkle_suite::Fr::from(index + 101),
+        )
+        .unwrap(),
+        issuer: key.public_key(),
+        issuer_index: 0,
+        issuer_siblings: vec![],
+    }
+}
+#[allow(dead_code)]
+pub fn canonical_fixture() -> Vec<Credential> {
+    vec![canonical_sign("<urn:a> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:b> <urn:p> \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n",0)]
+}

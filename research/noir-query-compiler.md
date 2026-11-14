@@ -22,14 +22,19 @@ canonical unbound cell in every column. Operators order rows lexicographically
 by bound status, authenticated term identity, kind and credential scope in schema order.
 Projection retains multiplicity and sorts the projected rows; DISTINCT validates
 canonical input order and removes equal adjacent mappings, retaining the first
-complete payload in each run. Scan retains each matching complete binding once. Since every
-source position is a constant or an output column, equal complete bindings
-identify equal matching triples. The retained output rows serve as the bounded
-duplicate cache; a further distinct match still triggers capacity refusal.
-Blank nodes from separate credentials remain distinct. Sorting uses stable
-networks for the supported compiled buckets and the existing general fallback
-elsewhere. Larger networks use bitonic stages over the same total key, including
-the original ordinal, so their final order remains stable.
+complete payload in each run. Scan verifies its supplied canonical output directly:
+every matching source binding must occur exactly once, every output binding must
+have a matching source, and adjacent identity duplicates are refused. Every source
+position is either a constant or an output column, so full bindings identify the
+matching triples. Metadata comes from the first matching source position.
+Projection and SELECT verify stable canonical permutations. Input occurrence
+ordinals distinguish repeated identities; matching output ordinals select each
+metadata field exactly once. This is a deterministic correspondence check, with
+no private permutation index or probabilistic multiset compression. Input/output
+padding, length, ordering and overflow remain constrained. The interpreter keeps
+the same stable canonical order. The original sorting helper remains available
+for other library consumers.
+Blank nodes from separate credentials remain distinct.
 Join implements compatibility on bound shared variables, including VALUES UNDEF.
 
 The expression bridge delegates typed comparison, boolean connectives and
@@ -65,8 +70,8 @@ binding absorbs every public word in ABI order through the shared Poseidon hash 
 Production delegates lexical binding, complete credential roots and authenticated
 metadata opening to the shared suite library. Hidden signatures call the shared
 Schnorr verifier over that opening's authenticated message. Value consumers use its fixed
-datatype checked-key constructors. Its private
-issuer membership path uses the existing compose relation and host helpers.
+datatype checked-key constructors. Its private issuer path uses canonical trust-member leaves and the policy module's
+shared builder and consumer.
 The verifier-stored envelope policy and ordered per-credential quad limits follow
 the result in the public layout. The group carries issuer and snapshot roots,
 canonical holder restrictions, status flags and validity/freshness times. Its
@@ -87,11 +92,15 @@ challenge last. The authenticated constructor requires the supported suite and i
 source policy. Typed envelope properties are admitted and bound to canonical request RDF.
 Typed policy inputs use the shared canonical policy derivation at admission and
 again at verifier reconstruction. Validity and freshness instants are Unix epoch
-milliseconds. A present-empty holder issuer list is refused. Enabled policy checks
-receive a named native refusal until the statement lane's consumer is integrated.
-The typed canonical relation is refused even at a matching issuer-only tree depth.
-Lane E supplies the public adapter, trust membership and envelope consumer. The structural request constructor
-cannot satisfy the authenticated proof path without a stored issuer root.
+milliseconds. A present-empty holder issuer list is refused. Generated programs
+consume canonical trust membership and the shared holder, status, validity and
+freshness relations. A raw private-evidence adapter builds their sealed observations
+inside constrained code. Each credential opens once; its converted view, issuer
+assertion and holder coverage come from that same slot. Holder signatures are checked
+once after coverage is accumulated. The native method derives public policy from the
+stored request and evaluates the same named credential graphs and default issuer
+assertions. The structural request constructor cannot satisfy the authenticated
+proof path without a stored issuer root.
 
 The cache is indexed by plan shape and invalidated by a fingerprint of the trusted
 library sources and pinned dependency declarations. It compiles from private source
@@ -209,3 +218,29 @@ controls plus per-plan compiler agreement. The full profile runs the complete co
 corpus, expression and proof sweeps. CPU affinity serializes nested native tests.
 Separate runtime ledger profiles require all entry/completion records for each
 job's declared sites; their inventories partition the full toolchain estate.
+
+The scalar bridge also exposes a class-aware temporal extraction. It subtracts
+the checked class header and divides by the fixed payload scale, then constrains
+the resulting word to its scalar bit width. The bounded reconstruction enforces
+the full header and zero tail. Native suite keys pin that representation; the
+existing byte-based helper remains available for callers that have no separate
+checked class.
+
+FILTER verifies its complete stable subsequence using computed prefix ranks and
+fieldwise payload accumulation. The selected predicates admit only true,
+non-error active rows. Input and output tables, exact cardinality and capacity
+remain checked; the holder supplies no source or destination index.
+
+A leading-column projection preserves the input’s canonical row order. It uses
+`table::assert_ordered` to bind each row and its complete payload directly. Other
+projections retain the stable canonical-permutation relation. Both paths check
+cardinality, padding and capacity.
+
+JOIN matches every compatible source pair to the first unused output occurrence
+of its binding, retaining source-pair order for equal identities. The full payload
+is bound at that occurrence. Complete pair coverage and complete output use
+preserve bag multiplicity; an undersized output refuses. All occurrence choices
+are computed inside the gadget.
+
+Plain-string equality classifies its operands from the authenticated datatype
+before value-key guards; identity-only comparison does not inspect unused keys.

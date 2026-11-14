@@ -69,9 +69,12 @@ and registers no method. See [query-method contracts](references/query-method-co
 The query compiler's verifier-selected `OpeningProfile` is part of its plan hash
 and stored request. Its compact default and explicit larger-opening profile are
 documented in the query-method contracts.
-The research Noir query compiler additionally exposes portable host reconstruction
-and `Request::new_authenticated_with_envelope` policy derivation there, including
-exact millisecond instants, issuer-authenticated dataset preparation and
+The research-grade, externally unaudited Noir query compiler exposes portable host
+reconstruction and `Request::new_authenticated_with_envelope` policy derivation.
+Generated programs consume canonical trust and envelope policy; the native
+`Compiler::prove_with_envelope` adds private holder/status evidence, while `prove`
+uses empty evidence. Both derive public policy from the stored request.
+Host reconstruction also covers exact millisecond instants, issuer-authenticated dataset preparation and
 parameterized membership lists; its subprocess method driver remains native.
 Its experimental `credential_graphs::canonical_credentials` now returns `Result`:
 propagate metadata-validation failures before assigning credential ranks.
@@ -218,9 +221,9 @@ The query compiler exposes the same explicit path setting. Its draft
 `method::Compiler::{prepare, prove, verify}` primitive lives in `driver.rs`;
 `request::Request` owns the stored protocol request, bounds and expected key.
 The generated proof path opens complete Poseidon Merkle-suite credentials and
-uses the shared hidden signature and issuer-membership relations. Construct its
-request with `Request::new_authenticated`, providing the verifier's authoritative
-issuer-set root. `Compiler::prove` takes `credential::Credential` inputs; the fixed
+uses shared hidden signatures and canonical trust-member membership. Construct its
+request with `Request::new_authenticated_with_envelope` for typed policy, or provide
+the authoritative canonical root through `Request::new_authenticated`. `Compiler::prove` takes `credential::Credential` inputs; the fixed
 `credential::SuiteEncoder` drives request constants and RDF result reconstruction.
 For distinct public quad limits per credential slot, use
 `prepare_with_credential_quad_bounds` and
@@ -232,6 +235,30 @@ the protocol adapter and holder, status and validity envelope. Verification deri
 its plan and result encoding from the stored request and RDF answer and consumes
 the original challenge last. Toolchain pins and verifier target are independent
 of the cache location.
+
+The query crate's `envelope_policy::{PolicyInput, derive, public_words}` helper
+prepares the agreed public policy extension from typed stored-policy input.
+`TrustMember` binds issuer, verification method, suite and key; `HolderBinding`
+selects all issuers when its issuer list is absent, or a non-empty explicit list with
+a capacity of four before deduplication. An empty list is refused with
+`Invalid("empty holder issuer list")`. To require no holder keys, omit `holderBinding`.
+`AcceptedSnapshots` takes verifier-curated digests. The helper sorts canonical set
+members, computes minimal roots/depths and emits zero words for disabled conditions.
+`holder_message` hashes the complete request digest for holder signing. `status_leaf`
+and `snapshot_digest` reproduce the tagged status-tree encodings; callers authenticate
+and admit the status list separately. The fixture generator uses these same helpers.
+The digest remains a separate host-computed public input. This helper is not yet
+admitted as a complete generated method. The envelope consumes authenticated suite metadata,
+uses exact Unix epoch milliseconds for request instants, and scopes graph names by the public
+request digest. Generated policy enforcement remains an integration item; the method is not
+externally audited. `check_holder_key` binds each active credential's key, and
+`check_holder_signatures` checks the accumulated required slots once across the batch;
+generated callers must derive those slots from active credentials and the public policy.
+`credential_dataset<N, O, G>(credential, issuer, view)` consumes the direct result of
+`from_authenticated_bounded`, with the same credential index bound at authentication and
+conversion and the public request digest supplied to conversion. The view is internal data,
+never an independent witness. The builder uses the operator order and fixes its sorting depth
+`G` so the smallest tree covers the default/named copies plus the issuer assertion.
 
 ## Prerequisites
 

@@ -73,6 +73,10 @@ fn opaque_cells_cannot_be_abi_witnesses() {
     let scratch = Scratch::new();
     for (name, source) in [
         (
+            "literal",
+            "fn main(opened: core::term::OpenedLiteral<32>) -> pub Field { opened.cell().enc() }",
+        ),
+        (
             "cell",
             "fn main(cell: core::term::TermCell) -> pub Field { cell.enc() }",
         ),
@@ -125,6 +129,20 @@ fn opaque_cells_cannot_be_abi_witnesses() {
     );
     assert!(!out.status.success(), "private cell fields were accessible");
     assert!(String::from_utf8_lossy(&out.stderr).contains("enc is private"), "{diagnostic}");
+    let path = scratch.0.join("private_literal");
+    project(
+        &path,
+        "private_literal",
+        "fn main(raw: core::suite_entry::BoundedTermOpening<32,41,1>) -> pub Field { core::term::open_literal_for_key_check(raw,0).lexical.len() as Field }",
+    );
+    let out = support::live_tool(&gate, "nargo")
+        .current_dir(&path)
+        .args(["compile", "--force"])
+        .output()
+        .unwrap();
+    let diagnostic = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "private literal lexical was accessible");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("lexical is private"), "{diagnostic}");
     support::complete(gate);
 }
 

@@ -603,6 +603,14 @@ where
     let (base_valid, base_scheme, base_path, base_end, base_hash, _) = reference(base);
     let (source_shape, source_capacity) = reference_shape(source);
     let (base_shape, base_capacity) = reference_shape(base);
+    let base_first = if base_path < L {
+        base.bytes[base_path]
+    } else {
+        0
+    };
+    // Relative references need a hierarchical base in this bounded profile.
+    // Rootless scheme paths remain outside it; absolute strings are retained.
+    let rootless_base = (base_path == base_scheme) & (base_first != 47);
     let mut out = empty();
     let mut p = empty();
     let mut cap = false;
@@ -663,12 +671,20 @@ where
         Lane {
             value: parts(
                 KIND_IRI,
-                if identity { source } else { out },
+                if identity | (scheme > 0) { source } else { out },
                 empty(),
                 empty(),
             ),
             capacity: input_capacity
-                | (!identity & !err & (cap | source_capacity | ((scheme == 0) & base_capacity))),
+                | (
+                    !identity
+                        & !err
+                        & (
+                            ((scheme == 0) & cap)
+                                | source_capacity
+                                | ((scheme == 0) & (base_capacity | rootless_base))
+                        )
+                ),
         }, err,
     )
 }

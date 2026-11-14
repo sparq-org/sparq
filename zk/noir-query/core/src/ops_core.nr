@@ -67,29 +67,40 @@ pub fn scan<let D: u32, let R: u32, let V: u32>(
     dataset: [[TermCell; 3]; D], active: [bool; D],
     slots: [u32; 3], constants: [TermCell; 3], out: Table<R, V>,
 ) {
-    let mut expected = empty();
-    for i in 0..D {
-        let mut matches = active[i];
-        let mut row = [unbound(); V];
-        for p in 0..3 {
-            assert(slots[p] <= V, "scan column");
-            if slots[p] == V { matches = matches & same_term(dataset[i][p], constants[p]); }
-            for v in 0..V {
-                if slots[p] == v {
-                    matches = matches & (!row[v].bound | same_term(row[v], dataset[i][p]));
-                    row[v] = dataset[i][p];
-                }
-            }
-        }
-        // Once the pattern matches, its full binding identifies the source triple:
-        // every position is a constant or a column, including repeated variables.
-        let mut duplicate = false;
-        for j in 0..R {
-            duplicate = duplicate | ((j < expected.len) & same_row(row, expected.rows[j]));
-        }
-        expected = append(expected, row, matches & !duplicate);
+    check_table(out);
+    for r in 1..R {
+        assert((r>=out.len)|!same_row(out.rows[r],out.rows[r-1]),"scan distinct bindings");
     }
-    assert_table(canonicalize(expected), out);
+    let mut seen=[false;R];
+    let mut metadata=[[[0 as Field;4];V];R];
+    for i in 0..D {
+        let mut matches=active[i];
+        let mut row=[unbound();V];
+        for p in 0..3 {
+            assert(slots[p]<=V,"scan column");
+            if slots[p]==V {matches=matches&same_term(dataset[i][p],constants[p]);}
+            for v in 0..V {if slots[p]==v {
+                matches=matches&(!row[v].bound|same_term(row[v],dataset[i][p]));
+                row[v]=dataset[i][p];
+            }}
+        }
+        let mut found:Field=0;
+        for r in 0..R {
+            let hit=matches&(r<out.len)&same_row(row,out.rows[r]);
+            // The first matching source position supplies each metadata field.
+            let first=hit&!seen[r];
+            for v in 0..V {let fields=crate::table::metadata_fields(row[v]);
+                for f in 0..4 {metadata[r][v][f]=metadata[r][v][f]+first as Field*fields[f];}
+            }
+            seen[r]=seen[r]|hit;
+            found=found+hit as Field;
+        }
+        assert(found==matches as Field,"scan completeness or capacity");
+    }
+    for r in 0..R {
+        assert((r>=out.len)|seen[r],"scan extra binding");
+        for v in 0..V {assert((r>=out.len)|(metadata[r][v]==crate::table::metadata_fields(out.rows[r][v])),"scan first payload");}
+    }
 }
 
 /// Each output column maps to a source column, or its source width for absent.
@@ -98,21 +109,34 @@ pub fn join<let A: u32, let B: u32, let R: u32, let VA: u32, let VB: u32, let V:
     left_cols: [u32; V], right_cols: [u32; V], out: Table<R, V>,
 ) {
     check_table(left); check_table(right);
-    let mut expected = empty();
-    for i in 0..A { for j in 0..B {
-        let mut row = [unbound(); V];
-        let mut compatible = (i < left.len) & (j < right.len);
+    check_table(out);
+    let mut seen=[false;R];
+    for i in 0..A {for j in 0..B {
+        let mut row=[unbound();V];
+        let mut compatible=(i<left.len)&(j<right.len);
         for v in 0..V {
-            assert((left_cols[v] <= VA) & (right_cols[v] <= VB), "join column");
-            let mut a = unbound(); let mut b = unbound();
-            for c in 0..VA { if c == left_cols[v] { a = left.rows[i][c]; } }
-            for c in 0..VB { if c == right_cols[v] { b = right.rows[j][c]; } }
-            compatible = compatible & (!a.bound | !b.bound | same_term(a, b));
-            row[v] = if a.bound { a } else { b };
+            assert((left_cols[v]<=VA)&(right_cols[v]<=VB),"join column");
+            let mut a=unbound();let mut b=unbound();
+            for c in 0..VA {if c==left_cols[v] {a=left.rows[i][c];}}
+            for c in 0..VB {if c==right_cols[v] {b=right.rows[j][c];}}
+            compatible=compatible&(!a.bound|!b.bound|same_term(a,b));
+            row[v]=if a.bound {a} else {b};
         }
-        expected = append(expected, row, compatible);
-    } }
-    assert_table(canonicalize(expected), out);
+        let mut found=false;
+        let mut metadata=[[0 as Field;4];V];
+        // Consume the first unused occurrence in this output identity run.
+        // Equal bindings retain the source-pair order and their full payloads.
+        for r in 0..R {
+            let hit=compatible&(r<out.len)&!seen[r]&!found&same_row(row,out.rows[r]);
+            found=found|hit;seen[r]=seen[r]|hit;
+            for v in 0..V {let fields=crate::table::metadata_fields(out.rows[r][v]);
+                for f in 0..4 {metadata[v][f]=metadata[v][f]+hit as Field*fields[f];}
+            }
+        }
+        assert(found==compatible,"join completeness or capacity");
+        for v in 0..V {assert(!compatible|(metadata[v]==crate::table::metadata_fields(row[v])),"join source payload");}
+    }}
+    for r in 0..R {assert((r>=out.len)|seen[r],"join extra binding");}
 }
 
 pub struct Boolean { pub value: bool, pub is_error: bool }
@@ -120,28 +144,29 @@ pub struct Boolean { pub value: bool, pub is_error: bool }
 pub fn filter<let A: u32, let R: u32, let V: u32>(
     input: Table<A, V>, predicates: [Boolean; A], out: Table<R, V>,
 ) {
-    check_table(input);
-    let mut expected = empty();
-    for i in 0..A {
-        expected = append(expected, input.rows[i], (i < input.len) & predicates[i].value & !predicates[i].is_error);
-    }
-    assert_table(expected, out);
+    let mut selected=[false;A];
+    for i in 0..A {selected[i]=predicates[i].value&!predicates[i].is_error;}
+    crate::table::assert_selection(input,selected,out);
 }
 
 pub fn project<let A: u32, let R: u32, let VA: u32, let V: u32>(
     input: Table<A, VA>, columns: [u32; V], out: Table<R, V>,
 ) {
     check_table(input);
-    let mut expected = empty();
+    let mut expected=empty::<A,V>();expected.len=input.len;
     for i in 0..A {
-        let mut row = [unbound(); V];
+        let mut row=[unbound();V];
         for v in 0..V {
-            assert(columns[v] <= VA, "project column");
-            for c in 0..VA { if c == columns[v] { row[v] = input.rows[i][c]; } }
+            assert(columns[v]<=VA,"project column");
+            for c in 0..VA {if c==columns[v] {row[v]=input.rows[i][c];}}
         }
-        expected = append(expected, row, i < input.len);
+        expected.rows[i]=row;
     }
-    assert_table(canonicalize(expected), out);
+    let mut prefix=true;
+    for v in 0..V {prefix=prefix&(columns[v]==v);}
+    // A leading-column projection preserves the input's canonical row order.
+    if prefix {crate::table::assert_ordered(expected,out);}
+    else {crate::table::assert_canonicalized(expected,out);}
 }
 
 pub fn distinct<let A: u32, let R: u32, let V: u32>(input: Table<A, V>, out: Table<R, V>) {
@@ -197,5 +222,5 @@ pub fn select<let R: u32, let V: u32>(input: Table<R, V>, result: Table<R, V>) {
             released.rows[r][v].key = 0;
         }
     } }
-    assert_table(canonicalize(released), result);
+    crate::table::assert_canonicalized(released,result);
 }

@@ -52,6 +52,18 @@ pub fn temporal_payload(key:Field) -> Field {
     instant as Field
 }
 
+/// Extract a scalar from a checked packed key whose class is supplied separately.
+/// The bounded word reconstructs the complete key, including its zero tail.
+pub fn temporal_payload_for_class(key:Field,class:u8) -> Field {
+    let payload_scale:Field = 0x100000000000000000000000000000000000000000000;
+    let prefix=class as Field*0x1000000000000000000000000000000000000000000000000000000000000;
+    let word=(key-prefix)/payload_scale;
+    // A byte header and bounded scalar reconstruct an integer below the field
+    // modulus, so this representation has no modular wrap.
+    word.assert_max_bit_size::<64>();
+    word
+}
+
 fn term_contract(cell:TermCell) -> crate::expr_term_contract::TermCell {
     crate::expr_term_contract::TermCell {bound:cell.bound,kind:cell.kind,enc:cell.enc,
         key_class:cell.key_class,key:cell.key,dt:cell.dt,lang:cell.lang,credential:cell.scope}
@@ -95,7 +107,7 @@ fn scalar(cell: TermCell, effective_boolean: bool, class_only:bool) -> (Lane<Sca
             value.boolean = cell.key != prefix;
         } else if (cell.key_class == 3) | (cell.key_class == 4) | (cell.key_class == 8) {
             value.tag = if cell.key_class == 8 { DATE } else { DATETIME };
-            value.temporal = TemporalLane { key_class: cell.key_class, key: temporal_payload(cell.key) };
+            value.temporal = TemporalLane { key_class: cell.key_class, key: temporal_payload_for_class(cell.key,cell.key_class) };
         } else if (cell.key_class == 6) | (cell.key_class == 7) {
             value.tag = STRING;
             value.string.lang = if cell.dt == DT_STRING { 0 } else { cell.lang };
@@ -124,6 +136,16 @@ fn ebv(value: Value) -> (Lane<bool>, bool) {
         expr_core::ebv(scalar(value.term, true, false))
     }
 }
+// Equality classifies plain strings from their datatype. Their scalar payload
+// is unused; RDF identity remains in enc, while other types keep checked values.
+fn equality_view(mut cell:TermCell) -> TermCell {
+    if cell.bound&(cell.kind==3)&(cell.dt==DT_STRING) {
+        cell.key_class=6;
+        cell.key=6*0x1000000000000000000000000000000000000000000000000000000000000;
+    }
+    cell
+}
+
 fn compare(op: u8, a: Value, b: Value, membership: bool) -> (Lane<bool>, bool) {
     assert(op <= 4, "comparison instruction");
     assert(!membership | (op == 0), "membership comparison instruction");
@@ -140,8 +162,14 @@ fn compare(op: u8, a: Value, b: Value, membership: bool) -> (Lane<bool>, bool) {
         if membership { expr_compare::in_list(left, [right]) }
         else { expr_compare::value_compare(left, right, op) }
     } else if !a.is_boolean & !b.is_boolean {
-        let a = a.term; let b = b.term;
+        let a = if op==0 {equality_view(a.term)}else{a.term};
+        let b = if op==0 {equality_view(b.term)}else{b.term};
         if !a.bound | !b.bound { truth(false, true) } else {
+        let identity_pair=(op==0)&((a.kind!=3)|(a.dt==DT_STRING))&((b.kind!=3)|(b.dt==DT_STRING));
+        if identity_pair {
+            expr_compare::same_term((Lane {value:term_contract(a),capacity:false},false),
+                (Lane {value:term_contract(b),capacity:false},false))
+        } else {
         if a.bound & b.bound & (a.kind == 3) & (b.kind == 3) {
             assert((a.key_class != 2) & (b.key_class != 2), "floating-point comparison not yet supported");
             assert((op != 0) | ((a.key_class != 0) & (b.key_class != 0)) | is_string(a) | is_string(b) | (a.dt == DT_LANGSTRING) | (b.dt == DT_LANGSTRING), "literal equality without a supported value key");
@@ -181,6 +209,7 @@ fn compare(op: u8, a: Value, b: Value, membership: bool) -> (Lane<bool>, bool) {
         // Credential-local blank labels retain their distinct scopes.
         if op == 0 { expr_core::logical_and(result, truth(a.scope == b.scope, false)) }
         else { result }
+        }
         }
         }
     } else {

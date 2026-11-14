@@ -118,6 +118,16 @@ entire key before returning. Pass a fixed pinned datatype identifier, such as
 and the recomputation functions produce checked cells only after full lexical
 key recomputation. Absent and nonliteral openings refuse.
 
+For a fixed-datatype dispatch, call
+`term::open_literal_for_key_check(raw, scope)` once before the scalar branches.
+It returns `OpenedLiteral<L>` with a private cell and its exact lexical vector.
+`term::check_literal_key_for(opened, expected_dt)` returns `KeyCheckedCell`
+after the same private datatype/key recomputation relation. Pass a fixed pinned
+identifier in each arm; keep the string branch at its profile-sized bound.
+`OpenedLiteral::cell()` exposes the constructed cell without claiming a key
+check. The object is ABI-sealed, has no lexical setter, and must be constructed
+in constrained code. `open_key_checked` delegates to this pair.
+
 `suite::credential_root` receives validated quad cells, leaf-salt witnesses, the
 private tree salt and count. It checks RDF positions, strict ordering, padding,
 leaf-salt derivation and the minimal tree. Credential scope must be fixed by the

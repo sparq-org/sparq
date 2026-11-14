@@ -8,7 +8,7 @@ use sparq_zk_query::{
     interp::{evaluate, ResultValue},
     lower::lower,
     statement::{Layout, Statement},
-    witness::prover_toml_authenticated,
+    witness::prover_toml_suite_fixture as prover_toml_authenticated,
     Error,
 };
 
@@ -214,7 +214,7 @@ fn suite_signature_opening_and_named_admission_guards_are_observable() {
     let mut changed = valid.clone();
     changed.issuer_siblings.pop();
     assert_eq!(
-        changed.cells(0).unwrap_err(),
+        changed.issuer_root().unwrap_err(),
         Error::Invalid("issuer membership shape".into())
     );
     let named = authenticated::sign("<urn:a> <urn:p> <urn:o> <urn:g> .", 0);
@@ -382,6 +382,35 @@ fn signed_dataset_derives_each_issuer_from_its_authorized_identity_method_and_ke
         sign(&document("urn:issuer:1"), Some("urn:method:1"), 1),
         sign(&document("urn:issuer:2"), Some("urn:method:2"), 2),
     ];
+    for credential in &credentials {
+        let (set, index, path) = credential.authorization_path(&trust).unwrap();
+        let leaf = sparq_zk_query::envelope_policy::trust_member_digest(
+            &credential.trust_member().unwrap(),
+        )
+        .unwrap();
+        let mut node = sparq_zk::field::field_from_hex_str_strict(&format!(
+            "0x{}",
+            leaf.iter().map(|b| format!("{b:02x}")).collect::<String>()
+        ))
+        .unwrap();
+        for (level, sibling) in path.iter().enumerate() {
+            let sibling = sparq_zk::field::field_from_hex_str_strict(&format!(
+                "0x{}",
+                sibling
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<String>()
+            ))
+            .unwrap();
+            node = if (index >> level) & 1 == 0 {
+                sparq_zk::poseidon2::hash(&[node, sibling])
+            } else {
+                sparq_zk::poseidon2::hash(&[sibling, node])
+            };
+        }
+        assert_eq!(sparq_zk::field::field_to_be_bytes_32(&node), set.root);
+        assert_eq!(path.len(), set.depth as usize);
+    }
     let dataset = assemble_issuer_dataset(&credentials, &trust, [7; 32]).unwrap();
     assert_eq!(dataset.credential_counts(), [3, 3]);
     let predicate = SuiteEncoder
@@ -715,4 +744,65 @@ fn private_value_read_bounds_do_not_restrict_unrelated_source_identity() {
             error
         );
     }
+}
+
+#[test]
+fn canonical_witness_paths_bind_the_signed_member_and_public_depth() {
+    use sparq_zk_query::{
+        credential::assemble_issuer_dataset, envelope_policy, interp::evaluate_dataset,
+        statement::EnvelopeInputs, witness::prover_toml_authenticated_with_envelope,
+    };
+    let policy = authenticated::canonical_policy();
+    let public: EnvelopeInputs = envelope_policy::derive(&policy).unwrap().into();
+    let mut credential = authenticated::canonical_fixture().remove(0);
+    let (set, index, path) = credential
+        .authorization_path(&policy.trust_members)
+        .unwrap();
+    credential.issuer_index = index as u64;
+    credential.issuer_siblings = path
+        .into_iter()
+        .map(|word| {
+            sparq_zk::field::field_from_hex_str_strict(&sparq_zk_query::statement::hex(word))
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(
+        credential
+            .canonical_issuer_root(public.issuer_depth)
+            .unwrap(),
+        set.root
+    );
+    let mut wrong = credential.clone();
+    wrong.issuer_index = 1;
+    assert_eq!(
+        wrong.canonical_issuer_root(0).unwrap_err(),
+        Error::Invalid("issuer membership shape".into())
+    );
+    assert_eq!(
+        credential.canonical_issuer_root(1).unwrap_err(),
+        Error::Invalid("issuer membership shape".into())
+    );
+    let plan = lower(
+        "ASK {}",
+        Bounds {
+            quads_per_credential: 8,
+            ..B
+        },
+    )
+    .unwrap();
+    let data = [credential];
+    let dataset = assemble_issuer_dataset(&data, &policy.trust_members, [7; 32]).unwrap();
+    let trace = evaluate_dataset(&plan, &dataset, &SuiteEncoder).unwrap();
+    let render = |public: &EnvelopeInputs| {
+        prover_toml_authenticated_with_envelope(&plan, &data, &trace, [7; 32], [3; 32], public)
+    };
+    let witness = render(&public).unwrap();
+    assert!(witness.contains("issuer_depth = 0\n"));
+    assert_eq!(witness, render(&public).unwrap());
+    let mut wrong = public.clone();
+    wrong.issuer_root = sparq_zk_query::statement::number(1);
+    assert_eq!(
+        render(&wrong).unwrap_err(),
+        Error::Invalid("issuer membership root".into())
+    );
 }

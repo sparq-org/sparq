@@ -33,7 +33,7 @@ fn generation_is_byte_identical_and_constants_are_inputs() {
         );
     }
     assert!(source.contains("ops_core_statement::bind_select_authenticated_modes("));
-    assert!(source.contains("core::ops_core_suite::open_profile_mode_one"));
+    assert!(source.contains("core::ops_core_envelope::open_slot"));
     assert!(!source.contains("urn:p"));
     assert!(!source.contains("assert("));
     assert!(!source.contains("for "));
@@ -91,12 +91,12 @@ fn source_identity_binding_uses_authenticated_identity_and_consumer_checks() {
     ] {
         let package = generate(&lower(query, B).unwrap()).unwrap();
         let source = &package.files[&format!("{}/src/main.nr", package.name)];
-        assert!(source.contains("open_profile_mode_one::<4, 64, 65, 0, 32>"));
+        assert!(source.contains("open_slot::<4,64,65,32,2>"));
         assert!(!source.contains("ops_core_reads::check_with_parameters("));
     }
     let package = generate(&lower("ASK {}", B).unwrap()).unwrap();
     let source = &package.files[&format!("{}/src/main.nr", package.name)];
-    assert!(source.contains("open_profile_mode_one::<4, 64, 65, 0, 32>"));
+    assert!(source.contains("open_slot::<4,64,65,32,2>"));
 }
 
 #[test]
@@ -135,7 +135,7 @@ fn expression_reads_cover_the_entire_consumer_input_before_filtering() {
     let eval = source.find(&format!("let predicate_{i} =")).unwrap();
     let filter = source.find(&format!("ops_core::filter(t{input},")).unwrap();
     assert!(check < eval && eval < filter);
-    assert!(source.contains("open_profile_mode_one::<64, 64, 65, 0, 32>"));
+    assert!(source.contains("open_slot::<64,64,65,32,1>"));
     assert!(!source.contains("source_index"));
 }
 
@@ -223,15 +223,14 @@ fn verifier_selects_opening_profile_and_one_index_binding_per_slot() {
         .with_opening_profile(OpeningProfile::LongObjects);
     assert_ne!(compact.hash(), long.hash());
     let p = generate(&long).unwrap();
-    assert!(p.files[&format!("{}/src/main.nr", p.name)]
-        .contains("open_profile_mode_one::<4, 64, 137, 0, 32>"));
+    assert!(p.files[&format!("{}/src/main.nr", p.name)].contains("open_slot::<4,64,137,32,2>"));
     let wide = compact
         .clone()
         .with_opening_profile(OpeningProfile::Extended);
     assert_ne!(compact.hash(), wide.hash());
     let package = generate(&wide).unwrap();
     let source = &package.files[&format!("{}/src/main.nr", package.name)];
-    assert!(source.contains("open_profile_mode_one::<4, 128, 160, 0, 128>"));
+    assert!(source.contains("open_slot::<4,128,160,128,2>"));
     for i in 0..2 {
         assert_eq!(
             source
@@ -239,9 +238,14 @@ fn verifier_selects_opening_profile_and_one_index_binding_per_slot() {
                 .count(),
             1
         );
-        assert_eq!(source.matches(&format!("let opened_{i} =")).count(), 1);
+        assert_eq!(
+            source
+                .matches(&format!("let (opened_{i}, issuer_{i}, used_{i})="))
+                .count(),
+            1
+        );
         assert!(source.contains(&format!(
-            "credential_quad_bounds[{i}], credential_index_{i}, issuer_root, request_digest"
+            "credential_quad_bounds[{i}],credential_index_{i},request_digest"
         )));
     }
     let changed = lower("ASK {}", B)

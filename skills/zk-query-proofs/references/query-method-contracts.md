@@ -311,3 +311,60 @@ value datatypes at the consumer. An identity-only source term does not inherit a
 scalar parser bound. Unsupported private value datatypes and oversized scalar
 lexicals return named refusals before native execution; exact public parameter
 matches retain their verifier-reconstructed key shortcut.
+
+`table::assert_canonicalized(input, out)` verifies a stable canonical permutation
+with exact multiplicity and complete metadata. The occurrence ordinals are
+computed from the rows; there is no private permutation index. Scan checks its
+canonical output directly against every source match and retains the first
+matching metadata payload. Projection and SELECT use the permutation verifier.
+Padding, output order and overflow remain part of each relation.
+
+`ops_core_expr::temporal_payload_for_class(key: Field, class: u8) -> Field`
+extracts the scalar word from a checked packed temporal key and checked class.
+Its bounded reconstruction enforces the header and zero tail. The original
+`temporal_payload(key)` byte-based helper remains available. Both keep the same
+suite representation; the class-aware bridge is also pinned to native keys.
+
+`table::assert_selection(input, selected, out)` verifies a complete stable
+subsequence with computed destination ranks and full payload equality. FILTER
+derives the selected flags from true, non-error predicates; inactive input rows
+remain excluded, and an undersized output refuses.
+
+A leading-column projection preserves the input’s canonical row order. It uses
+`table::assert_ordered` to bind each row and its complete payload directly. Other
+projections retain the stable canonical-permutation relation. Both paths check
+cardinality, padding and capacity.
+
+JOIN matches every compatible source pair to the first unused output occurrence
+of its binding, retaining source-pair order for equal identities. The full payload
+is bound at that occurrence. Complete pair coverage and complete output use
+preserve bag multiplicity; an undersized output refuses. All occurrence choices
+are computed inside the gadget.
+
+Plain-string equality classifies its operands from the authenticated datatype
+before value-key guards; identity-only comparison does not inspect unused keys.
+
+`Credential::trust_member` derives the signed issuer, proof verification method and
+verifying key. `authorization_path(trust_members)` obtains the canonical set and
+its membership path through the policy module’s shared builder. Generated envelope
+wiring is available through `codegen::generate_enveloped`; its private evidence
+contains raw fields, while sealed suite cells remain internal.
+
+`codegen::generate` selects the canonical envelope consumer. `generate_enveloped`
+is its explicit spelling. For suite-opening controls without the canonical dataset,
+use `generate_suite_fixture` with `prover_toml_suite_fixture` or
+`prover_toml_suite_fixture_revealed`; operator fixtures remain separate.
+`prover_toml_authenticated_with_envelope` consumes canonical trust-member paths at
+the stored issuer depth, including singleton paths. It renders empty private evidence.
+`prover_toml_enveloped` instead takes an `EnvelopeInput` containing typed policy,
+`EnvelopeWitness` and optional independently verified revealed inputs. The policy
+module owns canonical path construction. `Credential::canonical_issuer_root(depth)`
+checks the complete signed issuer/method/key member against its path.
+
+`Compiler::prove_with_envelope(request, credentials, vocabulary, salt, evidence, now)`
+accepts `EnvelopeWitness`: ordered `CredentialEvidence` slots, shared `HolderWitness`
+signatures and per-row `StatusWitness` paths. Existing `prove` passes empty evidence.
+The renderer derives lexical status/validity openings from signed properties;
+sealed suite cells never enter the ABI. The current status adapter admits its fixed
+bit-tree depth and refuses other depths by name. Public policy and roots always come
+from the stored request. Native proving remains hidden-signature mode.

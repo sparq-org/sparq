@@ -185,21 +185,6 @@ impl EnvelopeInputs {
         ]);
         Ok(words)
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn require_consumer(&self, canonical_policy: bool) -> Result<(), Error> {
-        if canonical_policy
-            || self.issuer_depth != crate::credential::ISSUER_DEPTH
-            || self.holder_required
-            || self.status_required
-            || self.validity_required
-            || self.freshness_required
-        {
-            return Err(Error::Unsupported(
-                "credential envelope policy integration".into(),
-            ));
-        }
-        Ok(())
-    }
 }
 
 /// One source for public declarations, field flattening and ABI auditing.
@@ -650,37 +635,6 @@ fn structure(value: &serde_json::Value, expected: &[(&str, Abi)]) -> bool {
 mod literal_tests {
     use super::*;
 
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn require_consumer_refuses_each_pending_policy_independently() {
-        let base = EnvelopeInputs::issuer_only(number(1));
-        assert_eq!(base.require_consumer(false), Ok(()));
-        assert_eq!(
-            base.require_consumer(true),
-            Err(Error::Unsupported(
-                "credential envelope policy integration".into()
-            ))
-        );
-        for case in 0..5 {
-            let mut policy = base.clone();
-            match case {
-                0 => policy.issuer_depth = 0,
-                1 => policy.holder_required = true,
-                2 => policy.status_required = true,
-                3 => policy.validity_required = true,
-                4 => policy.freshness_required = true,
-                _ => unreachable!(),
-            }
-            assert_eq!(
-                policy.require_consumer(false),
-                Err(Error::Unsupported(
-                    "credential envelope policy integration".into()
-                )),
-                "policy case {case}"
-            );
-        }
-    }
-
     #[test]
     fn noir_verified_issuer_predicate_is_a_literal_equal_to_the_suite() {
         use crate::interp::EncodeTerm;
@@ -725,6 +679,49 @@ mod literal_tests {
             assert_eq!(
                 field(expected).unwrap(),
                 field_from_hex_str_strict(literal).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn noir_temporal_scalar_layout_matches_native_suite_keys() {
+        let source = include_str!("../../../zk/noir-query/core/src/ops_core_expr.nr");
+        let scale = source
+            .split("let payload_scale:Field = ")
+            .nth(1)
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap();
+        let prefix = source
+            .split("let prefix=class as Field*")
+            .nth(1)
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap();
+        let scale = field_from_hex_str_strict(scale).unwrap();
+        let prefix = field_from_hex_str_strict(prefix).unwrap();
+        for (datatype, text) in [
+            ("date", "1970-01-01"),
+            ("date", "2024-03-01Z"),
+            ("dateTime", "2024-03-01T12:34:56Z"),
+            ("dateTime", "2024-03-01T12:34:56"),
+        ] {
+            let literal = oxrdf::Literal::new_typed_literal(
+                text,
+                oxrdf::NamedNode::new_unchecked(format!(
+                    "http://www.w3.org/2001/XMLSchema#{datatype}"
+                )),
+            );
+            let key = sparq_merkle_suite::comparison_key(&literal);
+            let word = u64::from_be_bytes(key[1..9].try_into().unwrap());
+            assert!(key[9..].iter().all(|&b| b == 0));
+            let mut packed = [0; 32];
+            packed[1..].copy_from_slice(&key);
+            assert_eq!(
+                field(packed).unwrap(),
+                Fr::from(key[0] as u64) * prefix + Fr::from(word) * scale
             );
         }
     }

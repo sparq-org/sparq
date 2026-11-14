@@ -21,7 +21,8 @@ const B: Bounds = Bounds {
 #[test]
 fn authenticated_read_witnesses_cover_consumer_inputs_and_public_values() {
     use sparq_zk_query::{
-        credential::SuiteEncoder, plan::Operator, witness::prover_toml_authenticated,
+        credential::SuiteEncoder, plan::Operator,
+        witness::prover_toml_suite_fixture as prover_toml_authenticated,
     };
     let data = authenticated::fixture();
     let cells = vec![data[0].cells(0).unwrap()];

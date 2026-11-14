@@ -205,6 +205,68 @@ fn rdf12_terms_are_refused_in_values_patterns_and_expressions() {
 }
 
 #[test]
+fn claims_and_medications_keep_distinct_verifier_selected_row_buckets() {
+    let query = "SELECT ?s WHERE {?s <urn:claim:date> ?date FILTER(?date >= 1)}";
+    let claims = lower(
+        query,
+        Bounds {
+            credentials: 2,
+            quads_per_credential: 64,
+            rows_per_table: 16,
+        },
+    )
+    .unwrap();
+    let medications = lower(
+        query,
+        Bounds {
+            credentials: 2,
+            quads_per_credential: 64,
+            rows_per_table: 32,
+        },
+    )
+    .unwrap();
+    assert_eq!(claims.capacity().rows_per_table, 16);
+    assert_eq!(medications.capacity().rows_per_table, 32);
+    assert_ne!(claims.hash(), medications.hash());
+    assert!(claims.nodes().iter().all(|n| n.output.capacity <= 16));
+    let cells = (0..17)
+        .map(|i| {
+            use sparq_zk_query::interp::EncodeTerm;
+            let encode = |term: oxrdf::Term| {
+                sparq_zk_query::credential::SuiteEncoder
+                    .encode(&term)
+                    .unwrap()
+            };
+            [
+                encode(
+                    oxrdf::NamedNode::new(format!("urn:claim:{i}"))
+                        .unwrap()
+                        .into(),
+                ),
+                encode(oxrdf::NamedNode::new_unchecked("urn:claim:date").into()),
+                encode(oxrdf::Literal::from(1).into()),
+                Default::default(),
+            ]
+        })
+        .collect::<Vec<_>>();
+    let mut data = [sparq_zk_query::interp::CredentialCells {
+        quads: cells[..16].to_vec(),
+    }];
+    assert!(sparq_zk_query::interp::evaluate(
+        &claims,
+        &data,
+        &sparq_zk_query::credential::SuiteEncoder
+    )
+    .is_ok());
+    data[0].quads = cells;
+    assert_eq!(
+        sparq_zk_query::interp::evaluate(&claims, &data, &sparq_zk_query::credential::SuiteEncoder)
+            .unwrap_err(),
+        sparq_zk_query::Error::Capacity("operator output".into())
+    );
+}
+
+#[test]
 fn closed_optional_and_subqueries_are_admitted() {
     for query in [
         "ASK {OPTIONAL {?s ?p ?o}}",

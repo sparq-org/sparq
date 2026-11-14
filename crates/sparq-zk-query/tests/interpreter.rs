@@ -336,3 +336,47 @@ fn zero_bytes_in_strings_preserve_ebv_and_identity_without_implying_lexical_orde
         sparq_zk_query::Error::Unsupported("string comparison capacity".into())
     );
 }
+
+#[test]
+fn plain_string_identity_ignores_unused_key_classes() {
+    use sparq_zk_query::credential::SuiteEncoder;
+    let query = "ASK {?s <urn:p> ?x FILTER(?x NOT IN (\"different\"))}";
+    let plan = lower(query, BOUNDS).unwrap();
+    let term = oxrdf::Literal::new_simple_literal("value").into();
+    let original = quad(&iri("urn:s"), &iri("urn:p"), &term);
+    for class in [0, 1, 2, 3, 4, 5, 6, 7, 8, 127] {
+        let mut cells = original;
+        cells[2] = SuiteEncoder.encode(&term).unwrap();
+        cells[2].key_class = class;
+        cells[2].key = [0; 32];
+        let data = [CredentialCells { quads: vec![cells] }];
+        assert_eq!(
+            evaluate(&plan, &data, &SuiteEncoder).unwrap().result,
+            ResultValue::Ask(true)
+        );
+    }
+}
+
+#[test]
+fn plain_string_equality_class_is_derived_from_its_datatype() {
+    use sparq_zk_query::credential::SuiteEncoder;
+    let plan = lower("ASK {?s <urn:p> ?x FILTER(?x = 1)}", BOUNDS).unwrap();
+    let term = oxrdf::Literal::new_simple_literal("value").into();
+    let mut cells = quad(&iri("urn:s"), &iri("urn:p"), &term);
+    cells[2] = SuiteEncoder.encode(&term).unwrap();
+    let numeric = SuiteEncoder
+        .encode(&oxrdf::Literal::from(1).into())
+        .unwrap();
+    cells[2].key_class = numeric.key_class;
+    cells[2].key = numeric.key;
+    assert_eq!(
+        evaluate(
+            &plan,
+            &[CredentialCells { quads: vec![cells] }],
+            &SuiteEncoder
+        )
+        .unwrap()
+        .result,
+        ResultValue::Ask(false)
+    );
+}

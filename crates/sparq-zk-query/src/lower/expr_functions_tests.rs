@@ -626,6 +626,19 @@ fn noir_function_samples_match_host_mirror() {
             cases.push((op.clone(), vec![mirror::typed(value, "dateTime")]));
         }
     }
+    for (text, base) in [
+        ("urn:a/../b", "http://example.org/"),
+        ("http://other/a/../b", "http://example.org/"),
+        ("../c", "urn:a/b"),
+    ] {
+        cases.push((
+            ExprOp::Iri,
+            vec![
+                Literal::new_simple_literal(text).into(),
+                NamedNode::new(base).unwrap().into(),
+            ],
+        ));
+    }
     for (i, (op, args)) in cases.iter().enumerate() {
         let result = super::expr_functions_semantics::function(
             op,
@@ -664,7 +677,7 @@ fn noir_function_samples_match_host_mirror() {
                     };
                     assert_noir_text(&mut source, "v.value", l.value());
                 }
-                ExprOp::Datatype => {
+                ExprOp::Datatype | ExprOp::Iri => {
                     let Term::NamedNode(n) = term else {
                         panic!("IRI");
                     };
@@ -710,4 +723,42 @@ fn noir_function_samples_match_host_mirror() {
         String::from_utf8_lossy(&out.stdout).contains(&format!("{} tests passed", cases.len()))
     );
     crate::support::complete(gate);
+}
+
+#[test]
+fn iri_absolute_and_rootless_base_references() {
+    let base = NamedNode::new("http://example.org/").unwrap();
+    let query = "BASE <http://example.org/> SELECT (IRI(\"urn:a/../b\") AS ?v) {}";
+    let ir = from_spargebra_with_context(&parsed(query), &slots(), &[], Some(&base)).unwrap();
+    let expected: Term = NamedNode::new("urn:a/../b").unwrap().into();
+    assert_eq!(mirror::eval(&ir, &BTreeMap::new()), Ok(expected.clone()));
+    assert_eq!(
+        sparq_engine::query(&sparq_core::Graph::new(), query)
+            .unwrap()
+            .rows,
+        vec![vec![Some(expected)]]
+    );
+}
+
+#[test]
+fn iri_relative_rootless_base_capacity() {
+    let base = NamedNode::new("urn:a/b").unwrap();
+    let query = "BASE <urn:a/b> SELECT (IRI(\"../c\") AS ?v) {}";
+    let ir = from_spargebra_with_context(&parsed(query), &slots(), &[], Some(&base)).unwrap();
+    assert_eq!(mirror::eval(&ir, &BTreeMap::new()), Err(Error::Capacity));
+}
+
+#[test]
+fn iri_relative_base_capacity_table() {
+    for base in ["http://é.org/", "http://[::1]/", "urn:a/b"] {
+        let base = NamedNode::new(base).unwrap();
+        let ir = Expr::Call {
+            op: ExprOp::Iri,
+            args: vec![
+                Expr::Constant(Literal::new_simple_literal("x").into()),
+                Expr::Constant(base.into()),
+            ],
+        };
+        assert_eq!(mirror::eval(&ir, &BTreeMap::new()), Err(Error::Capacity));
+    }
 }

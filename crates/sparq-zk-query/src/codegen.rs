@@ -16,15 +16,30 @@ pub struct Package {
 
 /// Generate the query program with complete suite authentication.
 pub fn generate(plan: &Plan) -> Result<Package, Error> {
-    generate_inner(plan, true)
+    generate_enveloped(plan)
+}
+
+/// Suite-opening fixture without the canonical envelope or dataset assertion.
+/// Native preparation uses `generate`.
+pub fn generate_suite_fixture(plan: &Plan) -> Result<Package, Error> {
+    generate_inner(plan, true, false)
 }
 
 /// Operator-relation fixture. It has no credential-authentication claim.
 pub fn generate_operator_fixture(plan: &Plan) -> Result<Package, Error> {
-    generate_inner(plan, false)
+    generate_inner(plan, false, false)
 }
 
-fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
+/// Generate canonical issuer and envelope consumer wiring.
+pub fn generate_enveloped(plan: &Plan) -> Result<Package, Error> {
+    generate_inner(plan, true, true)
+}
+
+fn generate_inner(
+    plan: &Plan,
+    authenticated: bool,
+    canonical_envelope: bool,
+) -> Result<Package, Error> {
     let hash: String = plan.hash().iter().map(|b| format!("{b:02x}")).collect();
     let name = format!("query_{hash}");
     let mut source = String::from(
@@ -94,6 +109,21 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
     } else {
         writeln!(source,"    credentials: [[[TermCell; 4]; {}]; {}],\n    counts: [u32; {}],\n    credential_count: u32,\n    presentation_salt: [u8; 32],",cap.quads_per_credential,cap.credentials,cap.credentials).unwrap();
     }
+    if canonical_envelope {
+        writeln!(
+            source,
+            "    holder_evidence: [core::envelope::HolderEvidence; {}],",
+            cap.credentials
+        )
+        .unwrap();
+        for (c, n) in plan.credential_quad_capacities().iter().enumerate() {
+            writeln!(
+                source,
+                "    envelope_{c}: core::ops_core_envelope::CredentialEvidence<{n}>,"
+            )
+            .unwrap();
+        }
+    }
     for (i, node) in plan.nodes.iter().enumerate() {
         writeln!(
             source,
@@ -125,22 +155,52 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
     if authenticated {
         let capacities = plan.credential_quad_capacities();
         let total: u32 = capacities.iter().sum();
+        let dataset_capacity = total
+            + if canonical_envelope {
+                cap.credentials
+            } else {
+                0
+            };
+        if canonical_envelope {
+            source.push_str("    let policy=core::envelope::PublicPolicy {issuer_root,issuer_depth,holder_required,holder_issuers_present,holder_issuer_count,holder_issuers,status_required,allow_missing_status,snapshot_root,snapshot_depth,validity_required,now,freshness_required,earliest_created};\n    core::envelope::check_policy::<4,4>(policy);\n");
+            writeln!(
+                source,
+                "    let holder_used_start=[false;{}];",
+                cap.credentials
+            )
+            .unwrap();
+        }
         writeln!(source,"    let credential_flags = core::ops_core_suite::credential_mode_flags::<{}>(credential_count, bounds[0], signature_mode, revealed_count, revealed_messages, revealed_keys);",cap.credentials).unwrap();
         let mut offset = 0;
         writeln!(
             source,
-            "    let dataset_start = core::ops_core_suite::empty_dataset::<{total}>();"
+            "    let dataset_start = core::ops_core_suite::empty_dataset::<{dataset_capacity}>();"
         )
         .unwrap();
         for (c, n) in capacities.iter().enumerate() {
             writeln!(source, "    let credential_index_{c}: u32 = {c};").unwrap();
-            writeln!(source,"    let opened_{c} = core::ops_core_suite::open_profile_mode_one::<{n}, {resource}, {lexical}, {check_keys}, {method}>(credential_{c}, credential_proof_{c}, counts[{c}], credential_flags[{c}], credential_quad_bounds[{c}], credential_index_{c}, issuer_root, request_digest, signature_mode, revealed_messages[{c}], revealed_keys[{c}]);").unwrap();
+            if canonical_envelope {
+                writeln!(source,"    let (opened_{c}, issuer_{c}, used_{c})=core::ops_core_envelope::open_slot::<{n},{resource},{lexical},{method},{}>(credential_{c},credential_proof_{c},counts[{c}],credential_flags[{c}],credential_quad_bounds[{c}],credential_index_{c},request_digest,signature_mode,revealed_messages[{c}],revealed_keys[{c}],policy,envelope_{c},holder_evidence);",cap.credentials).unwrap();
+                let previous = if c == 0 {
+                    "holder_used_start".into()
+                } else {
+                    format!("holder_used_{}", c - 1)
+                };
+                writeln!(source,"    let holder_used_{c}=core::ops_core_envelope::merge_coverage({previous},used_{c});").unwrap();
+            } else {
+                writeln!(source,"    let opened_{c} = core::ops_core_suite::open_profile_mode_one::<{n}, {resource}, {lexical}, {check_keys}, {method}>(credential_{c}, credential_proof_{c}, counts[{c}], credential_flags[{c}], credential_quad_bounds[{c}], credential_index_{c}, issuer_root, request_digest, signature_mode, revealed_messages[{c}], revealed_keys[{c}]);").unwrap();
+            }
             let prior = if c == 0 {
                 "dataset_start".to_owned()
             } else {
                 format!("dataset_{}", c - 1)
             };
-            writeln!(source,"    let dataset_{c} = core::ops_core_suite::append_credential({prior}, opened_{c}, {offset});").unwrap();
+            if canonical_envelope {
+                writeln!(source,"    let facts_{c}=core::ops_core_suite::append_credential({prior},opened_{c},{offset});").unwrap();
+                writeln!(source,"    let dataset_{c}=core::ops_core_suite::append_verified_issuer(facts_{c},opened_{c},issuer_{c},credential_flags[{c}],{});",total+c as u32).unwrap();
+            } else {
+                writeln!(source,"    let dataset_{c} = core::ops_core_suite::append_credential({prior}, opened_{c}, {offset});").unwrap();
+            }
             offset += n;
         }
         writeln!(
@@ -149,7 +209,10 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
             capacities.len() - 1
         )
         .unwrap();
-        let messages = array((0..capacities.len()).map(|c| format!("opened_{c}.message")));
+        if canonical_envelope {
+            writeln!(source,"    core::envelope::check_holder_signatures(request_digest,holder_used_{},holder_evidence);",capacities.len()-1).unwrap();
+        }
+        let messages = array((0..capacities.len()).map(|c| format!("opened_{c}.message()")));
         writeln!(source,"    core::ops_core_statement::check_suite_dataset({messages}, credential_count, presentation_salt, input_commitment);").unwrap();
     } else {
         writeln!(source,"    let {dataset_name} = ops_core::open_dataset::<{}, {}, {}>(credentials, counts, credential_count, bounds);",cap.credentials,cap.quads_per_credential,cap.credentials*cap.quads_per_credential).unwrap();

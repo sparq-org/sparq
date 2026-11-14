@@ -38,6 +38,14 @@ datatype identifier to omit unrelated parsers. `recompute_key_for` remains
 available for opening an existing cell. No unchecked checked-cell constructor is
 exposed.
 
+To share literal framing across fixed-datatype branches, call
+`term::open_literal_for_key_check(raw, scope) -> OpenedLiteral<L>` once, then
+`term::check_literal_key_for(opened, expected_dt) -> KeyCheckedCell` in each
+arm with a fixed pinned identifier. The opaque object privately binds the cell
+to its exact lexical vector and rejects nonliterals; its `cell()` getter does
+not establish a key check. It is ABI-sealed and has no unchecked constructor
+or lexical setter. `open_key_checked` delegates to the same pair.
+
 Hidden credential mode has public issuer-key coordinates and agreed configuration
 digest halves, and no public output. Revealed mode has public issuer-key coordinates and agreed configuration
 digest halves and outputs the salted signed message. Neither exposes the tree
@@ -94,8 +102,8 @@ constructor. The envelope integration can call `ops_core_suite::authenticate`,
 check its returned opaque suite object, and pass it to `from_authenticated`.
 `append_verified_issuer` consumes the envelope-authenticated issuer cell and adds
 a default-only assertion. Constant-list evaluation uses `evaluate_indexed` with
-the public active-length index. The canonical policy-root consumer and graph
-dispatch remain separate integrations.
+the public active-length index. Canonical policy consumption uses the envelope module; graph
+dispatch retains its own admission contract.
 
 The `ops_core_profile` adapter holds raw witness structs and normalization only.
 It constructs zero resource datatype, language and key fields and derives bound
@@ -114,7 +122,9 @@ when assembled from ABI-safe raw witnesses inside constrained code. Empty
 datatype capacity excludes literals; the constructor still checks metadata and
 canonical backing padding. Term identifiers and the byte encoding remain pinned.
 
-The generated query wiring uses `ops_core_suite::open_profile_mode_one`.
+The generated query wiring uses `ops_core_envelope::open_slot` and the shared
+public-policy consumer. It accumulates holder coverage before checking signatures,
+and uses the returned issuer with `append_verified_issuer`.
 `authenticate_profile_bounded_mode` returns the same opaque suite opening for
 later envelope checks. It calls the shared Schnorr verifier in hidden mode;
 revealed mode binds the opening's message and suite signer encoding to public
@@ -124,3 +134,43 @@ retain their existing signatures. The public layout and external signature
 admission live in the query crate; the native Compiler currently accepts hidden
 mode. `ops_core_expr::temporal_payload` is the shared packed-time adapter for
 operator consumers, retaining the exact zero-tail constraint.
+
+## Canonical table outputs
+
+Scan validates the supplied canonical bindings directly: every matching source
+binding is present, every active output has a matching source, and bindings are
+unique. Each metadata field is selected from its first matching source position.
+`table::assert_canonicalized` checks stable canonical permutations for projection
+and SELECT. Computed occurrence ordinals preserve repeated rows and their full
+payload order. No witness-chosen permutation or source index is used; metadata
+selection is exact in each field. Padding, cardinality, canonical order and
+capacity remain constrained. The reference interpreter's order is unchanged.
+
+The class-aware temporal scalar helper constrains the bounded word that
+reconstructs its checked key and header. This also enforces the key's zero tail;
+the older byte-based extraction entry point remains available.
+
+FILTER uses `table::assert_selection` to verify a complete stable subsequence.
+Computed prefix counts fix each accepted input row’s destination, and fieldwise
+selection binds its complete payload. Inactive rows and SPARQL errors contribute
+no rows; padding and overflow still refuse. No private row index is admitted.
+
+A leading-column projection preserves the input’s canonical row order. It uses
+`table::assert_ordered` to bind each row and its complete payload directly. Other
+projections retain the stable canonical-permutation relation. Both paths check
+cardinality, padding and capacity.
+
+JOIN matches every compatible source pair to the first unused output occurrence
+of its binding, retaining source-pair order for equal identities. The full payload
+is bound at that occurrence. Complete pair coverage and complete output use
+preserve bag multiplicity; an undersized output refuses. All occurrence choices
+are computed inside the gadget.
+
+Plain-string equality classifies its operands from the authenticated datatype
+before value-key guards; identity-only comparison does not inspect unused keys.
+
+The converted operator view exposes `rows()`, `active()`, `message()` and `graph()`.
+Its private construction marker excludes it from entry-point witnesses and external
+struct construction. Generated slots return that view after their envelope checks.
+Scalar read sites share `open_literal_for_key_check` before fixed-datatype dispatch;
+full-cell association and canonical unused/backing padding remain constrained.

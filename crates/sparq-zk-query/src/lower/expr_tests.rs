@@ -184,7 +184,14 @@ fn generated_expressions_against_engine() {
         "\"a\"@en=\"a\"@fr",
         "\"x\"^^<urn:dt>=\"y\"^^<urn:dt>",
     ] {
-        compare_engine(text, None);
+        compare_engine(
+            text,
+            if text == "\"a\"@en=\"a\"@fr" {
+                Some("RDFterm-equal errors for nonidentical language-tagged literals")
+            } else {
+                None
+            },
+        );
     }
 }
 
@@ -439,4 +446,149 @@ fn noir_samples_match_host_mirror() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("CheckedOpening"));
     crate::support::complete(gate);
+}
+
+#[test]
+fn literal_dispatch_recommendation_table() {
+    let a = LiteralPairCases::cases();
+    for (left, right, expected) in a {
+        for op in [ExprOp::Eq, ExprOp::Ne] {
+            let ir = expression(&format!("({left}) {} ({right})", op.name()));
+            let actual = mirror::eval(&ir, &BTreeMap::new());
+            let expected =
+                expected.map(|v| mirror::bool_term(if op == ExprOp::Eq { v } else { !v }));
+            assert_eq!(actual, expected, "{left} {} {right}", op.name());
+            let text = format!("({left}) {} ({right})", op.name());
+            compare_engine(
+                &text,
+                if expected.is_err() && (left.contains('@') || right.contains('@')) {
+                    Some(
+                        "The engine compares language-tagged string values beyond the Recommendation mapping",
+                    )
+                } else {
+                    None
+                },
+            );
+        }
+    }
+}
+struct LiteralPairCases;
+impl LiteralPairCases {
+    fn cases() -> Vec<(&'static str, &'static str, Result<bool, Error>)> {
+        vec![
+            ("\"a\"", "\"a\"", Ok(true)),
+            ("\"a\"", "\"b\"", Ok(false)),
+            ("\"a\"", "\"a\"@en", Err(Error::Sparql)),
+            ("\"a\"@en", "\"a\"", Err(Error::Sparql)),
+            ("\"a\"@en", "\"a\"@en", Ok(true)),
+            ("\"a\"@en", "\"b\"@en", Err(Error::Sparql)),
+            ("\"a\"@en", "\"a\"@fr", Err(Error::Sparql)),
+            ("\"1\"", "1", Err(Error::Sparql)),
+            ("1", "\"1\"", Err(Error::Sparql)),
+            (
+                "\"2026-11-13\"",
+                "\"2026-11-13\"^^xsd:date",
+                Err(Error::Sparql),
+            ),
+            ("<urn:x>", "\"urn:x\"", Ok(false)),
+            ("\"urn:x\"", "<urn:x>", Ok(false)),
+            ("<urn:x>", "1", Ok(false)),
+            ("1", "<urn:x>", Ok(false)),
+            ("\"a\"^^<urn:dt>", "\"a\"^^<urn:dt>", Ok(true)),
+            ("\"a\"^^<urn:dt>", "\"b\"^^<urn:dt>", Err(Error::Sparql)),
+        ]
+    }
+}
+
+#[test]
+fn cell_alias_binding_keeps_rdf_identity() {
+    for ty in [
+        LaneType::String,
+        LaneType::Date,
+        LaneType::DateTime,
+        LaneType::Float,
+        LaneType::Double,
+        LaneType::Dynamic,
+    ] {
+        let ir = Expr::Variable { slot: 8, ty };
+        let dag = lower_bind(&ir).expect("an existing cell needs no lexical serialization");
+        assert_eq!(dag.nodes.len(), 2);
+        assert_eq!(dag.nodes[0].gadget, Gadget::Variable(8));
+        assert_eq!(dag.nodes[1].gadget, Gadget::ToTerm);
+    }
+    for text in [
+        "\"x\"",
+        "\"2026-11-13\"^^xsd:date",
+        "\"NaN\"^^xsd:double",
+        "+\"01.0\"^^xsd:float",
+    ] {
+        let dag = lower_bind(&expression(text)).unwrap();
+        assert_eq!(dag.nodes[dag.root].gadget, Gadget::ToTerm);
+        assert!(!dag.nodes.iter().any(|n| n.gadget == Gadget::AsNumeric));
+    }
+    assert_eq!(
+        lower_bind(&expression("STR(1)")).unwrap_err().function,
+        "BIND"
+    );
+}
+
+#[test]
+fn numeric_inputs_cannot_shrink_past_capacity() {
+    for text in [
+        "\"5192296858534827.628530496329220096\"^^xsd:decimal * 0",
+        "\"5192296858534827.628530496329220096\"^^xsd:decimal = 1",
+        "FLOOR(\"5192296858534827.628530496329220096\"^^xsd:decimal)",
+        "IF(\"5192296858534827.628530496329220096\"^^xsd:decimal,true,false)",
+    ] {
+        assert_eq!(
+            mirror::eval(&expression(text), &BTreeMap::new()),
+            Err(Error::Capacity),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn invalid_derived_facets_precede_numeric_capacity() {
+    for (lexical, ty) in [
+        ("999999999999999999999999999999", "byte"),
+        ("999999999999999999999999999999", "unsignedLong"),
+        ("999999999999999999999999999999", "nonPositiveInteger"),
+        ("-99999999999999999999999999999", "positiveInteger"),
+    ] {
+        let text = format!("\"{lexical}\"^^xsd:{ty}");
+        assert_eq!(
+            mirror::eval(&expression(&format!("{text} + 0")), &BTreeMap::new()),
+            Err(Error::Sparql)
+        );
+        assert_eq!(
+            mirror::eval(&expression(&format!("!{text}")), &BTreeMap::new()),
+            Ok(mirror::bool_term(true))
+        );
+        compare_engine(&format!("{text} + 0"), None);
+        compare_engine(&format!("!{text}"), None);
+    }
+}
+
+#[test]
+fn computed_capacity_survives_boolean_forms_and_empty_membership() {
+    let cap = "(\"5192296858534827.628530496329220095\"^^xsd:decimal + 0.000000000000000001)";
+    for text in [
+        format!("{cap} IN ()"),
+        format!("{cap} NOT IN ()"),
+        format!("true || {cap}"),
+        format!("false && {cap}"),
+        format!("COALESCE({cap},1)"),
+        format!("IF(true,{cap},1)"),
+    ] {
+        assert_eq!(
+            mirror::eval(&expression(&text), &BTreeMap::new()),
+            Err(Error::Capacity),
+            "{text}"
+        );
+    }
+    assert_eq!(
+        mirror::eval(&expression(&format!("IF(false,{cap},1)")), &BTreeMap::new()),
+        Ok(mirror::typed("1", "integer"))
+    );
 }

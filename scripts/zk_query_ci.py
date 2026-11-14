@@ -15,12 +15,78 @@ HOSTED_TESTS = (
     "tests/authentication.rs::suite_program_checks_authentication_membership_keys_and_credential_limits",
     "tests/authentication.rs::suite_constant_scan_preserves_literal_identity",
     "tests/authentication.rs::read_site_keys_bind_complete_consumer_inputs_and_lexical_openings",
+    "tests/authentication.rs::canonical_envelope_executes_complete_private_evidence_and_policy_controls",
+    "tests/authentication.rs::converted_credential_view_cannot_be_witnessed_or_constructed",
 )
 OPERATORS = ("scan", "join", "filter", "project", "distinct", "slice", "values", "ask", "select")
+ROWS_CONTRACTS = (
+    "rows_plain_string_numeric_class_is_not_a_numeric_value",
+    "rows_plain_string_range_class_still_compares_identity",
+    "expression_string_ordering_keeps_checked_payloads",
+    "rows_plain_string_identity_ignores_unused_key_classes",
+    "rows_join_excludes_inactive_source_pairs",
+    "rows_join_preserves_bag_multiplicity",
+    "rows_join_cannot_reuse_an_output_occurrence",
+    "rows_join_cannot_emit_a_pair_twice",
+    "rows_join_preserves_duplicate_payload_order",
+    "rows_join_refuses_swapped_duplicate_payloads",
+    "rows_join_shared_bindings_keep_the_left_payload",
+    "rows_join_unbound_compatibility_retains_the_bound_cell",
+    "rows_join_skips_an_incompatible_pair_before_a_match",
+    "rows_join_incompatible_pairs_cannot_contribute",
+    "rows_join_authenticates_the_output_identity",
+    "rows_join_authenticates_the_key_class",
+    "rows_join_authenticates_the_key",
+    "rows_join_authenticates_the_datatype",
+    "rows_join_authenticates_the_language",
+    "rows_join_covers_a_full_left_input_bucket",
+    "rows_permutation_refuses_output_capacity",
+    "rows_ordered_projection_refuses_output_capacity",
+    "rows_ordered_projection_preserves_duplicate_payload_order",
+    "rows_ordered_projection_refuses_swapped_payloads",
+    "rows_ordered_projection_refuses_a_changed_identity",
+    "rows_ordered_projection_requires_canonical_order",
+    "rows_ordered_projection_checks_input_padding",
+    "rows_ordered_projection_refuses_missing_rows",
+    "rows_ordered_projection_refuses_extra_rows",
+    "rows_filter_preserves_selected_duplicate_payloads",
+    "rows_filter_refuses_a_different_duplicate_payload",
+    "rows_filter_preserves_a_full_input_with_a_smaller_output_bucket",
+    "rows_filter_authenticates_the_key_class",
+    "rows_filter_authenticates_the_key",
+    "rows_filter_authenticates_the_datatype",
+    "rows_filter_authenticates_the_language",
+    "rows_filter_authenticates_the_identity",
+    "rows_filter_authenticates_the_kind",
+    "rows_filter_authenticates_the_scope",
+    "rows_filter_authenticates_the_bound_flag",
+    "rows_filter_checks_input_padding",
+    "rows_projection_preserves_stable_duplicate_payloads",
+    "rows_projection_refuses_swapped_duplicate_payloads",
+    "rows_projection_sorts_the_complete_bucket",
+    "rows_permutation_preserves_multiplicity",
+    "rows_permutation_refuses_missing_rows",
+    "rows_permutation_refuses_extra_rows",
+    "rows_permutation_checks_output_order",
+    "rows_permutation_checks_input_padding",
+    "rows_permutation_checks_output_padding",
+    "rows_scan_keeps_the_first_duplicate_payload",
+    "rows_scan_authenticates_the_key_class",
+    "rows_scan_authenticates_the_key",
+    "rows_scan_authenticates_the_datatype",
+    "rows_scan_authenticates_the_language",
+    "rows_scan_refuses_duplicate_output_bindings",
+    "rows_scan_cannot_truncate_a_full_bucket",
+    "rows_temporal_scalar_matches_the_existing_byte_extraction",
+    "rows_temporal_scalar_refuses_nonzero_tail",
+    "rows_temporal_scalar_refuses_a_different_header",
+    "rows_temporal_scalar_refuses_an_overflowing_word",
+)
 NOIR_FILTERS = tuple(f"ops_core_tests::{op}_" for op in OPERATORS) + (
-    "ops_core_reads::", "ops_core_suite::table_identity_", "ops_core_tests::identity_",
+    "ops_core_tests::rows_", "ops_core_reads::", "ops_core_suite::table_identity_", "ops_core_tests::identity_",
     "ops_core_tests::expression_temporal_key_",
     "ops_core_tests::expression_same_type_strings_compare_authenticated_identity",
+    "ops_core_tests::expression_string_ordering_keeps_checked_payloads",
 )
 
 
@@ -82,6 +148,7 @@ def check_noir_listing(output: str) -> int:
     names = {line.split()[-1] for line in output.splitlines() if len(line.split()) == 2}
     required = {f"ops_core_tests::{op}_{case}" for op in OPERATORS
                 for case in ("honest", "missing", "extra", "reordered", "padding", "overflow")}
+    required |= {f"ops_core_tests::{name}" for name in ROWS_CONTRACTS}
     if not required <= names or not any(n.startswith("ops_core_reads::") for n in names):
         raise ValueError("hosted Noir contract inventory is incomplete")
     return len(names)

@@ -29,10 +29,10 @@ fn one() -> Table<4, 1> { Table { rows: [[iri(1)], [unbound()], [unbound()], [un
 #[test]
 fn scan_honest() { ops_core::scan([[iri(1),iri(9),iri(10)],[iri(2),iri(9),iri(10)],[iri(1),iri(9),iri(10)]],[true,true,true],[0,1,1],[unbound(),iri(9),iri(10)],two()); }
 
-#[test(should_fail_with = "operator length")]
+#[test(should_fail_with = "scan completeness or capacity")]
 fn scan_missing() { ops_core::scan([[iri(1),iri(9),iri(10)],[iri(2),iri(9),iri(10)],[iri(1),iri(9),iri(10)]],[true,true,true],[0,1,1],[unbound(),iri(9),iri(10)],one()); }
 
-#[test(should_fail_with = "operator length")]
+#[test(should_fail_with = "scan extra binding")]
 fn scan_extra() { ops_core::scan([[iri(1),iri(9),iri(10)],[iri(2),iri(9),iri(10)],[iri(1),iri(9),iri(10)]],[true,true,true],[0,1,1],[unbound(),iri(9),iri(10)],Table {rows:[[iri(1)],[iri(2)],[iri(3)],[unbound()]],len:3}); }
 
 #[test(should_fail_with = "table order")]
@@ -44,10 +44,10 @@ fn scan_padding() { ops_core::scan([[iri(1),iri(9),iri(10)],[iri(2),iri(9),iri(1
 #[test]
 fn join_honest() { ops_core::join(two(),Table {rows:[[]],len:1},[0],[0],two()); }
 
-#[test(should_fail_with = "operator length")]
+#[test(should_fail_with = "join completeness or capacity")]
 fn join_missing() { ops_core::join(two(),Table {rows:[[]],len:1},[0],[0],one()); }
 
-#[test(should_fail_with = "operator length")]
+#[test(should_fail_with = "join extra binding")]
 fn join_extra() { ops_core::join(two(),Table {rows:[[]],len:1},[0],[0],Table {rows:[[iri(1)],[iri(2)],[iri(3)],[unbound()]],len:3}); }
 
 #[test(should_fail_with = "table order")]
@@ -131,10 +131,10 @@ fn select_reordered() { ops_core::select(two(),Table {rows:[[iri(2)],[iri(1)],[u
 #[test(should_fail_with = "table padding")]
 fn select_padding() { ops_core::select(two(),Table {rows:[[iri(1)],[iri(2)],[iri(3)],[unbound()]],len:2}); }
 
-#[test(should_fail_with = "operator capacity")]
+#[test(should_fail_with = "scan completeness or capacity")]
 fn scan_overflow() { ops_core::scan([[iri(1),iri(9),iri(10)],[iri(2),iri(9),iri(10)],[iri(3),iri(9),iri(10)]],[true;3],[0,1,1],[unbound(),iri(9),iri(10)],empty::<2,1>()); }
 
-#[test(should_fail_with = "operator capacity")]
+#[test(should_fail_with = "join completeness or capacity")]
 fn join_overflow() { ops_core::join(two(),two(),[0,1],[1,0],empty::<2,2>()); }
 
 #[test(should_fail_with = "operator capacity")]
@@ -183,7 +183,7 @@ fn select_blank_nodes_are_result_local() {
     ops_core::select(Table{rows:[[private]],len:1},Table{rows:[[public]],len:1});
 }
 
-#[test(should_fail_with = "operator rows")]
+#[test(should_fail_with = "canonical permutation")]
 fn select_rejects_credential_scoped_result_cells() {
     let mut private = iri(42); private.kind = 2; private.scope = 1;
     ops_core::select(Table{rows:[[private]],len:1},Table{rows:[[private]],len:1});
@@ -687,7 +687,7 @@ fn expression_temporal_key_normalizes_the_suite_payload() {
         assert(result[0].value & !result[0].is_error);
     }
 }
-#[test(should_fail_with="temporal key zero tail")]
+#[test(should_fail_with="call to assert_max_bit_size")]
 fn expression_temporal_key_tail_is_exact() {
     let mut a=expression_cell(8,100,11);a.key=a.key+1;
     let _result=mixed_string_equality(a,a);
@@ -706,7 +706,7 @@ fn select_releases_literal_identity_without_value_metadata() {
     let mut released=source;released.key_class=0;released.key=0;
     ops_core::select(Table{rows:[[source]],len:1},Table{rows:[[released]],len:1});
 }
-#[test(should_fail_with="operator rows")]
+#[test(should_fail_with = "canonical payload")]
 fn select_rejects_unreleased_value_metadata() {
     let mut source=iri(7);source.kind=3;source.key_class=1;source.key=17;
     ops_core::select(Table{rows:[[source]],len:1},Table{rows:[[source]],len:1});
@@ -718,4 +718,331 @@ fn identity_keeps_kind_and_credential_scope() {
     assert(!crate::table::same_term(iri,blank));
     blank.scope=1;let mut other=blank;other.scope=2;assert(!crate::table::same_term(blank,other));
     other=blank;other.key=123;assert(crate::table::same_term(blank,other));
+}
+
+fn rows_literal(enc:Field,key:Field) -> TermCell {
+    TermCell {bound:true,kind:3,enc,key_class:1,key,dt:5,lang:7,scope:0}
+}
+fn rows_project_input() -> Table<4,2> {
+    Table {rows:[[iri(1),rows_literal(9,11)],[iri(2),rows_literal(9,22)],
+        [iri(3),rows_literal(8,33)],[unbound();2]],len:3}
+}
+fn rows_project_output() -> Table<4,1> {
+    Table {rows:[[rows_literal(8,33)],[rows_literal(9,11)],[rows_literal(9,22)],[unbound()]],len:3}
+}
+#[test]
+fn rows_projection_preserves_stable_duplicate_payloads() {
+    ops_core::project(rows_project_input(),[1],rows_project_output());
+}
+#[test(should_fail_with="canonical payload")]
+fn rows_projection_refuses_swapped_duplicate_payloads() {
+    let mut out=rows_project_output();let row=out.rows[1];out.rows[1]=out.rows[2];out.rows[2]=row;
+    ops_core::project(rows_project_input(),[1],out);
+}
+#[test]
+fn rows_projection_sorts_the_complete_bucket() {
+    let mut input=crate::table::empty::<32,2>();let mut out=crate::table::empty::<32,1>();
+    input.len=32;out.len=32;
+    for i in 0..32 {input.rows[i]=[iri(i as Field+1),iri(32-i as Field)];out.rows[i]=[iri(i as Field+1)];}
+    ops_core::project(input,[1],out);
+}
+#[test(should_fail_with="canonical permutation")]
+fn rows_permutation_preserves_multiplicity() {
+    crate::table::assert_canonicalized(Table{rows:[[iri(1)],[iri(1)],[iri(2)]],len:3},
+        Table{rows:[[iri(1)],[iri(2)],[iri(2)]],len:3});
+}
+#[test(should_fail_with="canonical permutation")]
+fn rows_permutation_refuses_a_changed_identity() {
+    crate::table::assert_canonicalized(two(),Table{rows:[[iri(1)],[iri(3)],[unbound()],[unbound()]],len:2});
+}
+#[test(should_fail_with="operator length")]
+fn rows_permutation_refuses_missing_rows() {crate::table::assert_canonicalized(two(),one());}
+#[test(should_fail_with="operator length")]
+fn rows_permutation_refuses_extra_rows() {crate::table::assert_canonicalized(one(),two());}
+#[test(should_fail_with="table order")]
+fn rows_permutation_checks_output_order() {
+    crate::table::assert_canonicalized(two(),Table{rows:[[iri(2)],[iri(1)],[unbound()],[unbound()]],len:2});
+}
+#[test(should_fail_with="table padding")]
+fn rows_permutation_checks_input_padding() {
+    crate::table::assert_canonicalized(Table{rows:[[iri(1)],[iri(2)],[iri(3)],[unbound()]],len:2},two());
+}
+#[test(should_fail_with="table padding")]
+fn rows_permutation_checks_output_padding() {
+    crate::table::assert_canonicalized(two(),Table{rows:[[iri(1)],[iri(2)],[iri(3)],[unbound()]],len:2});
+}
+#[test]
+fn rows_permutation_accepts_distinct_capacity_buckets() {
+    crate::table::assert_canonicalized(Table{rows:[[iri(2)],[iri(1)]],len:2},two());
+}
+fn rows_scan(out:TermCell) {
+    ops_core::scan([[iri(1),iri(9),rows_literal(10,11)],[iri(1),iri(9),rows_literal(10,22)]],
+        [true,true],[1,1,0],[iri(1),iri(9),unbound()],Table{rows:[[out],[unbound()],[unbound()],[unbound()]],len:1});
+}
+#[test]
+fn rows_scan_keeps_the_first_duplicate_payload() {rows_scan(rows_literal(10,11));}
+#[test(should_fail_with="scan first payload")]
+fn rows_scan_refuses_a_later_duplicate_payload() {rows_scan(rows_literal(10,22));}
+#[test(should_fail_with="scan first payload")]
+fn rows_scan_authenticates_the_key_class() {let mut out=rows_literal(10,11);out.key_class=2;rows_scan(out);}
+#[test(should_fail_with="scan first payload")]
+fn rows_scan_authenticates_the_key() {let mut out=rows_literal(10,11);out.key=12;rows_scan(out);}
+#[test(should_fail_with="scan first payload")]
+fn rows_scan_authenticates_the_datatype() {let mut out=rows_literal(10,11);out.dt=6;rows_scan(out);}
+#[test(should_fail_with="scan first payload")]
+fn rows_scan_authenticates_the_language() {let mut out=rows_literal(10,11);out.lang=8;rows_scan(out);}
+#[test(should_fail_with="scan distinct bindings")]
+fn rows_scan_refuses_duplicate_output_bindings() {
+    ops_core::scan([[iri(1),iri(9),iri(10)]],[true],[0,1,1],[unbound(),iri(9),iri(10)],
+        Table{rows:[[iri(1)],[iri(1)],[unbound()],[unbound()]],len:2});
+}
+#[test]
+fn rows_scan_ignores_nonmatching_source_payloads() {
+    ops_core::scan([[iri(2),iri(9),rows_literal(10,11)],[iri(1),iri(9),rows_literal(10,22)]],
+        [true,true],[1,1,0],[iri(1),iri(9),unbound()],
+        Table{rows:[[rows_literal(10,22)],[unbound()],[unbound()],[unbound()]],len:1});
+}
+#[test(should_fail_with="scan completeness or capacity")]
+fn rows_scan_cannot_truncate_a_full_bucket() {
+    let mut source=[[iri(1),iri(9),iri(10)];33];let mut out=crate::table::empty::<32,1>();out.len=32;
+    for i in 0..33 {source[i][0]=iri(i as Field+1);}
+    for i in 0..32 {out.rows[i]=[iri(i as Field+1)];}
+    ops_core::scan(source,[true;33],[0,1,1],[unbound(),iri(9),iri(10)],out);
+}
+
+#[test]
+fn rows_temporal_scalar_matches_the_existing_byte_extraction() {
+    for class in [3u8,4,8] {for instant in [0 as Field,100,0xffffffffffffffff] {
+        let key=class as Field*0x1000000000000000000000000000000000000000000000000000000000000+instant*0x100000000000000000000000000000000000000000000;
+        assert(crate::ops_core_expr::temporal_payload_for_class(key,class)==instant);
+        assert(crate::ops_core_expr::temporal_payload(key)==instant);
+    }}
+}
+#[test(should_fail_with="call to assert_max_bit_size")]
+fn rows_temporal_scalar_refuses_nonzero_tail() {
+    let _word=crate::ops_core_expr::temporal_payload_for_class(8*0x1000000000000000000000000000000000000000000000000000000000000+1,8);
+}
+#[test(should_fail_with="call to assert_max_bit_size")]
+fn rows_temporal_scalar_refuses_a_different_header() {
+    let _word=crate::ops_core_expr::temporal_payload_for_class(8*0x1000000000000000000000000000000000000000000000000000000000000,3);
+}
+#[test(should_fail_with="call to assert_max_bit_size")]
+fn rows_temporal_scalar_refuses_an_overflowing_word() {
+    let _word=crate::ops_core_expr::temporal_payload_for_class(9*0x1000000000000000000000000000000000000000000000000000000000000,8);
+}
+
+#[test]
+fn rows_filter_preserves_selected_duplicate_payloads() {
+    let input=Table{rows:[[rows_literal(9,11)],[rows_literal(9,22)],[unbound()],[unbound()]],len:2};
+    let out=Table{rows:[[rows_literal(9,22)],[unbound()],[unbound()],[unbound()]],len:1};
+    ops_core::filter(input,[ops_core::Boolean{value:false,is_error:false},
+        ops_core::Boolean{value:true,is_error:false},ops_core::Boolean{value:true,is_error:false},
+        ops_core::Boolean{value:true,is_error:false}],out);
+}
+#[test(should_fail_with="operator rows")]
+fn rows_filter_refuses_a_different_duplicate_payload() {
+    let input=Table{rows:[[rows_literal(9,11)],[rows_literal(9,22)],[unbound()],[unbound()]],len:2};
+    ops_core::filter(input,[ops_core::Boolean{value:false,is_error:false},
+        ops_core::Boolean{value:true,is_error:false},ops_core::Boolean{value:false,is_error:false},
+        ops_core::Boolean{value:false,is_error:false}],one_literal());
+}
+fn one_literal() -> Table<4,1> {
+    Table{rows:[[rows_literal(9,11)],[unbound()],[unbound()],[unbound()]],len:1}
+}
+#[test]
+fn rows_filter_preserves_a_full_input_with_a_smaller_output_bucket() {
+    let mut input=crate::table::empty::<32,1>();input.len=32;
+    let mut out=crate::table::empty::<16,1>();out.len=16;
+    let mut predicates=[ops_core::Boolean{value:false,is_error:false};32];
+    for i in 0..32 {input.rows[i]=[iri(i as Field+1)];predicates[i].value=(i%2)==1;}
+    for i in 0..16 {out.rows[i]=[iri(2*i as Field+2)];}
+    ops_core::filter(input,predicates,out);
+}
+fn rows_filter_payload(out:TermCell) {
+    ops_core::filter(one_literal(),[ops_core::Boolean{value:true,is_error:false};4],
+        Table{rows:[[out],[unbound()],[unbound()],[unbound()]],len:1});
+}
+#[test(should_fail_with="operator rows")]
+fn rows_filter_authenticates_the_key_class() {let mut out=rows_literal(9,11);out.key_class=2;rows_filter_payload(out);}
+#[test(should_fail_with="operator rows")]
+fn rows_filter_authenticates_the_key() {let mut out=rows_literal(9,11);out.key=12;rows_filter_payload(out);}
+#[test(should_fail_with="operator rows")]
+fn rows_filter_authenticates_the_datatype() {let mut out=rows_literal(9,11);out.dt=8;rows_filter_payload(out);}
+#[test(should_fail_with="operator rows")]
+fn rows_filter_authenticates_the_language() {let mut out=rows_literal(9,11);out.lang=8;rows_filter_payload(out);}
+#[test(should_fail_with="operator rows")]
+fn rows_filter_authenticates_the_identity() {let mut out=rows_literal(9,11);out.enc=10;rows_filter_payload(out);}
+#[test(should_fail_with="operator rows")]
+fn rows_filter_authenticates_the_kind() {let mut out=rows_literal(9,11);out.kind=1;rows_filter_payload(out);}
+#[test(should_fail_with="operator rows")]
+fn rows_filter_authenticates_the_scope() {
+    let mut cell=iri(9);cell.kind=2;cell.scope=1;let mut changed=cell;changed.scope=2;
+    ops_core::filter(Table{rows:[[cell]],len:1},[ops_core::Boolean{value:true,is_error:false}],Table{rows:[[changed]],len:1});
+}
+#[test(should_fail_with="operator rows")]
+fn rows_filter_authenticates_the_bound_flag() {
+    let mut cell=unbound();cell.bound=true;cell.kind=1;
+    ops_core::filter(Table{rows:[[cell]],len:1},[ops_core::Boolean{value:true,is_error:false}],Table{rows:[[unbound()]],len:1});
+}
+#[test(should_fail_with="table padding")]
+fn rows_filter_checks_input_padding() {
+    ops_core::filter(Table{rows:[[iri(1)],[iri(2)],[iri(3)],[unbound()]],len:2},
+        [ops_core::Boolean{value:true,is_error:false};4],two());
+}
+
+#[test]
+fn rows_ordered_projection_preserves_duplicate_payload_order() {
+    let input=Table{rows:[[rows_literal(9,11),iri(1)],[rows_literal(9,22),iri(2)]],len:2};
+    let out=Table{rows:[[rows_literal(9,11)],[rows_literal(9,22)]],len:2};
+    ops_core::project(input,[0],out);
+}
+#[test(should_fail_with="canonical payload")]
+fn rows_ordered_projection_refuses_swapped_payloads() {
+    let input=Table{rows:[[rows_literal(9,11),iri(1)],[rows_literal(9,22),iri(2)]],len:2};
+    let out=Table{rows:[[rows_literal(9,22)],[rows_literal(9,11)]],len:2};
+    ops_core::project(input,[0],out);
+}
+#[test(should_fail_with="canonical permutation")]
+fn rows_ordered_projection_refuses_a_changed_identity() {
+    crate::table::assert_ordered(two(),Table{rows:[[iri(1)],[iri(3)],[unbound()],[unbound()]],len:2});
+}
+#[test(should_fail_with="table order")]
+fn rows_ordered_projection_requires_canonical_order() {
+    let reversed=Table{rows:[[iri(2)],[iri(1)]],len:2};
+    crate::table::assert_ordered(reversed,reversed);
+}
+#[test(should_fail_with="table padding")]
+fn rows_ordered_projection_checks_input_padding() {
+    crate::table::assert_ordered(Table{rows:[[iri(1)],[iri(2)],[iri(3)],[unbound()]],len:2},Table{rows:[[iri(1)],[iri(2)]],len:2});
+}
+#[test(should_fail_with="operator length")]
+fn rows_ordered_projection_refuses_missing_rows() {
+    crate::table::assert_ordered(Table{rows:[[unbound()]],len:1},crate::table::empty::<4,1>());
+}
+#[test(should_fail_with="operator length")]
+fn rows_ordered_projection_refuses_extra_rows() {
+    crate::table::assert_ordered(Table{rows:[[iri(1)]],len:1},two());
+}
+
+#[test(should_fail_with="operator capacity")]
+fn rows_permutation_refuses_output_capacity() {crate::table::assert_canonicalized(two(),empty::<1,1>());}
+#[test(should_fail_with="operator capacity")]
+fn rows_ordered_projection_refuses_output_capacity() {crate::table::assert_ordered(two(),empty::<1,1>());}
+
+
+fn rows_join_payload(out:TermCell) {
+    ops_core::join(Table{rows:[[rows_literal(9,11)]],len:1},Table{rows:[[]],len:1},
+        [0],[0],Table{rows:[[out]],len:1});
+}
+#[test]
+fn rows_join_preserves_bag_multiplicity() {
+    let left=Table{rows:[[iri(1)],[iri(1)]],len:2};
+    ops_core::join(left,Table{rows:[[]],len:1},[0],[0],left);
+}
+#[test(should_fail_with="join completeness or capacity")]
+fn rows_join_cannot_reuse_an_output_occurrence() {
+    ops_core::join(Table{rows:[[iri(1)],[iri(1)]],len:2},Table{rows:[[]],len:1},[0],[0],
+        Table{rows:[[iri(1)]],len:1});
+}
+#[test(should_fail_with="join extra binding")]
+fn rows_join_cannot_emit_a_pair_twice() {
+    ops_core::join(Table{rows:[[iri(1)]],len:1},Table{rows:[[]],len:1},[0],[0],
+        Table{rows:[[iri(1)],[iri(1)]],len:2});
+}
+#[test]
+fn rows_join_preserves_duplicate_payload_order() {
+    let left=Table{rows:[[rows_literal(9,11)],[rows_literal(9,22)]],len:2};
+    ops_core::join(left,Table{rows:[[]],len:1},[0],[0],left);
+}
+#[test(should_fail_with="join source payload")]
+fn rows_join_refuses_swapped_duplicate_payloads() {
+    ops_core::join(Table{rows:[[rows_literal(9,11)],[rows_literal(9,22)]],len:2},
+        Table{rows:[[]],len:1},[0],[0],Table{rows:[[rows_literal(9,22)],[rows_literal(9,11)]],len:2});
+}
+#[test]
+fn rows_join_shared_bindings_keep_the_left_payload() {
+    let left=Table{rows:[[rows_literal(9,11)]],len:1};
+    ops_core::join(left,Table{rows:[[rows_literal(9,22)]],len:1},[0],[0],left);
+}
+#[test]
+fn rows_join_unbound_compatibility_retains_the_bound_cell() {
+    ops_core::join(Table{rows:[[unbound()]],len:1},Table{rows:[[iri(2)]],len:1},
+        [0],[0],Table{rows:[[iri(2)]],len:1});
+}
+#[test]
+fn rows_join_skips_an_incompatible_pair_before_a_match() {
+    ops_core::join(Table{rows:[[iri(1)]],len:1},Table{rows:[[iri(0)],[iri(1)]],len:2},
+        [0],[0],Table{rows:[[iri(1)]],len:1});
+}
+#[test(should_fail_with="join extra binding")]
+fn rows_join_incompatible_pairs_cannot_contribute() {
+    ops_core::join(Table{rows:[[iri(1)]],len:1},Table{rows:[[iri(2)]],len:1},
+        [0],[0],Table{rows:[[iri(1)]],len:1});
+}
+#[test(should_fail_with="join completeness or capacity")]
+fn rows_join_authenticates_the_output_identity() {
+    ops_core::join(Table{rows:[[iri(1)]],len:1},Table{rows:[[]],len:1},
+        [0],[0],Table{rows:[[iri(2)]],len:1});
+}
+#[test(should_fail_with="join source payload")]
+fn rows_join_authenticates_the_key_class() {let mut out=rows_literal(9,11);out.key_class=2;rows_join_payload(out);}
+#[test(should_fail_with="join source payload")]
+fn rows_join_authenticates_the_key() {let mut out=rows_literal(9,11);out.key=12;rows_join_payload(out);}
+#[test(should_fail_with="join source payload")]
+fn rows_join_authenticates_the_datatype() {let mut out=rows_literal(9,11);out.dt=8;rows_join_payload(out);}
+#[test(should_fail_with="join source payload")]
+fn rows_join_authenticates_the_language() {let mut out=rows_literal(9,11);out.lang=8;rows_join_payload(out);}
+#[test]
+fn rows_join_covers_a_full_left_input_bucket() {
+    let mut left=crate::table::empty::<32,1>();left.len=32;
+    for i in 0..32 {left.rows[i]=[iri(i as Field+1)];}
+    ops_core::join(left,Table{rows:[[]],len:1},[0],[0],left);
+}
+
+#[test]
+fn rows_join_excludes_inactive_source_pairs() {
+    let input=Table{rows:[[iri(1)],[unbound()]],len:1};
+    ops_core::join(input,input,[0],[0],Table{rows:[[iri(1)]],len:1});
+}
+
+#[test]
+fn rows_plain_string_identity_ignores_unused_key_classes() {
+    for class in [2,5] {
+        let mut a=plain_string_cell(7);a.key_class=class;a.key=0;
+        let mut b=plain_string_cell(8);b.enc=a.enc+1;b.key_class=class;b.key=1;
+        let equal=mixed_string_equality(a,a);assert(equal.value&!equal.is_error);
+        let different=mixed_string_equality(a,b);assert(!different.value&!different.is_error);
+        let iri_pair=mixed_string_equality(a,iri(7));assert(!iri_pair.value&!iri_pair.is_error);
+        let not_in=crate::ops_core_expr::evaluate(Table{rows:[[a]],len:1},[b],[
+            crate::ops_core_expr::Step{op:0,a:0,b:0,parameter:0,comparison:0},
+            crate::ops_core_expr::Step{op:1,a:0,b:0,parameter:0,comparison:0},
+            crate::ops_core_expr::Step{op:6,a:0,b:1,parameter:0,comparison:0},
+            crate::ops_core_expr::Step{op:5,a:2,b:2,parameter:0,comparison:0}]);
+        assert(not_in[0].value&!not_in[0].is_error);
+        let mixed=mixed_string_equality(a,expression_cell(1,1,12));assert(!mixed.value&mixed.is_error);
+    }
+}
+
+#[test]
+fn expression_string_ordering_keeps_checked_payloads() {
+    let mut a=expression_cell(6,3,11);a.dt=crate::suite_constants::DT_STRING;
+    let mut b=expression_cell(6,2,12);b.dt=crate::suite_constants::DT_STRING;
+    let result=crate::ops_core_expr::evaluate(Table{rows:[[a]],len:1},[b],
+        [expr_step(0,0,0,0,0),expr_step(1,0,0,0,0),expr_step(2,0,1,0,4)])[0];
+    assert(result.value&!result.is_error);
+}
+
+
+#[test]
+fn rows_plain_string_numeric_class_is_not_a_numeric_value() {
+    let number=expression_cell(1,1,12);let mut string=number;
+    string.dt=crate::suite_constants::DT_STRING;string.enc=11;
+    let result=mixed_string_equality(string,number);
+    assert(!result.value&result.is_error);
+}
+#[test]
+fn rows_plain_string_range_class_still_compares_identity() {
+    let mut string=plain_string_cell(6);string.key_class=127;string.key=0;
+    let result=mixed_string_equality(string,string);
+    assert(result.value&!result.is_error);
 }
