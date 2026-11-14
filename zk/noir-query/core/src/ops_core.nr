@@ -8,6 +8,16 @@ pub struct Dataset<let D: u32> {
     pub graphs: [TermCell; D],
 }
 
+/// The named view retains only facts carrying an authenticated graph name.
+/// Default-only method assertions remain available in the complete dataset.
+pub fn named_view<let D: u32>(dataset: Dataset<D>) -> Dataset<D> {
+    let mut result = dataset;
+    for i in 0..D {
+        result.active[i] = dataset.active[i] & dataset.graphs[i].bound;
+    }
+    result
+}
+
 /// Supplied-cell assembly for isolated operator fixtures.
 pub fn open_dataset<let C: u32, let N: u32, let D: u32>(
     credentials: [[[TermCell; 4]; N]; C], counts: [u32; C], credential_count: u32,

@@ -102,6 +102,13 @@ stored request and evaluates the same named credential graphs and default issuer
 assertions. The structural request constructor cannot satisfy the authenticated
 proof path without a stored issuer root.
 
+The canonical generator passes a facts-only named view to the closed GRAPH
+dispatcher. It preserves the complete dataset for default scans and correlated
+substitution, so the authenticated issuer assertions have one origin and remain
+outside named graphs. Exact target host interpretation, source generation,
+canonical witness preparation, circuit execution and proof verification are
+separate evidence stages.
+
 The cache is indexed by plan shape and invalidated by a fingerprint of the trusted
 library sources and pinned dependency declarations. It compiles from private source
 snapshots. Cached keys are never accepted from a presentation or loaded as trusted

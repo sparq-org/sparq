@@ -581,6 +581,16 @@ fn method_dataset_keeps_named_copies_and_a_deduplicated_default_merge() {
         .map(|r| r[0].enc)
         .collect::<std::collections::BTreeSet<_>>();
     assert_eq!(actual, issuers.iter().map(|c| c.enc).collect());
+    for (query, expected) in [
+        ("ASK { GRAPH ?g {?s <urn:p> ?x} }".to_owned(), true),
+        (format!("ASK {{ GRAPH ?g {{?g <{VERIFIED_ISSUER}> ?issuer}} }}"), false),
+        (format!("ASK {{ VALUES ?issuer {{<urn:issuer:a>}} FILTER EXISTS {{?g <{VERIFIED_ISSUER}> ?issuer}} }}"), true),
+        (format!("ASK {{ VALUES ?issuer {{<urn:issuer:absent>}} FILTER EXISTS {{?g <{VERIFIED_ISSUER}> ?issuer}} }}"), false),
+    ] {
+        let plan = lower(&query, bounds).unwrap();
+        assert_eq!(evaluate_dataset(&plan, &dataset, &SuiteEncoder).unwrap().result,
+            ResultValue::Ask(expected), "{query}");
+    }
     let other = assemble_dataset(&credentials, &issuers, [8; 32]).unwrap();
     assert_ne!(dataset.quads()[0][3].enc, other.quads()[0][3].enc);
     assert_eq!(other.credential_counts(), dataset.credential_counts());

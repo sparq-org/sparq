@@ -172,5 +172,13 @@ before value-key guards; identity-only comparison does not inspect unused keys.
 The converted operator view exposes `rows()`, `active()`, `message()` and `graph()`.
 Its private construction marker excludes it from entry-point witnesses and external
 struct construction. Generated slots return that view after their envelope checks.
+
+`ops_core::named_view(dataset)` retains the rows and graph cells and masks activity
+to authenticated named facts. Generated GRAPH scans use that view; default and
+correlated scans use the complete dataset, including the method's issuer assertions.
+
+The raw status adapter carries each evidence row's actual private depth to
+`envelope::check_status_bounded`. It uses the shared bounded path and snapshot
+relation; the accepted-set depth remains a separate public policy value.
 Scalar read sites share `open_literal_for_key_check` before fixed-datatype dispatch;
 full-cell association and canonical unused/backing padding remain constrained.

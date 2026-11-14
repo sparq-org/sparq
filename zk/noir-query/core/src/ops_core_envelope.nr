@@ -1,11 +1,11 @@
 //! Generated wiring between raw witnesses and the owned envelope consumer.
-use crate::envelope::{PublicPolicy, HolderEvidence, Membership, StatusEvidence, Snapshot, ValidityOpening};
+use crate::envelope::{PublicPolicy, HolderEvidence, Membership, BoundedStatusEvidence, Snapshot, ValidityOpening};
 use crate::ops_core_profile::QuadOpening;
 use crate::ops_core_suite::{OpenedCredential, BoundedCredentialProof};
 use std::collections::bounded_vec::BoundedVec;
 
 pub struct RawStatus<let D:u32,let A:u32> {
-    pub present:bool, pub bit_len:u32, pub root:Field,
+    pub depth:u32, pub present:bool, pub bit_len:u32, pub root:Field,
     pub accepted:Membership<A>, pub bit:bool, pub path:Membership<D>,
     pub purpose:[u8;16], pub purpose_len:u32,
     pub index:[u8;20], pub index_len:u32,
@@ -18,8 +18,8 @@ pub struct CredentialEvidence<let N:u32> {
     pub holder_slot:u32, pub status:[RawStatus<32,4>;N], pub validity:RawValidity,
 }
 fn status_evidence<let N:u32,let D:u32,let A:u32>(
-    c:crate::suite_metadata::OpenedCredential<N>,raw:[RawStatus<D,A>;N]) -> [StatusEvidence<D,A>;N] {
-    let absent=StatusEvidence {present:false,
+    c:crate::suite_metadata::OpenedCredential<N>,raw:[RawStatus<D,A>;N]) -> [BoundedStatusEvidence<D,A>;N] {
+    let absent=BoundedStatusEvidence {depth:0,present:false,
         snapshot:Snapshot {list:crate::term::padding(),purpose:crate::term::padding(),bit_len:0,root:0},
         accepted:Membership {index:0,siblings:[0;A]},bit:false,path:Membership {index:0,siblings:[0;D]},
         purpose:BoundedVec::new(),index:BoundedVec::new(),size:BoundedVec::new()};
@@ -31,7 +31,7 @@ fn status_evidence<let N:u32,let D:u32,let A:u32>(
             list=c.property(quads[i][2],crate::term::iri_status_list());
             purpose=c.property(quads[i][2],crate::term::iri_status_purpose());
         }
-        result[i]=StatusEvidence {present:e.present,snapshot:Snapshot {list,purpose,bit_len:e.bit_len,root:e.root},
+        result[i]=BoundedStatusEvidence {depth:e.depth,present:e.present,snapshot:Snapshot {list,purpose,bit_len:e.bit_len,root:e.root},
             accepted:e.accepted,bit:e.bit,path:e.path,
             purpose:BoundedVec::from_parts_unchecked(e.purpose,e.purpose_len),
             index:BoundedVec::from_parts_unchecked(e.index,e.index_len),
@@ -62,7 +62,7 @@ pub fn open_slot<let N:u32,let R:u32,let L:u32,let M:u32,let C:u32>(
             used[evidence.holder_slot]=true;
         }
         if policy.status_required {
-            crate::envelope::check_status(c,policy.snapshot_root,policy.snapshot_depth,policy.allow_missing_status,
+            crate::envelope::check_status_bounded(c,policy.snapshot_root,policy.snapshot_depth,policy.allow_missing_status,
                 status_evidence(c,evidence.status));
         }
         if policy.validity_required {

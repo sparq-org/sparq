@@ -6,10 +6,9 @@ Research grade Noir query compiler; not externally audited, unpublished and opt-
 
 Public request bounds choose the smallest fitting credential, quad and table buckets.
 The key reveals capacities and query structure. Private counts cannot select another bucket; exceeding a bound yields a named refusal, never truncation.
-Separate public quad limits select buckets for the ordered credential slots. The
-verifier also selects an `OpeningProfile`: `Solid` uses the compact resource
-and object bounds; `LongObjects` admits holder Multikey lexicals with compact
-resource and metadata bounds; `Extended` also admits larger resource identifiers. The selected profile is stored in the request and included in the plan hash.
+Separate public quad limits choose the ordered credential-slot buckets. `OpeningProfile` selects compact
+`Solid` bounds, `LongObjects` for holder Multikey lexicals, or `Extended` for larger resource identifiers.
+The request stores the selected profile and the plan hash commits it.
 
 Constants are public parameters. Canonical plan encodings include parameter kinds,
 operator wiring, schemas, orders and capacities, while excluding parameter values
@@ -30,19 +29,23 @@ Value consumers admit integer, decimal, date, dateTime, boolean and string datat
 Identity operations use the authenticated kind, lexical form, datatype and language.
 Unsupported value datatypes, excess bytes and value ranges receive named refusals.
 
+Each credential gets a request-scoped named graph and a default `vcq:verifiedIssuer` assertion.
+GRAPH reads authenticated named facts; default and correlated scans read the complete merge.
+Target execution and proof evidence remain separate from lowering and source generation.
+
+Status paths carry actual bit-tree depth; active paths constrain unused siblings to zero. Admission checks
+path length before bounded padding. The public accepted-snapshot set depth is separate.
+
 ## 🚀 Host contracts
 
 Run `cargo test -p sparq-zk-query`. The default-off `ordered-json` feature selects
 serde_json's insertion-order map backend for canonicalization regression tests;
 run it with `cargo test -p sparq-zk-query --features ordered-json`.
-`SPARQ_NOIR_QUERY_SEED` accepts an optional integer seed for the interpreter's
-seeded differential test; unset, it replays fixed regression seeds. It affects test inputs only.
+`SPARQ_NOIR_QUERY_SEED` optionally seeds the interpreter differential test; unset, it replays fixed regression seeds. It affects test inputs only.
 
-`method::Compiler` provides `prepare`, `prove` and `verify`. Choose an artifact root
-outside an existing Nargo workspace; `with_crs_path` selects a writable local CRS
-cache. The driver, toolchain pin guard and challenge-store contracts are shared.
-Keys are cached by the plan and trusted library source. The holder compares the
-request key with its local compilation before reading private inputs.
+`method::Compiler` provides `prepare`, `prove` and `verify`. Choose an artifact root outside a Nargo workspace;
+`with_crs_path` selects a writable CRS cache. Driver, pin guard and challenge-store contracts are shared.
+Keys are cached by plan and trusted source; request-key comparison precedes reading private inputs.
 
 `Request::new_authenticated` stores the native key, authoritative issuer-set root,
 shared protocol request and public bounds. `prepare_with_credential_quad_bounds`
@@ -65,9 +68,8 @@ The request digest is SHA-256 over RDFC canonical N-Quads of this method's reque
 The typed protocol encoding is a named method parameter within that RDF. Public inputs, in order, are request digest, salted input commitment, signature
 mode, request bounds, constant cells, index parameters, canonical result, envelope
 policy group, ordered credential quad bounds, revealed count/messages/keys and
-statement binding. The envelope
-group carries issuer root/depth, holder flags and issuer list, status flags and
-snapshot root/depth, validity flag/time, and freshness flag/earliest creation.
+statement binding. The envelope group carries issuer root/depth, holder flags and issuer list,
+status flags and snapshot root/depth, validity flag/time, and freshness flag/earliest creation.
 `statement::Layout` generates declarations, reconstructs canonical big endian field
 words, and audits the locally compiled ABI. Cells flatten as bound, kind, encoding,
 key class, key, datatype, language and credential scope. SELECT tables flatten
@@ -87,11 +89,9 @@ Generated programs use the canonical issuer and envelope consumers. `prove_with_
 adds private holder signatures and status paths; `prove` uses empty private evidence.
 Both reconstruct public policy from the stored request. Each credential opens once;
 its named graph and default verified-issuer assertion share one fixed slot index.
-Graph operators remain subject to their named lowering admission.
 
-The host plan, lowering, interpreter, generator, layout, request and presentation
-values build for WebAssembly. `method::Prepared`, `method::Presentation`,
-`Request::plan` and `Answer::release` are portable; the subprocess Compiler is native.
+Host planning, lowering, interpretation, generation, layout, requests and presentations build for WebAssembly.
+`method::Prepared`, `method::Presentation`, `Request::plan` and `Answer::release` are portable; Compiler is native.
 Authenticated Node delivery follows the native catalogue and prover-backend decision.
 The agreement ratchet compares native/WebAssembly bytecode and keys for each passing
 operator plan, recording the approved XPath failure; committed manifests load unchanged.
