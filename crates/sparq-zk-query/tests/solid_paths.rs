@@ -3,11 +3,12 @@ mod closed_native;
 #[path = "support/mod.rs"]
 mod support;
 use sparq_zk_query::{
+    answer::Answer,
     capacity::Bounds,
     codegen,
     credential::{Credential, SuiteEncoder},
     credential_graphs as graphs,
-    interp::{EncodeTerm, ResultValue, Trace},
+    interp::{ResultValue, Trace},
     plan::{Operator, Plan},
     plan_closed::{ClosedOperator, Predicate},
     witness_closed,
@@ -380,6 +381,17 @@ fn cases(target: &str) -> Vec<(&str, Option<bool>)> {
     }
     out
 }
+fn released_cell(term: oxrdf::Term) -> sparq_zk_query::interp::Cell {
+    let ResultValue::Select { rows, .. } = (Answer::Select {
+        variables: vec!["result".into()],
+        rows: vec![vec![Some(term)]],
+    })
+    .encode(&SuiteEncoder)
+    .unwrap() else {
+        unreachable!("SELECT answer")
+    };
+    rows[0][0]
+}
 fn released(result: &ResultValue) -> Option<bool> {
     let ResultValue::Select { variables, rows } = result else {
         panic!("SELECT result")
@@ -390,11 +402,7 @@ fn released(result: &ResultValue) -> Option<bool> {
     }
     assert_eq!(rows.len(), 1);
     for value in [false, true] {
-        let mut expected = SuiteEncoder
-            .encode(&oxrdf::Literal::from(value).into())
-            .unwrap();
-        expected.key_class = 0;
-        expected.key = [0; 32];
+        let expected = released_cell(oxrdf::Literal::from(value).into());
         if rows[0][0] == expected {
             return Some(value);
         }
@@ -414,9 +422,9 @@ fn released_for(target: &str, result: &ResultValue) -> Option<bool> {
     }
     assert_eq!(
         rows,
-        &vec![vec![SuiteEncoder
-            .encode(&oxrdf::NamedNode::new_unchecked("urn:fictional:recycled-content:lot").into())
-            .unwrap()]]
+        &vec![vec![released_cell(
+            oxrdf::NamedNode::new_unchecked("urn:fictional:recycled-content:lot").into()
+        )]]
     );
     Some(true)
 }
@@ -426,25 +434,19 @@ fn alter_result(target: &str, trace: &mut Trace) {
     };
     if target == "recycled-having" {
         if rows.is_empty() {
-            rows.push(vec![SuiteEncoder
-                .encode(
-                    &oxrdf::NamedNode::new_unchecked("urn:fictional:recycled-content:lot").into(),
-                )
-                .unwrap()]);
+            rows.push(vec![released_cell(
+                oxrdf::NamedNode::new_unchecked("urn:fictional:recycled-content:lot").into(),
+            )]);
         } else {
             rows.clear();
         }
     } else {
-        let truth = SuiteEncoder
-            .encode(&oxrdf::Literal::from(true).into())
-            .unwrap();
+        let truth = released_cell(oxrdf::Literal::from(true).into());
         if rows.is_empty() {
             rows.push(vec![truth]);
         } else {
             let value = rows[0][0] == truth;
-            rows[0][0] = SuiteEncoder
-                .encode(&oxrdf::Literal::from(!value).into())
-                .unwrap();
+            rows[0][0] = released_cell(oxrdf::Literal::from(!value).into());
         }
     }
 }
@@ -683,6 +685,7 @@ fn exercise(target: &str, auth: bool) {
         {
             let mut altered = trace.clone();
             alter_result(target, &mut altered);
+            assert_ne!(altered.result, trace.result, "{target}/{case}");
             assert!(
                 execute(
                     &root,

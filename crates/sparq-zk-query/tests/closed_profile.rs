@@ -1,5 +1,8 @@
 //! Credential profile and generated-runner contract controls.
 
+mod closed_native;
+#[path = "support/fixture.rs"]
+mod fixtures;
 use sparq_zk_query::credential_graphs::evaluate_cells as evaluate;
 use sparq_zk_query::{
     capacity::Bounds,
@@ -96,6 +99,107 @@ fn bounds(_path: &str) -> Bounds {
         credentials: 4,
         quads_per_credential: 8,
         rows_per_table: 4,
+    }
+}
+#[test]
+fn nested_exists_corpus_results_and_hidden_matches_are_bound() {
+    use sparq_zk_query::{
+        lower::lower, plan::Operator, plan_closed::ClosedOperator, witness::prover_toml,
+    };
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let corpus: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(root.join("../../zk/sparql-evaluator/fixtures/conformance/cases.json"))
+            .unwrap(),
+    )
+    .unwrap();
+    let rdf = std::fs::read_to_string(
+        root.join("../../zk/sparql-evaluator/fixtures/conformance/core.nt"),
+    )
+    .unwrap();
+    let (data, _) = fixtures::dataset(&rdf);
+    for (id, expected_rows) in [
+        ("reject-exists-nested-exists", 3),
+        ("reject-exists-nested-not-exists", 0),
+    ] {
+        let fixture = corpus["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|case| case["id"] == id)
+            .unwrap();
+        let query = fixture["query"].as_str().unwrap();
+        let plan = lower(
+            query,
+            Bounds {
+                credentials: 1,
+                quads_per_credential: 16,
+                rows_per_table: 4,
+            },
+        )
+        .unwrap();
+        let trace = evaluate(&plan, &data, &SuiteEncoder).unwrap();
+        fixtures::assert_engine(query, &rdf, &trace.result);
+        let ResultValue::Select { rows, .. } = &trace.result else {
+            panic!("SELECT result")
+        };
+        assert_eq!(rows.len(), expected_rows, "{id}");
+        let package = codegen::generate_operator_fixture(&plan).unwrap();
+        let workspace = closed_native::Workspace::new(&package);
+        let render = |trace: &sparq_zk_query::interp::Trace| {
+            prover_toml(&plan, &data, &SuiteEncoder, trace, [7; 32], [3; 32]).unwrap()
+        };
+        execute_bounded(
+            workspace.0.path(),
+            &package.name,
+            &render(&trace),
+            "nested_honest",
+        )
+        .unwrap_or_else(|e| panic!("{id}: {e}"));
+        // Hide a matching scan inside the nested EXISTS, including when
+        // NOT EXISTS leaves the final result empty.
+        let inner = plan
+            .nodes()
+            .iter()
+            .enumerate()
+            .find_map(|(i, node)| {
+                matches!(node.operator, Operator::Closed(ClosedOperator::Scan { .. }))
+                    .then_some(i)
+                    .filter(|&i| !trace.tables[i].rows.is_empty())
+            })
+            .expect("matching nested scan");
+        let mut hidden = trace.clone();
+        hidden.tables[inner].rows.pop();
+        let error = execute_bounded(
+            workspace.0.path(),
+            &package.name,
+            &render(&hidden),
+            "nested_hidden_match",
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("operator length") || error.contains("operator rows"),
+            "{id}: {error}"
+        );
+        let mut altered = trace.clone();
+        let ResultValue::Select { rows, .. } = &mut altered.result else {
+            unreachable!()
+        };
+        if rows.is_empty() {
+            rows.push(trace.tables[0].rows[0][..1].to_vec());
+        } else {
+            rows.pop();
+        }
+        let error = execute_bounded(
+            workspace.0.path(),
+            &package.name,
+            &render(&altered),
+            "nested_wrong_result",
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("operator length") || error.contains("operator rows"),
+            "{id}: {error}"
+        );
     }
 }
 #[test]
