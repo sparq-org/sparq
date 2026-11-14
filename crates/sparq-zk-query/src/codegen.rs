@@ -670,3 +670,17 @@ fn expression(
     steps.push(step);
     index
 }
+
+#[cfg(test)]
+mod read_profile_tests {
+    #[test]
+    fn read_profile_bits_match_the_noir_core() {
+        let core = include_str!("../../../zk/noir-query/core/src/ops_core_suite.nr");
+        for (bit, name) in super::READ_DATATYPES.iter().enumerate() {
+            let global = format!("pub global READ_{}:u32={};", name.to_uppercase(), 1u32 << bit);
+            assert!(core.contains(&global), "{global}");
+        }
+        assert!(core.contains(&format!("pub global READ_ALL:u32={};", super::READ_ALL)));
+        assert_eq!(super::READ_ALL, (1 << super::READ_DATATYPES.len()) - 1);
+    }
+}
