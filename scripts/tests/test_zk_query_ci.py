@@ -140,5 +140,68 @@ class QueryProfiles(unittest.TestCase):
                     self.assertEqual(gate.verify_ledger(ROOT, ledger, selected), expected)
 
 
+class QueryPolicyFeatures(unittest.TestCase):
+    def policy_listing(self):
+        return [f"sparq_noir_query_core ops_core_envelope::{name}" for name in profile.POLICY_CONTRACTS]
+
+    def test_policy_inventory_keeps_the_consumer_guards(self):
+        required = {
+            "selected_policy_cannot_drop_requested_holder",
+            "selected_policy_refuses_an_unknown_feature_tag",
+            "selected_holder_refuses_an_unknown_feature_tag",
+            "selected_status_cannot_accept_a_false_public_flag",
+            "selected_validity_cannot_accept_a_false_public_flag",
+            "selected_freshness_cannot_accept_a_false_public_flag",
+            "selected_policy_cannot_hide_a_disabled_status_root",
+            "selected_policy_cannot_hide_a_disabled_validity_time",
+            "selected_policy_cannot_hide_a_disabled_freshness_time",
+            "selected_holder_consumer_checks_a_required_signature",
+            "disabled_holder_consumer_refuses_signature_evidence",
+            "status_property_selection_refuses_an_unsigned_row",
+            "status_property_selection_refuses_another_subject_with_the_same_value",
+            "status_property_selection_refuses_another_predicate_with_the_same_value",
+            "status_property_selection_refuses_a_named_graph",
+        }
+        self.assertLessEqual(required, set(profile.POLICY_CONTRACTS))
+
+    def test_policy_listing_requires_every_flag_and_source_control(self):
+        names = self.policy_listing()
+        profile.check_policy_listing("\n".join(names))
+        for missing in range(len(names)):
+            with self.subTest(missing=missing), self.assertRaises(ValueError):
+                profile.check_policy_listing("\n".join(names[:missing] + names[missing + 1:]))
+
+    def test_hosted_filters_reach_the_policy_controls(self):
+        for name in profile.POLICY_CONTRACTS:
+            qualified = f"ops_core_envelope::{name}"
+            self.assertTrue(any(selected in qualified for selected in profile.NOIR_FILTERS), qualified)
+
+    def test_hosted_execution_refuses_an_incomplete_policy_listing(self):
+        from unittest import mock
+        import os
+        import subprocess
+        names = [f"sparq_noir_query_core ops_core_tests::{op}_{case}" for op in profile.OPERATORS
+                 for case in ("honest", "missing", "extra", "reordered", "padding", "overflow")]
+        names += ["sparq_noir_query_core ops_core_reads::reads_check_every_active_input_row"]
+        names += [f"sparq_noir_query_core ops_core_tests::{name}" for name in profile.ROWS_CONTRACTS]
+        names += self.policy_listing()
+        core = ROOT / "zk/noir-query/core"
+        for complete in (True, False):
+            listing = "\n".join(names if complete else names[:-1])
+            with self.subTest(complete=complete), \
+                 mock.patch.object(sys, "argv", ["zk_query_ci.py", "hosted", "--root", str(ROOT)]), \
+                 mock.patch.dict(os.environ, {"SPARQ_ZK_ALLOW_MISSING_TOOLCHAIN": "0"}), \
+                 mock.patch.object(profile.os, "sched_setaffinity"), \
+                 mock.patch.object(profile, "steps", return_value=[(["nargo", "test"], core)]), \
+                 mock.patch.object(profile.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout=listing)) as run:
+                if complete:
+                    self.assertEqual(profile.main(), 0)
+                    self.assertEqual(run.call_count, 2)
+                else:
+                    with self.assertRaises(ValueError):
+                        profile.main()
+                    self.assertEqual(run.call_count, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

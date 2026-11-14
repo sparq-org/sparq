@@ -3,7 +3,7 @@ use std::collections::bounded_vec::BoundedVec;
 use compose::issuer::{Point, schnorr_verify, assert_on_curve, assert_in_prime_order_subgroup};
 use poseidon::poseidon2::Poseidon2;
 use crate::term::{TermCell, padding, same_term, open_term, recompute_key_for};
-use crate::suite_entry::{TermOpening, open_cell, BoundedTermOpening, open_bounded_cell, open_credential_quads, open_credential_bounded_quads};
+use crate::suite_entry::{TermOpening, open_cell, BoundedTermOpening, open_bounded_cell, open_credential_quads, open_credential_bounded_quads, merge_mixed_rows};
 use crate::suite::{credential_root, signed_message};
 use crate::suite_constants::{METADATA_DOMAIN, MULTIKEY_LENGTH, MULTIKEY_PREFIX_0, MULTIKEY_PREFIX_1, MULTIKEY_PREFIX_2, MULTIKEY_PREFIX_3, CLASS_STRING_PREFIX, DT_DATETIME, DT_STRING, CLASS_DATE_TIME};
 
@@ -222,5 +222,36 @@ pub fn open_bounded_credential_hidden<let N: u32, let L: u32, let C: u32, let V:
     pk: Point, credential_index: u32, r: Point, s: Field, e: Field, e_k: Field,
 ) -> OpenedCredential<N> {
     let opened = open_bounded_credential_revealed(raw, salts, salt, count, configuration, created_raw, method_raw, pk, credential_index);
+    authenticate_signature(opened, pk, r, s, e, e_k)
+}
+
+/// Complete opening that holds most quads at a short bound and K quads at a
+/// longer lexical bound. Placement is private; see `merge_mixed_rows`. A quad
+/// that does not fit the short bound must use a long slot, or no proof exists.
+pub fn open_bounded_credential_mixed_revealed<let N: u32, let S: u32, let K: u32, let L: u32, let LL: u32,
+    let C: u32, let V: u32, let D: u32, let G: u32>(
+    raw_short: [[BoundedTermOpening<L, D, G>; 4]; S], raw_long: [[BoundedTermOpening<LL, D, G>; 4]; K],
+    long_index: [u32; K], salts: [Field; N], salt: Field, count: u32,
+    configuration: [u128; 2], created_raw: BoundedTermOpening<C, D, G>, method_raw: BoundedTermOpening<V, D, G>,
+    pk: Point, credential_index: u32,
+) -> OpenedCredential<N> {
+    assert(credential_index < 0xffffffff, "credential scope capacity");
+    let scope = credential_index + 1;
+    let quads = merge_mixed_rows(open_credential_bounded_quads(raw_short, scope),
+        open_credential_bounded_quads(raw_long, scope), long_index);
+    finish_opening(quads, salts, salt, count, configuration,
+        open_bounded_cell(created_raw, 0), BoundedVec::from_parts_unchecked(created_raw.lexical, created_raw.lexical_len),
+        open_bounded_cell(method_raw, 0), pk, credential_index)
+}
+/// Hidden signature mode over the same mixed-bound complete opening.
+pub fn open_bounded_credential_mixed_hidden<let N: u32, let S: u32, let K: u32, let L: u32, let LL: u32,
+    let C: u32, let V: u32, let D: u32, let G: u32>(
+    raw_short: [[BoundedTermOpening<L, D, G>; 4]; S], raw_long: [[BoundedTermOpening<LL, D, G>; 4]; K],
+    long_index: [u32; K], salts: [Field; N], salt: Field, count: u32,
+    configuration: [u128; 2], created_raw: BoundedTermOpening<C, D, G>, method_raw: BoundedTermOpening<V, D, G>,
+    pk: Point, credential_index: u32, r: Point, s: Field, e: Field, e_k: Field,
+) -> OpenedCredential<N> {
+    let opened = open_bounded_credential_mixed_revealed(raw_short, raw_long, long_index, salts, salt, count,
+        configuration, created_raw, method_raw, pk, credential_index);
     authenticate_signature(opened, pk, r, s, e, e_k)
 }

@@ -907,8 +907,21 @@ fn stored_request_reconstructs_the_verifier_selected_opening_profile() {
         validity_time: Some(1_794_614_400_123),
         ..Default::default()
     };
+    let typed_plan =
+        prepared
+            .plan
+            .clone()
+            .with_envelope_features(sparq_zk_query::plan::EnvelopeFeatures {
+                validity: true,
+                ..Default::default()
+            });
+    let mut typed_spec = request_spec(&stored);
+    let mut typed_requirements = requirements_spec(&typed_spec.requirements);
+    typed_requirements.methods =
+        vec![sparq_zk_query::request::descriptor(&typed_plan, &key).unwrap()];
+    typed_spec.requirements = QueryRequirements::new(typed_requirements).unwrap();
     let typed = Request::new_authenticated_with_envelope_and_profile(
-        stored.clone(),
+        StoredRequest::new(typed_spec).unwrap(),
         B,
         key.clone(),
         policy,
@@ -916,7 +929,8 @@ fn stored_request_reconstructs_the_verifier_selected_opening_profile() {
         OpeningProfile::Extended,
     )
     .unwrap();
-    assert_eq!(typed.plan().unwrap().hash(), prepared.plan.hash());
+    assert_eq!(typed.plan().unwrap().hash(), typed_plan.hash());
+    assert_ne!(typed.plan().unwrap().hash(), prepared.plan.hash());
     assert_eq!(typed.opening_profile(), OpeningProfile::Extended);
     assert_eq!(typed.envelope_inputs().unwrap().now, 1_794_614_400_123);
     assert_ne!(request.digest(), typed.digest());
@@ -929,7 +943,9 @@ fn stored_request_reconstructs_the_verifier_selected_opening_profile() {
 #[test]
 fn authenticated_request_admits_and_binds_typed_envelope_properties() {
     use sparq_zk_query::statement::EnvelopeInputs;
-    let plan = sparq_zk_query::lower::lower("ASK {}", B).unwrap();
+    let plan = sparq_zk_query::lower::lower("ASK {}", B)
+        .unwrap()
+        .with_envelope_features(sparq_zk_query::plan::EnvelopeFeatures::ALL);
     let key = vec![1, 2, 3];
     let prepared = Prepared {
         descriptor: sparq_zk_query::request::descriptor(&plan, &key).unwrap(),
@@ -973,6 +989,26 @@ fn authenticated_request_admits_and_binds_typed_envelope_properties() {
         Request::new_authenticated_with_policy(stored.clone(), B, key.clone(), altered, None)
             .unwrap();
     assert_ne!(request.digest(), other.digest());
+    assert!(request.canonical_rdf().contains("envelopeFeatures"));
+    assert_eq!(
+        request.envelope_features(),
+        sparq_zk_query::plan::EnvelopeFeatures::ALL
+    );
+    for consumer in ["validity", "freshness"] {
+        let mut dropped = policy.clone();
+        if consumer == "validity" {
+            dropped.validity_required = false;
+            dropped.now = 0;
+        } else {
+            dropped.freshness_required = false;
+            dropped.earliest_created = 0;
+        }
+        assert_eq!(
+            Request::new_authenticated_with_policy(stored.clone(), B, key.clone(), dropped, None)
+                .unwrap_err(),
+            Error::Invalid("method descriptor".into())
+        );
+    }
     let mut altered = policy;
     altered.holder_required = false;
     assert_eq!(
@@ -983,7 +1019,12 @@ fn authenticated_request_admits_and_binds_typed_envelope_properties() {
 
 #[test]
 fn request_admission_refuses_a_present_empty_holder_issuer_list() {
-    let plan = sparq_zk_query::lower::lower("ASK {}", B).unwrap();
+    let plan = sparq_zk_query::lower::lower("ASK {}", B)
+        .unwrap()
+        .with_envelope_features(sparq_zk_query::plan::EnvelopeFeatures {
+            holder: true,
+            ..Default::default()
+        });
     let key = b"request-admission-fixture".to_vec();
     let prepared = Prepared {
         descriptor: sparq_zk_query::request::descriptor(&plan, &key).unwrap(),
@@ -1021,7 +1062,9 @@ fn request_derives_canonical_policy_roots_and_exact_millisecond_words() {
     use sparq_zk_query::envelope_policy::{
         self, AcceptedSnapshots, HolderBinding, PolicyInput, TrustMember,
     };
-    let plan = sparq_zk_query::lower::lower("ASK {}", B).unwrap();
+    let plan = sparq_zk_query::lower::lower("ASK {}", B)
+        .unwrap()
+        .with_envelope_features(sparq_zk_query::plan::EnvelopeFeatures::ALL);
     let key = b"typed-envelope-fixture".to_vec();
     let prepared = Prepared {
         descriptor: sparq_zk_query::request::descriptor(&plan, &key).unwrap(),
@@ -1159,9 +1202,9 @@ fn canonical_policy_is_wired_to_the_native_program() {
     );
     let package = sparq_zk_query::codegen::generate(&request.plan().unwrap()).unwrap();
     let source = &package.files[&format!("{}/src/main.nr", package.name)];
-    assert!(source.contains("core::envelope::check_policy"));
+    assert!(source.contains("core::ops_core_envelope::select_policy::<0,0,0,0>"));
     assert!(source.contains("core::ops_core_envelope::open_slot"));
-    assert!(source.contains("core::envelope::check_holder_signatures"));
+    assert!(source.contains("core::ops_core_envelope::check_selected_holders::<0,1>"));
     assert!(!source.contains("open_profile_mode_one"));
 }
 

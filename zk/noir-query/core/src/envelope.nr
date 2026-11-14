@@ -333,6 +333,72 @@ pub fn check_status<let N: u32, let D: u32, let A: u32>(
     }
     check_status_bounded(c, snapshot_root, snapshot_depth, allow_missing, bounded);
 }
+/// One authenticated status entry: metadata openings, snapshot policy and clear bit.
+fn check_status_entry<let N: u32, let MAX: u32, let A: u32>(
+    c: OpenedCredential<N>,
+    entry: TermCell,
+    snapshot_root: Field,
+    snapshot_set_depth: u32,
+    e: BoundedStatusEvidence<MAX, A>,
+) {
+    assert(e.depth <= MAX, "status depth capacity");
+    let mut capacity: u64 = 1;
+    for level in 0..MAX {
+        if level < e.depth {
+            capacity = capacity * 2;
+        }
+    }
+    assert(entry.kind() != 3, "status entry kind");
+    assert(
+        contains(
+            c,
+            entry,
+            crate::term::iri_rdf_type(),
+            crate::term::iri_status_entry(),
+        ),
+        "status entry type",
+    );
+    let list = required_property(c, entry, crate::term::iri_status_list());
+    assert(list.kind() == 1, "status list kind");
+    let purpose = required_property(c, entry, crate::term::iri_status_purpose());
+    let _suspended = open_status_purpose(purpose, e.purpose);
+    let index_cell = required_property(c, entry, crate::term::iri_status_index());
+    let index = open_status_index(index_cell, e.index);
+    let size = c.property(entry, crate::term::iri_status_size());
+    if size.bound() {
+        let checked = crate::term::recompute_key_for(
+            size,
+            e.size,
+            BoundedVec::<u8, 64>::from_array("http://www.w3.org/2001/XMLSchema#integer"
+                .as_bytes()),
+            BoundedVec::<u8, 0>::new(),
+            crate::suite_constants::DT_INTEGER,
+        )
+            .cell();
+        // Compare against the suite's exact key for integer one.
+        let (_, one) = crate::term_key::recompute(
+            BoundedVec::<u8, 1>::from_array([49]),
+            crate::suite_constants::DT_INTEGER,
+        );
+        assert(checked.key() == one, "status size");
+    }
+    check_snapshot_identity(e.snapshot, list, purpose);
+    assert(index < e.snapshot.bit_len as u64, "status index length");
+    assert(e.path.index == index as Field, "status index binding");
+    let path_root = status_merkle_root(status_leaf(e.bit), e.path, e.depth);
+    assert(e.snapshot.bit_len as u64 <= capacity, "snapshot capacity");
+    assert(
+        set_merkle_root(
+            snapshot_digest_at_depth(e.snapshot, e.depth),
+            e.accepted,
+            snapshot_set_depth,
+        )
+            == snapshot_root,
+        "snapshot policy",
+    );
+    assert(!e.bit, "status bit set");
+    assert(path_root == e.snapshot.root, "status path");
+}
 /// Cover every signed status row, with no witnessed absence or selected subset.
 pub fn check_status_bounded<let N: u32, let MAX: u32, let A: u32>(
     c: OpenedCredential<N>,
@@ -353,67 +419,65 @@ pub fn check_status_bounded<let N: u32, let MAX: u32, let A: u32>(
         assert(evidence[i].present == hit, "status evidence coverage");
         count = count + hit as u32;
         if hit {
-            let e = evidence[i];
-            assert(e.depth <= MAX, "status depth capacity");
-            let mut capacity: u64 = 1;
-            for level in 0..MAX {
-                if level < e.depth {
-                    capacity = capacity * 2;
-                }
-            }
-            let entry = rows[i][2];
-            assert(entry.kind() != 3, "status entry kind");
-            assert(
-                contains(
-                    c,
-                    entry,
-                    crate::term::iri_rdf_type(),
-                    crate::term::iri_status_entry(),
-                ),
-                "status entry type",
-            );
-            let list = required_property(c, entry, crate::term::iri_status_list());
-            assert(list.kind() == 1, "status list kind");
-            let purpose = required_property(c, entry, crate::term::iri_status_purpose());
-            let _suspended = open_status_purpose(purpose, e.purpose);
-            let index_cell = required_property(c, entry, crate::term::iri_status_index());
-            let index = open_status_index(index_cell, e.index);
-            let size = c.property(entry, crate::term::iri_status_size());
-            if size.bound() {
-                let checked = crate::term::recompute_key_for(
-                    size,
-                    e.size,
-                    BoundedVec::<u8, 64>::from_array("http://www.w3.org/2001/XMLSchema#integer"
-                        .as_bytes()),
-                    BoundedVec::<u8, 0>::new(),
-                    crate::suite_constants::DT_INTEGER,
-                )
-                    .cell();
-                // Compare against the suite's exact key for integer one.
-                let (_, one) = crate::term_key::recompute(
-                    BoundedVec::<u8, 1>::from_array([49]),
-                    crate::suite_constants::DT_INTEGER,
-                );
-                assert(checked.key() == one, "status size");
-            }
-            check_snapshot_identity(e.snapshot, list, purpose);
-            assert(index < e.snapshot.bit_len as u64, "status index length");
-            assert(e.path.index == index as Field, "status index binding");
-            let path_root = status_merkle_root(status_leaf(e.bit), e.path, e.depth);
-            assert(e.snapshot.bit_len as u64 <= capacity, "snapshot capacity");
-            assert(
-                set_merkle_root(
-                    snapshot_digest_at_depth(e.snapshot, e.depth),
-                    e.accepted,
-                    snapshot_set_depth,
-                )
-                    == snapshot_root,
-                "snapshot policy",
-            );
-            assert(!e.bit, "status bit set");
-            assert(path_root == e.snapshot.root, "status path");
+            check_status_entry(c, rows[i][2], snapshot_root, snapshot_set_depth, evidence[i]);
         }
     }
+    assert((count > 0) | allow_missing, "status entry absent");
+}
+/// Status evidence for one selected signed row.
+pub struct SlotStatusEvidence<let MAX: u32, let A: u32> {
+    pub row: u32,
+    pub status: BoundedStatusEvidence<MAX, A>,
+}
+/// Slot form for a verifier-selected entry capacity S. One identity pass counts every
+/// signed status row; present slots name distinct rows in increasing order, so the
+/// count equality covers every row. More rows than S cannot be proved.
+pub fn check_status_slots<let N: u32, let S: u32, let MAX: u32, let A: u32>(
+    c: OpenedCredential<N>,
+    snapshot_root: Field,
+    snapshot_set_depth: u32,
+    allow_missing: bool,
+    slots: [SlotStatusEvidence<MAX, A>; S],
+) {
+    check_credential(c);
+    assert(MAX <= 32, "status tree depth");
+    let rows = c.quads();
+    let subject = c.credential_subject();
+    let mut hits = [false; N];
+    let mut count: u32 = 0;
+    for i in 0..N {
+        let hit = (i < c.count())
+            & same_term(rows[i][0], subject)
+            & same_term(rows[i][1], crate::term::iri_credential_status());
+        hits[i] = hit;
+        count = count + hit as u32;
+    }
+    let mut present: u32 = 0;
+    let mut open = true;
+    let mut last: u32 = 0;
+    for s in 0..S {
+        let slot = slots[s];
+        let used = slot.status.present;
+        assert(!used | open, "status slot order");
+        if used {
+            assert(slot.row < N, "status row range");
+            assert((present == 0) | (slot.row > last), "status row order");
+            assert(hits[slot.row], "status row");
+            check_status_entry(
+                c,
+                rows[slot.row][2],
+                snapshot_root,
+                snapshot_set_depth,
+                slot.status,
+            );
+            last = slot.row;
+            present = present + 1;
+        } else {
+            assert((slot.row == 0) & (slot.status.depth == 0), "status slot padding");
+        }
+        open = used;
+    }
+    assert(present == count, "status evidence coverage");
     assert((count > 0) | allow_missing, "status entry absent");
 }
 /// Lexical witnesses open the authenticated bound cells; absence comes from all quads.
@@ -948,7 +1012,8 @@ mod bounded_status_tests {
     use crate::suite_entry::TermOpening;
     use crate::term::same_term;
     use super::{
-        BoundedStatusEvidence, check_status, check_status_bounded, CredentialOpening, iri_bytes,
+        BoundedStatusEvidence, check_status, check_status_bounded, check_status_slots,
+        CredentialOpening, iri_bytes, SlotStatusEvidence,
         Membership, merkle_root, open_suite_credential, OpenedCredential, Point, required_property,
         Signature, Snapshot, snapshot_digest, snapshot_digest_at_depth, snapshot_test_purpose,
         status_leaf, status_merkle_root, StatusEvidence,
@@ -1447,5 +1512,79 @@ mod bounded_status_tests {
         );
         assert(snapshot_digest::<1>(s) == snapshot_digest_at_depth(s, 1));
         assert(snapshot_digest::<32>(s) == snapshot_digest_at_depth(s, 32));
+    }
+    fn slots<let S: u32>(
+        c: OpenedCredential<16>,
+        es: [BoundedStatusEvidence<32, 1>; 16],
+    ) -> [SlotStatusEvidence<32, 1>; S] {
+        let mut blank = es[0];
+        blank.present = false;
+        blank.depth = 0;
+        let mut out = [SlotStatusEvidence { row: 0, status: blank }; S];
+        out[0] = SlotStatusEvidence { row: row(c), status: es[row(c)] };
+        out
+    }
+    #[test]
+    fn status_slots_accept_one_entry() {
+        let c = credential();
+        let es = evidence::<32>(c, 1);
+        check_status_slots(c, policy(c, es), 0, false, slots::<1>(c, es));
+    }
+    #[test]
+    fn status_slots_accept_padding_after_the_entry() {
+        let c = credential();
+        let es = evidence::<32>(c, 32);
+        check_status_slots(c, policy(c, es), 0, false, slots::<3>(c, es));
+    }
+    #[test(should_fail_with = "status evidence coverage")]
+    fn status_slots_refuse_an_omitted_entry() {
+        let c = credential();
+        let es = evidence::<32>(c, 1);
+        let mut ss = slots::<1>(c, es);
+        ss[0].status.present = false;
+        ss[0].row = 0;
+        ss[0].status.depth = 0;
+        check_status_slots(c, policy(c, es), 0, true, ss);
+    }
+    #[test(should_fail_with = "status row")]
+    fn status_slots_refuse_a_row_that_is_not_a_status_entry() {
+        let c = credential();
+        let es = evidence::<32>(c, 1);
+        let mut ss = slots::<1>(c, es);
+        ss[0].row = (row(c) + 1) % 16;
+        check_status_slots(c, policy(c, es), 0, false, ss);
+    }
+    #[test(should_fail_with = "status row order")]
+    fn status_slots_refuse_a_repeated_row() {
+        let c = credential();
+        let es = evidence::<32>(c, 1);
+        let mut ss = slots::<2>(c, es);
+        ss[1] = ss[0];
+        check_status_slots(c, policy(c, es), 0, false, ss);
+    }
+    #[test(should_fail_with = "status slot order")]
+    fn status_slots_refuse_a_gap_before_an_entry() {
+        let c = credential();
+        let es = evidence::<32>(c, 1);
+        let mut ss = slots::<2>(c, es);
+        let first = ss[0];
+        ss[0] = ss[1];
+        ss[1] = first;
+        check_status_slots(c, policy(c, es), 0, false, ss);
+    }
+    #[test(should_fail_with = "status slot padding")]
+    fn status_slots_refuse_unzeroed_padding() {
+        let c = credential();
+        let es = evidence::<32>(c, 1);
+        let mut ss = slots::<2>(c, es);
+        ss[1].row = row(c);
+        check_status_slots(c, policy(c, es), 0, false, ss);
+    }
+    #[test(should_fail_with = "status bit set")]
+    fn status_slots_run_the_entry_relation() {
+        let c = credential();
+        let mut es = evidence::<32>(c, 1);
+        es[row(c)].bit = true;
+        check_status_slots(c, policy(c, es), 0, false, slots::<1>(c, es));
     }
 }

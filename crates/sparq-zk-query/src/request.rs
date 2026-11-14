@@ -11,7 +11,7 @@ use sparq_query_protocol::{
 use crate::{
     capacity::{Bounds, OpeningProfile},
     lower::lower,
-    plan::{Plan, ResultForm},
+    plan::{EnvelopeFeatures, Plan, ResultForm},
     Error,
 };
 
@@ -34,6 +34,7 @@ pub struct Request {
     envelope_policy: Option<crate::envelope_policy::PolicyInput>,
     credential_quad_bounds: Vec<u32>,
     opening_profile: OpeningProfile,
+    envelope_features: EnvelopeFeatures,
 }
 
 pub fn descriptor(plan: &Plan, key: &[u8]) -> Result<MethodDescriptor, Error> {
@@ -187,7 +188,13 @@ impl Request {
         if key.is_empty() {
             return Err(Error::Invalid("verification key".into()));
         }
-        let mut plan = lower(stored.query(), bounds)?.with_opening_profile(opening_profile);
+        let envelope_features = envelope
+            .as_ref()
+            .map(EnvelopeFeatures::from_policy)
+            .unwrap_or_default();
+        let mut plan = lower(stored.query(), bounds)?
+            .with_opening_profile(opening_profile)
+            .with_envelope_features(envelope_features);
         if let Some(quad_bounds) = quad_bounds {
             plan = plan.with_credential_quad_bounds(quad_bounds)?;
         }
@@ -265,6 +272,7 @@ impl Request {
             envelope_policy: None,
             credential_quad_bounds,
             opening_profile,
+            envelope_features,
         })
     }
     pub fn issuer_root(&self) -> Result<[u8; 32], Error> {
@@ -279,7 +287,7 @@ impl Request {
                 .clone()
                 .ok_or_else(|| Error::Unsupported("authenticated issuer policy required".into()))?
         };
-        policy.validate()?;
+        self.envelope_features.check(&policy)?;
         Ok(policy)
     }
     #[cfg(not(target_arch = "wasm32"))]
@@ -291,6 +299,9 @@ impl Request {
     }
     pub fn bounds(&self) -> Bounds {
         self.bounds
+    }
+    pub fn envelope_features(&self) -> EnvelopeFeatures {
+        self.envelope_features
     }
     pub fn opening_profile(&self) -> OpeningProfile {
         self.opening_profile
@@ -309,6 +320,7 @@ impl Request {
     pub fn plan(&self) -> Result<Plan, Error> {
         lower(self.stored.query(), self.bounds)?
             .with_opening_profile(self.opening_profile)
+            .with_envelope_features(self.envelope_features)
             .with_credential_quad_bounds(&self.credential_quad_bounds)
     }
 }
@@ -355,6 +367,7 @@ fn canonical_request(
         "planHash": URL_SAFE_NO_PAD.encode(plan.hash()), "profile":PROFILE,
         "credentialQuadBounds":plan.credential_quad_bounds(),
         "openingProfile":plan.opening_profile().name(),
+        "envelopeFeatures":plan.envelope_features().mask(),
         "storedRequestEncoding":sparq_query_protocol::LOCAL_ENCODING_PROFILE,
         "storedRequest":URL_SAFE_NO_PAD.encode(sparq_query_protocol::encode_stored_request(stored)),
     });

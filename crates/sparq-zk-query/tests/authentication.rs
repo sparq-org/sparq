@@ -1097,7 +1097,7 @@ fn canonical_envelope_program_keeps_raw_evidence_outside_sealed_views() {
             rows_per_table: 2,
         },
     )
-    .unwrap();
+    .unwrap().with_opening_profile(sparq_zk_query::capacity::OpeningProfile::LongObjects);
     let package = sparq_zk_query::codegen::generate_enveloped(&plan).unwrap();
     assert_eq!(
         package.files,
@@ -1127,6 +1127,18 @@ fn canonical_envelope_program_keeps_raw_evidence_outside_sealed_views() {
     assert!(Layout::new(&plan)
         .audit_authenticated_artifact(&missing)
         .is_err());
+    let policy=authenticated::canonical_policy();
+    for property in [
+        "<urn:credential> <https://www.w3.org/2018/credentials#validFrom> <urn:not-a-time> .".to_string(),
+        format!("<urn:credential> <https://www.w3.org/2018/credentials#validUntil> \"{}\" .", "x".repeat(80)),
+    ] {
+        let data=[authenticated::canonical_sign(&property,0)];
+        let dataset=sparq_zk_query::credential::assemble_issuer_dataset(&data,&policy.trust_members,[7;32]).unwrap();
+        let trace=sparq_zk_query::interp::evaluate_dataset(&plan,&dataset,&SuiteEncoder).unwrap();
+        let input=sparq_zk_query::witness::prover_toml_enveloped(&plan,&data,&trace,[7;32],[3;32],
+            sparq_zk_query::witness::EnvelopeInput{policy:&policy,evidence:&Default::default(),revealed:None}).unwrap();
+        driver.execute(&input,"unrequested_validity").unwrap();
+    }
     support::complete(gate);
 }
 
@@ -1152,7 +1164,7 @@ fn canonical_status_depth_binds_the_snapshot_and_padding() {
             rows_per_table: 2,
         },
     )
-    .unwrap();
+    .unwrap().with_envelope_features(sparq_zk_query::plan::EnvelopeFeatures {status:true,..Default::default()});
     let package = sparq_zk_query::codegen::generate(&plan).unwrap();
     let workspace = fixture_support::Workspace::new(&package);
     let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
@@ -1175,13 +1187,14 @@ fn canonical_status_depth_binds_the_snapshot_and_padding() {
         .unwrap();
         let row = evidence.credentials[0].statuses[0].quad_index;
         let parsed = parse(&input);
-        assert_eq!(parsed["envelope_0"]["status"][row]["depth"], json!(depth));
+        assert_eq!(parsed["envelope_0"]["status"][0]["row"], json!(row));
+        assert_eq!(parsed["envelope_0"]["status"][0]["depth"], json!(depth));
         driver
             .execute(&input, &format!("status_depth_{depth}"))
             .unwrap();
         for changed_depth in [if depth == 0 { 1 } else { depth - 1 }, 33] {
             let mut altered = parsed.clone();
-            altered["envelope_0"]["status"][row]["depth"] = json!(changed_depth);
+            altered["envelope_0"]["status"][0]["depth"] = json!(changed_depth);
             assert!(driver
                 .execute(
                     &render(&altered),
@@ -1191,7 +1204,7 @@ fn canonical_status_depth_binds_the_snapshot_and_padding() {
         }
         if depth == 1 {
             let mut altered = parsed.clone();
-            altered["envelope_0"]["status"][row]["path"]["siblings"][1] = json!("1");
+            altered["envelope_0"]["status"][0]["path"]["siblings"][1] = json!("1");
             assert!(driver.execute(&render(&altered), "status_padding").is_err());
         }
     }
@@ -1268,6 +1281,8 @@ fn canonical_envelope_executes_complete_private_evidence_and_policy_controls() {
     let holder = sig::SecretKey::from_seed(23);
     let multikey = sparq_merkle_suite::metadata::multikey(&holder.public_key()).unwrap();
     let source=format!("<urn:credential> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://www.w3.org/2018/credentials#VerifiableCredential> .\n<urn:credential> <https://www.w3.org/2018/credentials#issuer> <urn:issuer> .\n<urn:credential> <https://www.w3.org/2018/credentials#credentialSubject> <urn:s> .\n<urn:s> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:s> <https://www.w3.org/2018/credentials#confidenceMethod> <urn:key> .\n<urn:key> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/security#Multikey> .\n<urn:key> <https://w3id.org/security#publicKeyMultibase> \"{multikey}\" .\n<urn:credential> <https://www.w3.org/2018/credentials#validFrom> \"2020-01-01T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n<urn:credential> <https://www.w3.org/2018/credentials#validUntil> \"2030-01-01T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n<urn:credential> <https://www.w3.org/2018/credentials#credentialStatus> <urn:entry> .\n<urn:entry> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://www.w3.org/ns/credentials/status#BitstringStatusListEntry> .\n<urn:entry> <https://www.w3.org/ns/credentials/status#statusListCredential> <urn:list> .\n<urn:entry> <https://www.w3.org/ns/credentials/status#statusPurpose> \"revocation\" .\n<urn:entry> <https://www.w3.org/ns/credentials/status#statusListIndex> \"0\" .\n");
+    // Equal-valued distractions still belong to different signed properties.
+    let source=source+"<urn:unrelated> <urn:wrong-list> <urn:list> .\n<urn:unrelated> <urn:wrong-purpose> \"revocation\" .\n";
     let config="<urn:proof> <https://w3id.org/security#cryptosuite> \"schnorr-poseidon2-merkle-2026\" .\n<urn:proof> <https://w3id.org/security#verificationMethod> <urn:method> .\n<urn:proof> <http://purl.org/dc/terms/created> \"2026-11-13T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n";
     let credential = Credential {
         credential: suite::issue(&source, config, &key, sparq_merkle_suite::Fr::from(101u64))
@@ -1351,7 +1366,8 @@ fn canonical_envelope_executes_complete_private_evidence_and_policy_controls() {
         },
     )
     .unwrap()
-    .with_opening_profile(OpeningProfile::LongObjects);
+    .with_opening_profile(OpeningProfile::LongObjects)
+    .with_envelope_features(sparq_zk_query::plan::EnvelopeFeatures::ALL);
     let data = [credential];
     let dataset = assemble_issuer_dataset(&data, &policy.trust_members, digest).unwrap();
     let trace = evaluate_dataset(&plan, &dataset, &SuiteEncoder).unwrap();
@@ -1396,6 +1412,9 @@ fn canonical_envelope_executes_complete_private_evidence_and_policy_controls() {
     driver
         .execute(&revealed_input, "canonical_revealed")
         .unwrap();
+    let quads=oxttl::NQuadsParser::new().for_slice(data[0].credential.document.as_bytes()).map(Result::unwrap).collect::<Vec<_>>();
+    let unrelated_list=quads.iter().position(|q|q.predicate.as_str()=="urn:wrong-list").unwrap();
+    let unrelated_purpose=quads.iter().position(|q|q.predicate.as_str()=="urn:wrong-purpose").unwrap();
     let parsed = parse(&input);
     let mut controls = vec![
         ("holder signature", {
@@ -1405,12 +1424,21 @@ fn canonical_envelope_executes_complete_private_evidence_and_policy_controls() {
         }),
         ("status bit", {
             let mut p = parsed.clone();
-            p["envelope_0"]["status"][quad_index]["bit"] = json!(true);
+            p["envelope_0"]["status"][0]["bit"] = json!(true);
             p
         }),
         ("status coverage", {
             let mut p = parsed.clone();
-            p["envelope_0"]["status"][quad_index]["present"] = json!(false);
+            // A well-formed empty slot: the remaining signed entry is uncovered.
+            let slot = &mut p["envelope_0"]["status"][0];
+            slot["present"] = json!(false);
+            slot["row"] = json!(0);
+            slot["depth"] = json!(0);
+            p
+        }),
+        ("status slot row", {
+            let mut p = parsed.clone();
+            p["envelope_0"]["status"][0]["row"] = json!(unrelated_list);
             p
         }),
         ("issuer path", {
@@ -1430,6 +1458,15 @@ fn canonical_envelope_executes_complete_private_evidence_and_policy_controls() {
             p
         }),
     ];
+    for (name, field, row) in [
+        ("status list row", "list_row", unrelated_list),
+        ("status purpose row", "purpose_row", unrelated_purpose),
+        ("status property capacity", "list_row", 16),
+    ] {
+        let mut changed=parsed.clone();
+        changed["envelope_0"]["status"][0][field]=json!(row);
+        controls.push((name, changed));
+    }
     let other_holder = sig::SecretKey::from_seed(29);
     let mut other_evidence = evidence.clone();
     other_evidence.holders[0] = HolderWitness {

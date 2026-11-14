@@ -83,11 +83,36 @@ ROWS_CONTRACTS = (
     "rows_temporal_scalar_refuses_a_different_header",
     "rows_temporal_scalar_refuses_an_overflowing_word",
 )
+POLICY_CONTRACTS = (
+    'selected_policy_retains_zero_disabled_words',
+    'selected_policy_cannot_drop_requested_holder',
+    'selected_policy_cannot_drop_requested_status',
+    'selected_policy_cannot_drop_requested_validity',
+    'selected_policy_cannot_drop_requested_freshness',
+    'selected_policy_cannot_enable_an_unrequested_check',
+    'selected_policy_cannot_hide_a_disabled_status_root',
+    'selected_policy_cannot_hide_a_disabled_validity_time',
+    'selected_policy_cannot_hide_a_disabled_freshness_time',
+    'selected_policy_all_consumers_remain_required',
+    'disabled_holder_consumer_refuses_signature_evidence',
+    'selected_status_cannot_accept_a_false_public_flag',
+    'selected_holder_consumer_checks_a_required_signature',
+    'selected_validity_cannot_accept_a_false_public_flag',
+    'selected_freshness_cannot_accept_a_false_public_flag',
+    'status_property_selection_returns_the_authenticated_object',
+    'status_property_selection_refuses_another_subject_with_the_same_value',
+    'status_property_selection_refuses_another_predicate_with_the_same_value',
+    'status_property_selection_refuses_a_named_graph',
+    'status_property_selection_refuses_an_unsigned_row',
+    'selected_policy_refuses_an_unknown_feature_tag',
+    'selected_holder_refuses_an_unknown_feature_tag',
+)
 NOIR_FILTERS = tuple(f"ops_core_tests::{op}_" for op in OPERATORS) + (
     "ops_core_tests::rows_", "ops_core_reads::", "ops_core_suite::table_identity_", "ops_core_tests::identity_",
     "ops_core_tests::expression_temporal_key_",
     "ops_core_tests::expression_same_type_strings_compare_authenticated_identity",
     "ops_core_tests::expression_string_ordering_keeps_checked_payloads",
+    "ops_core_envelope::",
 )
 
 
@@ -155,6 +180,13 @@ def check_noir_listing(output: str) -> int:
     return len(names)
 
 
+def check_policy_listing(output: str) -> None:
+    names = {line.split()[-1] for line in output.splitlines() if len(line.split()) == 2}
+    required = {f"ops_core_envelope::{name}" for name in POLICY_CONTRACTS}
+    if not required <= names:
+        raise ValueError("hosted policy contract inventory is incomplete")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("profile", choices=("hosted", "full"))
@@ -185,6 +217,7 @@ def main() -> int:
             listing = subprocess.run(["nargo", "test", "--list-tests", *NOIR_FILTERS], cwd=cwd, env=env,
                                      text=True, capture_output=True, check=True)
             check_noir_listing(listing.stdout)
+            check_policy_listing(listing.stdout)
         subprocess.run(command, cwd=cwd, env=env, check=True)
     return 0
 

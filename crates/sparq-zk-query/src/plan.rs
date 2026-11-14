@@ -112,12 +112,63 @@ pub enum ResultForm {
     Ask,
 }
 
+/// Status entries checked per credential when the status consumer is selected.
+/// The circuit proves these slots cover every signed entry, so a credential with
+/// more entries has no proof. Committed in the plan hash with the status feature.
+pub const STATUS_SLOTS: usize = 1;
+
+/// Verifier-selected optional consumers. Issuer authorization is always enforced.
+/// Policy values remain public parameters; this selection is circuit structure.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EnvelopeFeatures {
+    pub holder: bool,
+    pub status: bool,
+    pub validity: bool,
+    pub freshness: bool,
+}
+
+impl EnvelopeFeatures {
+    pub const ALL: Self = Self {
+        holder: true,
+        status: true,
+        validity: true,
+        freshness: true,
+    };
+
+    /// Stable feature tag in the plan encoding and stored request parameters.
+    pub fn mask(self) -> u8 {
+        u8::from(self.holder)
+            | (u8::from(self.status) << 1)
+            | (u8::from(self.validity) << 2)
+            | (u8::from(self.freshness) << 3)
+    }
+
+    pub fn from_policy(policy: &crate::statement::EnvelopeInputs) -> Self {
+        Self {
+            holder: policy.holder_required,
+            status: policy.status_required,
+            validity: policy.validity_required,
+            freshness: policy.freshness_required,
+        }
+    }
+
+    /// Refuse a public policy whose required consumers differ from this circuit.
+    pub fn check(self, policy: &crate::statement::EnvelopeInputs) -> Result<(), crate::Error> {
+        policy.validate()?;
+        if self != Self::from_policy(policy) {
+            return Err(crate::Error::Invalid("compiled envelope features".into()));
+        }
+        Ok(())
+    }
+}
+
 /// A plan is constructed only by lowering, with topologically ordered nodes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Plan {
     pub(crate) bounds: Bounds,
     pub(crate) capacity: Capacity,
     pub(crate) opening_profile: OpeningProfile,
+    pub(crate) envelope_features: EnvelopeFeatures,
     pub(crate) credential_quad_bounds: Vec<u32>,
     pub(crate) nodes: Vec<Node>,
     pub(crate) parameters: Vec<Parameter>,
@@ -127,6 +178,15 @@ pub struct Plan {
 }
 
 impl Plan {
+    /// Select optional envelope checks before deriving the plan hash or key.
+    pub fn with_envelope_features(mut self, features: EnvelopeFeatures) -> Self {
+        self.envelope_features = features;
+        self
+    }
+    pub fn envelope_features(&self) -> EnvelopeFeatures {
+        self.envelope_features
+    }
+
     /// Choose opening bounds from the verifier's request, independently of witnesses.
     pub fn with_opening_profile(mut self, profile: OpeningProfile) -> Self {
         self.opening_profile = profile;
@@ -199,7 +259,7 @@ impl Plan {
     /// Length-prefixed, tagged, little-endian shape encoding. No serializer defaults.
     /// Parameter kinds and occurrence positions are encoded; their values are not.
     pub fn canonical_bytes(&self) -> Vec<u8> {
-        let mut w = Encoding(b"sparq.noir-query.plan\0\x03".to_vec());
+        let mut w = Encoding(b"sparq.noir-query.plan\0\x04".to_vec());
         for n in [
             self.capacity.credentials,
             self.capacity.quads_per_credential,
@@ -223,6 +283,10 @@ impl Plan {
             w.u32(capacity);
         }
         w.u32(crate::credential::ISSUER_DEPTH);
+        w.u8(self.envelope_features.mask());
+        if self.envelope_features.status {
+            w.u32(STATUS_SLOTS as u32);
+        }
         w.u8(match self.form {
             ResultForm::Select => 0,
             ResultForm::Ask => 1,

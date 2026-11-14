@@ -162,6 +162,15 @@ generated program. The complete opener specializes subject, predicate and graph
 construction to their RDF roles; general cell/table constructors remain available
 with their existing signatures and behavior.
 
+When a few quads need a longer lexical bound, call
+`suite::{open_bounded_credential_mixed_hidden, open_bounded_credential_mixed_revealed}`.
+They take `S` short rows at `BoundedTermOpening<L, D, G>`, `K` long rows at
+`BoundedTermOpening<LL, D, G>` and a private `long_index: [u32; K]` with `S + K = N`.
+Long indices strictly increase below `N`; an unused long slot is a padding row at
+the trailing indices. Short rows fill the remaining tree positions in order, so the
+leaves, root and returned `OpenedCredential<N>` equal the uniform opening. A quad
+too long for the short bound needs a long slot; otherwise no proof exists.
+
 Both fixture entry points expose the issuer-key coordinates and verifier-agreed
 configuration digest halves. Hidden mode returns nothing; revealed mode releases
 only the salted signed message. Raw metadata, terms, keys, count, root, salts and
