@@ -38,6 +38,14 @@ datatype identifier to omit unrelated parsers. `recompute_key_for` remains
 available for opening an existing cell. No unchecked checked-cell constructor is
 exposed.
 
+To share literal framing across fixed-datatype branches, call
+`term::open_literal_for_key_check(raw, scope) -> OpenedLiteral<L>` once, then
+`term::check_literal_key_for(opened, expected_dt) -> KeyCheckedCell` in each
+arm with a fixed pinned identifier. The opaque object privately binds the cell
+to its exact lexical vector and rejects nonliterals; its `cell()` getter does
+not establish a key check. It is ABI-sealed and has no unchecked constructor
+or lexical setter. `open_key_checked` delegates to the same pair.
+
 Hidden credential mode has public issuer-key coordinates and agreed configuration
 digest halves, and no public output. Revealed mode has public issuer-key coordinates and agreed configuration
 digest halves and outputs the salted signed message. Neither exposes the tree
