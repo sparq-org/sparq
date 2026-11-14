@@ -9,13 +9,18 @@ Public request bounds choose the smallest fitting credential, quad and table buc
 The key reveals those capacities and the query structure. Private counts cannot
 select another bucket; exceeding a bound yields a named refusal, never truncation.
 Separate public quad limits select buckets for the ordered credential slots.
+The verifier also selects an `OpeningProfile`: `Solid` uses the compact resource
+and object bounds; `LongObjects` admits holder Multikey lexicals with compact
+resource and metadata bounds; `Extended` also admits larger resource identifiers. The selected profile is stored in the request and included in the plan hash.
 
 Constants are public parameters. Canonical plan encodings include parameter kinds,
 operator wiring, schemas, orders and capacities, while excluding parameter values
 and variable names. Constant membership lists use a fixed parameter block and public
 active length, so values and list lengths preserve the shape within the profile.
 Rows are ordered lexicographically by term encoding in schema order; duplicates
-remain unless DISTINCT is requested. The composed manifest is superseded by the query method.
+remain unless DISTINCT is requested. Scans deduplicate complete matching bindings
+within the emitted table. Stable sorting networks preserve the first payload of
+equal bindings; DISTINCT compares adjacent rows after validating canonical input. The composed manifest is superseded by the query method.
 
 The expression dispatcher uses the shared comparison, boolean and membership
 gadgets. Its value, SPARQL error and capacity channels remain separate. Capacity is
@@ -45,6 +50,10 @@ limits. `Compiler::prove` accepts complete `credential::Credential` inputs with
 private lexical, signature and membership material. Its encoder argument remains
 for compatibility; proof and verification use `credential::SuiteEncoder`.
 Structural requests created with `Request::new` cannot produce an authenticated proof.
+The default opening profile is `Solid`. Use `prepare_with_opening_profile` and
+`Request::new_authenticated_with_opening_profile` with the same profile for larger
+openings; `new_authenticated_with_envelope_and_profile` retains typed envelope
+properties as well. Oversized lexical forms receive a capacity refusal.
 
 The current suite profile opens complete credentials, checks hidden signatures
 and issuer key membership. Source operators normalize supported literal keys.

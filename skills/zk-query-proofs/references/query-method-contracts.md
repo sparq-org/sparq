@@ -218,12 +218,28 @@ vocabulary or the plan's public constants.
 
 The circuit library's `ops_core_profile` contains raw witness structs and
 resource normalization only. Generated credential openings call
-`ops_core_suite::open_bounded_one`, delegating the complete signed opening to
+`ops_core_suite::open_profile_one`, delegating the complete signed opening to
 `suite::open_bounded_credential_hidden` once per credential. Resource datatype,
 language and key bytes are zero; the default graph and active flags are derived.
 Source scans, joins and value consumers call `term::open_key_checked` with fixed datatype
 identifiers. Raw lexical backing is separately bounded for resources, objects
 and scalars. Shape encoding includes all these capacities.
+The verifier selects `capacity::OpeningProfile::{Solid, LongObjects, Extended}`. Its
+`limits()` reports the compiled resource, object, scalar, datatype, language,
+creation and verification-method bounds. `Solid` is the default. Choose
+`LongObjects` for holder Multikey lexical forms with compact resource/metadata
+bounds, or `Extended` for longer identifiers;
+the compiler never resizes a profile from private data. Admission through
+`Credential::cells_with_profile` and witness rendering refuse excess bytes.
+Use `Plan::with_opening_profile` for portable generation, or
+`Compiler::prepare_with_opening_profile(query, bounds, quad_bounds, profile)`
+for native preparation. The matching request constructor is
+`Request::new_authenticated_with_opening_profile(stored, bounds, key,
+issuer_root, quad_bounds, profile)`; typed envelope policies use
+`new_authenticated_with_envelope_and_profile(stored, bounds, key, policy,
+quad_bounds, profile)`. Existing constructors select `Solid`.
+`Request::plan()` restores the selected profile and `opening_profile()` exposes
+it. Different profiles produce different plan hashes and keys.
 The additive envelope seam is `authenticate_bounded` followed by its consumer
 and `from_authenticated_bounded`. Existing unbounded fixture entry points remain
 available, with the same suite authentication relation.

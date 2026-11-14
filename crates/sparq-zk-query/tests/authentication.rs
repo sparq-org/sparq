@@ -262,7 +262,74 @@ fn suite_constant_scan_normalizes_literal_identity_keys() {
             .is_err(),
         "altered signed identity key accepted"
     );
+    long_object_profile_executes_a_suite_multikey_opening();
     support::complete(gate);
+}
+
+fn long_object_profile_executes_a_suite_multikey_opening() {
+    use sparq_zk_query::capacity::OpeningProfile;
+    let lexical = sparq_merkle_suite::metadata::multikey(
+        &sparq_zk::sig::SecretKey::from_seed(23).public_key(),
+    )
+    .unwrap();
+    let data = vec![authenticated::sign(
+        &format!("<urn:s> <urn:key> \"{lexical}\" ."),
+        0,
+    )];
+    let compact = lower(
+        "ASK {?s <urn:key> ?key}",
+        Bounds {
+            credentials: 1,
+            quads_per_credential: 4,
+            rows_per_table: 2,
+        },
+    )
+    .unwrap();
+    let plan = compact
+        .clone()
+        .with_opening_profile(OpeningProfile::LongObjects);
+    let cells = vec![data[0]
+        .cells_with_profile(0, OpeningProfile::LongObjects)
+        .unwrap()];
+    let trace = evaluate(&plan, &cells, &SuiteEncoder).unwrap();
+    assert!(prover_toml_authenticated(
+        &compact,
+        &data,
+        &trace,
+        [7; 32],
+        [3; 32],
+        authenticated::issuer_root()
+    )
+    .is_err());
+    let input = prover_toml_authenticated(
+        &plan,
+        &data,
+        &trace,
+        [7; 32],
+        [3; 32],
+        authenticated::issuer_root(),
+    )
+    .unwrap();
+    let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+    let workspace = fixture_support::Workspace::new(&package);
+    let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+    let artifact = driver.compile().unwrap();
+    Layout::new(&plan)
+        .audit_authenticated_artifact(
+            &serde_json::from_slice(&std::fs::read(artifact).unwrap()).unwrap(),
+        )
+        .unwrap();
+    driver
+        .execute(&input, "long_object_multikey_honest")
+        .unwrap();
+    let mut altered = parse(&input);
+    altered["credential_0"][0]["object"]["lexical"][0] = json!(98);
+    assert!(
+        driver
+            .execute(&render(&altered), "long_object_multikey_changed")
+            .is_err(),
+        "altered suite Multikey lexical accepted"
+    );
 }
 
 fn incorrect_key_signed_witness(

@@ -20,6 +20,7 @@ pub mod ops_core_expr;
 pub mod ops_core_statement;
 pub mod ops_core_suite;
 mod ops_core_tests;
+mod ops_core_scan_tests;
 
 pub mod expr_term_contract;
 pub mod expr_core;

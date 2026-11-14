@@ -215,14 +215,14 @@ pub fn prover_toml_authenticated_with_envelope(
     envelope: &crate::statement::EnvelopeInputs,
 ) -> Result<String, Error> {
     let issuer_root = envelope.issuer_root;
-    use crate::credential::{SuiteEncoder, LEXICAL_CAPACITY};
+    use crate::credential::SuiteEncoder;
     use sha2::{Digest, Sha256};
     use sparq_merkle_suite::poseidon as suite;
     use sparq_zk::{field::field_to_hex, sig};
     let cells = credentials
         .iter()
         .enumerate()
-        .map(|(i, c)| c.cells(i as u32))
+        .map(|(i, c)| c.cells_with_profile(i as u32, plan.opening_profile()))
         .collect::<Result<Vec<_>, _>>()?;
     plan.bounds()
         .check_credentials(&cells.iter().map(|c| c.quads.len()).collect::<Vec<_>>())?;
@@ -244,6 +244,7 @@ pub fn prover_toml_authenticated_with_envelope(
         presentation_salt,
     )?;
     let cap = plan.capacity();
+    let opening = plan.opening_profile().limits();
     let mut raw = vec![];
     let mut proofs = vec![];
     let capacities = plan.credential_quad_capacities();
@@ -254,11 +255,12 @@ pub fn prover_toml_authenticated_with_envelope(
                 return Err(Error::Invalid("issuer membership root".into()));
             }
             for q in credential.quads()? {
-                let mut object = term_opening_with_capacity(Some(&q.object), LEXICAL_CAPACITY)?;
+                let mut object =
+                    term_opening_with_capacity(Some(&q.object), opening.object as usize)?;
                 object.as_object_mut().unwrap().remove("bound");
                 quads.push(serde_json::json!({
-                    "subject":resource_opening(Some(&oxrdf::Term::from(q.subject)))?,
-                    "predicate":resource_opening(Some(&oxrdf::Term::NamedNode(q.predicate)))?,
+                    "subject":resource_opening(Some(&oxrdf::Term::from(q.subject)), opening.resource as usize)?,
+                    "predicate":resource_opening(Some(&oxrdf::Term::NamedNode(q.predicate)), opening.resource as usize)?,
                     "object":object,
                 }));
             }
@@ -284,7 +286,10 @@ pub fn prover_toml_authenticated_with_envelope(
                 metadata.created.as_ref(),
                 crate::credential::CREATION_CAPACITY,
             )?;
-            let method = resource_opening(metadata.verification_method.as_ref())?;
+            let method = resource_opening(
+                metadata.verification_method.as_ref(),
+                crate::credential::METHOD_CAPACITY,
+            )?;
             proofs.push(serde_json::json!({"created":created,"method":method,"salt":field_to_hex(&credential.credential.salt),"salts":salts,
                 "config":[u128::from_be_bytes(config[..16].try_into().unwrap()).to_string(),u128::from_be_bytes(config[16..].try_into().unwrap()).to_string()],
                 "pk":{"x":field_to_hex(&w.pk_x),"y":field_to_hex(&w.pk_y)},"r":{"x":field_to_hex(&w.r_x),"y":field_to_hex(&w.r_y)},
@@ -292,12 +297,12 @@ pub fn prover_toml_authenticated_with_envelope(
                 "issuer_siblings":credential.issuer_siblings.iter().map(field_to_hex).collect::<Vec<_>>()}));
         } else {
             proofs.push(serde_json::json!({"created":metadata_opening(None, crate::credential::CREATION_CAPACITY)?,
-                "method":resource_opening(None)?,"salt":"0","salts":vec!["0";capacity as usize],"config":["0","0"],
+                "method":resource_opening(None, crate::credential::METHOD_CAPACITY)?,"salt":"0","salts":vec!["0";capacity as usize],"config":["0","0"],
                 "pk":{"x":"0","y":"0"},"r":{"x":"0","y":"0"},"s":"0","e":"0","e_k":"0","issuer_index":0,"issuer_siblings":vec!["0";4]}));
         }
-        let mut object = term_opening_with_capacity(None, LEXICAL_CAPACITY)?;
+        let mut object = term_opening_with_capacity(None, opening.object as usize)?;
         object.as_object_mut().unwrap().remove("bound");
-        let resource = resource_opening(None)?;
+        let resource = resource_opening(None, opening.resource as usize)?;
         quads.resize(
             capacity as usize,
             serde_json::json!({"subject":resource,"predicate":resource,"object":object}),
@@ -373,8 +378,11 @@ pub fn prover_toml_authenticated_with_envelope(
     Ok(out)
 }
 
-fn resource_opening(term: Option<&oxrdf::Term>) -> Result<serde_json::Value, Error> {
-    let mut raw = term_opening_with_capacity(term, crate::credential::RESOURCE_CAPACITY)?;
+fn resource_opening(
+    term: Option<&oxrdf::Term>,
+    capacity: usize,
+) -> Result<serde_json::Value, Error> {
+    let mut raw = term_opening_with_capacity(term, capacity)?;
     let fields = raw.as_object_mut().unwrap();
     for key in [
         "bound",

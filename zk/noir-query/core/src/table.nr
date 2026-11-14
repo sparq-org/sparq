@@ -90,13 +90,63 @@ pub fn append<let R: u32, let V: u32>(mut table: Table<R, V>, row: [TermCell; V]
     table
 }
 
+struct SortRow<let V: u32> { row: [TermCell; V], active: bool, ordinal: u32 }
+
+fn exchange<let V: u32>(a: SortRow<V>, b: SortRow<V>) -> (SortRow<V>, SortRow<V>) {
+    let less = (b.active & !a.active) | (a.active & b.active &
+        (row_less(b.row, a.row) | (same_row(b.row, a.row) & (b.ordinal < a.ordinal))));
+    (if less { b } else { a }, if less { a } else { b })
+}
+
 pub fn canonicalize<let R: u32, let V: u32>(mut table: Table<R, V>) -> Table<R, V> {
-    for _ in 0..R {
-        for i in 0..R - 1 {
-            if (i + 1 < table.len) & row_less(table.rows[i + 1], table.rows[i]) {
-                let row = table.rows[i];
-                table.rows[i] = table.rows[i + 1];
-                table.rows[i + 1] = row;
+    if R == 4 {
+        let mut rows = [[unbound(); V]; 4];
+        // Index the generic input only within its own bound.
+        for i in 0..R { rows[i] = table.rows[i]; }
+        let a = SortRow { row: rows[0], active: 0 < table.len, ordinal: 0 };
+        let b = SortRow { row: rows[1], active: 1 < table.len, ordinal: 1 };
+        let c = SortRow { row: rows[2], active: 2 < table.len, ordinal: 2 };
+        let d = SortRow { row: rows[3], active: 3 < table.len, ordinal: 3 };
+        let (a, b) = exchange(a, b); let (c, d) = exchange(c, d);
+        let (a, c) = exchange(a, c); let (b, d) = exchange(b, d);
+        let (b, c) = exchange(b, c);
+        rows = [a.row, b.row, c.row, d.row];
+        for i in 0..R { table.rows[i] = rows[i]; }
+    } else if (R == 8) | (R == 16) | (R == 32) {
+        let mut wires = [SortRow {row:[unbound();V],active:false,ordinal:0};R];
+        for i in 0..R {
+            wires[i] = SortRow {row:table.rows[i],active:i < table.len,ordinal:i};
+        }
+        // Bitonic stages compare a total key including the original ordinal.
+        // Reversing intermediate runs therefore preserves stable final order.
+        for stage in 0..5 {
+            let width = 1u32 << (stage + 1);
+            if width <= R {
+                for pass in 0..5 {
+                    if pass <= stage {
+                        let stride = width >> (pass + 1);
+                        for i in 0..R {
+                            let partner = i ^ stride;
+                            if i < partner {
+                                let (low, high) = exchange(wires[i],wires[partner]);
+                                let ascending = (i & width) == 0;
+                                wires[i] = if ascending {low} else {high};
+                                wires[partner] = if ascending {high} else {low};
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for i in 0..R {table.rows[i] = wires[i].row;}
+    } else {
+        for _ in 0..R {
+            for i in 0..R - 1 {
+                if (i + 1 < table.len) & row_less(table.rows[i + 1], table.rows[i]) {
+                    let row = table.rows[i];
+                    table.rows[i] = table.rows[i + 1];
+                    table.rows[i + 1] = row;
+                }
             }
         }
     }

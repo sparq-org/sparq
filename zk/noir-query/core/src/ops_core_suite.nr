@@ -6,6 +6,7 @@ use crate::suite::open_credential_hidden;
 use crate::suite_constants::{DT_INTEGER, DT_DECIMAL, DT_DATE, DT_DATETIME, DT_BOOLEAN, DT_STRING};
 use crate::table::{TermCell, unbound};
 use crate::ops_core::Dataset;
+use crate::ops_core_profile::{ResourceOpening, ObjectOpening, QuadOpening};
 
 pub global VERIFIED_ISSUER_ENCODING: Field = 0x09eec572ceda200a642295e68e09118d7e1d26ea1a082cc560e303164907f5e9;
 fn check_input_predicate(enc:Field) { assert(enc != VERIFIED_ISSUER_ENCODING, "credential verifiedIssuer assertion"); }
@@ -111,6 +112,7 @@ fn convert_authenticated<let N:u32>(authenticated:crate::suite_metadata::OpenedC
         opened.graph = table_cell(crate::term::credential_graph(request, credential_index));
         for n in 0..N {
             for p in 0..3 {
+                if n < count { check_dataset_scope(quads[n][p],credential_index); }
                 opened.rows[n][p] = table_cell(quads[n][p]);
             }
             opened.active[n] = n < count;
@@ -120,6 +122,11 @@ fn convert_authenticated<let N:u32>(authenticated:crate::suite_metadata::OpenedC
             }
         }
     opened
+}
+fn check_dataset_scope(cell:crate::term::TermCell,credential_index:u32) {
+    assert(credential_index < 0xffffffff,"credential scope capacity");
+    assert(!cell.bound() | (cell.kind()!=2) | (cell.credential()==credential_index+1),
+        "dataset credential index");
 }
 
 /// Canonical inactive slot, shared by the suite and envelope dispatchers.
@@ -220,10 +227,15 @@ fn checked_bounded_literal<let L:u32>(cell:crate::term::TermCell,raw:BoundedTerm
 pub fn authenticate_bounded<let N:u32,let R:u32,let L:u32>(
     credentials:[crate::ops_core_profile::QuadOpening<R,L>;N],proof:BoundedCredentialProof<N>,
     count:u32,quad_bound:u32,credential_index:u32) -> crate::suite_metadata::OpenedCredential<N> {
+    authenticate_profile_bounded::<N,R,L,128>(credentials,proof,count,quad_bound,credential_index)
+}
+pub fn authenticate_profile_bounded<let N:u32,let R:u32,let L:u32,let M:u32>(
+    credentials:[crate::ops_core_profile::QuadOpening<R,L>;N],proof:BoundedCredentialProof<N>,
+    count:u32,quad_bound:u32,credential_index:u32) -> crate::suite_metadata::OpenedCredential<N> {
     check_limits::<N>(count,quad_bound);
     let raw=crate::ops_core_profile::normalize(credentials,count);
     crate::suite::open_bounded_credential_hidden(raw,proof.salts,proof.salt,count,proof.config,
-        proof.created,crate::ops_core_profile::optional_resource(proof.method),proof.pk,credential_index,
+        proof.created,crate::ops_core_profile::method::<M>(proof.method),proof.pk,credential_index,
         proof.r,proof.s,proof.e,proof.e_k)
 }
 pub fn from_authenticated_bounded<let N:u32,let R:u32,let L:u32,let CHECK:u32>(
@@ -253,10 +265,15 @@ fn check_inactive_bounded<let N:u32,let R:u32,let L:u32>(
 pub fn open_bounded_one<let N:u32,let R:u32,let L:u32,let CHECK:u32>(
     credentials:[crate::ops_core_profile::QuadOpening<R,L>;N],proof:BoundedCredentialProof<N>,
     count:u32,active:bool,quad_bound:u32,credential_index:u32,issuer_root:Field,request_digest:[u8;32]) -> OpenedCredential<N> {
+    open_profile_one::<N,R,L,CHECK,128>(credentials,proof,count,active,quad_bound,credential_index,issuer_root,request_digest)
+}
+pub fn open_profile_one<let N:u32,let R:u32,let L:u32,let CHECK:u32,let M:u32>(
+    credentials:[crate::ops_core_profile::QuadOpening<R,L>;N],proof:BoundedCredentialProof<N>,
+    count:u32,active:bool,quad_bound:u32,credential_index:u32,issuer_root:Field,request_digest:[u8;32]) -> OpenedCredential<N> {
     check_limits::<N>(count,quad_bound);
     let mut opened=OpenedCredential {rows:[[unbound();3];N],active:[false;N],message:0,graph:unbound()};
     if active {
-        let authenticated=authenticate_bounded(credentials,proof,count,quad_bound,credential_index);
+        let authenticated=authenticate_profile_bounded::<N,R,L,M>(credentials,proof,count,quad_bound,credential_index);
         key_set_membership(proof.pk,issuer_root,proof.issuer_index,proof.issuer_siblings);
         opened=from_authenticated_bounded::<N,R,L,CHECK>(authenticated,credentials,credential_index,request_digest);
     } else {check_inactive_bounded(credentials,proof,count,credential_index);}
@@ -513,4 +530,31 @@ fn bounded_suite_conversion_retains_rows_message_and_request_graph() {
 #[test(should_fail_with="credential verifiedIssuer assertion")]
 fn bounded_suite_conversion_refuses_the_reserved_input_predicate() {
     let _opened=bounded_converted_fixture("https://w3id.org/sparq/vcq#verifiedIssuer".as_bytes());
+}
+
+fn index_fixture() -> ([crate::ops_core_profile::QuadOpening<8,32>;1],crate::suite_metadata::OpenedCredential<1>) {
+    let raw=[QuadOpening {
+        subject:ResourceOpening {kind:2,lexical:[98,0,0,0,0,0,0,0],lexical_len:1},
+        predicate:ResourceOpening {kind:1,lexical:[117,114,110,58,112,0,0,0],lexical_len:5},
+        object:ObjectOpening {kind:1,lexical:[117,114,110,58,111,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],lexical_len:5,
+            datatype:[0;41],datatype_len:0,language:[0;1],language_len:0,key:[0;31]},
+    }];
+    let opened=crate::suite::open_bounded_credential_revealed(crate::ops_core_profile::normalize(raw,1),
+        [crate::suite::leaf_salt(7,0)],7,1,[0;2],crate::ops_core_profile::empty::<32>(),
+        crate::ops_core_profile::empty::<32>(),Point{x:compose::issuer::BJJ_GX,y:compose::issuer::BJJ_GY},0);
+    (raw,opened)
+}
+#[test]
+fn dataset_conversion_reuses_the_opening_index_and_request_scope() {
+    let (raw,opened)=index_fixture();
+    let converted=from_authenticated_bounded::<1,8,32,0>(opened,raw,0,
+        [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31]);
+    assert(converted.rows[0][0].scope==1);assert(converted.graph.scope==1);
+    assert(crate::table::equal_cell(converted.graph,table_cell(crate::term::credential_graph([
+        0x000102030405060708090a0b0c0d0e0f,0x101112131415161718191a1b1c1d1e1f],0))));
+}
+#[test(should_fail_with="dataset credential index")]
+fn dataset_conversion_refuses_a_different_credential_index() {
+    let (raw,opened)=index_fixture();
+    let _converted=from_authenticated_bounded::<1,8,32,0>(opened,raw,1,[7;32]);
 }

@@ -19,6 +19,106 @@ const B: Bounds = Bounds {
 };
 
 #[test]
+fn opening_profile_limits_are_selected_before_private_data() {
+    use sparq_zk_query::capacity::OpeningProfile;
+    for (length, compact) in [(65, true), (66, false), (137, false), (160, false)] {
+        let credential =
+            authenticated::sign(&format!("<urn:a> <urn:p> \"{}\" .", "m".repeat(length)), 0);
+        assert_eq!(
+            credential
+                .cells_with_profile(0, OpeningProfile::Solid)
+                .is_ok(),
+            compact
+        );
+        assert!(credential
+            .cells_with_profile(0, OpeningProfile::Extended)
+            .is_ok());
+        assert_eq!(
+            credential
+                .cells_with_profile(0, OpeningProfile::LongObjects)
+                .is_ok(),
+            length <= 137
+        );
+    }
+    let credential = authenticated::sign(&format!("<urn:{}> <urn:p> <urn:o> .", "r".repeat(61)), 0);
+    assert!(
+        matches!(credential.cells_with_profile(0, OpeningProfile::Solid),
+        Err(Error::Capacity(reason)) if reason == "opening profile lexical bytes")
+    );
+    assert!(credential
+        .cells_with_profile(0, OpeningProfile::Extended)
+        .is_ok());
+    let credential = authenticated::sign(&format!("<urn:a> <urn:{}> <urn:o> .", "p".repeat(61)), 0);
+    assert!(
+        matches!(credential.cells_with_profile(0, OpeningProfile::Solid),
+        Err(Error::Capacity(reason)) if reason == "opening profile lexical bytes")
+    );
+    assert!(credential
+        .cells_with_profile(0, OpeningProfile::Extended)
+        .is_ok());
+}
+
+#[test]
+fn opening_profile_checks_the_authenticated_verification_method_length() {
+    use sparq_zk_query::capacity::OpeningProfile;
+    let source = "<urn:a> <urn:p> <urn:o> .";
+    let mut credential = authenticated::sign(source, 0);
+    let config = format!(
+        "_:proof <https://w3id.org/security#cryptosuite> \"schnorr-poseidon2-merkle-2026\" .\n_:proof <https://w3id.org/security#verificationMethod> <urn:{}> .",
+        "v".repeat(29)
+    );
+    credential.credential = sparq_merkle_suite::poseidon::issue(
+        source,
+        &config,
+        &sparq_zk::sig::SecretKey::from_seed(19),
+        sparq_merkle_suite::Fr::from(101u64),
+    )
+    .unwrap();
+    assert!(
+        matches!(credential.cells_with_profile(0, OpeningProfile::Solid),
+        Err(Error::Capacity(reason)) if reason=="opening profile metadata bytes")
+    );
+    assert!(credential
+        .cells_with_profile(0, OpeningProfile::Extended)
+        .is_ok());
+}
+
+#[test]
+fn generated_witness_uses_the_selected_lexical_backing() {
+    use sparq_zk_query::capacity::OpeningProfile;
+    let data = vec![authenticated::sign(
+        &format!("<urn:a> <urn:p> \"{}\" .", "z".repeat(137)),
+        0,
+    )];
+    let compact = lower("ASK {}", B).unwrap();
+    let wide = compact
+        .clone()
+        .with_opening_profile(OpeningProfile::Extended);
+    let trace = evaluate(&wide, &[data[0].cells(0).unwrap()], &SuiteEncoder).unwrap();
+    assert_eq!(
+        prover_toml_authenticated(
+            &compact,
+            &data,
+            &trace,
+            [7; 32],
+            [3; 32],
+            authenticated::issuer_root()
+        )
+        .unwrap_err(),
+        Error::Capacity("opening profile lexical bytes".into())
+    );
+    assert!(prover_toml_authenticated(
+        &wide,
+        &data,
+        &trace,
+        [7; 32],
+        [3; 32],
+        authenticated::issuer_root()
+    )
+    .is_ok());
+}
+
+#[test]
 fn suite_credentials_feed_the_same_exact_interpreter_and_public_layout() {
     for case in fixture_support::n0_cases() {
         let bounds = Bounds {

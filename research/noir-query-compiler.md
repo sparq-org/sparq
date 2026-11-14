@@ -20,9 +20,16 @@ capacity. A limit on the final result does not waive an intermediate bound.
 Each table contains a bounded row array and its actual length. Padding uses the
 canonical unbound cell in every column. Operators order rows lexicographically
 by bound status, field term encoding and credential scope in schema order.
-Projection retains multiplicity and sorts the projected rows; DISTINCT removes
-equal mappings. Scan collapses duplicate triples in the default merge before
-matching a pattern. Blank nodes from separate credentials remain distinct.
+Projection retains multiplicity and sorts the projected rows; DISTINCT validates
+canonical input order and removes equal adjacent mappings, retaining the first
+complete payload in each run. Scan retains each matching complete binding once. Since every
+source position is a constant or an output column, equal complete bindings
+identify equal matching triples. The retained output rows serve as the bounded
+duplicate cache; a further distinct match still triggers capacity refusal.
+Blank nodes from separate credentials remain distinct. Sorting uses a stable
+networks for the supported compiled buckets and the existing general fallback
+elsewhere. Larger networks use bitonic stages over the same total key, including
+the original ordinal, so their final order remains stable.
 Join implements compatibility on bound shared variables, including VALUES UNDEF.
 
 The expression bridge delegates typed comparison, boolean connectives and
@@ -36,7 +43,7 @@ The crate README records the public-input layout. A shared schema in
 independent verifier reconstruction, and checks the locally compiled ABI before
 key creation. The generated main has no public return value. Intermediate tables,
 raw credential openings and the presentation salt are private. The statement
-binding absorbs every public word in ABI order through the shared Poseidon sponge.
+binding absorbs every public word in ABI order through the shared Poseidon hash chain.
 The production opening delegates lexical binding, complete credential roots and
 hidden signatures to the shared suite library. Value consumers use its fixed
 datatype checked-key constructors. Its private
@@ -142,7 +149,11 @@ It constructs zero resource metadata and default graph openings, then calls the
 suite's bounded credential entry point once per credential. The suite owns term
 construction, packing, root/metadata binding and signature verification. B's value
 consumers use fixed datatype checked-key calls with separate scalar bounds.
-Shape encoding includes every resource, object and metadata capacity.
+Shape encoding includes every resource, object and metadata capacity. The verifier
+chooses Solid, the LongObjects profile for larger object backing, or Extended
+for larger identifiers before
+witness admission. Request reconstruction restores that selection; excess lexical
+bytes refuse instead of selecting a larger circuit from private data.
 
 String comparisons preserve false versus SPARQL error. Equality tokens are local
 to plain strings of the same datatype and never become character openings.

@@ -66,6 +66,9 @@ profile `local-struct-v1`, and defines a shared `ChallengeStore` contract that c
 original challenge once. It has no backend, interoperable wire encoding, transport, parser,
 hash or other cryptography, ships no production challenge store, proves no cryptographic claim,
 and registers no method. See [query-method contracts](references/query-method-contracts.md).
+The query compiler's verifier-selected `OpeningProfile` is part of its plan hash
+and stored request. Its compact default and explicit larger-opening profile are
+documented in the query-method contracts.
 The research Noir query compiler additionally exposes portable host reconstruction
 and `Request::new_authenticated_with_envelope` policy derivation there, including
 exact millisecond instants, issuer-authenticated dataset preparation and

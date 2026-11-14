@@ -67,8 +67,10 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
         )
     };
     let cap = plan.capacity;
-    let lexical = crate::credential::LEXICAL_CAPACITY;
-    let resource = crate::credential::RESOURCE_CAPACITY;
+    let opening = plan.opening_profile().limits();
+    let lexical = opening.object;
+    let resource = opening.resource;
+    let method = opening.method;
     let check_keys = u8::from(plan.nodes.iter().any(|n| {
         !matches!(
             n.operator,
@@ -128,7 +130,8 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
         )
         .unwrap();
         for (c, n) in capacities.iter().enumerate() {
-            writeln!(source,"    let opened_{c} = core::ops_core_suite::open_bounded_one::<{n}, {resource}, {lexical}, {check_keys}>(credential_{c}, credential_proof_{c}, counts[{c}], credential_flags[{c}], credential_quad_bounds[{c}], {c}, issuer_root, request_digest);").unwrap();
+            writeln!(source, "    let credential_index_{c}: u32 = {c};").unwrap();
+            writeln!(source,"    let opened_{c} = core::ops_core_suite::open_profile_one::<{n}, {resource}, {lexical}, {check_keys}, {method}>(credential_{c}, credential_proof_{c}, counts[{c}], credential_flags[{c}], credential_quad_bounds[{c}], credential_index_{c}, issuer_root, request_digest);").unwrap();
             let prior = if c == 0 {
                 "dataset_start".to_owned()
             } else {

@@ -49,6 +49,7 @@ pub fn lower(query: &str, bounds: Bounds) -> Result<Plan, Error> {
         plan: Plan {
             bounds,
             capacity,
+            opening_profile: crate::capacity::OpeningProfile::default(),
             credential_quad_bounds: vec![],
             nodes: vec![],
             parameters: vec![],

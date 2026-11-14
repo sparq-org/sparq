@@ -14,16 +14,16 @@ use sparq_zk::{
 
 /// The initial issuer registry uses the shared membership relation.
 pub const ISSUER_DEPTH: u32 = 4;
-/// Opened lexical capacity of the initial query profile.
+/// Maximum object lexical backing in the extended opening profile.
 pub const LEXICAL_CAPACITY: usize = 160;
-/// Resource lexical backing in the bounded credential profile.
+/// Maximum resource lexical backing in the extended opening profile.
 pub const RESOURCE_CAPACITY: usize = 128;
 /// Scalar lexical backing used by value-key checks.
 pub const SCALAR_CAPACITY: usize = 32;
 /// Datatype and language backing in the bounded credential profile.
 pub const DATATYPE_CAPACITY: usize = 41;
 pub const LANGUAGE_CAPACITY: usize = 1;
-/// Creation and verification-method opening capacities.
+/// Creation and verification-method witness backing capacities.
 pub const CREATION_CAPACITY: usize = 32;
 pub const METHOD_CAPACITY: usize = 128;
 /// Reserved method-generated issuer assertion predicate.
@@ -62,6 +62,40 @@ pub struct Credential {
     pub issuer_siblings: Vec<Fr>,
 }
 impl Credential {
+    /// Enforce verifier-selected opening bounds without selecting a profile from data.
+    pub fn cells_with_profile(
+        &self,
+        credential_index: u32,
+        profile: crate::capacity::OpeningProfile,
+    ) -> Result<CredentialCells, Error> {
+        let cells = self.cells(credential_index)?;
+        let limits = profile.limits();
+        for quad in self.quads()? {
+            if lexical_len(&quad.subject.into())? > limits.resource as usize
+                || quad.predicate.as_str().len() > limits.resource as usize
+                || lexical_len(&quad.object)? > limits.object as usize
+            {
+                return Err(Error::Capacity("opening profile lexical bytes".into()));
+            }
+        }
+        let metadata = self.metadata()?;
+        if metadata
+            .created
+            .as_ref()
+            .map(lexical_len)
+            .transpose()?
+            .is_some_and(|n| n > limits.created as usize)
+            || metadata
+                .verification_method
+                .as_ref()
+                .map(lexical_len)
+                .transpose()?
+                .is_some_and(|n| n > limits.method as usize)
+        {
+            return Err(Error::Capacity("opening profile metadata bytes".into()));
+        }
+        Ok(cells)
+    }
     /// Verify before generating a witness; the circuit independently checks it.
     pub fn cells(&self, credential_index: u32) -> Result<CredentialCells, Error> {
         if !suite::verify(&self.credential, &self.issuer) {
@@ -173,6 +207,15 @@ impl Credential {
             };
         }
         Ok(field_to_be_bytes_32(&node))
+    }
+}
+
+fn lexical_len(term: &Term) -> Result<usize, Error> {
+    match term {
+        Term::NamedNode(n) => Ok(n.as_str().len()),
+        Term::BlankNode(n) => Ok(n.as_str().len()),
+        Term::Literal(l) => Ok(l.value().len()),
+        Term::Triple(_) => Err(Error::Excluded("triple term".into())),
     }
 }
 

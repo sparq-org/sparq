@@ -846,6 +846,66 @@ fn authenticated_issuer_policy_is_part_of_the_canonical_request() {
 }
 
 #[test]
+fn stored_request_reconstructs_the_verifier_selected_opening_profile() {
+    use sparq_zk_query::capacity::OpeningProfile;
+    let query = "ASK {}";
+    let plan = sparq_zk_query::lower::lower(query, B)
+        .unwrap()
+        .with_opening_profile(OpeningProfile::Extended);
+    let key = vec![37; 8];
+    let prepared = Prepared {
+        descriptor: sparq_zk_query::request::descriptor(&plan, &key).unwrap(),
+        plan,
+        verification_key: key.clone(),
+        artifact: serde_json::json!({}),
+    };
+    let mut spec = request_spec(&stored(&prepared, query, 9, "urn:verifier", None));
+    let mut requirements = requirements_spec(&spec.requirements);
+    requirements.source_evidence = Some(SourceEvidence::IssuerAuthenticated);
+    requirements.accepted_suites = vec![id(sparq_zk_query::request::SUITE)];
+    spec.requirements = QueryRequirements::new(requirements).unwrap();
+    let stored = StoredRequest::new(spec).unwrap();
+    let request = Request::new_authenticated_with_opening_profile(
+        stored.clone(),
+        B,
+        key.clone(),
+        authenticated::issuer_root(),
+        None,
+        OpeningProfile::Extended,
+    )
+    .unwrap();
+    assert_eq!(request.opening_profile(), OpeningProfile::Extended);
+    assert_eq!(request.plan().unwrap().hash(), prepared.plan.hash());
+    assert!(request.canonical_rdf().contains("openingProfile"));
+    let policy = sparq_zk_query::envelope_policy::PolicyInput {
+        trust_members: vec![sparq_zk_query::envelope_policy::TrustMember {
+            issuer: oxrdf::NamedNode::new_unchecked("urn:issuer"),
+            verification_method: oxrdf::NamedNode::new_unchecked("urn:issuer#key"),
+            key: sparq_zk::sig::SecretKey::from_seed(19).public_key(),
+        }],
+        validity_time: Some(1_794_614_400_123),
+        ..Default::default()
+    };
+    let typed = Request::new_authenticated_with_envelope_and_profile(
+        stored.clone(),
+        B,
+        key.clone(),
+        policy,
+        None,
+        OpeningProfile::Extended,
+    )
+    .unwrap();
+    assert_eq!(typed.plan().unwrap().hash(), prepared.plan.hash());
+    assert_eq!(typed.opening_profile(), OpeningProfile::Extended);
+    assert_eq!(typed.envelope_inputs().unwrap().now, 1_794_614_400_123);
+    assert_ne!(request.digest(), typed.digest());
+    assert_eq!(
+        Request::new_authenticated(stored, B, key, authenticated::issuer_root()).unwrap_err(),
+        Error::Invalid("method descriptor".into()),
+    );
+}
+
+#[test]
 fn authenticated_request_admits_and_binds_typed_envelope_properties() {
     use sparq_zk_query::statement::EnvelopeInputs;
     let plan = sparq_zk_query::lower::lower("ASK {}", B).unwrap();

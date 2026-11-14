@@ -69,9 +69,7 @@ pub fn scan<let D: u32, let R: u32, let V: u32>(
 ) {
     let mut expected = empty();
     for i in 0..D {
-        let mut duplicate = false;
-        for j in 0..D { duplicate = duplicate | ((j < i) & active[j] & same_row(dataset[i], dataset[j])); }
-        let mut matches = active[i] & !duplicate;
+        let mut matches = active[i];
         let mut row = [unbound(); V];
         for p in 0..3 {
             assert(slots[p] <= V, "scan column");
@@ -83,7 +81,13 @@ pub fn scan<let D: u32, let R: u32, let V: u32>(
                 }
             }
         }
-        expected = append(expected, row, matches);
+        // Once the pattern matches, its full binding identifies the source triple:
+        // every position is a constant or a column, including repeated variables.
+        let mut duplicate = false;
+        for j in 0..R {
+            duplicate = duplicate | ((j < expected.len) & same_row(row, expected.rows[j]));
+        }
+        expected = append(expected, row, matches & !duplicate);
     }
     assert_table(canonicalize(expected), out);
 }
@@ -145,7 +149,8 @@ pub fn distinct<let A: u32, let R: u32, let V: u32>(input: Table<A, V>, out: Tab
     let mut expected = empty();
     for i in 0..A {
         let mut duplicate = false;
-        for j in 0..A { duplicate = duplicate | ((j < i) & same_row(input.rows[i], input.rows[j])); }
+        // Canonical input order places every equal binding in one contiguous run.
+        if i > 0 { duplicate = same_row(input.rows[i], input.rows[i-1]); }
         expected = append(expected, input.rows[i], (i < input.len) & !duplicate);
     }
     assert_table(expected, out);

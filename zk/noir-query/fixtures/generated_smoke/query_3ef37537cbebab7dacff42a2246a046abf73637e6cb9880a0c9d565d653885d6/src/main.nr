@@ -26,7 +26,7 @@ fn main(
     earliest_created: pub u64,
     credential_quad_bounds: pub [u32; 1],
     statement_binding: pub Field,
-    credential_0: [core::ops_core_profile::QuadOpening<128, 160>; 4],
+    credential_0: [core::ops_core_profile::QuadOpening<64, 65>; 4],
     credential_proof_0: core::ops_core_suite::BoundedCredentialProof<4>,
     counts: [u32; 1],
     credential_count: u32,
@@ -38,7 +38,8 @@ fn main(
     ops_core::check_indices(indices, 0);
     let credential_flags = core::ops_core_suite::credential_flags::<1>(credential_count, bounds[0], signature_mode);
     let dataset_start = core::ops_core_suite::empty_dataset::<4>();
-    let opened_0 = core::ops_core_suite::open_bounded_one::<4, 128, 160, 0>(credential_0, credential_proof_0, counts[0], credential_flags[0], credential_quad_bounds[0], 0, issuer_root, request_digest);
+    let credential_index_0: u32 = 0;
+    let opened_0 = core::ops_core_suite::open_profile_one::<4, 64, 65, 0, 32>(credential_0, credential_proof_0, counts[0], credential_flags[0], credential_quad_bounds[0], credential_index_0, issuer_root, request_digest);
     let dataset_0 = core::ops_core_suite::append_credential(dataset_start, opened_0, 0);
     let _dataset = dataset_0;
     core::ops_core_statement::check_suite_dataset([opened_0.message], credential_count, presentation_salt, input_commitment);
