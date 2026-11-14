@@ -25,7 +25,8 @@ export function generatedReadme() {
   }
   const table = JSON.parse(readFileSync(new URL('assets/catalogue.json', directory)));
   const names = (table.notYetCatalogued || []).map(entry => '`' + entry.case + '`').join(', ');
-  const pending = names ? '\n\nNot yet catalogued on this branch: ' + names + '. Native maintainer compilation\nis still running. These plans receive the named missing-catalogue refusal.\n' : '\n\nAll listed test profiles have pinned catalogue entries.\n';
+  const failures = (table.nativeKnownFailures || []).map(f => '`' + f.case + '`').join(', ');
+  const pending = (failures ? '\n\nNamed native witness known failures: ' + failures + '. They are exercised as\nrefusals and are not counted as proved; the catalogue records their cause.' : '') + (names ? '\n\nNot yet catalogued on this branch: ' + names + '. Native maintainer compilation\nis still running. These plans receive the named missing-catalogue refusal.\n' : '\n\nAll listed test profiles have pinned catalogue entries.\n');
   return text.replace(/(<!-- public-input-layout:start -->)[\s\S]*?(<!-- public-input-layout:end -->)/, '$1' + layoutSection() + '$2')
     .replace(/(<!-- catalogue-pending:start -->)[\s\S]*?(<!-- catalogue-pending:end -->)/, '$1' + pending + '$2');
 }

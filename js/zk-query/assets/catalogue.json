@@ -16,7 +16,7 @@
       "vk": "e3d9b31f843a0f143dd75bc71f65b3871625ee545c1c4b45be1fbc3ce9fbc9ff.vk.hex",
       "acirSha256": "b6b8cc18f394b3fa6164bca3f7e82ac4ca2436f25246ac9fb34cde5969263ecc",
       "vkSha256": "eb64c092c45ef6159a43d734a17e7857afb47c2124f679525a36727adce07e8c",
-      "wasmProving": false,
+      "wasmProving": true,
       "example": {
         "query": "ASK {}",
         "bounds": {
@@ -93,26 +93,62 @@
           "rowsPerTable": 4
         }
       }
+    },
+    {
+      "planHash": "d0140fff365e1a31bccf59c9b7dc4cf843bc27ab819b89462d58d57fe3ac4f63",
+      "packageName": "query_d0140fff365e1a31bccf59c9b7dc4cf843bc27ab819b89462d58d57fe3ac4f63",
+      "acir": "d0140fff365e1a31bccf59c9b7dc4cf843bc27ab819b89462d58d57fe3ac4f63.json",
+      "vk": "d0140fff365e1a31bccf59c9b7dc4cf843bc27ab819b89462d58d57fe3ac4f63.vk.hex",
+      "acirSha256": "97e0745f37a4f49d42b5094b1afd5f867c094624e61e66828e4f5cc5414a8c45",
+      "vkSha256": "1c12ba5369aabdfc49010df64b426d263c00310915e7b78b14888517445fd4ea",
+      "wasmProving": false,
+      "example": {
+        "query": "SELECT ?s WHERE {?s <urn:p> ?x . ?s <urn:q> ?y}",
+        "bounds": {
+          "credentials": 2,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "95157e414c770a48ec55f51ca1f1814f7da7671ad3297f3993ea5004ffcc824a",
+      "packageName": "query_95157e414c770a48ec55f51ca1f1814f7da7671ad3297f3993ea5004ffcc824a",
+      "acir": "95157e414c770a48ec55f51ca1f1814f7da7671ad3297f3993ea5004ffcc824a.json",
+      "vk": "95157e414c770a48ec55f51ca1f1814f7da7671ad3297f3993ea5004ffcc824a.vk.hex",
+      "acirSha256": "286862f3491f9c90a5220314d4b6a0b1abf9fd5910f763db711ee8588a4e3ef4",
+      "vkSha256": "98682d6f0d020d76b07f468abb4e6b242a7f48980f025ea1b9f3344b13042651",
+      "wasmProving": false,
+      "example": {
+        "query": "SELECT ?s WHERE {?s <urn:p> ?x VALUES ?x {1 UNDEF}}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "4d29fe33e6aeee7d4fbcb551864fc302714b56bbe815d53aa8f81ec1377701c3",
+      "packageName": "query_4d29fe33e6aeee7d4fbcb551864fc302714b56bbe815d53aa8f81ec1377701c3",
+      "acir": "4d29fe33e6aeee7d4fbcb551864fc302714b56bbe815d53aa8f81ec1377701c3.json",
+      "vk": "4d29fe33e6aeee7d4fbcb551864fc302714b56bbe815d53aa8f81ec1377701c3.vk.hex",
+      "acirSha256": "38e44b2968ddfae546535473025428d4970e70a0fb9eca91a7ee18a49fbba216",
+      "vkSha256": "5af6180b5c639b8adce102257343140d6d02812c91073e77f76da96a23b1729f",
+      "wasmProving": false,
+      "example": {
+        "query": "SELECT ?p WHERE {?s ?p ?o}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 4
+        }
+      }
     }
   ],
   "sourceBundleSha256": "3764e678da429d6aaf1f2d014989f1ce07a3c6b1fcb03af7d71fe1c848dc4e69",
-  "crsPinsSha256": "a922ad3a4057b6ed69156c7d6a0cacf5c614555e05f290af749096990100ea29",
+  "crsPinsSha256": "b31eedd906f0f02d8e940af834a239694c9ef9790909e7c8b77d0065d819c41d",
   "notYetCatalogued": [
-    {
-      "case": "join-two-credentials",
-      "planHash": "d0140fff365e1a31bccf59c9b7dc4cf843bc27ab819b89462d58d57fe3ac4f63",
-      "reason": "Native catalogue compilation is still in progress on this branch; prove refuses this plan until its pinned entry is available."
-    },
-    {
-      "case": "values",
-      "planHash": "95157e414c770a48ec55f51ca1f1814f7da7671ad3297f3993ea5004ffcc824a",
-      "reason": "Native catalogue compilation is still in progress on this branch; prove refuses this plan until its pinned entry is available."
-    },
-    {
-      "case": "projection-bag",
-      "planHash": "4d29fe33e6aeee7d4fbcb551864fc302714b56bbe815d53aa8f81ec1377701c3",
-      "reason": "Native catalogue compilation is still in progress on this branch; prove refuses this plan until its pinned entry is available."
-    },
     {
       "case": "distinct",
       "planHash": "856bd49187ca09dd1fc69d06505ad6573eab2556da7756e6e2d12fc54907a156",
@@ -132,6 +168,14 @@
       "case": "ask-false",
       "planHash": "2f5e58f438ca4a281129f7329eb374f0417a9c49bd6e713fe603034a7d93a408",
       "reason": "Native catalogue compilation is still in progress on this branch; prove refuses this plan until its pinned entry is available."
+    }
+  ],
+  "nativeKnownFailures": [
+    {
+      "case": "date-range",
+      "stage": "witness",
+      "expectedRefusal": "native witness execution failed",
+      "reason": "The unchanged native date comparison reaches assert_max_bit_size in expr_compare.nr through value_compare. This authenticated fixture is a named known failure and does not count as proved."
     }
   ]
 }

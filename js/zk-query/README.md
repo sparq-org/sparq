@@ -80,9 +80,10 @@ to a private temporary directory and checked against the version and digest in
 binary pins select the supported native platform. Secret inputs use private files,
 child output is bounded and untrusted, and temporary files are removed afterwards.
 
-Authenticated catalogue entries currently require the native backend. The
-WebAssembly implementation stays opt-in until the authenticated consumer profile
-fits its gate budget. Consumer-limit profiles are not yet catalogued and refuse.
+The smallest authenticated catalogue entry also admits the opt-in WebAssembly
+backend. Other authenticated entries require native proving. WebAssembly resident
+memory can exceed a consumer's budget even when its linear heap fits; native
+remains the default. Consumer-limit profiles are not yet catalogued and refuse.
 
 `backend: 'wasm'` selects the in-process witness and prover implementation for
 catalogue entries that admit it. Other entries return a refusal before witness
@@ -136,7 +137,10 @@ Neither variable affects the installed API.
 
 <!-- catalogue-pending:start -->
 
-Not yet catalogued on this branch: `join-two-credentials`, `values`, `projection-bag`, `distinct`, `slice`, `ask-true`, `ask-false`. Native maintainer compilation
+Named native witness known failures: `date-range`. They are exercised as
+refusals and are not counted as proved; the catalogue records their cause.
+
+Not yet catalogued on this branch: `distinct`, `slice`, `ask-true`, `ask-false`. Native maintainer compilation
 is still running. These plans receive the named missing-catalogue refusal.
 <!-- catalogue-pending:end -->
 
@@ -147,7 +151,6 @@ artifact ABI. Arrays flatten in declaration order; cells use the shown field
 order, and SELECT tables emit padded rows before their length. Scalars use
 canonical big-endian field words. Array lengths come from the audited ABI; byte digests retain their fixed length.
 Bounds flatten as credential, quad and row limits.
-
 
 <!-- public-input-layout:start -->
 

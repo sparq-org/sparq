@@ -30,6 +30,8 @@ The package requires the pinned version and digest for the native platform.
 It copies binaries and witness material into private temporary directories and
 removes them afterwards. It does not send credentials to a proving service.
 `backend: 'wasm'` is opt-in and refuses entries outside its supported catalogue.
+The smallest authenticated profile admits it; resident memory may exceed the
+consumer budget even when the linear heap fits. Native remains the default.
 
 `issuerKeygen()` uses system randomness and accepts no seed. Keep its opaque
 `secretKeyHex` private. `testIssuerKeygen(seedHex)` is deterministic and test-only.

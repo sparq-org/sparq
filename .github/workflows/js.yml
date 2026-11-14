@@ -39,6 +39,8 @@ on:
       - "crates/sparq-wasm/**"
       - "crates/sparq-*-wasm/**"
       - "crates/sparq-lws-core/**"
+      - "crates/sparq-zk-query/**"
+      - "crates/sparq-merkle-suite/**"
       - "crates/sparq-engine/Cargo.toml"
       - "crates/sparq-forms/Cargo.toml"
       - "crates/sparq-shacl/Cargo.toml"

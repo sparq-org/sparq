@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { createFileManager, compile_program } from '@noir-lang/noir_wasm';
 import { createRequire } from 'node:module';
 import { UltraHonkBackend } from '@aztec/bb.js';
-import { createBackend, proofOptions, sha256 } from '../internal/runtime.mjs';
+import { createBackend, proofOptions, sha256, srsPointsForKey } from '../internal/runtime.mjs';
 const host = createRequire(import.meta.url)('../wasm/sparq_zk_query_wasm.cjs');
 export function equalArtifacts(wasm, native) {
   assert.deepEqual(wasm.abi, native.abi, 'compiler ABI differs');
@@ -58,7 +58,7 @@ export async function agreement({ root, directory, nargo, bb }) {
     equalArtifacts(program, native);
     execFileSync(bb, ['write_vk', '-b', artifactPath, '-o', work, '-t', 'noir-recursive', '--crs_path', new URL('../assets/crs/', import.meta.url).pathname], { stdio: 'pipe', env: { ...process.env, HARDWARE_CONCURRENCY: '1' } });
     const pins = JSON.parse(readFileSync(new URL('../assets/crs.pins.json', import.meta.url)));
-    const api = await createBackend(new URL('../assets/crs/', import.meta.url), pins);
+    const api = await createBackend(new URL('../assets/crs/', import.meta.url), pins, 'prove', srsPointsForKey(readFileSync(join(work, 'vk')), pins));
     try { equalKeys(await new UltraHonkBackend(program.bytecode, api).getVerificationKey(proofOptions), readFileSync(join(work, 'vk'))); } finally { api.destroy(); }
     const result = { status: 'agreement', sourceHash }; writeFileSync(resultPath, JSON.stringify(result)); programs.set(generated.name, result); results.push({ case: claim.id, ...result });
   }

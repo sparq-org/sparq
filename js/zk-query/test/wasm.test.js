@@ -16,7 +16,8 @@ test('WebAssembly backend proves a Rust-generated operator witness and verifies 
   const api = await createBackend(crsDirectory, crsPins, 'verify');
   try { assert.equal(verifyProofSync(api, { ...result, verificationKey: key }), true); }
   finally { api.destroy(); }
-  await assert.rejects(prove(artifact, generated.witnessInputs, { ...options, expectedKey: Buffer.from([0]) }), /key mismatch/);
+  const wrongKey = Buffer.from(key); wrongKey[wrongKey.length - 1] ^= 1;
+  await assert.rejects(prove(artifact, generated.witnessInputs, { ...options, expectedKey: wrongKey }), /key mismatch/);
 });
 
 test('reported WebAssembly allocation failures become named refusals', async () => {
