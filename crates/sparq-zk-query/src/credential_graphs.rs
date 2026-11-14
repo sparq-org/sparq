@@ -1,8 +1,8 @@
 //! Credential graph profile and lane E's issuer-quad stand-in.
 //!
 //! Credentials are ordered by authenticated signed-message bytes, with canonical
-//! document and configuration bytes as tie breakers. Graph labels use a fixed
-//! domain-separated blank-node encoding and that canonical credential rank as their scope. Identical
+//! document and configuration bytes as tie breakers. Graph labels use the suite
+//! request-scoped constructor and that credential rank as their scope. Identical
 //! complete credentials still occupy distinct graphs; their tie order is immaterial.
 //! The signed RDF vc:issuer field supplies the issuer IRI. A verifier-owned
 //! public registry binds it to the signing key verified by the suite. Lane E
@@ -15,17 +15,22 @@ use crate::{
     plan_closed::ClosedOperator,
     Error,
 };
-pub const VERIFIED_ISSUER: &str = "urn:sparq:zk:verified-issuer-placeholder#verifiedIssuer";
-pub const ISSUER: &str = "http://www.w3.org/2018/credentials#issuer";
-pub fn canonical_credentials(mut credentials: Vec<Credential>) -> Vec<Credential> {
-    credentials.sort_by_key(|c| {
-        (
-            sparq_merkle_suite::poseidon::field_bytes(c.signed_message()),
-            c.credential.document.clone(),
-            c.credential.proof_config.clone(),
-        )
+pub const VERIFIED_ISSUER: &str = crate::credential::VERIFIED_ISSUER;
+pub const ISSUER: &str = "https://www.w3.org/2018/credentials#issuer";
+pub fn canonical_credentials(credentials: Vec<Credential>) -> Result<Vec<Credential>, Error> {
+    let mut keyed = credentials
+        .into_iter()
+        .map(|c| {
+            let message = sparq_merkle_suite::poseidon::field_bytes(c.signed_message()?);
+            Ok((message, c))
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
+    keyed.sort_by(|(a, x), (b, y)| {
+        a.cmp(b)
+            .then_with(|| x.credential.document.cmp(&y.credential.document))
+            .then_with(|| x.credential.proof_config.cmp(&y.credential.proof_config))
     });
-    credentials
+    Ok(keyed.into_iter().map(|(_, c)| c).collect())
 }
 pub fn lower(query: &str, bounds: Bounds) -> Result<Plan, Error> {
     let mut plan = crate::lower::lower(query, bounds)?;
@@ -43,7 +48,7 @@ pub fn lower(query: &str, bounds: Bounds) -> Result<Plan, Error> {
         operator: Operator::Closed(ClosedOperator::CredentialProfile {
             lexical_capacity: 64,
             literal_capacity: 64,
-            literal_types: 7,
+            literal_types: 31,
             issuers: vec![],
         }),
         output: crate::plan::Schema {
@@ -54,11 +59,11 @@ pub fn lower(query: &str, bounds: Bounds) -> Result<Plan, Error> {
     });
     Ok(plan)
 }
-/// Pin integer (1), date/boolean (6), or all three (7) credential literal families.
+/// Pin integer (1), date/boolean (6), all three (7), or add decimal/string (31) families.
 /// The restriction covers every credential row and is included in the plan hash.
 /// The integer/date-boolean profiles bound literal lexical values at sixteen bytes.
 pub fn with_literal_types(mut plan: Plan, types: u8) -> Result<Plan, Error> {
-    if !matches!(types, 1 | 6 | 7) {
+    if !matches!(types, 1 | 6 | 7 | 31) {
         return Err(Error::Unsupported(
             "closed credential literal profile".into(),
         ));
@@ -80,11 +85,14 @@ pub fn with_literal_types(mut plan: Plan, types: u8) -> Result<Plan, Error> {
         })
         .ok_or_else(|| Error::Invalid("credential graph profile".into()))?;
     *profile.0 = types;
-    *profile.1 = if types == 7 { 64 } else { 16 };
+    *profile.1 = match types {
+        7 | 31 => 64,
+        _ => 16,
+    };
     Ok(plan)
 }
 pub(crate) fn check_literal_types(types: u8, credentials: &[CredentialCells]) -> Result<(), Error> {
-    if !matches!(types, 1 | 6 | 7) {
+    if !matches!(types, 1 | 6 | 7 | 31) {
         return Err(Error::Unsupported(
             "closed credential literal profile".into(),
         ));
@@ -94,6 +102,8 @@ pub(crate) fn check_literal_types(types: u8, credentials: &[CredentialCells]) ->
         (1, "integer", "0"),
         (2, "boolean", "false"),
         (4, "date", "2000-01-01"),
+        (8, "decimal", "0.0"),
+        (16, "string", ""),
     ] {
         if types & flag != 0 {
             let c = SuiteEncoder.encode(
@@ -120,18 +130,7 @@ pub(crate) fn check_literal_types(types: u8, credentials: &[CredentialCells]) ->
     Ok(())
 }
 pub fn name(index: u32) -> Result<Cell, Error> {
-    let enc = sparq_zk::poseidon2::hash(&[
-        sparq_merkle_suite::Fr::from(u64::from_be_bytes(*b"NQ/GRAPH")),
-        sparq_merkle_suite::Fr::from(0u64),
-        sparq_merkle_suite::Fr::from(0u64),
-    ]);
-    Ok(Cell {
-        bound: true,
-        kind: 2,
-        enc: sparq_merkle_suite::poseidon::field_bytes(enc),
-        scope: index + 1,
-        ..Cell::default()
-    })
+    crate::credential::credential_graph([0; 32], index)
 }
 pub(crate) fn is_profile(plan: &Plan) -> bool {
     plan.nodes.iter().any(|n| {
@@ -141,6 +140,7 @@ pub(crate) fn is_profile(plan: &Plan) -> bool {
         )
     })
 }
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn scan(
     pattern: &[Slot; 3],
     vars: &[Var],
@@ -149,6 +149,7 @@ pub(crate) fn scan(
     selection: (Option<u32>, bool),
     credentials: &[CredentialCells],
     params: &[Option<Cell>],
+    names: &[Cell],
 ) -> Result<Vec<Row>, Error> {
     let (credential, include_issuers) = selection;
     if !ctxvars.is_empty() && context.is_none() {
@@ -175,7 +176,11 @@ pub(crate) fn scan(
                 }
             }
             if let Some(issuer) = named {
-                source.push([name(i as u32)?, predicate, issuer]);
+                source.push([
+                    names.get(i).copied().unwrap_or(name(i as u32)?),
+                    predicate,
+                    issuer,
+                ]);
             }
         }
     }
@@ -224,6 +229,11 @@ pub fn cells(credentials: &[Credential]) -> Result<Vec<CredentialCells>, Error> 
             }
             let mut quads = vec![];
             for q in c.quads()? {
+                if q.predicate.as_str() == VERIFIED_ISSUER {
+                    return Err(Error::Excluded(
+                        "credential verifiedIssuer assertion".into(),
+                    ));
+                }
                 if q.graph_name != oxrdf::GraphName::DefaultGraph {
                     return Err(Error::Unsupported("credential named graph".into()));
                 }
@@ -243,6 +253,8 @@ pub fn cells(credentials: &[Credential]) -> Result<Vec<CredentialCells>, Error> 
                                 "http://www.w3.org/2001/XMLSchema#integer"
                                     | "http://www.w3.org/2001/XMLSchema#date"
                                     | "http://www.w3.org/2001/XMLSchema#boolean"
+                                    | "http://www.w3.org/2001/XMLSchema#decimal"
+                                    | "http://www.w3.org/2001/XMLSchema#string"
                             ) {
                                 return Err(Error::Unsupported(
                                     "closed credential literal datatype".into(),
@@ -328,6 +340,16 @@ pub fn key_name(key: &sparq_zk::sig::PublicKey) -> Result<oxrdf::NamedNode, Erro
     )))
 }
 pub(crate) fn check_issuer_registry(plan: &Plan, credentials: &[Credential]) -> Result<(), Error> {
+    let messages = credentials
+        .iter()
+        .map(|c| {
+            c.signed_message()
+                .map(sparq_merkle_suite::poseidon::field_bytes)
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
+    if messages.windows(2).any(|pair| pair[0] > pair[1]) {
+        return Err(Error::Invalid("canonical credential order".into()));
+    }
     if let Some(types) = plan.nodes.iter().find_map(|n| match n.operator {
         Operator::Closed(ClosedOperator::CredentialProfile { literal_types, .. }) => {
             Some(literal_types)
@@ -392,10 +414,69 @@ pub(crate) fn check_issuer_registry(plan: &Plan, credentials: &[Credential]) -> 
     }
     Ok(())
 }
+/// Preserve complete credential boundaries for the closed operator interpreter.
+/// Supplied cells are an operator fixture; this entry point authenticates nothing.
+pub fn evaluate_cells(
+    plan: &Plan,
+    credentials: &[CredentialCells],
+    encoder: &impl EncodeTerm,
+) -> Result<crate::interp::Trace, Error> {
+    evaluate_cells_for_request(plan, credentials, encoder, [0; 32])
+}
+/// Supplied-cell fixture with graph names derived from an explicit request.
+pub fn evaluate_cells_for_request(
+    plan: &Plan,
+    credentials: &[CredentialCells],
+    encoder: &impl EncodeTerm,
+    digest: [u8; 32],
+) -> Result<crate::interp::Trace, Error> {
+    let mut quads = vec![];
+    let mut counts = vec![];
+    for (i, c) in credentials.iter().enumerate() {
+        counts.push(c.quads.len());
+        let graph = crate::credential::credential_graph(digest, i as u32)?;
+        for q in &c.quads {
+            if q[3].bound {
+                return Err(Error::Unsupported("credential named graph".into()));
+            }
+            if q[..3]
+                .iter()
+                .any(|c| c.kind == 2 && c.scope != i as u32 + 1)
+            {
+                return Err(Error::Invalid("credential blank-node scope".into()));
+            }
+            quads.push([q[0], q[1], q[2], graph]);
+        }
+    }
+    crate::interp::evaluate_dataset(plan, &crate::interp::Dataset { quads, counts }, encoder)
+}
 /// Evaluate authenticated credentials under the verifier-owned graph policy.
 pub fn evaluate(plan: &Plan, credentials: &[Credential]) -> Result<crate::interp::Trace, Error> {
     check_issuer_registry(plan, credentials)?;
-    crate::interp::evaluate(plan, &cells(credentials)?, &SuiteEncoder)
+    evaluate_for_request(plan, credentials, [0; 32])
+}
+/// Evaluate with presentation-local graph identities bound to this request.
+pub fn evaluate_for_request(
+    plan: &Plan,
+    credentials: &[Credential],
+    digest: [u8; 32],
+) -> Result<crate::interp::Trace, Error> {
+    check_issuer_registry(plan, credentials)?;
+    let cells = cells(credentials)?;
+    let mut quads = vec![];
+    let mut counts = vec![];
+    for (i, c) in cells.iter().enumerate() {
+        let graph = crate::credential::credential_graph(digest, i as u32)?;
+        counts.push(c.quads.len());
+        for q in &c.quads {
+            quads.push([q[0], q[1], q[2], graph]);
+        }
+    }
+    crate::interp::evaluate_dataset(
+        plan,
+        &crate::interp::Dataset { quads, counts },
+        &SuiteEncoder,
+    )
 }
 #[cfg(test)]
 mod tests {
@@ -404,7 +485,7 @@ mod tests {
     fn check_issuer_registry_rejects_identity_mismatch() {
         let key = sparq_zk::sig::SecretKey::from_seed(7);
         let source =
-            "<urn:credential> <http://www.w3.org/2018/credentials#issuer> <urn:issuer> .\n";
+            "<urn:credential> <https://www.w3.org/2018/credentials#issuer> <urn:issuer> .\n";
         let config =
             "_:proof <https://w3id.org/security#cryptosuite> \"schnorr-poseidon2-merkle-2026\" .\n";
         let credential = sparq_merkle_suite::poseidon::issue(

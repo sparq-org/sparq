@@ -210,7 +210,8 @@ fn capacity_precision_and_named_dependency_refusals() {
         group(&input, &errors(&input, 1), &s, &codec).unwrap_err(),
         Error::Unsupported("GROUP_CONCAT lexical opening required".into())
     );
-    for datatype in ["decimal", "double"] {
+    {
+        let datatype = "double";
         let c = Encoder
             .encode(
                 &oxrdf::Literal::new_typed_literal(
@@ -500,7 +501,7 @@ fn recommendation_error_operands_record_engine_divergences() {
 }
 
 #[test]
-fn full_integer_range_and_large_cancellation() {
+fn exact_numeric_limit_refuses_large_inputs_even_with_cancellation() {
     let n = "883423532389192164791648750371459257913741948437809479";
     let term = |lexical: &str| {
         Encoder
@@ -528,15 +529,15 @@ fn full_integer_range_and_large_cancellation() {
         vec![iri("urn:a"), high],
         vec![iri("urn:a"), low],
     ]);
-    assert_eq!(
-        group(&input, &errors(&input, 1), &s, &codec).unwrap().rows,
-        vec![vec![high]]
-    );
+    assert!(matches!(
+        group(&input, &errors(&input, 1), &s, &codec),
+        Err(Error::Capacity(_))
+    ));
     let input = canonical(vec![vec![iri("urn:a"), low]]);
-    assert_eq!(
-        group(&input, &errors(&input, 1), &s, &codec).unwrap().rows,
-        vec![vec![low]]
-    );
+    assert!(matches!(
+        group(&input, &errors(&input, 1), &s, &codec),
+        Err(Error::Capacity(_))
+    ));
 }
 
 #[test]
@@ -566,7 +567,7 @@ fn grouping_without_aggregates_and_empty_schema_validation() {
 }
 
 #[test]
-fn having_comparisons_errors_and_nonnumeric_refusal() {
+fn having_comparisons_errors_and_nonnumeric_filtering() {
     let input = data();
     let codec = IntegerCodec::new(Encoder).unwrap();
     for (comparison, count) in [
@@ -601,8 +602,47 @@ fn having_comparisons_errors_and_nonnumeric_refusal() {
         .rows
         .is_empty());
     s.having.as_mut().unwrap().rhs = iri("urn:a");
+    assert!(group(&input, &errors(&input, 1), &s, &codec)
+        .unwrap()
+        .rows
+        .is_empty());
+}
+
+#[test]
+fn decimal_aggregate_capacity_is_independent_of_expression_errors() {
+    let codec = IntegerCodec::new(Encoder).unwrap();
+    let term = Encoder
+        .encode(
+            &oxrdf::Literal::new_typed_literal(
+                "2596148429267413.814265248164610048",
+                oxrdf::NamedNode::new_unchecked("http://www.w3.org/2001/XMLSchema#decimal"),
+            )
+            .into(),
+        )
+        .unwrap();
+    let input = canonical(vec![vec![iri("urn:a"), term], vec![iri("urn:a"), term]]);
+    let mut s = spec(AggregateKind::Sum, false);
+    s.columns.clear();
+    assert!(matches!(
+        group(&input, &errors(&input, 1), &s, &codec),
+        Err(Error::Capacity(_))
+    ));
+}
+
+#[test]
+fn admitted_integer_cancellation_remains_exact() {
+    let high = int(281474976710655);
+    let low = int(-281474976710655);
+    let input = canonical(vec![
+        vec![iri("urn:a"), high],
+        vec![iri("urn:a"), high],
+        vec![iri("urn:a"), low],
+    ]);
+    let codec = IntegerCodec::new(Encoder).unwrap();
+    let mut s = spec(AggregateKind::Sum, false);
+    s.columns.clear();
     assert_eq!(
-        group(&input, &errors(&input, 1), &s, &codec).unwrap_err(),
-        Error::Unsupported("HAVING numeric comparison required".into())
+        group(&input, &errors(&input, 1), &s, &codec).unwrap().rows,
+        vec![vec![high]]
     );
 }

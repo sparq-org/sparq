@@ -1,5 +1,5 @@
-//! STAND-IN: lane D owns replacement of this typed integer expression seam.
-//! Values use signed integer keys; errors are explicit, overflow is a refusal.
+//! Host mirror of the shared exact expression bucket over checked suite keys.
+//! Values use signed scaled magnitudes; errors and capacity refusals remain distinct.
 use crate::{
     interp::{Cell, Word},
     plan::{Compare, Slot, Var},
@@ -28,12 +28,24 @@ fn offset() -> Fr {
         .parse()
         .unwrap()
 }
-fn checked(n: Fr) -> Result<Fr, Error> {
-    let key = field_to_be_bytes_32(&(n * Fr::from(1_000_000_000_000_000_000u64) + offset()));
-    if key[..2] != [0; 2] {
-        return Err(Error::Capacity("lane D integer arithmetic range".into()));
+const SCALE: i128 = 1_000_000_000_000_000_000;
+const LIMIT: i128 = 1i128 << 112;
+fn checked(n: i128) -> Result<i128, Error> {
+    if n.unsigned_abs() >= LIMIT as u128 {
+        Err(Error::Capacity("numeric capacity".into()))
+    } else {
+        Ok(n)
     }
-    Ok(n)
+}
+fn signed(n: Fr, negative: bool) -> Result<i128, Error> {
+    let bytes = field_to_be_bytes_32(&n);
+    if bytes[..18] != [0; 18] {
+        return Err(Error::Capacity(
+            "numeric capacity or exact precision".into(),
+        ));
+    }
+    let magnitude = u128::from_be_bytes(bytes[16..].try_into().unwrap()) as i128;
+    checked(if negative { -magnitude } else { magnitude })
 }
 impl Integer {
     fn evaluate(
@@ -41,7 +53,7 @@ impl Integer {
         vars: &[Var],
         row: &[Cell],
         params: &[Option<Cell>],
-    ) -> Result<(Fr, bool), Error> {
+    ) -> Result<(i128, bool), Error> {
         Ok(match self {
             Self::Term(s) => {
                 let c = match s {
@@ -52,33 +64,29 @@ impl Integer {
                     Slot::Parameter(p) => params[*p as usize].expect("term"),
                 };
                 if !c.bound {
-                    return Ok((Fr::from(0), true));
+                    return Ok((0, true));
+                }
+                if c.key_class == 127 {
+                    return Err(Error::Capacity("numeric capacity".into()));
                 }
                 let types =
                     crate::interp_closed_group::IntegerCodec::new(crate::credential::SuiteEncoder)?;
                 use crate::interp_closed_group::NumericCodec;
-                if c.key_class == 127 {
-                    return Err(Error::Capacity("lane D integer arithmetic range".into()));
-                }
-                if c.kind != 3 || c.key_class != 1 || c.dt != types.types().integer_dt {
-                    return Err(Error::Unsupported(
-                        "lane D integer arithmetic operands".into(),
-                    ));
+                if c.kind != 3
+                    || c.key_class != 1
+                    || ![types.types().integer_dt, types.types().decimal_dt].contains(&c.dt)
+                {
+                    return Ok((0, true));
                 }
                 let mut key = c.key;
                 if key[0] != 0 || key[1] != 1 {
-                    return Err(Error::Invalid("integer key class".into()));
+                    return Err(Error::Invalid("numeric key class".into()));
                 }
                 key[1] = 0;
-                let scaled = field(key) - offset();
-                let n = scaled / Fr::from(1_000_000_000_000_000_000u64);
-                let magnitude = if key < field_to_be_bytes_32(&offset()) {
-                    -n
-                } else {
-                    n
-                };
-                let bytes = field_to_be_bytes_32(&magnitude);
-                if bytes[..9] != [0; 9] || bytes[9] >= 16 {
+                let negative = key < field_to_be_bytes_32(&offset());
+                let n = field(key) - offset();
+                let n = signed(if negative { -n } else { n }, negative)?;
+                if c.dt == types.types().integer_dt && n % SCALE != 0 {
                     return Err(Error::Invalid("fractional integer key".into()));
                 }
                 (n, false)
@@ -87,36 +95,18 @@ impl Integer {
                 let (a, ae) = a.evaluate(vars, row, params)?;
                 let (b, be) = b.evaluate(vars, row, params)?;
                 if ae || be {
-                    (Fr::from(0), true)
+                    (0, true)
                 } else {
-                    if matches!(self, Self::Multiply(..)) {
-                        let negative = |n: Fr| {
-                            field_to_be_bytes_32(
-                                &(n * Fr::from(1_000_000_000_000_000_000u64) + offset()),
-                            ) < field_to_be_bytes_32(&offset())
-                        };
-                        let am = if negative(a) { -a } else { a };
-                        let bm = if negative(b) { -b } else { b };
-                        if field_to_be_bytes_32(&am)[..17] != [0; 17]
-                            || field_to_be_bytes_32(&bm)[..17] != [0; 17]
-                        {
-                            return Err(Error::Capacity(
-                                "lane D multiplication operand range".into(),
-                            ));
+                    let value = match self {
+                        Self::Add(..) => checked(a + b)?,
+                        Self::Subtract(..) => checked(a - b)?,
+                        _ => {
+                            let magnitude = Fr::from(a.unsigned_abs()) * Fr::from(b.unsigned_abs())
+                                / Fr::from(SCALE as u128);
+                            signed(magnitude, (a < 0) ^ (b < 0))?
                         }
-                        let magnitude = field_to_be_bytes_32(&(am * bm));
-                        if magnitude[..9] != [0; 9] || magnitude[9] >= 16 {
-                            return Err(Error::Capacity(
-                                "lane D multiplication result range".into(),
-                            ));
-                        }
-                    }
-                    let n = match self {
-                        Self::Add(..) => a + b,
-                        Self::Subtract(..) => a - b,
-                        _ => a * b,
                     };
-                    (checked(n)?, false)
+                    (value, false)
                 }
             }
         })
@@ -163,9 +153,6 @@ impl Comparison {
     ) -> Result<(bool, bool), Error> {
         let (a, ae) = self.left.evaluate(vars, row, params)?;
         let (b, be) = self.right.evaluate(vars, row, params)?;
-        let key =
-            |n: Fr| field_to_be_bytes_32(&(n * Fr::from(1_000_000_000_000_000_000u64) + offset()));
-        let (a, b) = (key(a), key(b));
         Ok((
             match self.op {
                 Compare::Equal => a == b,

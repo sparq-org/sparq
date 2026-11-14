@@ -1,7 +1,7 @@
 //! Bridge between suite-prefixed keys and the complete grouping relation.
 use crate::table::{TermCell,Table,check_table};
 use crate::ops_closed_group::{Aggregate, NumericTypes, Having};
-use crate::ops_closed_numeric_standin::{PREFIX,encode};
+use crate::ops_closed_numeric::{PREFIX,encode};
 use crate::suite_constants::{DT_INTEGER, DT_DECIMAL, LANGUAGE_DOMAIN};
 use std::collections::bounded_vec::BoundedVec;
 fn normalize(mut c: TermCell) -> TermCell {

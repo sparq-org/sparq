@@ -60,6 +60,8 @@ fn opening(term: Option<&oxrdf::Term>) -> Result<serde_json::Value, Error> {
         "http://www.w3.org/2001/XMLSchema#integer" => 1,
         "http://www.w3.org/2001/XMLSchema#boolean" => 2,
         "http://www.w3.org/2001/XMLSchema#date" => 3,
+        "http://www.w3.org/2001/XMLSchema#decimal" => 4,
+        "http://www.w3.org/2001/XMLSchema#string" => 5,
         _ => {
             return Err(Error::Unsupported(
                 "closed credential literal datatype".into(),
@@ -73,6 +75,44 @@ fn opening(term: Option<&oxrdf::Term>) -> Result<serde_json::Value, Error> {
         serde_json::json!({"bound":true,"kind":kind,"lexical":pad(text,64)?,"lexical_len":text.len(),"datatype_tag":datatype_tag,"key":key.as_slice()}),
     )
 }
+fn metadata_opening(
+    term: Option<&oxrdf::Term>,
+    capacity: usize,
+) -> Result<serde_json::Value, Error> {
+    let (kind, key) = match term {
+        Some(oxrdf::Term::NamedNode(_)) => (1, [0; 31]),
+        Some(oxrdf::Term::Literal(l)) => (3, sparq_merkle_suite::comparison_key(l)),
+        None => (0, [0; 31]),
+        _ => return Err(Error::Invalid("suite metadata term".into())),
+    };
+    let mut v = serde_json::json!({"kind":kind,"key":key.as_slice()});
+    let text = match term {
+        Some(oxrdf::Term::NamedNode(n)) => n.as_str(),
+        Some(oxrdf::Term::Literal(l)) => l.value(),
+        None => "",
+        _ => return Err(Error::Invalid("suite metadata term".into())),
+    };
+    if text.len() > capacity {
+        return Err(Error::Capacity("suite metadata opening".into()));
+    }
+    let mut lexical = text.as_bytes().to_vec();
+    lexical.resize(capacity, 0);
+    let dt = match term {
+        Some(oxrdf::Term::Literal(l)) => l.datatype().as_str(),
+        _ => "",
+    };
+    let mut datatype = dt.as_bytes().to_vec();
+    datatype.resize(128, 0);
+    v.as_object_mut().unwrap().remove("datatype_tag");
+    v["lexical_len"] = serde_json::json!(text.len());
+    v["lexical"] = serde_json::json!(lexical);
+    v["datatype"] = serde_json::json!(datatype);
+    v["datatype_len"] = serde_json::json!(dt.len());
+    v["language"] = serde_json::json!(vec![0; 64]);
+    v["language_len"] = serde_json::json!(0);
+    v["bound"] = serde_json::json!(term.is_some());
+    Ok(v)
+}
 /// Produce the ordinary authenticated public layout and complete private openings.
 pub fn prover_toml(
     plan: &Plan,
@@ -84,7 +124,7 @@ pub fn prover_toml(
 ) -> Result<String, Error> {
     crate::credential_graphs::check_issuer_registry(plan, credentials)?;
     let cells = crate::credential_graphs::cells(credentials)?;
-    let input_commitment = crate::credential::dataset_commitment(credentials, salt);
+    let input_commitment = crate::credential::dataset_commitment(credentials, salt)?;
     let statement = crate::statement::Statement {
         request_digest: digest,
         input_commitment,
@@ -118,9 +158,12 @@ pub fn prover_toml(
             }
             let config: [u8; 32] =
                 Sha256::digest(credential.credential.proof_config.as_bytes()).into();
+            let metadata = credential.metadata()?;
+            let created = metadata_opening(metadata.created.as_ref(), 32)?;
+            let method = metadata_opening(metadata.verification_method.as_ref(), 128)?;
             let w = sig::in_circuit_witness(
                 &credential.issuer,
-                &credential.signed_message(),
+                &credential.signed_message()?,
                 &credential.credential.signature,
             )
             .ok_or_else(|| Error::Invalid("suite signature witness".into()))?;
@@ -133,9 +176,9 @@ pub fn prover_toml(
                     })
                 })
                 .collect::<Vec<_>>();
-            proofs.push(serde_json::json!({"salt":field_to_hex(&credential.credential.salt),"salts":salts,"config":[u128::from_be_bytes(config[..16].try_into().unwrap()).to_string(),u128::from_be_bytes(config[16..].try_into().unwrap()).to_string()],"pk":{"x":field_to_hex(&w.pk_x),"y":field_to_hex(&w.pk_y)},"r":{"x":field_to_hex(&w.r_x),"y":field_to_hex(&w.r_y)},"s":field_to_hex(&w.s),"e":field_to_hex(&w.e),"e_k":field_to_hex(&w.e_k),"issuer_index":credential.issuer_index,"issuer_siblings":credential.issuer_siblings.iter().map(field_to_hex).collect::<Vec<_>>()}));
+            proofs.push(serde_json::json!({"created":created,"method":method,"salt":field_to_hex(&credential.credential.salt),"salts":salts,"config":[u128::from_be_bytes(config[..16].try_into().unwrap()).to_string(),u128::from_be_bytes(config[16..].try_into().unwrap()).to_string()],"pk":{"x":field_to_hex(&w.pk_x),"y":field_to_hex(&w.pk_y)},"r":{"x":field_to_hex(&w.r_x),"y":field_to_hex(&w.r_y)},"s":field_to_hex(&w.s),"e":field_to_hex(&w.e),"e_k":field_to_hex(&w.e_k),"issuer_index":credential.issuer_index,"issuer_siblings":credential.issuer_siblings.iter().map(field_to_hex).collect::<Vec<_>>()}));
         } else {
-            proofs.push(serde_json::json!({"salt":"0","salts":vec!["0";n as usize],"config":["0","0"],"pk":{"x":"0","y":"0"},"r":{"x":"0","y":"0"},"s":"0","e":"0","e_k":"0","issuer_index":0,"issuer_siblings":vec!["0";4]}));
+            proofs.push(serde_json::json!({"created":metadata_opening(None,32)?,"method":metadata_opening(None,128)?,"salt":"0","salts":vec!["0";n as usize],"config":["0","0"],"pk":{"x":"0","y":"0"},"r":{"x":"0","y":"0"},"s":"0","e":"0","e_k":"0","issuer_index":0,"issuer_siblings":vec!["0";4]}));
         }
         let mut padding = opening(None)?;
         padding["bound"] = serde_json::Value::Bool(false);
@@ -167,6 +210,7 @@ pub fn prover_toml(
         }
     }
     writeln!(out, "issuer_root = {}", word(issuer_root)).unwrap();
+    out.push_str("issuer_depth = 4\nholder_required = false\nholder_issuers_present = false\nholder_issuer_count = 0\nholder_issuers = [\"0\",\"0\",\"0\",\"0\"]\nstatus_required = false\nallow_missing_status = false\nsnapshot_root = \"0\"\nsnapshot_depth = 0\nvalidity_required = false\nnow = 0\nfreshness_required = false\nearliest_created = 0\n");
     for (c, p) in proofs.iter().enumerate() {
         writeln!(out, "credential_proof_{c} = {}", toml(p)).unwrap();
     }

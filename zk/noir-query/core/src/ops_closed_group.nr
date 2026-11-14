@@ -1,6 +1,6 @@
 //! Standalone research grouping over the complete input; not externally audited.
 //! Numeric encoding is a constrained, compile-time callback supplied by the suite.
-//! Expression errors are a separate lane, to be wired from expression gadgets.
+//! Operand errors are explicit; numeric values use the shared expression gadgets.
 
 use crate::table::{TermCell, Table, unbound, same_term, same_row,
     row_less, check_table, check_cell, equal_row};
@@ -14,7 +14,7 @@ global SCALE: Field = 1000000000000000000;
 /// SAMPLE=6, GROUP_CONCAT=7. COUNT(*) uses column V as its sentinel.
 pub struct Aggregate { pub kind: u8, pub column: u32, pub distinct: bool }
 pub struct NumericTypes { pub integer_dt: Field, pub decimal_dt: Field }
-/// Local numeric-comparison HAVING seam. General expressions wire from lane D.
+/// Standalone numeric HAVING adapter; generated plans use expression FILTER.
 pub struct Having { pub enabled: bool, pub column: u32, pub comparison: u8, pub rhs: TermCell }
 
 fn same_group<let V: u32, let G: u32>(a: [TermCell; V], b: [TermCell; V], columns: [u32; G]) -> bool {
@@ -23,16 +23,10 @@ fn same_group<let V: u32, let G: u32>(a: [TermCell; V], b: [TermCell; V], column
     same
 }
 
-fn integer_key(c: TermCell, types: NumericTypes) -> Field {
-    assert((c.kind == 3) & (c.key_class == 1) & (c.dt == types.integer_dt), "integer aggregate arithmetic required");
-    c.key.assert_max_bit_size::<240>();
-    let magnitude = if c.key.lt(OFFSET) { OFFSET - c.key } else { c.key - OFFSET };
-    // A range-bounded field quotient can exist only for an exact integer.
-    let quotient = magnitude / SCALE;
-    quotient.assert_max_bit_size::<180>();
-    c.key - OFFSET
+fn numeric_key(c:TermCell,types:NumericTypes)->(crate::expr_core::Lane<crate::expr_core::Numeric>,bool){
+    assert((c.kind==3)&(c.key_class==1)&((c.dt==types.integer_dt)|(c.dt==types.decimal_dt)),"exact aggregate arithmetic required");
+    crate::ops_closed_numeric::read(c.key,c.dt==types.decimal_dt)
 }
-
 fn numeric<Env>(key: Field, decimal: bool, types: NumericTypes, encode: fn[Env](Field, bool) -> TermCell) -> TermCell {
     key.assert_max_bit_size::<240>();
     let c = encode(key, decimal);
@@ -44,14 +38,14 @@ fn numeric<Env>(key: Field, decimal: bool, types: NumericTypes, encode: fn[Env](
 }
 
 struct Prepared<let A: u32> {
-    values: [TermCell; A], selected: [bool; A], numbers: [Field; A],
+    values: [TermCell; A], selected: [bool; A], numbers: [(crate::expr_core::Lane<crate::expr_core::Numeric>,bool); A],
     errors: [bool; A], extremum: [bool; A],
 }
 
 fn prepare<let A: u32, let V: u32, let G: u32>(
     input: Table<A, V>, columns: [u32; G], errors: [bool; A], spec: Aggregate, types: NumericTypes,
 ) -> Prepared<A> {
-    let mut data = Prepared { values: [unbound(); A], selected: [false; A], numbers: [0; A],
+    let mut data = Prepared { values: [unbound(); A], selected: [false; A], numbers: [(crate::expr_core::lane(crate::expr_core::zero_numeric()),false); A],
         errors: [false; A], extremum: [false; A] };
     for i in 0..A { for v in 0..V { if v == spec.column { data.values[i] = input.rows[i][v]; } } }
     for i in 0..A {
@@ -69,7 +63,7 @@ fn prepare<let A: u32, let V: u32, let G: u32>(
         if ((spec.kind == 2) | (spec.kind == 5)) & present {
             let numeric_type = (data.values[i].kind == 3) & ((data.values[i].key_class == 1)
                 | (data.values[i].key_class == 2) | (data.values[i].key_class == 127));
-            if numeric_type { data.numbers[i] = integer_key(data.values[i], types); }
+            if numeric_type { data.numbers[i] = numeric_key(data.values[i], types); }
             else { data.errors[i] = true; }
         }
         if ((spec.kind == 3) | (spec.kind == 4)) & present { check_order_cell(data.values[i]); }
@@ -81,7 +75,12 @@ fn prepare<let A: u32, let V: u32, let G: u32>(
         if ((spec.kind == 3) | (spec.kind == 4)) & present {
             for j in 0..A {
                 if data.selected[j] & data.values[j].bound & !errors[j] & same_group(input.rows[i], input.rows[j], columns) {
-                    let (lt, _, gt) = term_relation(data.values[j], data.values[i]);
+                    let x=data.values[j];let y=data.values[i];
+                    let (lt,gt)=if (x.kind==3)&(y.kind==3)&(x.key_class==1)&(y.key_class==1){
+                        let a=numeric_key(x,types);let b=numeric_key(y,types);
+                        let (l,_)=crate::ops_closed_numeric::compare(a,b,1);let (g,_)=crate::ops_closed_numeric::compare(a,b,3);
+                        assert(!l.capacity & !g.capacity,"aggregate numeric capacity");(l.value,g.value)
+                    }else{let (lt,_,gt)=term_relation(x,y);(lt,gt)};
                     blocked = blocked | if spec.kind == 3 { lt } else { gt };
                 }
             }
@@ -95,25 +94,37 @@ fn aggregate<Env, let A: u32>(
     members: [bool; A], data: Prepared<A>, spec: Aggregate, types: NumericTypes,
     encode: fn[Env](Field, bool) -> TermCell,
 ) -> TermCell {
-    let mut count: u32 = 0; let mut sum: Field = 0; let mut error = false;
+    let mut count: u32 = 0; let mut sum=(crate::expr_core::lane(crate::expr_core::zero_numeric()),false);let mut decimal_input=false; let mut error = false;
     let mut chosen = unbound(); let mut found = false;
     for i in 0..A {
         let selected = members[i] & data.selected[i];
         // COUNT counts bound operands even when SUM has a numeric type error.
         let present = selected & data.values[i].bound;
         count = count + (if spec.kind == 0 { selected } else { present }) as u32;
-        if members[i] { sum = sum + data.numbers[i]; error = error | data.errors[i]; }
+        if members[i] {
+            if data.selected[i] & data.values[i].bound & ((spec.kind==2)|(spec.kind==5)) & !data.errors[i] {
+                sum=crate::ops_closed_numeric::binary(sum,data.numbers[i],crate::expr_arith::ADD);
+                decimal_input=decimal_input | (data.values[i].dt==types.decimal_dt);
+            }
+            error = error | data.errors[i];
+        }
         if members[i] & data.extremum[i] & (!found | row_less([data.values[i]], [chosen])) {
             chosen = data.values[i]; found = true;
         }
     }
+    assert(!sum.0.capacity,"aggregate numeric capacity");
     let mut result = if (((spec.kind == 3) | (spec.kind == 4)) & !error) | (spec.kind == 6) { chosen } else { unbound() };
     if (spec.kind == 0) | (spec.kind == 1) { result = numeric(OFFSET + (count as Field) * SCALE, false, types, encode); }
     if ((spec.kind == 2) & !error) | ((spec.kind == 5) & (!error | (count == 0))) {
-        let decimal = (spec.kind == 5) & (count > 0);
-        let divisor = if decimal { count as Field } else { 1 };
-        // No rounding or modular quotient can pass the key range check.
-        result = numeric(OFFSET + sum / divisor, decimal, types, encode);
+        let decimal = decimal_input | ((spec.kind == 5) & (count > 0));
+        if (spec.kind==5)&(count>0){
+            let divisor=crate::expr_core::exact(crate::expr_core::INTEGER,false,(count as Field)*SCALE);
+            sum=crate::ops_closed_numeric::binary(sum,(crate::expr_core::lane(divisor),false),crate::expr_arith::DIV);
+        }
+        let (value,failed)=sum;assert(!value.capacity,"aggregate numeric capacity");
+        assert(!failed,"aggregate arithmetic error");
+        let n=value.value;let key=if n.negative {OFFSET-n.magnitude}else{OFFSET+n.magnitude};
+        result=numeric(key,decimal,types,encode);
     }
     result
 }
@@ -125,14 +136,11 @@ fn having_keeps<let W: u32>(row: [TermCell; W], having: Having) -> bool {
         assert(having.comparison <= 4, "HAVING comparison");
         let a = row[having.column]; let b = having.rhs;
         check_cell(b);
-        let compatible = a.bound & b.bound & (a.kind == 3) & (b.kind == 3)
-            & (a.key_class == b.key_class) & ((a.key_class == 1) | (a.key_class == 5));
-        assert(!a.bound | !b.bound | compatible, "HAVING numeric comparison required");
-        if compatible { a.key.assert_max_bit_size::<240>(); b.key.assert_max_bit_size::<240>(); }
-        let eq = a.key == b.key; let lt = a.key.lt(b.key); let gt = b.key.lt(a.key);
-        keep = compatible & if having.comparison == 0 { eq }
-            else if having.comparison == 1 { lt } else if having.comparison == 2 { lt | eq }
-            else if having.comparison == 3 { gt } else { gt | eq };
+        let compatible = a.bound & b.bound & (a.kind==3)&(b.kind==3)&(a.key_class==1)&(b.key_class==1);
+        if compatible {
+            let left=crate::ops_closed_numeric::read(a.key,true);let right=crate::ops_closed_numeric::read(b.key,true);
+            keep=crate::expr_core::filter_accept(crate::ops_closed_numeric::compare(left,right,having.comparison));
+        }else{keep=false;}
     }
     keep
 }
@@ -184,7 +192,7 @@ pub fn group<Env, let A: u32, let R: u32, let V: u32, let G: u32, let M: u32, le
         assert(having.comparison <= 4, "HAVING comparison");
         check_cell(having.rhs);
     }
-    let mut prepared = [Prepared { values: [unbound(); A], selected: [false; A], numbers: [0; A],
+    let mut prepared = [Prepared { values: [unbound(); A], selected: [false; A], numbers: [(crate::expr_core::lane(crate::expr_core::zero_numeric()),false); A],
         errors: [false; A], extremum: [false; A] }; M];
     for m in 0..M {
         let mut errs = [false; A];

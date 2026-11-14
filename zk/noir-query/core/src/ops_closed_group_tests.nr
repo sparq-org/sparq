@@ -219,9 +219,9 @@ fn avg_does_not_round_nonterminating_decimal() {
     group(Table { rows: [[num(0)], [num(0)], [num(1)]], len: 3 }, Table { rows: [[encode(OFFSET + SCALE / 3, true)]], len: 1 }, [],
         [Aggregate { kind: 5, column: 0, distinct: false }], [[false]; 3], types(), no_having(), encode);
 }
-#[test(should_fail_with = "integer aggregate arithmetic required")]
-fn decimal_sum_refused_by_name() {
-    group(Table { rows: [[dec(1)]], len: 1 }, empty::<1, 1>(), [],
+#[test]
+fn decimal_sum_uses_shared_arithmetic() {
+    group(Table { rows: [[dec(1)]], len: 1 }, Table{rows:[[dec(1)]],len:1}, [],
         [Aggregate { kind: 2, column: 0, distinct: false }], [[false]], types(), no_having(), encode);
 }
 #[test(should_fail_with = "GROUP_CONCAT lexical opening required")]
@@ -284,12 +284,12 @@ fn numeric_codec_cannot_change_comparison_key() {
 }
 #[test]
 fn numeric_sum_large_cancellation_is_exact() {
-    let n: Field = 883423532389192164791648750371459257913741948437809479;
+    let n: Field = 281474976710655;
     group(Table { rows: [[num(0 - n)], [num(n)], [num(n)]], len: 3 }, Table { rows: [[num(n)]], len: 1 }, [],
         [Aggregate { kind: 2, column: 0, distinct: false }], [[false]; 3], types(), no_having(), encode);
 }
-#[test(should_fail_with = "HAVING numeric comparison required")]
-fn having_nonnumeric_refused_by_name() {
+#[test]
+fn having_nonnumeric_error_rejects_every_group() {
     group(input(), empty::<4, 2>(), [0], [spec(2)], [[false]; 4], types(),
         Having { enabled: true, column: 1, comparison: 0, rhs: iri(3) }, encode);
 }
@@ -390,4 +390,25 @@ fn count_star_distinct_uses_all_mapping_columns() {
         Table { rows: [[num(2), num(1)]], len: 1 }, [],
         [Aggregate { kind: 0, column: 2, distinct: true }, Aggregate { kind: 1, column: 1, distinct: true }],
         [[false; 2]; 2], types(), no_having(), encode);
+}
+
+#[test(should_fail_with="operator length")]
+fn having_nonnumeric_error_cannot_release_a_group(){
+    group(input(),output(num(6),num(2)),[0],[spec(2)],[[false];4],types(),
+        Having{enabled:true,column:1,comparison:0,rhs:iri(3)},encode);
+}
+
+#[test(should_fail_with="aggregate numeric capacity")]
+fn decimal_sum_at_exact_limit_is_capacity(){
+    let half=crate::expr_core::EXACT_LIMIT/2;
+    let value=encode(OFFSET+half,true);
+    group(Table{rows:[[value],[value]],len:2},Table{rows:[[encode(OFFSET+half*2,true)]],len:1},[],
+        [Aggregate{kind:2,column:0,distinct:false}],[[false];2],types(),no_having(),encode);
+}
+
+#[test(should_fail_with="aggregate numeric capacity")]
+fn aggregate_error_does_not_absorb_sum_capacity(){
+    let value=encode(OFFSET+crate::expr_core::EXACT_LIMIT/2,true);
+    group(Table{rows:[[unbound()],[value],[value]],len:3},Table{rows:[[unbound()]],len:1},[],
+        [Aggregate{kind:2,column:0,distinct:false}],[[false];3],types(),no_having(),encode);
 }

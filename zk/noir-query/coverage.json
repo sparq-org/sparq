@@ -74,10 +74,22 @@
     {
       "id": "bind_errors",
       "spec": "https://www.w3.org/TR/sparql11-query/#bind",
-      "status": "not_attempted",
-      "positive_cases": [],
-      "rejection_cases": [],
-      "guest_proof_evidence": "not_asserted"
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:ops_closed_bind_tests::bind_error_keeps_an_unbound_solution"
+      ],
+      "rejection_cases": [
+        "noir:ops_closed_bind_tests::bind_boolean_wrong_result"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "evidence": {
+        "layer": "isolated_gadget_execution",
+        "corpus": "core/src/ops_closed_bind_tests.nr",
+        "runner": "nargo test --program-dir zk/noir-query/core",
+        "guest_proof_coverage": "not_asserted",
+        "full_w3c_conformance": "not_asserted",
+        "negative_cases_are_feature_support": false
+      }
     },
     {
       "id": "blank_nodes",
@@ -1357,8 +1369,7 @@
     },
     {
       "id": "numeric-promotion",
-      "status": "refused",
-      "refusal": "lane D integer arithmetic operands is not yet supported by the query method"
+      "status": "passing"
     },
     {
       "id": "numeric-divide",
@@ -1633,6 +1644,28 @@
       "id": "path-negated-both-orientations",
       "status": "refused",
       "refusal": "property path is not yet supported by the query method"
+    }
+  ],
+  "isolated_extensions": [
+    {
+      "id": "closed_existence_boolean_bind",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:ops_closed_bind_tests::existence_can_feed_boolean_bind",
+        "noir:ops_closed_bind_tests::empty_min_error_and_false_releases_false"
+      ],
+      "rejection_cases": [
+        "noir:ops_closed_bind_tests::existence_hidden_matching_right_fails_before_binding"
+      ],
+      "evidence": {
+        "layer": "isolated_gadget_execution",
+        "corpus": "core/src/ops_closed_bind_tests.nr",
+        "runner": "nargo test --program-dir zk/noir-query/core",
+        "guest_proof_coverage": "not_asserted",
+        "full_w3c_conformance": "not_asserted",
+        "negative_cases_are_feature_support": false
+      },
+      "guest_proof_evidence": "not_asserted"
     }
   ]
 }

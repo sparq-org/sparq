@@ -1,5 +1,5 @@
 mod closed_native;
-#[path = "support/mod.rs"]
+#[path = "support/fixture.rs"]
 mod fixtures;
 use closed_native::Workspace;
 use fixtures::FixtureEncoder;
@@ -7,12 +7,19 @@ use sparq_zk_compose::driver::ProgramProver;
 use sparq_zk_query::{
     capacity::Bounds,
     codegen::generate_operator_fixture as generate,
-    interp::{evaluate, Cell, ResultValue},
+    interp::{Cell, ResultValue},
     lower::lower,
     plan::Operator,
     plan_closed::ClosedOperator,
     witness::prover_toml,
 };
+fn evaluate(
+    plan: &sparq_zk_query::plan::Plan,
+    data: &[sparq_zk_query::interp::CredentialCells],
+    encoder: &impl sparq_zk_query::interp::EncodeTerm,
+) -> Result<sparq_zk_query::interp::Trace, sparq_zk_query::Error> {
+    sparq_zk_query::credential_graphs::evaluate_cells_for_request(plan, data, encoder, [7; 32])
+}
 const B: Bounds = Bounds {
     credentials: 2,
     quads_per_credential: 4,
@@ -492,7 +499,7 @@ fn named_graph_engine_interpreter_and_circuit_differential() {
         if let ResultValue::Select {variables,rows}=&trace.result {
             assert_eq!(variables,&expected.vars.iter().map(|v|v.as_str().to_owned()).collect::<Vec<_>>());
             let mut actual=rows.iter().map(|r|r.iter().map(|c|c.bound.then_some(c.enc)).collect::<Vec<_>>()).collect::<Vec<_>>();
-            let mut expected=expected.rows.iter().map(|r|r.iter().map(|t|t.as_ref().map(|t|if let oxrdf::Term::BlankNode(n)=t {let mut w=[0;32];w[31]=n.as_str().trim_start_matches('g').parse::<u8>().unwrap()+1;w} else {FixtureEncoder.encode(t).unwrap().enc})).collect::<Vec<_>>()).collect::<Vec<_>>();
+            let mut expected=expected.rows.iter().map(|r|r.iter().map(|t|t.as_ref().map(|t|if let oxrdf::Term::BlankNode(n)=t {{let mut word=[0;32];let label=n.as_str().trim_start_matches('g').parse::<u32>().unwrap()+1;word[28..].copy_from_slice(&label.to_be_bytes());word}} else {FixtureEncoder.encode(t).unwrap().enc})).collect::<Vec<_>>()).collect::<Vec<_>>();
             actual.sort();expected.sort();assert_eq!(actual,expected,"{query}");
         }else{panic!("SELECT");}
         let package=generate(&plan).unwrap();let workspace=Workspace::new(&package);
@@ -511,7 +518,7 @@ fn check_issuer_registry() {
     use sparq_zk_query::{credential::Credential, credential_graphs as graphs};
     let key = sparq_zk::sig::SecretKey::from_seed(7);
     let credential = sparq_merkle_suite::poseidon::issue(
-        "<urn:credential> <http://www.w3.org/2018/credentials#issuer> <urn:issuer> .\n",
+        "<urn:credential> <https://www.w3.org/2018/credentials#issuer> <urn:issuer> .\n",
         "_:proof <https://w3id.org/security#cryptosuite> \"schnorr-poseidon2-merkle-2026\" .\n",
         &key,
         sparq_merkle_suite::Fr::from(19u64),
@@ -542,14 +549,42 @@ fn check_literal_types() {
     use sparq_zk_query::{credential::Credential, credential_graphs as graphs};
     let key = sparq_zk::sig::SecretKey::from_seed(7);
     let credential = sparq_merkle_suite::poseidon::issue(
-        "<urn:credential> <http://www.w3.org/2018/credentials#issuer> <urn:issuer> .\n<urn:s> <urn:p> \"true\"^^<http://www.w3.org/2001/XMLSchema#boolean> .\n",
+        "<urn:credential> <https://www.w3.org/2018/credentials#issuer> <urn:issuer> .\n<urn:s> <urn:p> \"true\"^^<http://www.w3.org/2001/XMLSchema#boolean> .\n",
         "_:proof <https://w3id.org/security#cryptosuite> \"schnorr-poseidon2-merkle-2026\" .\n",
         &key,
         sparq_merkle_suite::Fr::from(19u64),
     ).unwrap();
-    let c=Credential {credential,issuer:key.public_key(),issuer_index:0,issuer_siblings:vec![sparq_merkle_suite::Fr::from(0u64);4]};
-    let p=graphs::bind_issuer_registry(graphs::lower("ASK {}",B).unwrap(),&[(oxrdf::NamedNode::new_unchecked("urn:issuer"),key.public_key())]).unwrap();
-    assert_eq!(graphs::evaluate(&p,std::slice::from_ref(&c)).unwrap().result,ResultValue::Ask(true));
-    let p=graphs::with_literal_types(p,1).unwrap();
-    assert!(graphs::evaluate(&p,&[c]).unwrap_err().to_string().contains("closed credential literal profile"));
+    let c = Credential {
+        credential,
+        issuer: key.public_key(),
+        issuer_index: 0,
+        issuer_siblings: vec![sparq_merkle_suite::Fr::from(0u64); 4],
+    };
+    let p = graphs::bind_issuer_registry(
+        graphs::lower("ASK {}", B).unwrap(),
+        &[(
+            oxrdf::NamedNode::new_unchecked("urn:issuer"),
+            key.public_key(),
+        )],
+    )
+    .unwrap();
+    assert_eq!(
+        graphs::evaluate(&p, std::slice::from_ref(&c))
+            .unwrap()
+            .result,
+        ResultValue::Ask(true)
+    );
+    let p = graphs::with_literal_types(p, 1).unwrap();
+    assert!(graphs::evaluate(&p, &[c])
+        .unwrap_err()
+        .to_string()
+        .contains("closed credential literal profile"));
+}
+
+#[test]
+fn graph_evaluation_refuses_a_lost_credential_boundary() {
+    let p = lower("SELECT ?g {?s <urn:p> ?x GRAPH ?g {?s <urn:p> ?x}}", B).unwrap();
+    let error = sparq_zk_query::interp::evaluate(&p, &fixtures::fixture(), &FixtureEncoder)
+        .unwrap_err();
+    assert!(error.to_string().contains("complete credential graph view"));
 }

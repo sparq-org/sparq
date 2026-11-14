@@ -207,7 +207,7 @@ pub fn evaluate_dataset(
         let input = |id: NodeId| &tables[id as usize].rows;
         let schema = |id: NodeId| &plan.nodes[id as usize].output.variables;
         let mut rows = match &node.operator {
-            Operator::Closed(op) => closed::evaluate(op, node, plan, &tables, &dataset, credentials, &params)?,
+            Operator::Closed(op) => closed::evaluate(op, node, plan, &tables, &dataset, input_dataset, &params)?,
             Operator::Unit => vec![vec![]],
             Operator::Scan(pattern) => {
                 let mut rows = vec![];

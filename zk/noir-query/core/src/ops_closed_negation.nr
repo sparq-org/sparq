@@ -2,7 +2,7 @@
 //! Pairwise compatibility and canonical sorting dominate these relations.
 use crate::table::{TermCell, Table, empty, append, canonicalize, check_table, assert_table};
 use crate::ops_core::Boolean;
-use crate::ops_core_expr::{Step, evaluate};
+use crate::ops_core_expr::Step;
 use crate::ops_closed_common::{compatible, project_row, overlay};
 
 pub fn left_join<let A: u32, let B: u32, let R: u32, let VA: u32, let VB: u32, let V: u32,
@@ -10,6 +10,14 @@ pub fn left_join<let A: u32, let B: u32, let R: u32, let VA: u32, let VB: u32, l
     left: Table<A, VA>, right: Table<B, VB>, ac: [u32; V], bc: [u32; V],
     context: Table<C, VC>, eval_cols: [u32; EV], context_cols: [u32; EV],
     parameters: [TermCell; P], steps: [Step; E], has_condition: bool, out: Table<R, V>,
+) {
+    left_join_indexed(left,right,ac,bc,context,eval_cols,context_cols,parameters,[0],steps,has_condition,out);
+}
+pub fn left_join_indexed<let A: u32, let B: u32, let R: u32, let VA: u32, let VB: u32, let V: u32,
+    let C: u32, let VC: u32, let EV: u32, let P: u32, let E: u32, let I:u32>(
+    left: Table<A, VA>, right: Table<B, VB>, ac: [u32; V], bc: [u32; V],
+    context: Table<C, VC>, eval_cols: [u32; EV], context_cols: [u32; EV],
+    parameters: [TermCell; P], indices:[u32;I], steps: [Step; E], has_condition: bool, out: Table<R, V>,
 ) {
     check_table(left); check_table(right); check_table(context);
     let mut expected = empty();
@@ -21,7 +29,7 @@ pub fn left_join<let A: u32, let B: u32, let R: u32, let VA: u32, let VB: u32, l
             if has_condition & compatible & (i < left.len) & (j < right.len) {
                 let one: Table<1, V> = Table {rows: [row], len: 1};
                 let evaluated = overlay(one, context, eval_cols, context_cols);
-                let predicate = evaluate(evaluated, parameters, steps)[0];
+                let predicate = crate::ops_closed_expr::evaluate_indexed(evaluated, parameters, indices, steps)[0];
                 passes = predicate.value & !predicate.is_error;
             }
             let active = (i < left.len) & (j < right.len) & compatible & passes;

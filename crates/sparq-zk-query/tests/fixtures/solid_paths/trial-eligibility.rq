@@ -1,25 +1,14 @@
-# Draft query derived from the Solid App Suite catalogue; consumer confirmation pending.
-PREFIX ex:  <https://example.org/solid-suite#>
+PREFIX vcq: <https://w3id.org/sparq/vcq#>
 PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
-PREFIX zkv: <urn:sparq:zk:verified-issuer-placeholder#>   # lane E defines the real predicate
-ASK {
-  ?prac zkv:verifiedIssuer <urn:fictional:trial-eligibility:practice> .
-  ?id   zkv:verifiedIssuer <urn:fictional:trial-eligibility:practice> .   # or the identity issuer, to confirm
-  GRAPH ?prac {
-    ?vol ex:medicationPeriodStart ?start ;
-         ex:medicationPeriodEnd   ?end ;
-         ex:medicationComplete    true ;
-         ex:method ex:recorded-by-authority .
-    FILTER (?start <= "2026-08-15"^^xsd:date && ?end >= "2026-11-13"^^xsd:date)
-  }
-  GRAPH ?id {
-    ?vol ex:dateOfBirth ?dob .
-    FILTER (?dob <= "2008-11-13"^^xsd:date && ?dob > "1961-11-13"^^xsd:date)   # 18 to 65
-  }
-  FILTER NOT EXISTS {
-    GRAPH ?prac {
-      ?vol ex:takes ?m .
-      VALUES ?m { <urn:fictional:medicine-b> <urn:fictional:medicine-c> }
-    }
-  }
+
+SELECT DISTINCT ?result WHERE {
+  ?prac vcq:verifiedIssuer <urn:fictional:trial-eligibility:practice> .
+  GRAPH ?prac { ?subject <urn:claim:trial.age> ?age ;
+                         <urn:claim:trial.diagnosis> ?dx ;
+                         <https://w3id.org/jeswr/awp#periodStart> ?from ;
+                         <https://w3id.org/jeswr/awp#periodEnd> ?to . }
+  BIND((?age >= 18 && ?age <= 65 && ?dx = "condition-a" &&
+        ?from <= "2026-11-01"^^xsd:date && ?to >= "2026-11-13"^^xsd:date &&
+        NOT EXISTS { GRAPH ?prac { ?subject <urn:claim:trial.medications> ?m .
+                                   FILTER(?m IN ("excluded-x", "excluded-y")) } }) AS ?result)
 }

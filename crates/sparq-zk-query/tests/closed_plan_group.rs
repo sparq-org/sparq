@@ -1,4 +1,6 @@
 mod closed_native;
+#[path = "support/fixture.rs"]
+mod fixture_support;
 #[path = "support/mod.rs"]
 mod support;
 use sparq_zk_compose::driver::ProgramProver;
@@ -23,16 +25,17 @@ fn suite_constants_for_closed_profile_match() {
             .join("../../zk/noir-query/core/src/ops_closed_dataset.nr"),
     )
     .unwrap();
-    for c in [
+    assert_eq!(
         name(0).unwrap(),
-        SuiteEncoder.encode(&support::iri(ISSUER)).unwrap(),
-        SuiteEncoder.encode(&support::iri(VERIFIED_ISSUER)).unwrap(),
-    ] {
-        assert!(source.contains(&format!(
-            "0x{}",
-            c.enc.iter().map(|b| format!("{b:02x}")).collect::<String>()
-        )));
-    }
+        sparq_zk_query::credential::credential_graph([0; 32], 0).unwrap()
+    );
+    assert_eq!(VERIFIED_ISSUER, sparq_zk_query::credential::VERIFIED_ISSUER);
+    assert!(source.contains("crate::term::credential_graph"));
+    assert!(source.contains("crate::ops_core_suite::VERIFIED_ISSUER_ENCODING"));
+    let issuer=SuiteEncoder.encode(&fixture_support::iri(ISSUER)).unwrap();
+    let suite_source=std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../zk/noir-query/core/src/suite_constants.nr")).unwrap();
+    assert!(suite_source.contains(&format!("0x{}",issuer.enc.iter().map(|b|format!("{b:02x}")).collect::<String>())));
+    assert!(source.contains("crate::suite_constants::IRI_ISSUER"));
 }
 #[test]
 fn groups_having_subquery_and_empty_sum_execute() {
@@ -44,7 +47,7 @@ fn groups_having_subquery_and_empty_sum_execute() {
         "SELECT (MIN(?x) AS ?a) (MAX(?x) AS ?b) (AVG(?x) AS ?c) (SAMPLE(?x) AS ?d) WHERE {VALUES ?x {2 2}}",
     ]{
         eprintln!("executing {query}");
-        let p=lower(query,B).unwrap();let trace=evaluate(&p,&[],&SuiteEncoder).unwrap();support::assert_engine(query,"",&trace.result);
+        let p=lower(query,B).unwrap();let trace=evaluate(&p,&[],&SuiteEncoder).unwrap();fixture_support::assert_engine(query,"",&trace.result);
         let pkg=generate_operator_fixture(&p).unwrap();let workspace=closed_native::Workspace::new(&pkg);let driver=ProgramProver::new(workspace.0.path(),&pkg.name).unwrap();
         let input=prover_toml(&p,&[],&SuiteEncoder,&trace,[7;32],[3;32]).unwrap();driver.execute(&input,"group").unwrap_or_else(|e|panic!("{query}: {e}"));
         let group=p.nodes().iter().position(|n|matches!(n.operator,sparq_zk_query::plan::Operator::Closed(sparq_zk_query::plan_closed::ClosedOperator::Group{..}))).unwrap();
@@ -68,7 +71,7 @@ fn aggregate_corpus_executes_with_engine_expected_and_altered_controls() {
             .as_str()
             .map(str::to_owned)
             .unwrap_or_else(|| std::fs::read_to_string(root.join("core.nt")).unwrap());
-        let (data, _) = support::dataset(&rdf);
+        let (data, _) = fixture_support::dataset(&rdf);
         let p = lower(
             query,
             Bounds {
@@ -78,7 +81,7 @@ fn aggregate_corpus_executes_with_engine_expected_and_altered_controls() {
         )
         .unwrap();
         let trace = evaluate(&p, &data, &SuiteEncoder).unwrap();
-        support::assert_engine(query, &rdf, &trace.result);
+        fixture_support::assert_engine(query, &rdf, &trace.result);
         let expected = &fixture["expected"]["result"];
         match &trace.result {
             ResultValue::Ask(v) => assert_eq!(Some(*v), expected["Ask"].as_bool()),
@@ -88,7 +91,8 @@ fn aggregate_corpus_executes_with_engine_expected_and_altered_controls() {
                     let mut r = vec![];
                     for term in row.as_array().unwrap() {
                         if let Some(text) = term.as_str() {
-                            let (_, terms) = support::dataset(&format!("<urn:s> <urn:p> {text} ."));
+                            let (_, terms) =
+                                fixture_support::dataset(&format!("<urn:s> <urn:p> {text} ."));
                             r.push(Some(SuiteEncoder.encode(&terms[2]).unwrap().enc));
                         } else {
                             r.push(None);
@@ -204,4 +208,25 @@ fn credential_profile_codegen_only_wires_the_checked_activation_flags() {
     for token in ["assert(", "for ", "if ", " < credential_count"] {
         assert!(!source.contains(token), "{token}");
     }
+}
+
+#[test]
+fn numeric_promotion_and_decimal_sum_bind_execute() {
+    let Some(gate) = support::gate("numeric_promotion_and_decimal_sum_bind_execute", &["nargo"])
+    else {
+        return;
+    };
+    for query in [
+        "ASK {FILTER(1 + 2.5 = 3.5)}",
+        "ASK {FILTER(281474976710656 * 1 = 281474976710656)}",
+        "SELECT DISTINCT ?result WHERE {{SELECT (SUM(?mass) AS ?total) (COUNT(DISTINCT ?iss) AS ?n) WHERE {VALUES (?iss ?mass) {(<urn:a> 200.0) (<urn:b> 200.0) (<urn:c> 200.0)}}} BIND((?total>=500 && ?n=3) AS ?result)}",
+        "SELECT ?lot (SUM(?mass) AS ?total) WHERE {VALUES (?lot ?iss ?mass) {(<urn:lot> <urn:a> 200.0) (<urn:lot> <urn:b> 200.0) (<urn:lot> <urn:c> 200.0)}} GROUP BY ?lot HAVING(SUM(?mass)>=500 && COUNT(DISTINCT ?iss)=3)",
+    ]{
+        let p=lower(query,B).unwrap();let trace=evaluate(&p,&[],&SuiteEncoder).unwrap();fixture_support::assert_engine(query,"",&trace.result);
+        let pkg=generate_operator_fixture(&p).unwrap();let root=closed_native::Workspace::new(&pkg);let driver=ProgramProver::new(root.0.path(),&pkg.name).unwrap();
+        let render=|t|prover_toml(&p,&[],&SuiteEncoder,t,[7;32],[3;32]).unwrap();driver.execute(&render(&trace),"decimal_honest").unwrap();
+        let mut wrong=trace.clone();match &mut wrong.result{sparq_zk_query::interp::ResultValue::Ask(v)=>*v = !*v,sparq_zk_query::interp::ResultValue::Select{rows,..}=>rows[0][0].enc[31]^=1};
+        assert!(driver.execute(&render(&wrong),"decimal_wrong_result").is_err());
+    }
+    support::complete(gate);
 }

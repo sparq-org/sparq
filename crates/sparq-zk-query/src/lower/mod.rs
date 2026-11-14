@@ -17,7 +17,7 @@ mod closed;
 mod closed_group;
 mod closed_graph;
 mod closed_join;
-mod closed_arith_standin;
+mod closed_arith;
 
 use crate::{capacity::Bounds, plan::*, Error};
 use spargebra::{algebra::GraphPattern, SparqlParser};

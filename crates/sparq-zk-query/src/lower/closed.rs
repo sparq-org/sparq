@@ -19,9 +19,7 @@ pub(super) fn handles(pattern: &GraphPattern, outer: bool) -> bool {
         | G::Extend { .. }
         | G::Graph { .. }
         | G::Group { .. } => true,
-        G::Filter { expr, .. } => {
-            has_exists(expr) || super::closed_arith_standin::has_arithmetic(expr)
-        }
+        G::Filter { expr, .. } => has_exists(expr) || super::closed_arith::has_arithmetic(expr),
         G::Project { .. } => !outer,
         _ => false,
     }
@@ -87,16 +85,16 @@ impl Builder {
                 }
                 Predicate::Exists(rights)
             }
-            E::Not(a) if has_exists(a) || super::closed_arith_standin::has_arithmetic(a) => {
+            E::Not(a) if has_exists(a) || super::closed_arith::has_arithmetic(a) => {
                 Predicate::Not(Box::new(self.closed_predicate(a, input, context, graph)?))
             }
-            E::And(a, b) if has_exists(e) || super::closed_arith_standin::has_arithmetic(e) => {
+            E::And(a, b) if has_exists(e) || super::closed_arith::has_arithmetic(e) => {
                 Predicate::And(
                     Box::new(self.closed_predicate(a, input, context, graph)?),
                     Box::new(self.closed_predicate(b, input, context, graph)?),
                 )
             }
-            E::Or(a, b) if has_exists(e) || super::closed_arith_standin::has_arithmetic(e) => {
+            E::Or(a, b) if has_exists(e) || super::closed_arith::has_arithmetic(e) => {
                 Predicate::Or(
                     Box::new(self.closed_predicate(a, input, context, graph)?),
                     Box::new(self.closed_predicate(b, input, context, graph)?),
@@ -105,7 +103,7 @@ impl Builder {
             _ if has_exists(e) => {
                 return Err(Error::Unsupported("EXISTS in a value expression".into()))
             }
-            _ if super::closed_arith_standin::has_arithmetic(e) => {
+            _ if super::closed_arith::has_arithmetic(e) => {
                 Predicate::Arithmetic(self.closed_arithmetic(e)?)
             }
             _ => Predicate::Expression(self.expression(e)?),
@@ -182,23 +180,33 @@ impl Builder {
                         "EXISTS substitution into BIND target".into(),
                     ));
                 }
-                let value = match self.expression(expression)? {
-                    Expr::Term(s) => s,
-                    _ => {
-                        return Err(Error::Unsupported(
-                            "BIND value expression (expression lane)".into(),
-                        ))
-                    }
-                };
                 let mut vars = self.schema(input);
                 vars.push(var);
                 vars.sort_unstable();
                 vars.dedup();
+                if matches!(
+                    expression,
+                    Expression::Variable(_) | Expression::NamedNode(_) | Expression::Literal(_)
+                ) {
+                    let Expr::Term(value) = self.expression(expression)? else {
+                        unreachable!("term expression")
+                    };
+                    return self.closed_push(
+                        C::Extend {
+                            input,
+                            variable: var,
+                            value,
+                            context,
+                        },
+                        vars,
+                    );
+                }
+                let predicate = self.closed_predicate(expression, input, context, graph)?;
                 self.closed_push(
-                    C::Extend {
+                    C::BindBoolean {
                         input,
                         variable: var,
-                        value,
+                        predicate,
                         context,
                     },
                     vars,
