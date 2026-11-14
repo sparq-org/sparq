@@ -71,16 +71,7 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
     let lexical = opening.object;
     let resource = opening.resource;
     let method = opening.method;
-    let check_keys = u8::from(plan.nodes.iter().any(|n| {
-        !matches!(
-            n.operator,
-            Operator::Unit
-                | Operator::Project(_)
-                | Operator::Distinct(_)
-                | Operator::Slice { .. }
-                | Operator::Values(_)
-        )
-    }));
+    let check_keys = u8::from(source_key_checks());
     let layout = crate::statement::Layout::new(plan);
     source.push_str(&if authenticated {
         layout.declarations_authenticated()
@@ -214,9 +205,14 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
             Operator::Filter(a, expr) => {
                 let read_columns = read_columns(expr, &plan.nodes[*a as usize].output.variables);
                 if authenticated && !read_columns.is_empty() {
+                    let checker = if identity_string_reads(expr) {
+                        "check_identity_equalities"
+                    } else {
+                        "check_with_parameters"
+                    };
                     writeln!(
                         source,
-                        "    core::ops_core_reads::check_with_parameters(t{a}, reads_{i}, {}, parameters);",
+                        "    core::ops_core_reads::{checker}(t{a}, reads_{i}, {}, parameters);",
                         array(read_columns.iter().map(usize::to_string))
                     )
                     .unwrap();
@@ -310,6 +306,12 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
     Ok(Package { name, files })
 }
 
+/// Complete source openings authenticate identity. Value consumers check their
+/// entire bounded input through the read-site adapter below.
+fn source_key_checks() -> bool {
+    false
+}
+
 /// Static variable columns consumed by an expression, checked on its entire input.
 /// Parameter cells are public and reconstructed by the verifier from the request.
 pub(crate) fn read_columns(expr: &Expr, schema: &[Var]) -> Vec<usize> {
@@ -338,6 +340,23 @@ pub(crate) fn read_columns(expr: &Expr, schema: &[Var]) -> Vec<usize> {
     let mut columns = std::collections::BTreeSet::new();
     collect(expr, schema, &mut columns);
     columns.into_iter().collect()
+}
+
+// Plain strings use identity only when every use is term equality/membership.
+// Typed literals still require value keys under this mode.
+pub(crate) fn identity_string_reads(expr: &Expr) -> bool {
+    match expr {
+        Expr::Compare(Compare::Equal, a, b) => {
+            matches!((&**a, &**b), (Expr::Term(_), Expr::Term(_)))
+        }
+        Expr::InList { value, .. } => matches!(&**value, Expr::Term(_)),
+        Expr::In(value, list) => {
+            matches!(&**value, Expr::Term(_)) && list.iter().all(|e| matches!(e, Expr::Term(_)))
+        }
+        Expr::And(a, b) | Expr::Or(a, b) => identity_string_reads(a) && identity_string_reads(b),
+        Expr::Not(a) => identity_string_reads(a),
+        _ => false,
+    }
 }
 
 fn array(items: impl IntoIterator<Item = String>) -> String {

@@ -83,7 +83,7 @@ fn committed_smoke_package_is_exactly_generated_with_its_original_manifest() {
 }
 
 #[test]
-fn source_identity_binding_retains_the_suite_normalization_contract() {
+fn source_identity_binding_uses_authenticated_identity_and_consumer_checks() {
     for query in [
         "ASK {?s <urn:p> 1}",
         "SELECT ?s WHERE {?s <urn:p> ?x}",
@@ -91,7 +91,7 @@ fn source_identity_binding_retains_the_suite_normalization_contract() {
     ] {
         let package = generate(&lower(query, B).unwrap()).unwrap();
         let source = &package.files[&format!("{}/src/main.nr", package.name)];
-        assert!(source.contains("open_profile_mode_one::<4, 64, 65, 1, 32>"));
+        assert!(source.contains("open_profile_mode_one::<4, 64, 65, 0, 32>"));
         assert!(!source.contains("ops_core_reads::check_with_parameters("));
     }
     let package = generate(&lower("ASK {}", B).unwrap()).unwrap();
@@ -135,7 +135,7 @@ fn expression_reads_cover_the_entire_consumer_input_before_filtering() {
     let eval = source.find(&format!("let predicate_{i} =")).unwrap();
     let filter = source.find(&format!("ops_core::filter(t{input},")).unwrap();
     assert!(check < eval && eval < filter);
-    assert!(source.contains("open_profile_mode_one::<64, 64, 65, 1, 32>"));
+    assert!(source.contains("open_profile_mode_one::<64, 64, 65, 0, 32>"));
     assert!(!source.contains("source_index"));
 }
 

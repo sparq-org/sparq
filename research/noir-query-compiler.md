@@ -19,7 +19,7 @@ capacity. A limit on the final result does not waive an intermediate bound.
 
 Each table contains a bounded row array and its actual length. Padding uses the
 canonical unbound cell in every column. Operators order rows lexicographically
-by bound status, field term encoding and credential scope in schema order.
+by bound status, authenticated term identity, kind and credential scope in schema order.
 Projection retains multiplicity and sorts the projected rows; DISTINCT validates
 canonical input order and removes equal adjacent mappings, retaining the first
 complete payload in each run. Scan retains each matching complete binding once. Since every
@@ -38,15 +38,23 @@ checked suite keys and keeps capacity separate from SPARQL errors. FILTER retain
 non-error root. Unimplemented operand families receive named refusals rather
 than a different comparison. Same-datatype string equality delegates directly to shared term identity; mixed types retain value/error dispatch.
 
-The read-site adapter validates value inputs separately from authentication. Source
-identity normalization remains part of credential conversion. Before evaluation it
-validates each consumed literal on every active input row. Private lexical reads
+The read-site adapter validates value inputs separately from authentication. Source,
+parameter and released-term identities use the suite's authenticated identity covering
+kind, lexical form, datatype and language. The suite's keyed encoding remains part
+of credential commitments. Production opens identities once. Private scalar byte/datatype bounds apply at
+read admission, so unrelated source terms do not inherit a value-parser limit. It validates each
+value-consuming literal on every active consumer input row. Plain-string equality
+and membership use identity; typed-literal equality and membership still check keys. Private lexical reads
 use a fixed-datatype suite constructor. Cells equal in every field to a public
 request parameter reuse its verifier-reconstructed canonical key. It checks the entire reconstructed cell against that row's authenticated
 encoding and metadata. No private source index chooses the binding, and rejected
 rows are included. Request parameters are reconstructed publicly by the verifier.
 The scan proves completeness of each bounded input table; intermediate capacity
 refuses rather than truncates, independently of final projection or slice.
+Released RDF cells preserve identity and datatype/language metadata and clear the
+value key and its class. The interpreter, SELECT gadget, RDF answer conversion and
+verifier reconstruction share that rule. A released term makes no value-key claim;
+public request parameters retain their canonical keys for value evaluation.
 
 The crate README records the public-input layout. A shared schema in
 `statement::Layout` produces declarations and
@@ -107,8 +115,10 @@ query method.
 The initial native and WebAssembly compiler experiment agreed on bytecode and
 independently created keys for its recorded operator source. The current pinned
 XPath dependency has an approved named loading failure in its vendored hash alias.
-The ratchet records that failure per affected passing plan, without asserting
-bytecode or key agreement. An unrelated diagnostic or dependency revision remains
+A dedicated live test enumerates every distinct passing plan, independently of the
+full altered-witness corpus. The ratchet records that failure per affected passing
+plan, without asserting bytecode or key agreement. Every record binds the exact
+native artifact digest; a bytecode-only record cannot satisfy key agreement. An unrelated diagnostic or dependency revision remains
 an error; a changed pin makes comparison mandatory again. Domain, datatype and
 suite identifiers are literals checked against Rust computations.
 The delivery package uses a catalogue of natively compiled authenticated plans;
@@ -190,3 +200,12 @@ the remaining packed payload to zero. Temporal comparisons receive that scalar
 word with the original key class retained separately. Native date and dateTime
 range controls include epoch boundaries and compare the answer with the engine;
 packed-word and bypassed-helper omissions exercise the comparison range guard.
+
+The toolchain workflow separates the query hosted profile from the dispatch-only
+full sweep. Hosted validation loads the committed core and generated fixture
+manifests unchanged, checks every operator contract case and the read-site contracts,
+builds both portable feature sets, and runs small actual authentication/proof
+controls plus per-plan compiler agreement. The full profile runs the complete core,
+corpus, expression and proof sweeps. CPU affinity serializes nested native tests.
+Separate runtime ledger profiles require all entry/completion records for each
+job's declared sites; their inventories partition the full toolchain estate.

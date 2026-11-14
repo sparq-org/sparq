@@ -472,6 +472,9 @@ impl Layout {
                         if c.scope != 0 {
                             return Err(Error::Invalid("result-local blank node".into()));
                         }
+                        if c.key_class != 0 || c.key != [0; 32] {
+                            return Err(Error::Invalid("released value metadata".into()));
+                        }
                         words.extend(cell_words(c));
                     }
                 }

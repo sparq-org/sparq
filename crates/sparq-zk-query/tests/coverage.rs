@@ -336,16 +336,13 @@ fn assert_expected(trace: &Trace, fixture: &Value) {
 fn corpus_cases_execute_with_engine_expected_result_and_altered_witness_controls() {
     let Some(gate) = support::gate(
         "corpus_cases_execute_with_engine_expected_result_and_altered_witness_controls",
-        &["nargo", "bb", "node"],
+        &["nargo", "bb"],
     ) else {
         return;
     };
     let corpus = corpus();
     let manifest = merged_manifest();
     let mut workspaces = std::collections::BTreeMap::new();
-    let mut compiler_checked = std::collections::BTreeSet::new();
-    let mut compiler_agreement = std::collections::BTreeSet::new();
-    let mut compiler_known_failures = std::collections::BTreeMap::new();
     for fixture in corpus["cases"].as_array().unwrap() {
         let entry = manifest["cases"]
             .as_array()
@@ -375,72 +372,6 @@ fn corpus_cases_execute_with_engine_expected_result_and_altered_witness_controls
             .entry(plan.hash())
             .or_insert_with(|| Workspace::new(&package));
         let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
-        if entry["status"] == "passing" && compiler_checked.insert(plan.hash()) {
-            // The catalogue design retains compiler agreement on operator
-            // programs; authenticated programs are natively compiled/keyed.
-            let agreement_package = &package;
-            let agreement_workspace = workspace;
-            let agreement_driver = &driver;
-            let artifact = agreement_driver.compile().unwrap();
-            let compile_only = support::live_tool(&gate, "node")
-                .arg(root().join("zk/noir-query/compiler-agreement/check.mjs"))
-                .arg(agreement_workspace.0.join(&agreement_package.name))
-                .arg(&artifact)
-                .arg("--compile-only")
-                .arg(agreement_workspace.0.join("wasm-cache"))
-                .arg("--record-known-failures")
-                .output()
-                .unwrap();
-            if compile_only.status.code() == Some(2) {
-                assert!(String::from_utf8_lossy(&compile_only.stderr)
-                    .contains("xpath-vendored-sha-alias"));
-                let record: Value = serde_json::from_slice(
-                    &std::fs::read(
-                        agreement_workspace
-                            .0
-                            .join("wasm-cache/compiler-agreement.json"),
-                    )
-                    .unwrap(),
-                )
-                .unwrap();
-                assert_eq!(record["status"], "known_failure");
-                assert_eq!(record["id"], "xpath-vendored-sha-alias");
-                assert_eq!(record["program"], agreement_package.name);
-                assert_eq!(record["bytecode"], "not_compared");
-                assert_eq!(record["key"], "not_compared");
-                eprintln!("Compiler known failure for {}: {}", fixture["id"], record);
-                compiler_known_failures.insert(plan.hash(), record);
-            } else {
-                assert!(
-                    compile_only.status.success(),
-                    "compiler bytecode agreement for {}: {}{}",
-                    fixture["id"],
-                    String::from_utf8_lossy(&compile_only.stdout),
-                    String::from_utf8_lossy(&compile_only.stderr)
-                );
-                let key = agreement_driver
-                    .canonical_vk(&agreement_workspace.0)
-                    .unwrap();
-                let key_file = agreement_workspace.0.join("agreement.vk");
-                std::fs::write(&key_file, key).unwrap();
-                let out = support::live_tool(&gate, "node")
-                    .arg(root().join("zk/noir-query/compiler-agreement/check.mjs"))
-                    .arg(agreement_workspace.0.join(&agreement_package.name))
-                    .arg(artifact)
-                    .arg(key_file)
-                    .arg(agreement_workspace.0.join("wasm-cache"))
-                    .output()
-                    .unwrap();
-                assert!(
-                    out.status.success(),
-                    "compiler agreement for {}: {}{}",
-                    fixture["id"],
-                    String::from_utf8_lossy(&out.stdout),
-                    String::from_utf8_lossy(&out.stderr)
-                );
-                compiler_agreement.insert(plan.hash());
-            }
-        }
         let input = prover_toml(&plan, &data, &FixtureEncoder, &trace, [7; 32], [3; 32]).unwrap();
         driver
             .execute(&input, "corpus")
@@ -492,28 +423,123 @@ fn corpus_cases_execute_with_engine_expected_result_and_altered_witness_controls
         let changed = input.replace("request_digest = [7,", "request_digest = [8,");
         assert!(driver.execute(&changed, "altered_public").is_err());
     }
-    // Every passing plan must compare successfully or retain its exact named
-    // dependency loading failure. A loading failure is never key agreement.
-    let passing_programs: std::collections::BTreeSet<_> = corpus["cases"]
+    support::complete(gate);
+}
+
+#[test]
+#[ignore = "requires the pinned native query toolchain"]
+fn compiler_agreement_for_every_passing_plan() {
+    let Some(gate) = support::gate(
+        "compiler_agreement_for_every_passing_plan",
+        &["nargo", "bb", "node"],
+    ) else {
+        return;
+    };
+    let corpus = corpus();
+    let manifest = merged_manifest();
+    let mut programs = std::collections::BTreeMap::new();
+    for entry in manifest["cases"]
         .as_array()
         .unwrap()
         .iter()
-        .filter(|f| {
-            manifest["cases"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|c| c["id"] == f["id"] && c["status"] == "passing")
-        })
-        .map(|f| lower(f["query"].as_str().unwrap(), B).unwrap().hash())
-        .collect();
-    assert!(compiler_agreement.is_disjoint(&compiler_known_failures.keys().copied().collect()));
-    let recorded = compiler_agreement
-        .union(&compiler_known_failures.keys().copied().collect())
-        .copied()
-        .collect::<std::collections::BTreeSet<_>>();
-    assert_eq!(compiler_checked, passing_programs);
-    assert_eq!(recorded, passing_programs);
+        .filter(|c| c["status"] == "passing")
+    {
+        let fixture = corpus["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["id"] == entry["id"])
+            .unwrap();
+        let plan = lower(fixture["query"].as_str().unwrap(), B).unwrap();
+        programs.entry(plan.hash()).or_insert(plan);
+    }
+    assert!(
+        !programs.is_empty(),
+        "compiler ratchet has no passing plans"
+    );
+    let mut compared = std::collections::BTreeMap::new();
+    for (hash, plan) in &programs {
+        let package = sparq_zk_query::codegen::generate_operator_fixture(plan).unwrap();
+        let workspace = Workspace::new(&package);
+        let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+        let artifact = driver.compile().unwrap();
+        let cache = workspace.0.join("wasm-cache");
+        let check = |key: &std::path::Path, known: bool| {
+            let output = support::live_tool(&gate, "node")
+                .arg(root().join("zk/noir-query/compiler-agreement/check.mjs"))
+                .arg(workspace.0.join(&package.name))
+                .arg(&artifact)
+                .arg(key)
+                .arg(&cache)
+                .args(known.then_some("--record-known-failures"))
+                .output()
+                .unwrap();
+            if output.status.code() == Some(2) {
+                assert!(known);
+                assert!(
+                    String::from_utf8_lossy(&output.stderr).contains("xpath-vendored-sha-alias")
+                );
+            } else {
+                assert!(
+                    output.status.success(),
+                    "{}{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            output
+        };
+        let compile = check(std::path::Path::new("--compile-only"), true);
+        let record = if compile.status.code() == Some(2) {
+            assert!(String::from_utf8_lossy(&compile.stderr).contains("xpath-vendored-sha-alias"));
+            let record: Value = serde_json::from_slice(
+                &std::fs::read(cache.join("compiler-agreement.json")).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(record["status"], "known_failure");
+            assert_eq!(record["id"], "xpath-vendored-sha-alias");
+            assert_eq!(record["bytecode"], "not_compared");
+            assert_eq!(record["key"], "not_compared");
+            record
+        } else {
+            assert!(
+                compile.status.success(),
+                "bytecode agreement: {}{}",
+                String::from_utf8_lossy(&compile.stdout),
+                String::from_utf8_lossy(&compile.stderr)
+            );
+            let key_file = workspace.0.join("agreement.vk");
+            std::fs::write(&key_file, driver.canonical_vk(&workspace.0).unwrap()).unwrap();
+            let key = check(&key_file, false);
+            assert!(
+                key.status.success(),
+                "key agreement: {}{}",
+                String::from_utf8_lossy(&key.stdout),
+                String::from_utf8_lossy(&key.stderr)
+            );
+            let record: Value = serde_json::from_slice(
+                &std::fs::read(cache.join("compiler-agreement.json")).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(record["status"], "passing");
+            assert_eq!(record["bytecode"], "identical");
+            assert_eq!(record["key"], "identical");
+            record
+        };
+        assert_eq!(record["program"], package.name);
+        use sha2::{Digest, Sha256};
+        let digest = Sha256::digest(std::fs::read(&artifact).unwrap())
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+        assert_eq!(record["native_artifact_digest"], digest);
+        eprintln!("Compiler agreement {}: {record}", package.name);
+        assert!(compared.insert(*hash, record).is_none());
+    }
+    assert_eq!(
+        compared.keys().collect::<Vec<_>>(),
+        programs.keys().collect::<Vec<_>>()
+    );
     support::complete(gate);
 }
 

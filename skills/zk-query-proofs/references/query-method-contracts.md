@@ -221,7 +221,8 @@ resource normalization only. Generated credential openings call
 `ops_core_suite::open_profile_one`, delegating the complete signed opening to
 `suite::open_bounded_credential_hidden` once per credential. Resource datatype,
 language and key bytes are zero; the default graph and active flags are derived.
-Source scans, joins and value consumers call `term::open_key_checked` with fixed datatype
+Scans, joins, GRAPH and DISTINCT compare authenticated term identity, retaining
+blank-node scope. Value consumers call `term::open_key_checked` with fixed datatype
 identifiers. Raw lexical backing is separately bounded for resources, objects
 and scalars. Shape encoding includes all these capacities.
 The verifier selects `capacity::OpeningProfile::{Solid, LongObjects, Extended}`. Its
@@ -282,3 +283,31 @@ those canonical keys; other literal cells carry separate lexical openings. Each 
 authenticated encoding and metadata; no private source index selects the binding.
 Select intermediate row bounds for the full scan output, independently of result
 limits. An overflowing intermediate table refuses the proof.
+
+`interp::Cell::enc` is the suite's key-independent RDF identity for private tables
+and public request parameters. The suite's keyed encoding remains for credential
+commitments, revealed verification keys and envelope trust-member derivation.
+Plain-string equality and membership use identity; typed-literal equality and
+membership remain value consumers. The generated read adapter checks every row
+entering those consumers, including later rejected rows.
+
+Released SELECT cells preserve identity, kind, datatype and language but set
+`key_class` and `key` to zero. `Answer::encode`, `Answer::release`, the interpreter
+and SELECT gadget share this conversion; `Layout` refuses released value metadata.
+Result-local blank-node labels retain their existing canonical form. Public request
+parameter cells keep their canonical value keys.
+
+For toolchain CI, `python3 scripts/zk_query_ci.py hosted` loads and tests the
+committed Noir manifests unchanged, runs the operator contracts, portable host
+checks and small live controls, and checks agreement for every passing operator
+plan. `full` runs the complete core, corpus, expressions and proof sweep and is
+selected by explicit workflow dispatch. Both require the real pinned tools.
+`--list` prints commands and `--root` selects a frozen checkout. Separate runtime
+ledger profiles require every declared live entry and completion; a named XPath
+failure records unavailable comparison rather than claiming byte or key identity.
+
+Private scalar read admission applies the selected parser byte bound and supported
+value datatypes at the consumer. An identity-only source term does not inherit a
+scalar parser bound. Unsupported private value datatypes and oversized scalar
+lexicals return named refusals before native execution; exact public parameter
+matches retain their verifier-reconstructed key shortcut.

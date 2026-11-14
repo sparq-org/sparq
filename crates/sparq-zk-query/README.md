@@ -24,9 +24,9 @@ equal bindings; DISTINCT compares adjacent rows after validating canonical input
 The expression dispatcher uses the shared comparison, boolean and membership
 gadgets. Its value, SPARQL error and capacity channels remain separate. Capacity is
 asserted at the expression root and cannot be absorbed as a SPARQL error.
-The credential literal profile admits integer, decimal, date, dateTime, boolean and
-string datatypes. Unsupported datatypes, oversized lexical forms and comparisons
-outside the exact value ranges receive a named refusal.
+Value consumers admit integer, decimal, date, dateTime, boolean and string datatypes.
+Identity operations use the authenticated kind, lexical form, datatype and language.
+Unsupported value datatypes, excess bytes and value ranges receive named refusals.
 
 ## 🚀 Host contracts
 
@@ -54,7 +54,7 @@ Use `prepare_with_opening_profile` and
 properties as well. Oversized lexical forms receive a capacity refusal.
 
 The current suite profile opens complete credentials, checks hidden signatures
-and issuer key membership. Source identities retain normalized literal cells; value consumers also check complete active inputs, including rejected rows. Overflow refuses.
+and issuer key membership. Source identities are key-independent; value consumers check complete active inputs, including rejected rows. Released RDF clears value-key metadata. Overflow refuses.
 The verifier reconstructs the plan and constants from its stored request, re-encodes the released RDF answer,
 and consumes the shared challenge after proof verification and a final validity check.
 Supplied-cell programs are isolated operator fixtures.
@@ -92,16 +92,16 @@ The host plan, lowering, interpreter, generator, layout, request and presentatio
 values build for WebAssembly. `method::Prepared`, `method::Presentation`,
 `Request::plan` and `Answer::release` are portable; the subprocess Compiler is native.
 Authenticated Node delivery follows the native catalogue and prover-backend decision.
-The corpus ratchet compares native/WebAssembly bytecode and keys for each passing
-operator program; the workflow loads committed Noir manifests unchanged.
+The agreement ratchet compares native/WebAssembly bytecode and keys for each passing
+operator plan, recording the approved XPath failure; committed manifests load unchanged.
 
 Native execution uses the shared live-toolchain gate. Run it with
 `cargo test -p sparq-zk-query --test execution -- --ignored`, or use
 `cargo test -p sparq-zk-query -- --include-ignored` for the full live suite.
 `SPARQ_NOIR_QUERY_PROOF_PROFILE` selects `full` (default) or `smoke` for the
-native proof sweep. Hosted CI uses the authenticated sample and an explicit
-differential seed; workflow dispatch with `full_query_proofs` selects the complete
-acceptance sweep and default seed set. Differential execution checks operator
+native proof sweep. Hosted CI runs small authenticated and operator controls.
+Workflow dispatch with `full_query_proofs` selects the complete core, corpus and
+proof sweep with its default seed set. Differential execution checks operator
 fixtures; authenticated altered-witness controls run separately.
 `SPARQ_NOIR_QUERY_EVIDENCE`, unset by default, accepts an external JSONL output path
 for native proof-test plans and measurements. Keep the output outside the repository.

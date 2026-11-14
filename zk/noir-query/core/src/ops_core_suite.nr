@@ -8,7 +8,7 @@ use crate::table::{TermCell, unbound};
 use crate::ops_core::Dataset;
 use crate::ops_core_profile::{ResourceOpening, ObjectOpening, QuadOpening};
 
-pub global VERIFIED_ISSUER_ENCODING: Field = 0x09eec572ceda200a642295e68e09118d7e1d26ea1a082cc560e303164907f5e9;
+pub global VERIFIED_ISSUER_ENCODING: Field = 0x123638c7d0d692091a7783e94d513e977d9c478fd3fe9a6a6f735080310f0bcf;
 fn check_input_predicate(enc:Field) { assert(enc != VERIFIED_ISSUER_ENCODING, "credential verifiedIssuer assertion"); }
 fn issuer_predicate() -> TermCell {
     TermCell {bound:true,kind:1,enc:VERIFIED_ISSUER_ENCODING,key_class:0,key:0,dt:0,lang:0,scope:0}
@@ -50,10 +50,11 @@ fn checked_literal<let L: u32>(cell: crate::term::TermCell, raw: TermOpening<L>)
 }
 
 fn table_cell(cell: crate::term::TermCell) -> TermCell {
-    TermCell {bound: cell.bound(), kind: cell.kind(), enc: cell.enc(),
+    TermCell {bound: cell.bound(), kind: cell.kind(), enc: table_identity(cell),
         key_class: cell.key_class(), key: cell.key(), dt: cell.datatype(),
         lang: cell.language(), scope: cell.credential()}
 }
+fn table_identity(cell:crate::term::TermCell) -> Field { cell.identity() }
 
 pub struct OpenedCredential<let N: u32> {
     pub rows: [[TermCell; 3]; N],
@@ -133,7 +134,7 @@ fn convert_authenticated<let N:u32>(authenticated:crate::suite_metadata::OpenedC
             opened.active[n] = n < count;
             if n < count {
                 assert(quads[n][3].kind() == 0, "credential named graph not yet supported");
-                check_input_predicate(quads[n][1].enc());
+                check_input_predicate(quads[n][1].identity());
             }
         }
     opened
@@ -266,8 +267,10 @@ pub fn from_authenticated_bounded<let N:u32,let R:u32,let L:u32,let CHECK:u32>(
     let raw=crate::ops_core_profile::normalize(credentials,authenticated.count());
     let quads=authenticated.quads();
     for n in 0..N {if (n < authenticated.count()) & (quads[n][2].kind()==3) {
-        literal_profile(quads[n][2],raw[n][2]);
-        if CHECK==1 {let _checked=checked_bounded_literal(table_cell(quads[n][2]),raw[n][2]);}
+        if CHECK==1 {
+            literal_profile(quads[n][2],raw[n][2]);
+            let _checked=checked_bounded_literal(table_cell(quads[n][2]),raw[n][2]);
+        }
     }}
     convert_authenticated(authenticated,credential_index,request_digest)
 }
@@ -471,7 +474,7 @@ fn verified_issuer_assertion_is_in_the_default_view() {
     assert(dataset.active[0]);assert(!dataset.graphs[0].bound);
     assert(crate::table::equal_cell(dataset.rows[0][0],graph));
     assert(dataset.rows[0][1].enc == VERIFIED_ISSUER_ENCODING);
-    assert(dataset.rows[0][2].enc == issuer.enc());
+    assert(dataset.rows[0][2].enc == issuer.identity());
 }
 #[test(should_fail_with = "issuer assertion capacity")]
 fn issuer_assertion_cannot_escape_the_dataset() {
@@ -649,3 +652,16 @@ fn credential_modes_refuse_hidden_key() {let _flags=credential_mode_flags::<1>(1
 fn credential_modes_refuse_inactive_message() {let _flags=credential_mode_flags::<2>(1,2,0,1,[7,8],[9,0]);}
 #[test(should_fail_with="revealed input padding")]
 fn credential_modes_refuse_inactive_key() {let _flags=credential_mode_flags::<2>(1,2,0,1,[7,0],[9,8]);}
+
+#[test]
+fn table_identity_ignores_the_authenticated_value_key() {
+    let mut raw=crate::ops_core_profile::empty::<65>();raw.bound=true;raw.kind=3;
+    raw.lexical[0]=49;raw.lexical_len=1;
+    let datatype="http://www.w3.org/2001/XMLSchema#integer".as_bytes();
+    raw.datatype_len=datatype.len();for i in 0..datatype.len() {raw.datatype[i]=datatype[i];}
+    let left=crate::suite_entry::open_bounded_cell(raw,0);
+    raw.key[0]=1;raw.key[1]=128;
+    let right=crate::suite_entry::open_bounded_cell(raw,0);
+    assert(crate::table::same_term(table_cell(left),table_cell(right)));
+    assert(!crate::table::equal_cell(table_cell(left),table_cell(right)));
+}

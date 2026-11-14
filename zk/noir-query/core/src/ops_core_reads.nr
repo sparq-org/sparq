@@ -13,6 +13,17 @@ pub fn check<let R:u32,let V:u32,let K:u32,let L:u32>(
 /// Exact equality establishes their canonical key without a private lexical input.
 pub fn check_with_parameters<let R:u32,let V:u32,let K:u32,let L:u32,let P:u32>(
     input:Table<R,V>,raw:[[BoundedTermOpening<L,41,1>;K];R],columns:[u32;K],parameters:[crate::table::TermCell;P]) {
+    check_mode::<R,V,K,L,P,0>(input,raw,columns,parameters);
+}
+
+/// Equality and membership of plain strings use authenticated RDF identity.
+/// Typed literals remain value consumers on every active input row.
+pub fn check_identity_equalities<let R:u32,let V:u32,let K:u32,let L:u32,let P:u32>(
+    input:Table<R,V>,raw:[[BoundedTermOpening<L,41,1>;K];R],columns:[u32;K],parameters:[crate::table::TermCell;P]) {
+    check_mode::<R,V,K,L,P,1>(input,raw,columns,parameters);
+}
+fn check_mode<let R:u32,let V:u32,let K:u32,let L:u32,let P:u32,let IDENTITY_STRINGS:u32>(
+    input:Table<R,V>,raw:[[BoundedTermOpening<L,41,1>;K];R],columns:[u32;K],parameters:[crate::table::TermCell;P]) {
     assert(input.len<=R,"read table capacity");
     for k in 0..K {
         assert(columns[k]<V,"read column");
@@ -20,7 +31,8 @@ pub fn check_with_parameters<let R:u32,let V:u32,let K:u32,let L:u32,let P:u32>(
             let cell=input.rows[r][columns[k]];
             let mut public=false;
             for p in 0..P {public=public | equal_cell(cell,parameters[p]);}
-            if (r<input.len) & cell.bound & (cell.kind==3) & !public {
+            let identity_only=(IDENTITY_STRINGS==1) & (cell.dt==crate::suite_constants::DT_STRING);
+            if (r<input.len) & cell.bound & (cell.kind==3) & !public & !identity_only {
                 let checked=crate::ops_core_suite::checked_bounded_literal(cell,raw[r][k]);
                 assert(equal_cell(checked,cell),"read opening differs from input cell");
             } else {
@@ -46,7 +58,7 @@ fn integer(value:u8) -> BoundedTermOpening<65,41,1> {
 }
 fn cell(raw:BoundedTermOpening<65,41,1>) -> crate::table::TermCell {
     let opened=crate::suite_entry::open_bounded_cell(raw,0);
-    crate::table::TermCell {bound:opened.bound(),kind:opened.kind(),enc:opened.enc(),
+    crate::table::TermCell {bound:opened.bound(),kind:opened.kind(),enc:opened.identity(),
         key_class:opened.key_class(),key:opened.key(),dt:opened.datatype(),lang:opened.language(),scope:opened.credential()}
 }
 fn input() -> Table<2,1> {
@@ -118,3 +130,14 @@ fn reads_cannot_truncate_an_overflowing_input() {
 }
 #[test(should_fail_with="read column")]
 fn reads_cannot_select_another_column() {check(input(),[[integer(1)],[integer(2)]],[1]);}
+
+#[test]
+fn reads_plain_string_identity_needs_no_value_key() {
+    let mut string=crate::table::unbound();string.bound=true;string.kind=3;
+    string.dt=crate::suite_constants::DT_STRING;string.enc=7;string.key_class=6;string.key=17;
+    check_identity_equalities(Table{rows:[[string]],len:1},[[crate::ops_core_profile::empty::<65>()]],[0],[crate::table::unbound()]);
+}
+#[test(should_fail_with="key requires literal")]
+fn reads_typed_membership_still_needs_a_value_key() {
+    check_identity_equalities(input(),[[crate::ops_core_profile::empty::<65>()];2],[0],[crate::table::unbound()]);
+}

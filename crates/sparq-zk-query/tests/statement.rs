@@ -240,7 +240,12 @@ fn computed_boolean_answers_do_not_require_a_source_vocabulary_entry() {
         let term: oxrdf::Term = oxrdf::Literal::from(value).into();
         let result = ResultValue::Select {
             variables: vec!["result".into()],
-            rows: vec![vec![SuiteEncoder.encode(&term).unwrap()]],
+            rows: vec![vec![{
+                let mut cell = SuiteEncoder.encode(&term).unwrap();
+                cell.key_class = 0;
+                cell.key = [0; 32];
+                cell
+            }]],
         };
         assert_eq!(
             Answer::release(&result, &plan, &[], &SuiteEncoder).unwrap(),

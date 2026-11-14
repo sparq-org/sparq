@@ -41,13 +41,17 @@ fn cell(c: suite::TermCell) -> Cell {
     Cell {
         bound: c.bound,
         kind: c.kind,
-        enc: suite::field_bytes(c.enc),
+        enc: table_identity(&c),
         key_class: c.key_class,
         key: suite::field_bytes(c.key),
         dt: suite::field_bytes(c.dt),
         lang: suite::field_bytes(c.lang),
         scope: c.credential,
     }
+}
+// One conversion is shared by source cells, request parameters and released RDF.
+fn table_identity(cell: &suite::TermCell) -> Word {
+    suite::field_bytes(cell.identity)
 }
 fn suite_error(e: sparq_merkle_suite::Error) -> Error {
     Error::Invalid(e.to_string())
@@ -135,27 +139,11 @@ impl Credential {
                 };
                 let capacity = if position < 2 {
                     RESOURCE_CAPACITY
-                } else if matches!(term, Term::Literal(l) if l.datatype().as_str() != "http://www.w3.org/2001/XMLSchema#string")
-                {
-                    SCALAR_CAPACITY
                 } else {
                     LEXICAL_CAPACITY
                 };
                 if lexical.len() > capacity {
                     return Err(Error::Capacity("opened lexical bytes".into()));
-                }
-                if let Term::Literal(l) = term {
-                    if !matches!(
-                        l.datatype().as_str(),
-                        "http://www.w3.org/2001/XMLSchema#integer"
-                            | "http://www.w3.org/2001/XMLSchema#decimal"
-                            | "http://www.w3.org/2001/XMLSchema#date"
-                            | "http://www.w3.org/2001/XMLSchema#dateTime"
-                            | "http://www.w3.org/2001/XMLSchema#boolean"
-                            | "http://www.w3.org/2001/XMLSchema#string"
-                    ) {
-                        return Err(Error::Unsupported("N0 credential literal datatype".into()));
-                    }
                 }
             }
             let encoded = suite::quad_cells(&quad, scope).map_err(suite_error)?;

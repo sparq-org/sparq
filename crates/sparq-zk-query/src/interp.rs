@@ -15,6 +15,7 @@ pub type Word = [u8; 32];
 pub struct Cell {
     pub bound: bool,
     pub kind: u8,
+    /// Authenticated key-independent RDF identity, or a result-local blank label.
     pub enc: Word,
     pub key_class: u8,
     pub key: Word,
@@ -26,10 +27,11 @@ pub struct Cell {
 impl Cell {
     pub fn same_term(self, other: Self) -> bool {
         self.bound == other.bound
-            && (!self.bound || (self.enc == other.enc && self.scope == other.scope))
+            && (!self.bound
+                || (self.kind == other.kind && self.enc == other.enc && self.scope == other.scope))
     }
-    fn identity(self) -> (bool, Word, u32) {
-        (self.bound, self.enc, self.scope)
+    fn identity(self) -> (bool, Word, u8, u32) {
+        (self.bound, self.enc, self.kind, self.scope)
     }
     pub fn validate(self) -> Result<(), Error> {
         if !self.bound {
@@ -356,6 +358,8 @@ fn release_rows(mut rows: Vec<Row>) -> Vec<Row> {
                     enc,
                     ..Cell::default()
                 };
+            } else {
+                *c = released_cell(*c);
             }
         }
     }
@@ -363,7 +367,14 @@ fn release_rows(mut rows: Vec<Row>) -> Vec<Row> {
     rows
 }
 
-pub(crate) fn row_key(row: &[Cell]) -> Vec<(bool, Word, u32)> {
+// A released RDF term carries identity and RDF metadata, with no value-key claim.
+pub(crate) fn released_cell(mut cell: Cell) -> Cell {
+    cell.key_class = 0;
+    cell.key = [0; 32];
+    cell
+}
+
+pub(crate) fn row_key(row: &[Cell]) -> Vec<(bool, Word, u8, u32)> {
     row.iter().map(|c| c.identity()).collect()
 }
 fn lookup(schema: &[Var], row: &[Cell], v: Var) -> Cell {
