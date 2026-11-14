@@ -83,7 +83,7 @@ fn committed_smoke_package_is_exactly_generated_with_its_original_manifest() {
 }
 
 #[test]
-fn source_scans_and_joins_use_the_normalized_literal_profile() {
+fn source_identity_binding_retains_the_suite_normalization_contract() {
     for query in [
         "ASK {?s <urn:p> 1}",
         "SELECT ?s WHERE {?s <urn:p> ?x}",
@@ -92,10 +92,61 @@ fn source_scans_and_joins_use_the_normalized_literal_profile() {
         let package = generate(&lower(query, B).unwrap()).unwrap();
         let source = &package.files[&format!("{}/src/main.nr", package.name)];
         assert!(source.contains("open_profile_mode_one::<4, 64, 65, 1, 32>"));
+        assert!(!source.contains("ops_core_reads::check_with_parameters("));
     }
     let package = generate(&lower("ASK {}", B).unwrap()).unwrap();
     let source = &package.files[&format!("{}/src/main.nr", package.name)];
     assert!(source.contains("open_profile_mode_one::<4, 64, 65, 0, 32>"));
+}
+
+#[test]
+fn expression_reads_cover_the_entire_consumer_input_before_filtering() {
+    let plan = lower(
+        "SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x >= 1 && ?x <= 9)}",
+        Bounds {
+            credentials: 1,
+            quads_per_credential: 64,
+            rows_per_table: 32,
+        },
+    )
+    .unwrap();
+    let package = generate(&plan).unwrap();
+    let source = &package.files[&format!("{}/src/main.nr", package.name)];
+    let (i, input) = plan
+        .nodes()
+        .iter()
+        .enumerate()
+        .find_map(|(i, node)| {
+            if let sparq_zk_query::plan::Operator::Filter(input, _) = node.operator {
+                Some((i, input))
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert!(source.contains(&format!(
+        "reads_{i}: [[core::suite_entry::BoundedTermOpening<65, 41, 1>; 1]; 32]"
+    )));
+    let check = source
+        .find(&format!(
+            "core::ops_core_reads::check_with_parameters(t{input}, reads_{i}, [1], parameters);"
+        ))
+        .unwrap();
+    let eval = source.find(&format!("let predicate_{i} =")).unwrap();
+    let filter = source.find(&format!("ops_core::filter(t{input},")).unwrap();
+    assert!(check < eval && eval < filter);
+    assert!(source.contains("open_profile_mode_one::<64, 64, 65, 1, 32>"));
+    assert!(!source.contains("source_index"));
+}
+
+#[test]
+fn absent_expression_variables_stay_unbound_without_read_witnesses() {
+    let plan = lower("ASK { FILTER(?absent > 1) }", B).unwrap();
+    let package = generate(&plan).unwrap();
+    let source = &package.files[&format!("{}/src/main.nr", package.name)];
+    assert!(!source.contains("ops_core_reads::check_with_parameters("));
+    assert!(!source.contains("reads_"));
+    assert!(source.contains("ops_core_expr::evaluate_indexed("));
 }
 
 #[test]

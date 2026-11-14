@@ -2,7 +2,7 @@
 
 use crate::{
     interp::{Cell, CredentialCells, EncodeTerm, ResultValue, Trace},
-    plan::{Parameter, Plan, ResultForm, Schema},
+    plan::{Operator, Parameter, Plan, ResultForm, Schema},
     Error,
 };
 use std::fmt::Write;
@@ -459,6 +459,59 @@ fn prover_toml_authenticated_mode(
         array(quad_bounds.iter().map(u32::to_string))
     )
     .unwrap();
+    // The table encoding is the binding, so no private location selects the source.
+    // Include request literals as VALUES can also feed a value-consuming operator.
+    let mut literals = Vec::new();
+    let mut public_literals = Vec::new();
+    for credential in credentials {
+        for quad in credential.quads()? {
+            if let oxrdf::Term::Literal(_) = &quad.object {
+                literals.push((SuiteEncoder.encode(&quad.object)?, quad.object));
+            }
+        }
+    }
+    for parameter in plan.parameters() {
+        if let Parameter::Term(term @ oxrdf::Term::Literal(_)) = parameter {
+            public_literals.push(SuiteEncoder.encode(term)?);
+        }
+    }
+    for (i, node) in plan.nodes().iter().enumerate() {
+        if let Operator::Filter(input, expr) = &node.operator {
+            let input = *input as usize;
+            let columns = crate::codegen::read_columns(expr, &plan.nodes()[input].output.variables);
+            if columns.is_empty() {
+                continue;
+            }
+            let mut reads = Vec::new();
+            for r in 0..plan.nodes()[input].output.capacity as usize {
+                let mut row = Vec::new();
+                for &column in &columns {
+                    let cell = trace.tables[input].rows.get(r).map(|row| row[column]);
+                    let term = if let Some(cell) =
+                        cell.filter(|c| c.bound && c.kind == 3 && !public_literals.contains(c))
+                    {
+                        Some(
+                            &literals
+                                .iter()
+                                .find(|(c, _)| *c == cell)
+                                .ok_or_else(|| Error::Invalid("expression read opening".into()))?
+                                .1,
+                        )
+                    } else {
+                        None
+                    };
+                    row.push(term_opening_with_capacity(term, opening.object as usize)?);
+                }
+                reads.push(serde_json::Value::Array(row));
+            }
+            writeln!(
+                out,
+                "reads_{i} = {}",
+                json_toml(&serde_json::Value::Array(reads))
+            )
+            .unwrap();
+        }
+    }
     Ok(out)
 }
 
@@ -516,7 +569,7 @@ fn term_opening_with_capacity(
         Ok(bytes)
     };
     Ok(
-        serde_json::json!({"bound":true,"kind":kind,"lexical":pad(text,capacity)?,"lexical_len":text.len(),
+        serde_json::json!({"bound":term.is_some(),"kind":kind,"lexical":pad(text,capacity)?,"lexical_len":text.len(),
         "datatype":pad(dt,crate::credential::DATATYPE_CAPACITY)?,"datatype_len":dt.len(),"language":pad(lang,crate::credential::LANGUAGE_CAPACITY)?,"language_len":lang.len(),"key":key.as_slice()}),
     )
 }

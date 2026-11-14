@@ -54,7 +54,7 @@ Use `prepare_with_opening_profile` and
 properties as well. Oversized lexical forms receive a capacity refusal.
 
 The current suite profile opens complete credentials, checks hidden signatures
-and issuer key membership. Source operators normalize supported literal keys.
+and issuer key membership. Source identities retain normalized literal cells; value consumers also check complete active inputs, including rejected rows. Overflow refuses.
 The verifier reconstructs the plan and constants from its stored request, re-encodes the released RDF answer,
 and consumes the shared challenge after proof verification and a final validity check.
 Supplied-cell programs are isolated operator fixtures.

@@ -108,6 +108,15 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
             node.output.abi_width()
         )
         .unwrap();
+        if authenticated {
+            if let Operator::Filter(input, expr) = &node.operator {
+                let columns = read_columns(expr, &plan.nodes[*input as usize].output.variables);
+                if !columns.is_empty() {
+                    writeln!(source, "    reads_{i}: [[core::suite_entry::BoundedTermOpening<{lexical}, 41, 1>; {}]; {}],",
+                        columns.len(), plan.nodes[*input as usize].output.capacity).unwrap();
+                }
+            }
+        }
     }
     writeln!(source,") {{\n    ops_core::check_parameters(parameters, {});\n    ops_core::check_indices(indices, {});",term_ids.len(),index_ids.len()).unwrap();
     let dataset_name = if plan
@@ -203,6 +212,15 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
                 writeln!(source, "    ops_core::distinct(t{a}, t{i});").unwrap()
             }
             Operator::Filter(a, expr) => {
+                let read_columns = read_columns(expr, &plan.nodes[*a as usize].output.variables);
+                if authenticated && !read_columns.is_empty() {
+                    writeln!(
+                        source,
+                        "    core::ops_core_reads::check_with_parameters(t{a}, reads_{i}, {}, parameters);",
+                        array(read_columns.iter().map(usize::to_string))
+                    )
+                    .unwrap();
+                }
                 let mut steps = vec![];
                 expression(
                     expr,
@@ -290,6 +308,36 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
         (format!("{name}/src/main.nr"),source),
     ]);
     Ok(Package { name, files })
+}
+
+/// Static variable columns consumed by an expression, checked on its entire input.
+/// Parameter cells are public and reconstructed by the verifier from the request.
+pub(crate) fn read_columns(expr: &Expr, schema: &[Var]) -> Vec<usize> {
+    fn collect(expr: &Expr, schema: &[Var], columns: &mut std::collections::BTreeSet<usize>) {
+        match expr {
+            Expr::Term(Slot::Variable(v)) => {
+                // An absent variable remains unbound in the expression VM.
+                if let Some(column) = schema.iter().position(|a| a == v) {
+                    columns.insert(column);
+                }
+            }
+            Expr::Term(Slot::Parameter(_)) => {}
+            Expr::Compare(_, a, b) | Expr::And(a, b) | Expr::Or(a, b) => {
+                collect(a, schema, columns);
+                collect(b, schema, columns);
+            }
+            Expr::Not(a) | Expr::InList { value: a, .. } => collect(a, schema, columns),
+            Expr::In(a, list) => {
+                collect(a, schema, columns);
+                for b in list {
+                    collect(b, schema, columns);
+                }
+            }
+        }
+    }
+    let mut columns = std::collections::BTreeSet::new();
+    collect(expr, schema, &mut columns);
+    columns.into_iter().collect()
 }
 
 fn array(items: impl IntoIterator<Item = String>) -> String {

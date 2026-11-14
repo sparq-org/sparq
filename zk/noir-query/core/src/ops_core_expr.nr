@@ -52,21 +52,20 @@ pub fn temporal_payload(key:Field) -> Field {
     instant as Field
 }
 
-// Equality uses a term-identity token only for strings of the same datatype. Ordering uses the checked
-// short-string key, whose zero padding preserves the lexical order. Neither
-// representation is exposed as a lexical opening to other expression gadgets.
-// Other literal types, including language-tagged literals, retain the shared
-// RDF term equality/error dispatch without a lexical token.
-fn scalar(cell: TermCell, equality: bool, effective_boolean: bool, class_only:bool) -> (Lane<Scalar<32>>, bool) {
+fn term_contract(cell:TermCell) -> crate::expr_term_contract::TermCell {
+    crate::expr_term_contract::TermCell {bound:cell.bound,kind:cell.kind,enc:cell.enc,
+        key_class:cell.key_class,key:cell.key,dt:cell.dt,lang:cell.lang,credential:cell.scope}
+}
+
+// Ordering uses the checked short-string key, whose zero padding preserves order.
+// Equality of strings with the same datatype delegates directly to shared term
+// identity. Other pairs retain the shared class and error dispatch.
+fn scalar(cell: TermCell, effective_boolean: bool, class_only:bool) -> (Lane<Scalar<32>>, bool) {
     let mut value = Scalar {
         tag: TERM, valid: true, boolean: false, number: zero_numeric(),
         string: StringLane { bytes: [0; 32], len: 0, lang: 0 },
         temporal: TemporalLane { key_class: 0, key: 0 },
-        term: crate::expr_term_contract::TermCell {
-            bound: cell.bound, kind: cell.kind,
-            enc: cell.enc, key_class: cell.key_class, key: cell.key, dt: cell.dt, lang: cell.lang,
-            credential: cell.scope,
-        },
+        term: term_contract(cell),
     };
     let mut capacity = false;
     let invalid_ebv = cell.bound & (cell.kind == 3) & (cell.key_class == 0)
@@ -106,9 +105,6 @@ fn scalar(cell: TermCell, equality: bool, effective_boolean: bool, class_only:bo
                 let nonempty = (cell.key_class == 7) | (cell.key != prefix);
                 value.string.len = nonempty as u32;
                 value.string.bytes[0] = nonempty as u8;
-            } else if equality {
-                value.string.bytes = cell.enc.to_be_bytes::<32>();
-                value.string.len = 32;
             } else {
                 assert(cell.key_class == 6, "string comparison capacity");
                 let bytes = cell.key.to_be_bytes::<32>();
@@ -125,7 +121,7 @@ fn ebv(value: Value) -> (Lane<bool>, bool) {
     if value.is_boolean { value.boolean }
     else {
         assert(!value.term.bound | (value.term.dt != DT_LANGSTRING), "language-tagged effective boolean value not yet supported");
-        expr_core::ebv(scalar(value.term, false, true, false))
+        expr_core::ebv(scalar(value.term, true, false))
     }
 }
 fn compare(op: u8, a: Value, b: Value, membership: bool) -> (Lane<bool>, bool) {
@@ -133,7 +129,7 @@ fn compare(op: u8, a: Value, b: Value, membership: bool) -> (Lane<bool>, bool) {
     assert(!membership | (op == 0), "membership comparison instruction");
     if a.is_boolean & b.is_boolean {
         let (av, ae) = a.boolean; let (bv, be) = b.boolean;
-        let mut left = scalar(unbound(), false, false, false);
+        let mut left = scalar(unbound(), false, false);
         let mut right = left;
         let (mut x, _) = left; let (mut y, _) = right;
         x.value.tag = BOOLEAN; x.value.boolean = av.value; x.value.term.bound = true;
@@ -159,9 +155,15 @@ fn compare(op: u8, a: Value, b: Value, membership: bool) -> (Lane<bool>, bool) {
         }
         let string_pair = is_string(a) & is_string(b);
         let same_string_type = string_pair & (a.dt == b.dt);
-        let class_only = !string_pair | ((op == 0) & !same_string_type);
-        let (mut x, xe) = scalar(a, (op == 0) & same_string_type, false, class_only);
-        let (mut y, ye) = scalar(b, (op == 0) & same_string_type, false, class_only);
+        if (op == 0) & same_string_type {
+            expr_compare::same_term((Lane {value:term_contract(a),capacity:false},false),
+                (Lane {value:term_contract(b),capacity:false},false))
+        } else {
+        // Under equality, same-type strings have already taken the identity arm.
+        // The remaining scalar dispatch needs only string classes, never bytes.
+        let class_only = !string_pair | (op == 0);
+        let (mut x, xe) = scalar(a, false, class_only);
+        let (mut y, ye) = scalar(b, false, class_only);
         let result = if (x.value.tag == NUMERIC) & (y.value.tag == NUMERIC) {
             // Keep the exact-only bucket statically typed. Error and capacity
             // remain separate, and no IEEE conversion is instantiated here.
@@ -179,6 +181,7 @@ fn compare(op: u8, a: Value, b: Value, membership: bool) -> (Lane<bool>, bool) {
         // Credential-local blank labels retain their distinct scopes.
         if op == 0 { expr_core::logical_and(result, truth(a.scope == b.scope, false)) }
         else { result }
+        }
         }
     } else {
         assert(false, "comparison of boolean expression and term not yet supported");

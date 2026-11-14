@@ -15,6 +15,45 @@ const BOUNDS: Bounds = Bounds {
 };
 
 #[test]
+fn medication_input_capacity_covers_rejected_rows_before_the_result_limit() {
+    let query = "SELECT ?medication WHERE {?medication <urn:strength> ?strength FILTER(?strength >= 31)} LIMIT 1";
+    let input = |count| {
+        (0..count).map(|i| format!(
+        "<urn:medication:{i}> <urn:strength> \"{i}\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n"
+    )).collect::<String>()
+    };
+    let bounds = Bounds {
+        credentials: 1,
+        quads_per_credential: 64,
+        rows_per_table: 32,
+    };
+    let plan = lower(query, bounds).unwrap();
+    let (data, _) = dataset(&input(32));
+    let trace = evaluate(&plan, &data, &FixtureEncoder).unwrap();
+    assert!(trace.tables.iter().any(|t| t.rows.len() == 32));
+    assert!(matches!(&trace.result, ResultValue::Select {rows,..} if rows.len()==1));
+    assert_engine(query, &input(32), &trace.result);
+    let narrow = lower(
+        query,
+        Bounds {
+            rows_per_table: 4,
+            ..bounds
+        },
+    )
+    .unwrap();
+    assert_ne!(plan.hash(), narrow.hash());
+    assert_eq!(
+        evaluate(&narrow, &data, &FixtureEncoder).unwrap_err(),
+        Error::Capacity("operator output".into())
+    );
+    let (overflow, _) = dataset(&input(33));
+    assert_eq!(
+        evaluate(&plan, &overflow, &FixtureEncoder).unwrap_err(),
+        Error::Capacity("operator output".into())
+    );
+}
+
+#[test]
 fn bag_projection_distinct_join_values_and_false_ask() {
     let data = fixture();
     let run = |q| {

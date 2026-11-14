@@ -274,3 +274,11 @@ same verification. The native `Compiler` retains its hidden-only contract; the
 statement adapter must enforce its request's accepted mode before using these APIs.
 Both modes share one suite opening per active credential, with the shared Schnorr
 verifier called for hidden mode. No presentation-supplied layout is accepted.
+
+Authenticated query programs open complete credential identities once. Value-consuming
+FILTER inputs validate each consumed literal on every active input row, including
+rejected rows. Cells identical to verifier-reconstructed public parameters reuse
+those canonical keys; other literal cells carry separate lexical openings. Each checked cell must equal the row's
+authenticated encoding and metadata; no private source index selects the binding.
+Select intermediate row bounds for the full scan output, independently of result
+limits. An overflowing intermediate table refuses the proof.

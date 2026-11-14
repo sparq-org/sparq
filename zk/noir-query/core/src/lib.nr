@@ -17,6 +17,7 @@ mod suite_entry_tests;
 pub mod table;
 pub mod ops_core;
 pub mod ops_core_expr;
+pub mod ops_core_reads;
 pub mod ops_core_statement;
 pub mod ops_core_suite;
 mod ops_core_tests;

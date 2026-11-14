@@ -36,7 +36,17 @@ The expression bridge delegates typed comparison, boolean connectives and
 membership to the shared expression library. It derives scalar values from
 checked suite keys and keeps capacity separate from SPARQL errors. FILTER retains only a true,
 non-error root. Unimplemented operand families receive named refusals rather
-than a different comparison. The bridge does not expose equality tokens as lexical openings.
+than a different comparison. Same-datatype string equality delegates directly to shared term identity; mixed types retain value/error dispatch.
+
+The read-site adapter validates value inputs separately from authentication. Source
+identity normalization remains part of credential conversion. Before evaluation it
+validates each consumed literal on every active input row. Private lexical reads
+use a fixed-datatype suite constructor. Cells equal in every field to a public
+request parameter reuse its verifier-reconstructed canonical key. It checks the entire reconstructed cell against that row's authenticated
+encoding and metadata. No private source index chooses the binding, and rejected
+rows are included. Request parameters are reconstructed publicly by the verifier.
+The scan proves completeness of each bounded input table; intermediate capacity
+refuses rather than truncates, independently of final projection or slice.
 
 The crate README records the public-input layout. A shared schema in
 `statement::Layout` produces declarations and

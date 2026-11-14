@@ -226,17 +226,23 @@ fn literal_profile<let L:u32>(cell:crate::term::TermCell,raw:BoundedTermOpening<
         "N0 credential literal datatype");
     assert((dt==DT_STRING)|(raw.lexical_len <= 32),"credential scalar lexical capacity");
 }
-fn checked_bounded_literal<let L:u32>(cell:crate::term::TermCell,raw:BoundedTermOpening<L,41,1>) {
-    if cell.datatype()==DT_STRING {
-        let _checked=crate::term::open_key_checked(raw,0,DT_STRING);
+/// Reopen a literal through the suite's fixed-datatype constructors.
+/// The caller binds the returned cell to its authenticated input table.
+pub fn checked_bounded_literal<let L:u32>(cell:TermCell,raw:BoundedTermOpening<L,41,1>) -> TermCell {
+    let checked=if cell.dt==DT_STRING {
+        crate::term::open_key_checked(raw,0,DT_STRING).cell()
     } else {
         let scalar=scalar_opening(raw);
-        if cell.datatype()==DT_INTEGER {let _checked=crate::term::open_key_checked(scalar,0,DT_INTEGER);}
-        else if cell.datatype()==DT_DECIMAL {let _checked=crate::term::open_key_checked(scalar,0,DT_DECIMAL);}
-        else if cell.datatype()==DT_DATE {let _checked=crate::term::open_key_checked(scalar,0,DT_DATE);}
-        else if cell.datatype()==DT_DATETIME {let _checked=crate::term::open_key_checked(scalar,0,DT_DATETIME);}
-        else {assert(cell.datatype()==DT_BOOLEAN,"N0 credential literal datatype");let _checked=crate::term::open_key_checked(scalar,0,DT_BOOLEAN);}
-    }
+        let mut tail:Field=0;
+        for i in 32..L {tail=tail+raw.lexical[i] as Field;}
+        assert(tail==0,"read scalar backing padding");
+        if cell.dt==DT_INTEGER {crate::term::open_key_checked(scalar,0,DT_INTEGER).cell()}
+        else if cell.dt==DT_DECIMAL {crate::term::open_key_checked(scalar,0,DT_DECIMAL).cell()}
+        else if cell.dt==DT_DATE {crate::term::open_key_checked(scalar,0,DT_DATE).cell()}
+        else if cell.dt==DT_DATETIME {crate::term::open_key_checked(scalar,0,DT_DATETIME).cell()}
+        else {assert(cell.dt==DT_BOOLEAN,"N0 credential literal datatype");crate::term::open_key_checked(scalar,0,DT_BOOLEAN).cell()}
+    };
+    table_cell(checked)
 }
 /// The complete bounded suite opening is shared with the envelope consumer.
 pub fn authenticate_bounded<let N:u32,let R:u32,let L:u32>(
@@ -261,7 +267,7 @@ pub fn from_authenticated_bounded<let N:u32,let R:u32,let L:u32,let CHECK:u32>(
     let quads=authenticated.quads();
     for n in 0..N {if (n < authenticated.count()) & (quads[n][2].kind()==3) {
         literal_profile(quads[n][2],raw[n][2]);
-        if CHECK==1 {checked_bounded_literal(quads[n][2],raw[n][2]);}
+        if CHECK==1 {let _checked=checked_bounded_literal(table_cell(quads[n][2]),raw[n][2]);}
     }}
     convert_authenticated(authenticated,credential_index,request_digest)
 }
@@ -526,7 +532,7 @@ fn checked_bounded_test<let T:u32>(byte:u8,datatype:[u8;T],key_class:u8) {
     raw.lexical[0]=byte;raw.lexical_len=1;raw.datatype_len=T;raw.key[0]=key_class;
     for i in 0..T {raw.datatype[i]=datatype[i];}
     let bounded=bounded_raw(raw);let cell=crate::suite_entry::open_bounded_cell(bounded,0);
-    literal_profile(cell,bounded);checked_bounded_literal(cell,bounded);
+    literal_profile(cell,bounded);let _checked=checked_bounded_literal(table_cell(cell),bounded);
 }
 #[test]
 fn bounded_invalid_integer_keeps_its_exact_none_key() {

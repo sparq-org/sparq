@@ -595,6 +595,15 @@ fn plain_string_cell(class:u8) -> TermCell {
     let mut cell=expression_cell(class,1,11);cell.dt=crate::suite_constants::DT_STRING;cell
 }
 #[test]
+fn expression_same_type_strings_compare_authenticated_identity() {
+    for class in [6,7] {
+        let a=plain_string_cell(class);let mut b=a;b.enc=12;
+        let equal=mixed_string_equality(a,a);let different=mixed_string_equality(a,b);
+        assert(equal.value & !equal.is_error,"same-type string identity equality");
+        assert(!different.value & !different.is_error,"same-type string identity inequality");
+    }
+}
+#[test]
 fn expression_plain_and_language_string_equality_uses_its_type_class() {
     let mut language=expression_cell(0,0,12);
     language.dt=crate::suite_constants::DT_LANGSTRING;language.lang=7;
