@@ -26,7 +26,9 @@ use sparq_zk::commit::GraphCommitment;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) mod date;
+mod issuer_scope;
 mod optimize;
+pub use issuer_scope::lower_issuer_scope;
 /// Separately admitted canonical signed-integer disclosure planning.
 pub mod signed;
 #[doc(inline)]

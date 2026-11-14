@@ -78,7 +78,10 @@ struct Credential {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Policy {
+    #[serde(default)]
     trusted_issuers: Vec<String>,
+    #[serde(default)]
+    issuers: BTreeMap<String, String>,
     snapshots: Vec<StatusListSnapshot>,
     min_version: u64,
     max_version: u64,
@@ -117,19 +120,66 @@ fn test_seed(seed: &str) -> Result<u64, String> {
 fn test_issuer_key(seed: &str) -> Result<SecretKey, String> {
     Ok(SecretKey::from_seed(test_seed(seed)?))
 }
+struct HostPolicy {
+    native: ResultPolicy,
+    issuers: BTreeMap<String, sig::PublicKey>,
+}
+
+struct IssuerScope {
+    iri: String,
+    key: sig::PublicKey,
+}
+
+// Shared by preparation and independent reconstruction. Scope is receiver policy,
+// never presentation metadata, and the native unscoped verifier stays unchanged.
+fn admit_query(
+    query: &str,
+    policy_json: &str,
+) -> Result<(String, Option<IssuerScope>, HostPolicy), String> {
+    let (flat, issuer) = sparq_zk_compose::planner::lower_issuer_scope(query).map_err(err)?;
+    let policy = host_policy(policy_json)?;
+    let scope = issuer
+        .map(|iri| {
+            let key = *policy.issuers.get(&iri).ok_or("issuer-not-in-policy")?;
+            Ok::<_, String>(IssuerScope { iri, key })
+        })
+        .transpose()?;
+    Ok((flat, scope, policy))
+}
+
+#[cfg(test)]
 fn policy(s: &str) -> Result<ResultPolicy, String> {
+    Ok(host_policy(s)?.native)
+}
+
+fn host_policy(s: &str) -> Result<HostPolicy, String> {
     let p: Policy = parse(s)?;
-    let keys = p
+    let mut keys = p
         .trusted_issuers
         .iter()
         .map(|s| sig::public_key_from_hex(s).ok_or_else(|| "invalid trusted issuer key".to_owned()))
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(ResultPolicy {
-        trusted_issuers: keys,
-        snapshots: p.snapshots,
-        min_version: p.min_version,
-        max_version: p.max_version,
-        admit_unbound_legacy: false,
+    let issuers = p
+        .issuers
+        .into_iter()
+        .map(|(iri, key)| {
+            oxrdf::NamedNode::new(&iri).map_err(err)?;
+            let key = sig::public_key_from_hex(&key).ok_or("invalid issuer map key")?;
+            if !keys.contains(&key) {
+                keys.push(key);
+            }
+            Ok((iri, key))
+        })
+        .collect::<Result<BTreeMap<_, _>, String>>()?;
+    Ok(HostPolicy {
+        native: ResultPolicy {
+            trusted_issuers: keys,
+            snapshots: p.snapshots,
+            min_version: p.min_version,
+            max_version: p.max_version,
+            admit_unbound_legacy: false,
+        },
+        issuers,
     })
 }
 fn credential(s: &str) -> Result<ResultCredential, String> {
@@ -292,12 +342,15 @@ pub fn prepare(
     if credentials_json.len() > sparq_zk_compose::planner::MAX_DISCLOSURE_CREDENTIALS {
         return Err("wallet exceeds disclosure credential limit".into());
     }
-    sparq_zk_compose::planner::DisclosureQuery::parse(query_text).map_err(err)?;
+    let (flat, scope, p) = admit_query(query_text, policy_json)?;
     let credentials = credentials_json
         .iter()
         .map(|s| credential(s))
         .collect::<Result<Vec<_>, _>>()?;
-    let p = policy(policy_json)?;
+    let credentials = credentials
+        .into_iter()
+        .filter(|c| scope.as_ref().is_none_or(|scope| c.issuer == scope.key))
+        .collect::<Vec<_>>();
     let n = nonce(nonce_hex)?;
     let options: Options = parse(options_json)?;
     let triples = credentials
@@ -308,7 +361,7 @@ pub fn prepare(
     for t in triples {
         graph.insert_triple(t.subject, t.predicate, t.object)?;
     }
-    let evaluated = sparq_engine::query(&graph, query_text)?;
+    let evaluated = sparq_engine::query(&graph, &flat)?;
     let rows = evaluated
         .rows
         .iter()
@@ -325,10 +378,10 @@ pub fn prepare(
         .collect::<Vec<_>>();
     let defaults = ResultOptions::default();
     let prepared = result::prepare_result_with_options(
-        query_text,
+        &flat,
         &credentials,
         &rows,
-        &p,
+        &p.native,
         &n,
         ResultOptions {
             credential_capacity: if options.hide_in_two {
@@ -353,7 +406,9 @@ pub fn prepare(
     )
     .map_err(err)?;
     canonical_vk_hash(prepared.member())?;
-    Ok(json!({"member":prepared.member(),"witnessInputs":noir_numbers(serde_json::to_value(prepared.witness_inputs()).map_err(err)?),"presentationSkeleton":prepared.presentation_skeleton()}).to_string())
+    let mut skeleton = prepared.presentation_skeleton().clone();
+    skeleton.query = query_text.to_owned();
+    Ok(json!({"member":prepared.member(),"witnessInputs":noir_numbers(serde_json::to_value(prepared.witness_inputs()).map_err(err)?),"presentationSkeleton":skeleton}).to_string())
 }
 
 /// Independently reconstructs the expected statement and candidate report.
@@ -365,13 +420,24 @@ pub fn reconstruct_public_inputs(
     policy_json: &str,
     nonce_hex: &str,
 ) -> Result<String, String> {
-    let presentation: ResultPresentation = parse(presentation_json)?;
-    let p = policy(policy_json)?;
+    let mut presentation: ResultPresentation = parse(presentation_json)?;
+    if presentation.query != expected_query_text {
+        return Err("query differs from relying-party request".into());
+    }
+    let (flat, scope, p) = admit_query(expected_query_text, policy_json)?;
+    presentation.query = flat.clone();
     let n = nonce(nonce_hex)?;
     let reconstructed =
-        result::reconstruct_result_public_inputs(expected_query_text, &presentation, &p, &n)
+        result::reconstruct_result_public_inputs(&flat, &presentation, &p.native, &n)
             .map_err(err)?;
-    let report = reconstructed_report(expected_query_text, &reconstructed, &p, &n)?;
+    let report = reconstructed_report(
+        expected_query_text,
+        &reconstructed,
+        &p.native,
+        &p.issuers,
+        scope.as_ref(),
+        &n,
+    )?;
     Ok(json!({"member":reconstructed.member,"publicInputs":inputs(&reconstructed.public_inputs),"released":presentation.rows,"nonce":n.as_field_hex().0,"report":report}).to_string())
 }
 
@@ -382,6 +448,8 @@ fn reconstructed_report(
     expected_query: &str,
     reconstructed: &result::ReconstructedResult,
     policy: &ResultPolicy,
+    issuer_names: &BTreeMap<String, sig::PublicKey>,
+    scope: Option<&IssuerScope>,
     nonce: &VerifierNonce,
 ) -> Result<Value, String> {
     let slots = match reconstructed.member.split('_').nth(2) {
@@ -393,7 +461,7 @@ fn reconstructed_report(
         .public_inputs
         .get(3 * 32..(3 + 2 * slots) * 32)
         .ok_or("missing public issuer coordinates")?;
-    let issuers = coordinates
+    let keys = coordinates
         .chunks_exact(64)
         .map(|pair| {
             policy
@@ -403,11 +471,31 @@ fn reconstructed_report(
                     let (x, y) = key.coords()?;
                     (pair[..32] == field_to_be_bytes_32(&x)
                         && pair[32..] == field_to_be_bytes_32(&y))
-                    .then(|| sig::public_key_to_hex(key))
+                    .then_some(*key)
                 })
                 .ok_or_else(|| "public issuer coordinates outside trust policy".to_owned())
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let issuers = if let Some(scope) = scope {
+        if keys.iter().any(|key| *key != scope.key) {
+            return Err("issuer-scope-mismatch".into());
+        }
+        vec![scope.iri.clone()]
+    } else {
+        keys.iter()
+            .flat_map(|key| {
+                let names = issuer_names
+                    .iter()
+                    .filter_map(|(iri, mapped)| (mapped == key).then_some(iri.clone()))
+                    .collect::<Vec<_>>();
+                if names.is_empty() {
+                    vec![sig::public_key_to_hex(key)]
+                } else {
+                    names
+                }
+            })
+            .collect()
+    };
     Ok(json!({
         "rule": {"query": expected_query, "member": reconstructed.member},
         "issuers": issuers,
@@ -443,6 +531,197 @@ mod tests {
         let policy=json!({"trustedIssuers":[key["publicKey"]],"snapshots":[{"status_list":"https://example.org/status","version":1,"bits":[0]}],"minVersion":1,"maxVersion":1}).to_string();
         let credential = issue(&issuer, GRAPH, STATUS).unwrap();
         (issuer, credential, policy)
+    }
+
+    fn scoped_query(iri: &str) -> String {
+        format!("PREFIX vcq: <https://w3id.org/sparq/vcq#> SELECT DISTINCT ?p WHERE {{ ?g vcq:verifiedIssuer <{iri}> . GRAPH ?g {{ ?p <https://example.org/degree> <https://example.org/BSc> }} }}")
+    }
+
+    #[test]
+    fn issuer_scope_filters_credentials_and_requires_policy_resolution() {
+        let (issuer, c, p) = fixture();
+        let mut p: Value = parse(&p).unwrap();
+        let key: Value = parse(&issuer).unwrap();
+        p["issuers"] = json!({"urn:issuer:a": key["publicKey"]});
+        // The map alone grants trust; the old trust list stays optional.
+        p.as_object_mut().unwrap().remove("trustedIssuers");
+        let query = scoped_query("urn:issuer:a");
+        let prepared: Value =
+            parse(&prepare(&query, vec![c.clone()], &p.to_string(), "0x1234", "{}").unwrap())
+                .unwrap();
+        assert_eq!(prepared["presentationSkeleton"]["query"], query);
+        let checked: Value = parse(
+            &reconstruct_public_inputs(
+                &query,
+                &prepared["presentationSkeleton"].to_string(),
+                &p.to_string(),
+                "0x1234",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(checked["report"]["issuers"], json!(["urn:issuer:a"]));
+        assert_eq!(checked["report"]["rule"]["query"], query);
+        let unknown = scoped_query("urn:issuer:unknown");
+        assert_eq!(
+            prepare(&unknown, vec![c.clone()], &p.to_string(), "0x1234", "{}").unwrap_err(),
+            "issuer-not-in-policy"
+        );
+        let mut skeleton = prepared["presentationSkeleton"].clone();
+        skeleton["query"] = json!(unknown);
+        assert_eq!(
+            reconstruct_public_inputs(&unknown, &skeleton.to_string(), &p.to_string(), "0x1234")
+                .unwrap_err(),
+            "issuer-not-in-policy"
+        );
+        assert!(
+            reconstruct_public_inputs(&query, &skeleton.to_string(), &p.to_string(), "0x1234")
+                .unwrap_err()
+                .contains("query differs")
+        );
+        let other = test_issuer_keygen("b2").unwrap();
+        let other_key: Value = parse(&other).unwrap();
+        p["trustedIssuers"] = json!([other_key["publicKey"]]);
+        let other_credential = issue(&other, &GRAPH.replace("alice", "bob"), STATUS).unwrap();
+        assert!(prepare(
+            &query,
+            vec![other_credential.clone()],
+            &p.to_string(),
+            "0x1234",
+            "{}"
+        )
+        .is_err());
+        let selected: Value = parse(
+            &prepare(
+                &query,
+                vec![other_credential, c],
+                &p.to_string(),
+                "0x1234",
+                "{}",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            selected["presentationSkeleton"]["issuer_slots"],
+            json!([key["publicKey"]])
+        );
+        assert_eq!(
+            selected["presentationSkeleton"]["rows"],
+            prepared["presentationSkeleton"]["rows"]
+        );
+    }
+
+    #[test]
+    fn issuer_scope_checks_every_public_slot_and_reports_policy_names() {
+        let (issuer, c, p) = fixture();
+        let mut p: Value = parse(&p).unwrap();
+        let key: Value = parse(&issuer).unwrap();
+        let other: Value = parse(&test_issuer_keygen("b2").unwrap()).unwrap();
+        p["issuers"] =
+            json!({"urn:issuer:a": key["publicKey"], "urn:issuer:b": other["publicKey"]});
+        let query = scoped_query("urn:issuer:a");
+        let prepared: Value = parse(
+            &prepare(
+                &query,
+                vec![c],
+                &p.to_string(),
+                "0x1234",
+                r#"{"hideInTwo":true}"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let skeleton = prepared["presentationSkeleton"].clone();
+        let checked: Value = parse(
+            &reconstruct_public_inputs(&query, &skeleton.to_string(), &p.to_string(), "0x1234")
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(checked["report"]["issuers"], json!(["urn:issuer:a"]));
+        let public_inputs = checked["publicInputs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|v| {
+                field_to_be_bytes_32(&field_from_hex_str_strict(v.as_str().unwrap()).unwrap())
+            })
+            .collect::<Vec<_>>();
+        let host = host_policy(&p.to_string()).unwrap();
+        let issuer_scope = IssuerScope {
+            iri: "urn:issuer:a".into(),
+            key: host.issuers["urn:issuer:a"],
+        };
+        let (x, y) = host.issuers["urn:issuer:b"].coords().unwrap();
+        for index in 0..2 {
+            // Exercise each coordinate pair independently of the outer ordering guard.
+            let mut raw = result::ReconstructedResult {
+                member: "result_v5_k2_n16_p3_r4_f0_d10",
+                public_inputs: public_inputs.clone(),
+                released: Vec::new(),
+            };
+            let offset = (3 + 2 * index) * 32;
+            raw.public_inputs[offset..offset + 32].copy_from_slice(&field_to_be_bytes_32(&x));
+            raw.public_inputs[offset + 32..offset + 64].copy_from_slice(&field_to_be_bytes_32(&y));
+            assert_eq!(
+                reconstructed_report(
+                    &query,
+                    &raw,
+                    &host.native,
+                    &host.issuers,
+                    Some(&issuer_scope),
+                    &nonce("0x1234").unwrap()
+                )
+                .unwrap_err(),
+                "issuer-scope-mismatch"
+            );
+            let mut wrong = skeleton.clone();
+            wrong["issuer_slots"][index] = other["publicKey"].clone();
+            wrong["issuer_slots"]
+                .as_array_mut()
+                .unwrap()
+                .sort_by(|a, b| a.as_str().cmp(&b.as_str()));
+            assert_eq!(
+                reconstruct_public_inputs(&query, &wrong.to_string(), &p.to_string(), "0x1234")
+                    .unwrap_err(),
+                "issuer-scope-mismatch"
+            );
+        }
+        let mut unscoped = skeleton.clone();
+        unscoped["query"] = json!(QUERY);
+        let checked: Value = parse(
+            &reconstruct_public_inputs(QUERY, &unscoped.to_string(), &p.to_string(), "0x1234")
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            checked["report"]["issuers"],
+            json!(["urn:issuer:a", "urn:issuer:a"])
+        );
+        p["issuers"] = json!({"urn:issuer:b": other["publicKey"]});
+        let checked: Value = parse(
+            &reconstruct_public_inputs(QUERY, &unscoped.to_string(), &p.to_string(), "0x1234")
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            checked["report"]["issuers"],
+            json!([key["publicKey"], key["publicKey"]])
+        );
+    }
+
+    #[test]
+    fn issuer_map_rejects_invalid_iris_and_keys() {
+        let (issuer, _, p) = fixture();
+        let key: Value = parse(&issuer).unwrap();
+        let mut p: Value = parse(&p).unwrap();
+        p["issuers"] = json!({"relative": key["publicKey"]});
+        assert!(host_policy(&p.to_string()).is_err());
+        p["issuers"] = json!({"urn:issuer:a": "invalid"});
+        assert_eq!(
+            host_policy(&p.to_string()).err().unwrap(),
+            "invalid issuer map key"
+        );
     }
 
     #[test]
@@ -557,7 +836,9 @@ mod tests {
             } else {
                 2
             };
-            let report = reconstructed_report(QUERY, &reconstructed, &p, &n).unwrap();
+            let report =
+                reconstructed_report(QUERY, &reconstructed, &p, &BTreeMap::new(), None, &n)
+                    .unwrap();
             assert_eq!(
                 report,
                 json!({
@@ -571,10 +852,15 @@ mod tests {
             let (x, y) = other.coords().unwrap();
             reconstructed.public_inputs[3 * 32..4 * 32].copy_from_slice(&field_to_be_bytes_32(&x));
             reconstructed.public_inputs[4 * 32..5 * 32].copy_from_slice(&field_to_be_bytes_32(&y));
-            let report = reconstructed_report(QUERY, &reconstructed, &p, &n).unwrap();
+            let report =
+                reconstructed_report(QUERY, &reconstructed, &p, &BTreeMap::new(), None, &n)
+                    .unwrap();
             assert_eq!(report["issuers"][0], sig::public_key_to_hex(&other));
             p.trusted_issuers.remove(0);
-            assert!(reconstructed_report(QUERY, &reconstructed, &p, &n).is_err());
+            assert!(
+                reconstructed_report(QUERY, &reconstructed, &p, &BTreeMap::new(), None, &n)
+                    .is_err()
+            );
             p.trusted_issuers.insert(0, other);
         }
     }

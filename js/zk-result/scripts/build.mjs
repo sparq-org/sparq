@@ -32,6 +32,7 @@ try {
   const hostSources = [
     'crates/sparq-zk-result-wasm/src/lib.rs', 'crates/sparq-zk-result-wasm/build.rs',
     'crates/sparq-zk-result-wasm/Cargo.toml', 'crates/sparq-zk-compose/src/result.rs',
+    'crates/sparq-zk-compose/src/planner.rs', 'crates/sparq-zk-compose/src/planner/issuer_scope.rs',
     'crates/sparq-zk-compose/src/result/signed.rs', 'crates/sparq-zk-compose/src/nonce.rs',
     'crates/sparq-zk-compose/src/verifier_wasm.rs', 'Cargo.lock', '.cargo/config.toml',
     'js/zk-result/scripts/build.mjs', 'js/zk-result/scripts/crs.mjs', 'js/zk-result/index.js',
