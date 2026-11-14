@@ -30,8 +30,9 @@ The package requires the pinned version and digest for the native platform.
 It copies binaries and witness material into private temporary directories and
 removes them afterwards. It does not send credentials to a proving service.
 `backend: 'wasm'` is opt-in and refuses entries outside its supported catalogue.
-The smallest authenticated profile admits it; resident memory may exceed the
-consumer budget even when the linear heap fits. Native remains the default.
+Measured authenticated entries admit it and run the same proof and refusal
+contracts in the live suite. Resident memory may exceed the consumer budget even
+when the linear heap fits. Native remains the default.
 
 `issuerKeygen()` uses system randomness and accepts no seed. Keep its opaque
 `secretKeyHex` private. `testIssuerKeygen(seedHex)` is deterministic and test-only.
@@ -66,6 +67,8 @@ and the [Rust host adapter](../../crates/sparq-zk-query-wasm/README.md).
 A source checkout builds bindings and pinned CRS with
 `node js/zk-query/scripts/build.mjs`; circuit regeneration is a separate
 `build-circuits.mjs` maintainer operation. Consumer tarballs are self-contained.
+`CARGO_BUILD_JOBS` also limits concurrent native catalogue compilations; unset
+means serial. Completed cache entries are checked against the committed pins.
 
 For a verifier-agreed `inputCommitment`, the holder passes the existing commitment's
 salt as `backend: { type: 'native', presentationSaltHex }` (or the corresponding

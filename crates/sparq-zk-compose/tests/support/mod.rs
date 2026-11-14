@@ -48,9 +48,7 @@ fn on_path(tool: &str) -> bool {
 /// skip is then declared by the lane's environment rather than printed.
 fn skip_line(msg: &str) {
     use std::io::Write;
-    let _ = std::io::stderr()
-        .lock()
-        .write_all(format!("{msg}\n").as_bytes());
+    let _ = std::io::stderr().lock().write_all(format!("{msg}\n").as_bytes());
 }
 
 fn allow_missing() -> bool {
@@ -317,10 +315,7 @@ mod gate_identity_tests {
         let path = scratch("call_site");
         let line = line!() + 2;
         let token = redirected(&path, || {
-            gate(
-                "a name that is deliberately not this test's name",
-                &["cargo"],
-            )
+            gate("a name that is deliberately not this test's name", &["cargo"])
         });
         let token = token.expect("cargo must be on PATH for this test to mean anything");
         let key = format!("{}:{}", file!().replace('\\', "/"), line);

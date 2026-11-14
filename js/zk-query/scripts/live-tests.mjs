@@ -35,7 +35,11 @@ for (const [index, sample] of profiles.entries()) {
   const profile = table.entries.find(entry => entry.planHash === (sample.planHash || table.entries[0].planHash));
   const entryHash = profile ? sha256(JSON.stringify([profile.acirSha256, profile.vkSha256, table.sourceBundleSha256])) : '';
   if (existsSync(path)) { const cached = JSON.parse(readFileSync(path)); if (cached.verified && cached.runtimeHash === runtimeHash && cached.entryHash === entryHash) { const checked = await verify({ request: cached.request, presentation: cached.presentation, seenNonces: new Set() }); assert.equal(checked.verified, true, checked.reason); continue; } }
-  if (sample.planHash && !table.entries.some(e => e.planHash === sample.planHash)) { pending.push({ case: sample.name, status: 'not-yet-catalogued', reason: table.notYetCatalogued.find(c => c.case === sample.name)?.reason }); continue; }
+  if (sample.planHash && !table.entries.some(e => e.planHash === sample.planHash)) {
+    assert.throws(() => request({ query: sample.query, policy: { bounds: sample.bounds, trustedIssuers: [issuer.publicKey], audience: 'urn:sparq:test:missing' }, nonce: '09'.repeat(32) }), /missing catalogue plan/);
+    pending.push({ case: sample.name, status: 'not-yet-catalogued', reason: table.notYetCatalogued.find(c => c.case === sample.name)?.reason });
+    continue;
+  }
   const credentials = sample.sources.map((graphNQuads, slot) => testIssue({ issuer, graphNQuads, seedHex: (index + slot + 1).toString(16).padStart(2, '0').repeat(32) }));
   let stored = request({ query: sample.query, policy: { bounds: sample.bounds, trustedIssuers: [issuer.publicKey], audience: 'urn:sparq:test:verifier', notBefore: 0, notAfter: 32503680000 }, nonce: (index + 30).toString(16).padStart(2, '0').repeat(32) });
   const backend = { type: 'native' };
@@ -62,20 +66,31 @@ for (const [index, sample] of profiles.entries()) {
   console.log('Authenticated native backend and Node verification passed:', sample.name);
 }
 writeFileSync(join(directory, 'not-yet-catalogued.json'), JSON.stringify(pending, null, 2));
-if (table.entries[0].wasmProving) {
-  const wasmPath = join(directory, 'authenticated-wasm.json');
-  const wasmCached = existsSync(wasmPath) ? JSON.parse(readFileSync(wasmPath)) : undefined;
-  if (!wasmCached || wasmCached.runtimeHash !== runtimeHash || wasmCached.entryHash !== table.entries[0].acirSha256) {
-    const r = request({ query: table.entries[0].example.query, policy: { bounds: table.entries[0].example.bounds, trustedIssuers: [issuer.publicKey], audience: 'urn:sparq:test:wasm', notBefore: 0, notAfter: 32503680000 }, nonce: '06'.repeat(32) });
-    const credentials = [testIssue({ issuer, graphNQuads: '<a:> <b:> <c:> .', seedHex: '01'.repeat(32) })];
-    const result = await prove({ request: r, credentials, backend: 'wasm' });
-    const checked = await verify({ request: r, presentation: result.presentation, seenNonces: new Set() });
-    assert.equal(checked.verified, true, checked.reason);
-    writeFileSync(wasmPath, JSON.stringify({ verified: true, runtimeHash, entryHash: table.entries[0].acirSha256, request: r, ...result }));
+for (const [index, sample] of profiles.entries()) {
+  const profile = table.entries.find(entry => entry.planHash === (sample.planHash || table.entries[0].planHash));
+  if (!profile) continue;
+  const knownFailure = table.nativeKnownFailures?.find(failure => failure.case === sample.name);
+  const nativeResult = JSON.parse(readFileSync(join(directory, sample.name + '.json')));
+  if (knownFailure) nativeResult.request = request({ query: sample.query, policy: { bounds: sample.bounds, trustedIssuers: [issuer.publicKey], audience: 'urn:sparq:test:verifier', notBefore: 0, notAfter: 32503680000 }, nonce: (index + 30).toString(16).padStart(2, '0').repeat(32) });
+  const credentials = sample.sources.map((graphNQuads, slot) => testIssue({ issuer, graphNQuads, seedHex: (index + slot + 1).toString(16).padStart(2, '0').repeat(32) }));
+  if (!profile.wasmProving) {
+    await assert.rejects(prove({ request: nativeResult.request, credentials, backend: 'wasm' }), /requires the native prover backend/);
+    continue;
   }
-  const wasmResult = JSON.parse(readFileSync(wasmPath));
-  assert.equal((await verify({ request: wasmResult.request, presentation: wasmResult.presentation, seenNonces: new Set() })).verified, true);
-  console.log('Opt-in authenticated WebAssembly proof verifies in Node.');
+  const wasmPath = join(directory, sample.name + '-wasm.json');
+  const cached = existsSync(wasmPath) ? JSON.parse(readFileSync(wasmPath)) : undefined;
+  const entryHash = sha256(JSON.stringify([profile.acirSha256, profile.vkSha256, table.sourceBundleSha256]));
+  if (!cached || cached.runtimeHash !== runtimeHash || cached.entryHash !== entryHash) {
+    const input = join(directory, sample.name + '-wasm-input.json');
+    writeFileSync(input, JSON.stringify({ sample, index, request: nativeResult.request, runtimeHash, entryHash, knownFailure }), { mode: 0o600 });
+    execFileSync(process.execPath, [new URL('./wasm-live-case.mjs', import.meta.url).pathname, input, wasmPath], { stdio: 'inherit' });
+  }
+  const result = JSON.parse(readFileSync(wasmPath));
+  if (knownFailure) { assert.equal(result.status, 'known-failure'); continue; }
+  assert.equal(result.verified, true);
+  assert.deepEqual(result.report, nativeResult.report);
+  assert.equal((await verify({ request: result.request, presentation: result.presentation, seenNonces: new Set() })).verified, true);
+  console.log('Opt-in authenticated WebAssembly contracts passed:', sample.name);
 }
 // Independently call the suite in native Rust, rather than compare two adapters.
 const vector = JSON.parse(readFileSync(new URL('../test/fixtures/issuance.json', import.meta.url)));

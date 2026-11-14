@@ -66,6 +66,9 @@ on:
       - "crates/sparq-zk/**"
       - "crates/sparq-zk-compose/**"
       - "crates/sparq-zk-query/**"
+      - "crates/sparq-zk-query-wasm/**"
+      - "js/zk-query/**"
+      - "js/zk-shared/**"
       - "zk/noir-query/**"
       # sq-5reoy: narrowed from zk/** to zk/compose/** — the zk/ieee754 and
       # zk/xpath trees were externalized to the sparq-org/noir_IEEE754 and
@@ -95,6 +98,9 @@ on:
       - "crates/sparq-zk/**"
       - "crates/sparq-zk-compose/**"
       - "crates/sparq-zk-query/**"
+      - "crates/sparq-zk-query-wasm/**"
+      - "js/zk-query/**"
+      - "js/zk-shared/**"
       - "zk/noir-query/**"
       # sq-5reoy: narrowed from zk/** to zk/compose/** (see the pull_request
       # paths note above — the ieee754/xpath trees moved to their face repos, #1599).
@@ -154,7 +160,7 @@ jobs:
     name: zk forge + anchor suite (nargo/bb)
     runs-on: ubuntu-latest
     # Toolchain install + real bb proving is the long pole; generous headroom.
-    timeout-minutes: 60
+    timeout-minutes: 360
     env:
       # The RUNTIME LEDGER. The shared gate in crates/sparq-zk*/tests/support/mod.rs
       # writes `enter <file>:<line>` when it admits a body, then `complete <file>:<line>`
@@ -790,8 +796,14 @@ jobs:
           node zk/noir-query/compiler-agreement/check.mjs --self-test
           cargo test -p sparq-zk-query -- --include-ignored --test-threads=1
 
+      - name: Cache native query catalogue compilations
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/sparq-query-catalogue
+          key: query-catalogue-${{ runner.os }}-${{ hashFiles('js/zk-query/assets/catalogue.json', 'js/zk-query/scripts/build-circuits.mjs', 'js/zk-query/scripts/artifact.mjs', 'js/zk-query/scripts/cache.mjs') }}
       - name: Build and exercise the split query prover package offline
         env:
+          CARGO_BUILD_JOBS: 3
           SPARQ_NARGO: /usr/local/bin/nargo
           SPARQ_BB: /usr/local/bin/bb
         run: |

@@ -80,8 +80,9 @@ to a private temporary directory and checked against the version and digest in
 binary pins select the supported native platform. Secret inputs use private files,
 child output is bounded and untrusted, and temporary files are removed afterwards.
 
-The smallest authenticated catalogue entry also admits the opt-in WebAssembly
-backend. Other authenticated entries require native proving. WebAssembly resident
+Catalogue entries marked `wasmProving` admit the opt-in WebAssembly backend and
+run the same successful-proof and refusal contracts in the live suite. Entries
+outside that measured set require native proving. WebAssembly resident
 memory can exceed a consumer's budget even when its linear heap fits; native
 remains the default. Consumer-limit profiles are not yet catalogued and refuse.
 
@@ -122,6 +123,10 @@ The offline wrapper also works before a build, directly from a source checkout.
 `build-circuits.mjs` regenerates missing catalogue artifacts and checks their pins.
 Its `--cache` directory retains completed native compilations; `--cases` accepts
 query/bounds profiles and `--write-pins` explicitly updates maintainer pins.
+`CARGO_BUILD_JOBS` also bounds concurrent catalogue builds, defaulting to serial
+when unset. Duplicate plan hashes share a build and must generate identical sources.
+Cached source paths through symbolic links are refused; staging replaces ordinary
+cached files without modifying another hard link's contents.
 Rebuild bindings after a pin update. An absent compiled plan refuses with
 `missing catalogue plan` rather than choosing a different capacity.
 
@@ -140,8 +145,7 @@ Neither variable affects the installed API.
 Named native witness known failures: `date-range`. They are exercised as
 refusals and are not counted as proved; the catalogue records their cause.
 
-Not yet catalogued on this branch: `distinct`, `slice`, `ask-true`, `ask-false`. Native maintainer compilation
-is still running. These plans receive the named missing-catalogue refusal.
+All listed test profiles have pinned catalogue entries.
 <!-- catalogue-pending:end -->
 
 ## Public-input layout

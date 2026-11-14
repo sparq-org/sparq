@@ -33,7 +33,7 @@
       "vk": "f0f274f09385e498c6caa273348e5da64d3453e7df806d78d5567a83fec503d6.vk.hex",
       "acirSha256": "5b8d0d747bef3ceef86497d7f980ee92525078c0ee1a99320f30ca1eea03539d",
       "vkSha256": "9dbaf94d450af888cbfd1aa7a56e8d441c8cb868a1864949126202b3c3fdbb0e",
-      "wasmProving": false,
+      "wasmProving": true,
       "example": {
         "query": "SELECT ?s ?x WHERE {?s <urn:p> ?x}",
         "bounds": {
@@ -50,7 +50,7 @@
       "vk": "d8f561cb7c83d037d062aa32e719455dc876bf99ec2b22ace824654dc3cd987f.vk.hex",
       "acirSha256": "86a5d2a64c81e336b680b093aba6c272083c128de0673b5a0366558e465fdff9",
       "vkSha256": "393b059403f260617de04966bad696395061f61e0e6faf98bbc52385efaab424",
-      "wasmProving": false,
+      "wasmProving": true,
       "example": {
         "query": "SELECT ?s WHERE {?s <urn:p> ?x . ?s <urn:q> ?y}",
         "bounds": {
@@ -67,7 +67,7 @@
       "vk": "8faedc0eac6a6d60d78d15a36a8a9b4f4f6f83370f339061e3999b43c24cefd4.vk.hex",
       "acirSha256": "3462a5bf1f2117166616b988a7740e0730fdd9bf5422c9cea0045e78477a4997",
       "vkSha256": "d35a5c9a48ac59cf2524f1758cdc06806a655d8f6e4e6836bfb73c6e43fc4e0c",
-      "wasmProving": false,
+      "wasmProving": true,
       "example": {
         "query": "SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x >= 1 && ?x < 2)}",
         "bounds": {
@@ -84,7 +84,7 @@
       "vk": "c2b2a2f0615549ab6983bb0dc93f849634a077cb78695ce1372271ccf4b7f877.vk.hex",
       "acirSha256": "243ff5bb5eab6b3ff395dda5eb2ff2da97b7c7e85198875f115651dfda6eb287",
       "vkSha256": "82b53294b3bfa946a5a57a62c224059e857568531d35c3c47a2f7649c90b64a5",
-      "wasmProving": false,
+      "wasmProving": true,
       "example": {
         "query": "SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x IN (1,3))}",
         "bounds": {
@@ -118,7 +118,7 @@
       "vk": "95157e414c770a48ec55f51ca1f1814f7da7671ad3297f3993ea5004ffcc824a.vk.hex",
       "acirSha256": "286862f3491f9c90a5220314d4b6a0b1abf9fd5910f763db711ee8588a4e3ef4",
       "vkSha256": "98682d6f0d020d76b07f468abb4e6b242a7f48980f025ea1b9f3344b13042651",
-      "wasmProving": false,
+      "wasmProving": true,
       "example": {
         "query": "SELECT ?s WHERE {?s <urn:p> ?x VALUES ?x {1 UNDEF}}",
         "bounds": {
@@ -135,9 +135,77 @@
       "vk": "4d29fe33e6aeee7d4fbcb551864fc302714b56bbe815d53aa8f81ec1377701c3.vk.hex",
       "acirSha256": "38e44b2968ddfae546535473025428d4970e70a0fb9eca91a7ee18a49fbba216",
       "vkSha256": "5af6180b5c639b8adce102257343140d6d02812c91073e77f76da96a23b1729f",
-      "wasmProving": false,
+      "wasmProving": true,
       "example": {
         "query": "SELECT ?p WHERE {?s ?p ?o}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "856bd49187ca09dd1fc69d06505ad6573eab2556da7756e6e2d12fc54907a156",
+      "packageName": "query_856bd49187ca09dd1fc69d06505ad6573eab2556da7756e6e2d12fc54907a156",
+      "acir": "856bd49187ca09dd1fc69d06505ad6573eab2556da7756e6e2d12fc54907a156.json",
+      "vk": "856bd49187ca09dd1fc69d06505ad6573eab2556da7756e6e2d12fc54907a156.vk.hex",
+      "acirSha256": "ddeb78aeec1a9e44292a44946ae3f212ded87ce0eba239e27beed0690e86d5ec",
+      "vkSha256": "5a37a8b52a776cae73336a10fa0d42ae6d5dc9d7bb32d8b522f7df231f330288",
+      "wasmProving": true,
+      "example": {
+        "query": "SELECT DISTINCT ?p WHERE {?s ?p ?o}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "d3b2ff1313d581819975301c0ba248b432950865e470a138b8387a7ea1b1f892",
+      "packageName": "query_d3b2ff1313d581819975301c0ba248b432950865e470a138b8387a7ea1b1f892",
+      "acir": "d3b2ff1313d581819975301c0ba248b432950865e470a138b8387a7ea1b1f892.json",
+      "vk": "d3b2ff1313d581819975301c0ba248b432950865e470a138b8387a7ea1b1f892.vk.hex",
+      "acirSha256": "d844054d2029321844dfe49623e5e9b4788096cb9c9f111786f5439439329b6e",
+      "vkSha256": "8eabba236b9d0ffb22d330b3c67a63dd8db0f5afbef422ea545484a61b674a79",
+      "wasmProving": true,
+      "example": {
+        "query": "SELECT ?s WHERE {?s <urn:p> ?x} LIMIT 1 OFFSET 1",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "5d4fc1f7547b7155e7f1b12ed0df15330572d568bc0ffe8d2cc95fa03415fc9f",
+      "packageName": "query_5d4fc1f7547b7155e7f1b12ed0df15330572d568bc0ffe8d2cc95fa03415fc9f",
+      "acir": "5d4fc1f7547b7155e7f1b12ed0df15330572d568bc0ffe8d2cc95fa03415fc9f.json",
+      "vk": "5d4fc1f7547b7155e7f1b12ed0df15330572d568bc0ffe8d2cc95fa03415fc9f.vk.hex",
+      "acirSha256": "fbf5256f1742c62e9dcbfea95691dac1267ca499098ab8dbe3d6ceeee7cdbe86",
+      "vkSha256": "3542e31c51e8aa4e7ef3150c5aff6072a49aaa4ee9d132c477cd864a4da51d4a",
+      "wasmProving": true,
+      "example": {
+        "query": "ASK {?s <urn:p> ?x}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "2f5e58f438ca4a281129f7329eb374f0417a9c49bd6e713fe603034a7d93a408",
+      "packageName": "query_2f5e58f438ca4a281129f7329eb374f0417a9c49bd6e713fe603034a7d93a408",
+      "acir": "2f5e58f438ca4a281129f7329eb374f0417a9c49bd6e713fe603034a7d93a408.json",
+      "vk": "2f5e58f438ca4a281129f7329eb374f0417a9c49bd6e713fe603034a7d93a408.vk.hex",
+      "acirSha256": "331d5d48df06f02ddfdaf1b35a3abe8da58c251285b1eab0006c2f1b27cddbe7",
+      "vkSha256": "907ef3e2ad4d3e7bd2055e5b4e59b9f461bd5a8c0961ccf150111a5e929a6a3c",
+      "wasmProving": true,
+      "example": {
+        "query": "ASK {?s <urn:p> ?x FILTER(?x > 8)}",
         "bounds": {
           "credentials": 1,
           "quadsPerCredential": 4,
@@ -148,28 +216,7 @@
   ],
   "sourceBundleSha256": "3764e678da429d6aaf1f2d014989f1ce07a3c6b1fcb03af7d71fe1c848dc4e69",
   "crsPinsSha256": "b31eedd906f0f02d8e940af834a239694c9ef9790909e7c8b77d0065d819c41d",
-  "notYetCatalogued": [
-    {
-      "case": "distinct",
-      "planHash": "856bd49187ca09dd1fc69d06505ad6573eab2556da7756e6e2d12fc54907a156",
-      "reason": "Native catalogue compilation is still in progress on this branch; prove refuses this plan until its pinned entry is available."
-    },
-    {
-      "case": "slice",
-      "planHash": "d3b2ff1313d581819975301c0ba248b432950865e470a138b8387a7ea1b1f892",
-      "reason": "Native catalogue compilation is still in progress on this branch; prove refuses this plan until its pinned entry is available."
-    },
-    {
-      "case": "ask-true",
-      "planHash": "5d4fc1f7547b7155e7f1b12ed0df15330572d568bc0ffe8d2cc95fa03415fc9f",
-      "reason": "Native catalogue compilation is still in progress on this branch; prove refuses this plan until its pinned entry is available."
-    },
-    {
-      "case": "ask-false",
-      "planHash": "2f5e58f438ca4a281129f7329eb374f0417a9c49bd6e713fe603034a7d93a408",
-      "reason": "Native catalogue compilation is still in progress on this branch; prove refuses this plan until its pinned entry is available."
-    }
-  ],
+  "notYetCatalogued": [],
   "nativeKnownFailures": [
     {
       "case": "date-range",

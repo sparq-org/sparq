@@ -15,6 +15,10 @@ test('XPath known failures cannot hide a different compiler error', () => {
   const sources = { 'noir_XPath/pinned/xpath/Nargo.toml': 'sha256 = { path = "../vendor/sha256" }' };
   assert.equal(knownXPathFailure(diagnostic, sources), true);
   assert.equal(knownXPathFailure(diagnostic + '\n    main.nr:8: unrelated', sources), false);
+  const warning = '\n  unused import unbound\n    /cache/query_' + 'a'.repeat(64) + '/src/main.nr:5: unbound';
+  assert.equal(knownXPathFailure(diagnostic + warning, sources), true);
+  assert.equal(knownXPathFailure(diagnostic + warning + '\n    main.nr:8: unrelated', sources), false);
+  assert.equal(knownXPathFailure(diagnostic + warning.replace('unused import unbound', 'unrelated error'), sources), false);
   assert.equal(knownXPathFailure('different compiler error', sources), false);
   assert.equal(knownXPathFailure(diagnostic, {}), false);
 });

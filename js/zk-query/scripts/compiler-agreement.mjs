@@ -16,7 +16,10 @@ export function equalArtifacts(wasm, native) {
 export function equalKeys(wasm, native) { assert.deepEqual(Buffer.from(wasm), Buffer.from(native), 'compiler key differs'); }
 export function knownXPathFailure(diagnostic, sources) {
   const collision = Object.entries(sources).some(([name, text]) => name.includes('noir_XPath') && name.endsWith('/xpath/Nargo.toml') && /^sha256\s*=\s*\{/m.test(text));
-  return collision && diagnostic.includes('No module `constants` at path `sha256/constants.nr` or `sha256/constants/mod.nr`') && !diagnostic.split('\n').filter(line => /^    .*:[0-9]+:/.test(line)).some(line => !/^    sha256\//.test(line));
+  // This compiler also emits the generated unbound import's warning among errors.
+  // Remove only that exact warning; unrelated program diagnostics remain fatal.
+  const errors = diagnostic.replace(/\n  unused import unbound\n    [^\n]*\/query_[a-f0-9]{64}\/src\/main\.nr:[0-9]+: unbound(?=\n|$)/g, '');
+  return collision && diagnostic.includes('No module `constants` at path `sha256/constants.nr` or `sha256/constants/mod.nr`') && !errors.split('\n').filter(line => /^    .*:[0-9]+:/.test(line)).some(line => !/^    sha256\//.test(line));
 }
 export async function agreement({ root, directory, nargo, bb }) {
   await compilerControl({ directory, nargo, bb, equalArtifacts, equalKeys });
