@@ -22,9 +22,55 @@ const DATASET_DOMAIN: &[u8; 16] = b"NQ/SUPPLIED/V1\0\0";
 pub struct Statement {
     pub request_digest: Word,
     pub input_commitment: Word,
-    /// The draft supplied-cell profile uses absence of a signature mode.
+    /// Selector interpreted by the authenticated or supplied-cell layout.
     pub signature_mode: u8,
     pub result: ResultValue,
+}
+
+/// Revealed suite signature over an ordered credential message.
+#[derive(Clone, Debug)]
+pub struct RevealedSignature {
+    pub key: sparq_zk::sig::PublicKey,
+    pub message: Word,
+    pub signature: sparq_zk::sig::Signature,
+}
+
+/// Public message/key values admitted only after external signature verification.
+#[derive(Clone, Debug)]
+pub struct RevealedInputs {
+    messages: Vec<Word>,
+    keys: Vec<Word>,
+}
+impl RevealedInputs {
+    pub fn verify(signatures: &[RevealedSignature]) -> Result<Self, Error> {
+        if signatures.len() > 4 {
+            return Err(Error::Capacity("revealed credential count".into()));
+        }
+        let mut messages = Vec::with_capacity(signatures.len());
+        let mut keys = Vec::with_capacity(signatures.len());
+        for signature in signatures {
+            let message = field(signature.message)?;
+            if !sparq_zk::sig::verify(&signature.key, &message, &signature.signature) {
+                return Err(Error::Invalid("revealed credential signature".into()));
+            }
+            let key = sparq_merkle_suite::metadata::key_cell(&signature.key)
+                .map_err(|e| Error::Invalid(e.to_string()))?;
+            messages.push(signature.message);
+            keys.push(field_to_be_bytes_32(&key.enc));
+        }
+        Ok(Self { messages, keys })
+    }
+    pub(crate) fn words(&self, plan: &Plan) -> Result<(u32, Vec<Word>, Vec<Word>), Error> {
+        if self.messages.len() > plan.bounds().credentials as usize {
+            return Err(Error::Capacity("revealed credential count".into()));
+        }
+        let mut messages = self.messages.clone();
+        let mut keys = self.keys.clone();
+        let count = messages.len() as u32;
+        messages.resize(plan.capacity().credentials as usize, [0; 32]);
+        keys.resize(plan.capacity().credentials as usize, [0; 32]);
+        Ok((count, messages, keys))
+    }
 }
 
 /// Verifier-stored envelope policy in its public-input order.
@@ -139,21 +185,6 @@ impl EnvelopeInputs {
         ]);
         Ok(words)
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn require_consumer(&self, canonical_policy: bool) -> Result<(), Error> {
-        if canonical_policy
-            || self.issuer_depth != crate::credential::ISSUER_DEPTH
-            || self.holder_required
-            || self.status_required
-            || self.validity_required
-            || self.freshness_required
-        {
-            return Err(Error::Unsupported(
-                "credential envelope policy integration".into(),
-            ));
-        }
-        Ok(())
-    }
 }
 
 /// One source for public declarations, field flattening and ABI auditing.
@@ -218,6 +249,16 @@ impl Layout {
                 Abi::array(Abi::UInt(32), self.credentials),
             ),
         );
+        for group in [
+            ("revealed_count", Abi::UInt(32)),
+            (
+                "revealed_messages",
+                Abi::array(Abi::Field, self.credentials),
+            ),
+            ("revealed_keys", Abi::array(Abi::Field, self.credentials)),
+        ] {
+            groups.insert(groups.len() - 1, group);
+        }
         groups
     }
     fn envelope_groups() -> Vec<(&'static str, Abi)> {
@@ -269,12 +310,48 @@ impl Layout {
         statement: &Statement,
         envelope: &EnvelopeInputs,
     ) -> Result<Vec<Word>, Error> {
-        let mut words =
-            self.reconstruct_words(plan, statement, &crate::credential::SuiteEncoder, 1)?;
+        self.reconstruct_authenticated_mode(plan, statement, envelope, None)
+    }
+    /// Reconstruct revealed-mode words from externally verified signatures.
+    /// Circuit membership binds each revealed signer to the stored trust policy.
+    pub fn reconstruct_revealed(
+        &self,
+        plan: &Plan,
+        statement: &Statement,
+        envelope: &EnvelopeInputs,
+        revealed: &RevealedInputs,
+    ) -> Result<Vec<Word>, Error> {
+        self.reconstruct_authenticated_mode(plan, statement, envelope, Some(revealed))
+    }
+    fn reconstruct_authenticated_mode(
+        &self,
+        plan: &Plan,
+        statement: &Statement,
+        envelope: &EnvelopeInputs,
+        revealed: Option<&RevealedInputs>,
+    ) -> Result<Vec<Word>, Error> {
+        let mut words = self.reconstruct_words(
+            plan,
+            statement,
+            &crate::credential::SuiteEncoder,
+            u8::from(revealed.is_none()),
+        )?;
         words.extend(envelope.words()?);
         let mut bounds = plan.credential_quad_bounds();
         bounds.resize(self.credentials, 0);
         words.extend(bounds.into_iter().map(|n| number(u64::from(n))));
+        let (count, messages, keys) = if let Some(revealed) = revealed {
+            revealed.words(plan)?
+        } else {
+            (
+                0,
+                vec![[0; 32]; self.credentials],
+                vec![[0; 32]; self.credentials],
+            )
+        };
+        words.push(number(u64::from(count)));
+        words.extend(messages);
+        words.extend(keys);
         words.push(binding(&words)?);
         Ok(words)
     }
@@ -379,6 +456,9 @@ impl Layout {
                         c.validate()?;
                         if c.scope != 0 {
                             return Err(Error::Invalid("result-local blank node".into()));
+                        }
+                        if c.key_class != 0 || c.key != [0; 32] {
+                            return Err(Error::Invalid("released value metadata".into()));
                         }
                         words.extend(cell_words(c));
                     }
@@ -555,37 +635,6 @@ fn structure(value: &serde_json::Value, expected: &[(&str, Abi)]) -> bool {
 mod literal_tests {
     use super::*;
 
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn require_consumer_refuses_each_pending_policy_independently() {
-        let base = EnvelopeInputs::issuer_only(number(1));
-        assert_eq!(base.require_consumer(false), Ok(()));
-        assert_eq!(
-            base.require_consumer(true),
-            Err(Error::Unsupported(
-                "credential envelope policy integration".into()
-            ))
-        );
-        for case in 0..5 {
-            let mut policy = base.clone();
-            match case {
-                0 => policy.issuer_depth = 0,
-                1 => policy.holder_required = true,
-                2 => policy.status_required = true,
-                3 => policy.validity_required = true,
-                4 => policy.freshness_required = true,
-                _ => unreachable!(),
-            }
-            assert_eq!(
-                policy.require_consumer(false),
-                Err(Error::Unsupported(
-                    "credential envelope policy integration".into()
-                )),
-                "policy case {case}"
-            );
-        }
-    }
-
     #[test]
     fn noir_verified_issuer_predicate_is_a_literal_equal_to_the_suite() {
         use crate::interp::EncodeTerm;
@@ -630,6 +679,49 @@ mod literal_tests {
             assert_eq!(
                 field(expected).unwrap(),
                 field_from_hex_str_strict(literal).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn noir_temporal_scalar_layout_matches_native_suite_keys() {
+        let source = include_str!("../../../zk/noir-query/core/src/ops_core_expr.nr");
+        let scale = source
+            .split("let payload_scale:Field = ")
+            .nth(1)
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap();
+        let prefix = source
+            .split("let prefix=class as Field*")
+            .nth(1)
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap();
+        let scale = field_from_hex_str_strict(scale).unwrap();
+        let prefix = field_from_hex_str_strict(prefix).unwrap();
+        for (datatype, text) in [
+            ("date", "1970-01-01"),
+            ("date", "2024-03-01Z"),
+            ("dateTime", "2024-03-01T12:34:56Z"),
+            ("dateTime", "2024-03-01T12:34:56"),
+        ] {
+            let literal = oxrdf::Literal::new_typed_literal(
+                text,
+                oxrdf::NamedNode::new_unchecked(format!(
+                    "http://www.w3.org/2001/XMLSchema#{datatype}"
+                )),
+            );
+            let key = sparq_merkle_suite::comparison_key(&literal);
+            let word = u64::from_be_bytes(key[1..9].try_into().unwrap());
+            assert!(key[9..].iter().all(|&b| b == 0));
+            let mut packed = [0; 32];
+            packed[1..].copy_from_slice(&key);
+            assert_eq!(
+                field(packed).unwrap(),
+                Fr::from(key[0] as u64) * prefix + Fr::from(word) * scale
             );
         }
     }

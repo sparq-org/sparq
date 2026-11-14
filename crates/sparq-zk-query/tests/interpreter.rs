@@ -15,6 +15,45 @@ const BOUNDS: Bounds = Bounds {
 };
 
 #[test]
+fn medication_input_capacity_covers_rejected_rows_before_the_result_limit() {
+    let query = "SELECT ?medication WHERE {?medication <urn:strength> ?strength FILTER(?strength >= 31)} LIMIT 1";
+    let input = |count| {
+        (0..count).map(|i| format!(
+        "<urn:medication:{i}> <urn:strength> \"{i}\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n"
+    )).collect::<String>()
+    };
+    let bounds = Bounds {
+        credentials: 1,
+        quads_per_credential: 64,
+        rows_per_table: 32,
+    };
+    let plan = lower(query, bounds).unwrap();
+    let (data, _) = dataset(&input(32));
+    let trace = evaluate(&plan, &data, &FixtureEncoder).unwrap();
+    assert!(trace.tables.iter().any(|t| t.rows.len() == 32));
+    assert!(matches!(&trace.result, ResultValue::Select {rows,..} if rows.len()==1));
+    assert_engine(query, &input(32), &trace.result);
+    let narrow = lower(
+        query,
+        Bounds {
+            rows_per_table: 4,
+            ..bounds
+        },
+    )
+    .unwrap();
+    assert_ne!(plan.hash(), narrow.hash());
+    assert_eq!(
+        evaluate(&narrow, &data, &FixtureEncoder).unwrap_err(),
+        Error::Capacity("operator output".into())
+    );
+    let (overflow, _) = dataset(&input(33));
+    assert_eq!(
+        evaluate(&plan, &overflow, &FixtureEncoder).unwrap_err(),
+        Error::Capacity("operator output".into())
+    );
+}
+
+#[test]
 fn bag_projection_distinct_join_values_and_false_ask() {
     let data = fixture();
     let run = |q| {
@@ -295,5 +334,49 @@ fn zero_bytes_in_strings_preserve_ebv_and_identity_without_implying_lexical_orde
     assert_eq!(
         evaluate(&lower(query, BOUNDS).unwrap(), &[], &FixtureEncoder).unwrap_err(),
         sparq_zk_query::Error::Unsupported("string comparison capacity".into())
+    );
+}
+
+#[test]
+fn plain_string_identity_ignores_unused_key_classes() {
+    use sparq_zk_query::credential::SuiteEncoder;
+    let query = "ASK {?s <urn:p> ?x FILTER(?x NOT IN (\"different\"))}";
+    let plan = lower(query, BOUNDS).unwrap();
+    let term = oxrdf::Literal::new_simple_literal("value").into();
+    let original = quad(&iri("urn:s"), &iri("urn:p"), &term);
+    for class in [0, 1, 2, 3, 4, 5, 6, 7, 8, 127] {
+        let mut cells = original;
+        cells[2] = SuiteEncoder.encode(&term).unwrap();
+        cells[2].key_class = class;
+        cells[2].key = [0; 32];
+        let data = [CredentialCells { quads: vec![cells] }];
+        assert_eq!(
+            evaluate(&plan, &data, &SuiteEncoder).unwrap().result,
+            ResultValue::Ask(true)
+        );
+    }
+}
+
+#[test]
+fn plain_string_equality_class_is_derived_from_its_datatype() {
+    use sparq_zk_query::credential::SuiteEncoder;
+    let plan = lower("ASK {?s <urn:p> ?x FILTER(?x = 1)}", BOUNDS).unwrap();
+    let term = oxrdf::Literal::new_simple_literal("value").into();
+    let mut cells = quad(&iri("urn:s"), &iri("urn:p"), &term);
+    cells[2] = SuiteEncoder.encode(&term).unwrap();
+    let numeric = SuiteEncoder
+        .encode(&oxrdf::Literal::from(1).into())
+        .unwrap();
+    cells[2].key_class = numeric.key_class;
+    cells[2].key = numeric.key;
+    assert_eq!(
+        evaluate(
+            &plan,
+            &[CredentialCells { quads: vec![cells] }],
+            &SuiteEncoder
+        )
+        .unwrap()
+        .result,
+        ResultValue::Ask(false)
     );
 }

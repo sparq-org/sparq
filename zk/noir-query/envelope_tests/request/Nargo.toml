@@ -1,0 +1,10 @@
+[package]
+name = "envelope_request"
+type = "bin"
+authors = ["sparq"]
+compiler_version = ">=1.0.0"
+
+[dependencies]
+envelope_core = { path = "../../core" }
+compose_core = { path = "../../../compose/compose_core" }
+envelope_support = { path = "../support" }

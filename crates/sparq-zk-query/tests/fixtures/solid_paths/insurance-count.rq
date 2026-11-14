@@ -1,0 +1,12 @@
+PREFIX vcq: <https://w3id.org/sparq/vcq#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+SELECT DISTINCT ?result WHERE {
+  ?lic vcq:verifiedIssuer <urn:fictional:insurance-quote:licensing> .
+  ?reg vcq:verifiedIssuer <urn:fictional:insurance-quote:claims-register> .
+  GRAPH ?lic { ?subject <urn:claim:licence.years> ?v0 ;
+                        <urn:claim:licence.points> ?v1 . }
+  GRAPH ?reg { ?subject <urn:claim:claims.five-year-count> ?v2 ;
+                        <urn:claim:claims.five-year-complete> ?v3 . }
+  BIND((?v0 >= 5 && ?v1 <= 3 && ?v2 = 0 && ?v3 = true) AS ?result)
+}

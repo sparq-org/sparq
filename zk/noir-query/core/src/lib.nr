@@ -17,9 +17,30 @@ mod suite_entry_tests;
 pub mod table;
 pub mod ops_core;
 pub mod ops_core_expr;
+pub mod ops_core_reads;
 pub mod ops_core_statement;
 pub mod ops_core_suite;
 mod ops_core_tests;
+pub mod ops_closed_common;
+pub mod ops_closed_negation;
+pub mod ops_closed_union;
+pub mod ops_closed_extend;
+pub mod ops_closed_substitute;
+mod ops_closed_tests;
+pub mod ops_closed_graph;
+pub mod ops_closed_group;
+pub mod ops_closed_order;
+mod ops_closed_group_tests;
+mod ops_closed_order_tests;
+
+pub mod ops_closed_numeric;
+pub mod ops_closed_group_plan;
+pub mod ops_closed_dataset;
+pub mod ops_closed_arith;
+mod ops_closed_plan_tests;
+pub mod ops_closed_opening;
+pub mod ops_closed_issuer_standin;
+mod ops_core_scan_tests;
 
 pub mod expr_term_contract;
 pub mod expr_core;
@@ -33,9 +54,19 @@ mod expr_target_tests;
 mod expr_open_tests;
 
 pub mod ops_core_profile;
+
+mod ops_closed_bind_tests;
+
+pub mod ops_closed_expr;
 pub mod expr_language;
 pub mod expr_term;
 pub mod expr_date;
 pub mod expr_numeric;
 pub mod expr_construct;
 mod expr_functions_tests;
+
+pub mod ops_closed_join;
+mod term_identity_tests;
+pub mod envelope;
+
+pub mod ops_core_envelope;

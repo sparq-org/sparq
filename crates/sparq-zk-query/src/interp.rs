@@ -3,6 +3,9 @@
 //! The credential adapter authenticates complete inputs before this reference
 //! evaluator runs; the generated program checks them independently.
 
+#[path = "interp_closed.rs"]
+mod closed;
+
 use crate::{plan::*, Error};
 use oxrdf::Term;
 use std::collections::BTreeSet;
@@ -15,6 +18,7 @@ pub type Word = [u8; 32];
 pub struct Cell {
     pub bound: bool,
     pub kind: u8,
+    /// Authenticated key-independent RDF identity, or a result-local blank label.
     pub enc: Word,
     pub key_class: u8,
     pub key: Word,
@@ -26,10 +30,11 @@ pub struct Cell {
 impl Cell {
     pub fn same_term(self, other: Self) -> bool {
         self.bound == other.bound
-            && (!self.bound || (self.enc == other.enc && self.scope == other.scope))
+            && (!self.bound
+                || (self.kind == other.kind && self.enc == other.enc && self.scope == other.scope))
     }
-    fn identity(self) -> (bool, Word, u32) {
-        (self.bound, self.enc, self.scope)
+    fn identity(self) -> (bool, Word, u8, u32) {
+        (self.bound, self.enc, self.kind, self.scope)
     }
     pub fn validate(self) -> Result<(), Error> {
         if !self.bound {
@@ -204,6 +209,7 @@ pub fn evaluate_dataset(
         let input = |id: NodeId| &tables[id as usize].rows;
         let schema = |id: NodeId| &plan.nodes[id as usize].output.variables;
         let mut rows = match &node.operator {
+            Operator::Closed(op) => closed::evaluate(op, node, plan, &tables, &dataset, input_dataset, &params)?,
             Operator::Unit => vec![vec![]],
             Operator::Scan(pattern) => {
                 let mut rows = vec![];
@@ -356,6 +362,8 @@ fn release_rows(mut rows: Vec<Row>) -> Vec<Row> {
                     enc,
                     ..Cell::default()
                 };
+            } else {
+                *c = released_cell(*c);
             }
         }
     }
@@ -363,7 +371,14 @@ fn release_rows(mut rows: Vec<Row>) -> Vec<Row> {
     rows
 }
 
-pub(crate) fn row_key(row: &[Cell]) -> Vec<(bool, Word, u32)> {
+// A released RDF term carries identity and RDF metadata, with no value-key claim.
+pub(crate) fn released_cell(mut cell: Cell) -> Cell {
+    cell.key_class = 0;
+    cell.key = [0; 32];
+    cell
+}
+
+pub(crate) fn row_key(row: &[Cell]) -> Vec<(bool, Word, u8, u32)> {
     row.iter().map(|c| c.identity()).collect()
 }
 fn lookup(schema: &[Var], row: &[Cell], v: Var) -> Cell {
@@ -474,7 +489,7 @@ fn string_cell(cell: Cell) -> bool {
 }
 
 fn compare(op: Compare, a: Value, b: Value) -> Result<Value, Error> {
-    let (a, b) = match (a, b) {
+    let (mut a, mut b) = match (a, b) {
         (Value::Term(a), Value::Term(b)) => (a, b),
         (Value::Boolean(a, ae), Value::Boolean(b, be)) => {
             return Ok(Value::Boolean(
@@ -496,6 +511,22 @@ fn compare(op: Compare, a: Value, b: Value) -> Result<Value, Error> {
     };
     if !a.bound || !b.bound {
         return Ok(Value::Boolean(false, true));
+    }
+    if op == Compare::Equal
+        && [a, b]
+            .iter()
+            .all(|c| c.kind != 3 || c.dt == *STRING_DATATYPE)
+    {
+        return Ok(Value::Boolean(a.same_term(b), false));
+    }
+    if op == Compare::Equal {
+        for c in [&mut a, &mut b] {
+            if c.kind == 3 && c.dt == *STRING_DATATYPE {
+                c.key_class = 6;
+                c.key = [0; 32];
+                c.key[1] = 6;
+            }
+        }
     }
     for c in [a, b] {
         if c.kind == 3 && c.key_class == 1 {

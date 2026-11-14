@@ -6,8 +6,9 @@ use crate::suite::open_credential_hidden;
 use crate::suite_constants::{DT_INTEGER, DT_DECIMAL, DT_DATE, DT_DATETIME, DT_BOOLEAN, DT_STRING};
 use crate::table::{TermCell, unbound};
 use crate::ops_core::Dataset;
+use crate::ops_core_profile::{ResourceOpening, ObjectOpening, QuadOpening};
 
-pub global VERIFIED_ISSUER_ENCODING: Field = 0x09eec572ceda200a642295e68e09118d7e1d26ea1a082cc560e303164907f5e9;
+pub global VERIFIED_ISSUER_ENCODING: Field = 0x123638c7d0d692091a7783e94d513e977d9c478fd3fe9a6a6f735080310f0bcf;
 fn check_input_predicate(enc:Field) { assert(enc != VERIFIED_ISSUER_ENCODING, "credential verifiedIssuer assertion"); }
 fn issuer_predicate() -> TermCell {
     TermCell {bound:true,kind:1,enc:VERIFIED_ISSUER_ENCODING,key_class:0,key:0,dt:0,lang:0,scope:0}
@@ -49,16 +50,25 @@ fn checked_literal<let L: u32>(cell: crate::term::TermCell, raw: TermOpening<L>)
 }
 
 fn table_cell(cell: crate::term::TermCell) -> TermCell {
-    TermCell {bound: cell.bound(), kind: cell.kind(), enc: cell.enc(),
+    TermCell {bound: cell.bound(), kind: cell.kind(), enc: table_identity(cell),
         key_class: cell.key_class(), key: cell.key(), dt: cell.datatype(),
         lang: cell.language(), scope: cell.credential()}
 }
+fn table_identity(cell:crate::term::TermCell) -> Field { cell.identity() }
 
 pub struct OpenedCredential<let N: u32> {
+    constructed: [u8;0],
     pub rows: [[TermCell; 3]; N],
     pub active: [bool; N],
     pub message: Field,
     pub graph: TermCell,
+}
+
+impl<let N:u32> OpenedCredential<N> {
+    pub fn rows(self) -> [[TermCell;3];N] {self.rows}
+    pub fn active(self) -> [bool;N] {self.active}
+    pub fn message(self) -> Field {self.message}
+    pub fn graph(self) -> TermCell {self.graph}
 }
 
 pub fn credential_flags<let C: u32>(count: u32, bound: u32, signature_mode: u8) -> [bool; C] {
@@ -69,13 +79,28 @@ pub fn credential_flags<let C: u32>(count: u32, bound: u32, signature_mode: u8) 
     flags
 }
 
+pub fn credential_mode_flags<let C:u32>(count:u32,bound:u32,signature_mode:u8,
+    revealed_count:u32,revealed_messages:[Field;C],revealed_keys:[Field;C]) -> [bool;C] {
+    assert(signature_mode<=1,"suite signature mode");
+    assert((bound>0)&(bound<=C)&(count<=bound),"credential count");
+    assert(revealed_count==if signature_mode==0 {count}else{0},"revealed credential count");
+    let mut flags=[false;C];
+    for c in 0..C {
+        flags[c]=c<count;
+        if (signature_mode==1)|(c>=count) {
+            assert((revealed_messages[c]==0)&(revealed_keys[c]==0),"revealed input padding");
+        }
+    }
+    flags
+}
+
 pub fn open_one<let N: u32, let L: u32>(
     credentials: [[TermOpening<L>; 4]; N], proof: CredentialProof<N>,
     count: u32, active: bool, quad_bound: u32, credential_index: u32, issuer_root: Field,
     request_digest: [u8;32],
 ) -> OpenedCredential<N> {
     check_limits::<N>(count, quad_bound);
-    let mut opened = OpenedCredential {rows: [[unbound(); 3]; N], active: [false; N], message: 0, graph: unbound()};
+    let mut opened = OpenedCredential {constructed:[],rows: [[unbound(); 3]; N], active: [false; N], message: 0, graph: unbound()};
     if active {
         let authenticated = authenticate(credentials,proof,count,quad_bound,credential_index);
         key_set_membership(proof.pk, issuer_root, proof.issuer_index, proof.issuer_siblings);
@@ -105,21 +130,27 @@ fn convert_authenticated<let N:u32>(authenticated:crate::suite_metadata::OpenedC
     credential_index:u32,request_digest:[u8;32]) -> OpenedCredential<N> {
         let quads = authenticated.quads();
         let count=authenticated.count();
-        let mut opened=OpenedCredential {rows:[[unbound();3];N],active:[false;N],message:authenticated.message(),graph:unbound()};
+        let mut opened=OpenedCredential {constructed:[],rows:[[unbound();3];N],active:[false;N],message:authenticated.message(),graph:unbound()};
         let mut request: [u128;2] = [0;2];
         for i in 0..32 { request[i/16] = request[i/16] * 256 + request_digest[i] as u128; }
         opened.graph = table_cell(crate::term::credential_graph(request, credential_index));
         for n in 0..N {
             for p in 0..3 {
+                if n < count { check_dataset_scope(quads[n][p],credential_index); }
                 opened.rows[n][p] = table_cell(quads[n][p]);
             }
             opened.active[n] = n < count;
             if n < count {
                 assert(quads[n][3].kind() == 0, "credential named graph not yet supported");
-                check_input_predicate(quads[n][1].enc());
+                check_input_predicate(quads[n][1].identity());
             }
         }
     opened
+}
+fn check_dataset_scope(cell:crate::term::TermCell,credential_index:u32) {
+    assert(credential_index < 0xffffffff,"credential scope capacity");
+    assert(!cell.bound() | (cell.kind()!=2) | (cell.credential()==credential_index+1),
+        "dataset credential index");
 }
 
 /// Canonical inactive slot, shared by the suite and envelope dispatchers.
@@ -127,7 +158,7 @@ pub fn inactive_credential<let N:u32, let L:u32>(credentials:[[TermOpening<L>;4]
     count:u32,quad_bound:u32,credential_index:u32) -> OpenedCredential<N> {
     check_limits::<N>(count,quad_bound);
     check_inactive(credentials,proof,count,credential_index);
-    OpenedCredential {rows:[[unbound();3];N],active:[false;N],message:0,graph:unbound()}
+    OpenedCredential {constructed:[],rows:[[unbound();3];N],active:[false;N],message:0,graph:unbound()}
 }
 
 fn check_limits<let N:u32>(count:u32, quad_bound:u32) {
@@ -204,26 +235,38 @@ fn literal_profile<let L:u32>(cell:crate::term::TermCell,raw:BoundedTermOpening<
         "N0 credential literal datatype");
     assert((dt==DT_STRING)|(raw.lexical_len <= 32),"credential scalar lexical capacity");
 }
-fn checked_bounded_literal<let L:u32>(cell:crate::term::TermCell,raw:BoundedTermOpening<L,41,1>) {
-    if cell.datatype()==DT_STRING {
-        let _checked=crate::term::open_key_checked(raw,0,DT_STRING);
+/// Reopen a literal through the suite's fixed-datatype constructors.
+/// The caller binds the returned cell to its authenticated input table.
+pub fn checked_bounded_literal<let L:u32>(cell:TermCell,raw:BoundedTermOpening<L,41,1>) -> TermCell {
+    let checked=if cell.dt==DT_STRING {
+        crate::term::open_key_checked(raw,0,DT_STRING).cell()
     } else {
         let scalar=scalar_opening(raw);
-        if cell.datatype()==DT_INTEGER {let _checked=crate::term::open_key_checked(scalar,0,DT_INTEGER);}
-        else if cell.datatype()==DT_DECIMAL {let _checked=crate::term::open_key_checked(scalar,0,DT_DECIMAL);}
-        else if cell.datatype()==DT_DATE {let _checked=crate::term::open_key_checked(scalar,0,DT_DATE);}
-        else if cell.datatype()==DT_DATETIME {let _checked=crate::term::open_key_checked(scalar,0,DT_DATETIME);}
-        else {assert(cell.datatype()==DT_BOOLEAN,"N0 credential literal datatype");let _checked=crate::term::open_key_checked(scalar,0,DT_BOOLEAN);}
-    }
+        let mut tail:Field=0;
+        for i in 32..L {tail=tail+raw.lexical[i] as Field;}
+        assert(tail==0,"read scalar backing padding");
+        let opened=crate::term::open_literal_for_key_check(scalar,0);
+        if cell.dt==DT_INTEGER {crate::term::check_literal_key_for(opened,DT_INTEGER).cell()}
+        else if cell.dt==DT_DECIMAL {crate::term::check_literal_key_for(opened,DT_DECIMAL).cell()}
+        else if cell.dt==DT_DATE {crate::term::check_literal_key_for(opened,DT_DATE).cell()}
+        else if cell.dt==DT_DATETIME {crate::term::check_literal_key_for(opened,DT_DATETIME).cell()}
+        else {assert(cell.dt==DT_BOOLEAN,"N0 credential literal datatype");crate::term::check_literal_key_for(opened,DT_BOOLEAN).cell()}
+    };
+    table_cell(checked)
 }
 /// The complete bounded suite opening is shared with the envelope consumer.
 pub fn authenticate_bounded<let N:u32,let R:u32,let L:u32>(
     credentials:[crate::ops_core_profile::QuadOpening<R,L>;N],proof:BoundedCredentialProof<N>,
     count:u32,quad_bound:u32,credential_index:u32) -> crate::suite_metadata::OpenedCredential<N> {
+    authenticate_profile_bounded::<N,R,L,128>(credentials,proof,count,quad_bound,credential_index)
+}
+pub fn authenticate_profile_bounded<let N:u32,let R:u32,let L:u32,let M:u32>(
+    credentials:[crate::ops_core_profile::QuadOpening<R,L>;N],proof:BoundedCredentialProof<N>,
+    count:u32,quad_bound:u32,credential_index:u32) -> crate::suite_metadata::OpenedCredential<N> {
     check_limits::<N>(count,quad_bound);
     let raw=crate::ops_core_profile::normalize(credentials,count);
     crate::suite::open_bounded_credential_hidden(raw,proof.salts,proof.salt,count,proof.config,
-        proof.created,crate::ops_core_profile::optional_resource(proof.method),proof.pk,credential_index,
+        proof.created,crate::ops_core_profile::method::<M>(proof.method),proof.pk,credential_index,
         proof.r,proof.s,proof.e,proof.e_k)
 }
 pub fn from_authenticated_bounded<let N:u32,let R:u32,let L:u32,let CHECK:u32>(
@@ -233,8 +276,10 @@ pub fn from_authenticated_bounded<let N:u32,let R:u32,let L:u32,let CHECK:u32>(
     let raw=crate::ops_core_profile::normalize(credentials,authenticated.count());
     let quads=authenticated.quads();
     for n in 0..N {if (n < authenticated.count()) & (quads[n][2].kind()==3) {
-        literal_profile(quads[n][2],raw[n][2]);
-        if CHECK==1 {checked_bounded_literal(quads[n][2],raw[n][2]);}
+        if CHECK==1 {
+            literal_profile(quads[n][2],raw[n][2]);
+            let _checked=checked_bounded_literal(table_cell(quads[n][2]),raw[n][2]);
+        }
     }}
     convert_authenticated(authenticated,credential_index,request_digest)
 }
@@ -249,17 +294,76 @@ fn check_inactive_bounded<let N:u32,let R:u32,let L:u32>(
     check_proof_padding(proof.salt,proof.salts,proof.config,proof.pk,proof.r,proof.s,proof.e,proof.e_k,
         proof.issuer_index,proof.issuer_siblings);
 }
+/// Canonical inactive view; active slots defer their opening to the caller.
+pub fn inactive_bounded<let N:u32,let R:u32,let L:u32>(
+    raw:[crate::ops_core_profile::QuadOpening<R,L>;N],proof:BoundedCredentialProof<N>,
+    count:u32,quad_bound:u32,credential_index:u32,active:bool,revealed_message:Field,revealed_key:Field,
+) -> OpenedCredential<N> {
+    check_limits::<N>(count,quad_bound);
+    if !active {
+        assert((revealed_message==0)&(revealed_key==0),"revealed input padding");
+        check_inactive_bounded(raw,proof,count,credential_index);
+    }
+    OpenedCredential{constructed:[],rows:[[unbound();3];N],active:[false;N],message:0,graph:unbound()}
+}
+
 /// Thin lifecycle dispatch; the suite owns the only credential opener.
 pub fn open_bounded_one<let N:u32,let R:u32,let L:u32,let CHECK:u32>(
     credentials:[crate::ops_core_profile::QuadOpening<R,L>;N],proof:BoundedCredentialProof<N>,
     count:u32,active:bool,quad_bound:u32,credential_index:u32,issuer_root:Field,request_digest:[u8;32]) -> OpenedCredential<N> {
+    open_profile_one::<N,R,L,CHECK,128>(credentials,proof,count,active,quad_bound,credential_index,issuer_root,request_digest)
+}
+pub fn open_profile_one<let N:u32,let R:u32,let L:u32,let CHECK:u32,let M:u32>(
+    credentials:[crate::ops_core_profile::QuadOpening<R,L>;N],proof:BoundedCredentialProof<N>,
+    count:u32,active:bool,quad_bound:u32,credential_index:u32,issuer_root:Field,request_digest:[u8;32]) -> OpenedCredential<N> {
     check_limits::<N>(count,quad_bound);
-    let mut opened=OpenedCredential {rows:[[unbound();3];N],active:[false;N],message:0,graph:unbound()};
+    let mut opened=OpenedCredential {constructed:[],rows:[[unbound();3];N],active:[false;N],message:0,graph:unbound()};
     if active {
-        let authenticated=authenticate_bounded(credentials,proof,count,quad_bound,credential_index);
+        let authenticated=authenticate_profile_bounded::<N,R,L,M>(credentials,proof,count,quad_bound,credential_index);
         key_set_membership(proof.pk,issuer_root,proof.issuer_index,proof.issuer_siblings);
         opened=from_authenticated_bounded::<N,R,L,CHECK>(authenticated,credentials,credential_index,request_digest);
     } else {check_inactive_bounded(credentials,proof,count,credential_index);}
+    opened
+}
+
+/// Open once and enforce the selected signature mode before the envelope consumes metadata.
+pub fn authenticate_profile_bounded_mode<let N:u32,let R:u32,let L:u32,let M:u32>(
+    credentials:[crate::ops_core_profile::QuadOpening<R,L>;N],proof:BoundedCredentialProof<N>,
+    count:u32,quad_bound:u32,credential_index:u32,signature_mode:u8,
+    revealed_message:Field,revealed_key:Field) -> crate::suite_metadata::OpenedCredential<N> {
+    assert(signature_mode<=1,"suite signature mode");
+    check_limits::<N>(count,quad_bound);
+    let raw=crate::ops_core_profile::normalize(credentials,count);
+    let authenticated=crate::suite::open_bounded_credential_revealed(raw,proof.salts,proof.salt,count,proof.config,
+        proof.created,crate::ops_core_profile::method::<M>(proof.method),proof.pk,credential_index);
+    if signature_mode==1 {
+        assert((revealed_message==0)&(revealed_key==0),"revealed input padding");
+        compose::issuer::schnorr_verify(proof.pk,proof.r,proof.s,proof.e,proof.e_k,authenticated.message());
+    } else {
+        assert(authenticated.message()==revealed_message,"revealed credential message");
+        assert(authenticated.verification_key().enc()==revealed_key,"revealed credential key");
+        assert((proof.r.x==0)&(proof.r.y==0)&(proof.s==0)&(proof.e==0)&(proof.e_k==0),"revealed signature witness padding");
+    }
+    authenticated
+}
+
+/// Shared complete opening; the selected signature mode consumes it once.
+pub fn open_profile_mode_one<let N:u32,let R:u32,let L:u32,let CHECK:u32,let M:u32>(
+    credentials:[crate::ops_core_profile::QuadOpening<R,L>;N],proof:BoundedCredentialProof<N>,
+    count:u32,active:bool,quad_bound:u32,credential_index:u32,issuer_root:Field,request_digest:[u8;32],
+    signature_mode:u8,revealed_message:Field,revealed_key:Field) -> OpenedCredential<N> {
+    assert(signature_mode<=1,"suite signature mode");
+    check_limits::<N>(count,quad_bound);
+    let mut opened=OpenedCredential {constructed:[],rows:[[unbound();3];N],active:[false;N],message:0,graph:unbound()};
+    if active {
+        let authenticated=authenticate_profile_bounded_mode::<N,R,L,M>(credentials,proof,count,quad_bound,credential_index,
+            signature_mode,revealed_message,revealed_key);
+        key_set_membership(proof.pk,issuer_root,proof.issuer_index,proof.issuer_siblings);
+        opened=from_authenticated_bounded::<N,R,L,CHECK>(authenticated,credentials,credential_index,request_digest);
+    } else {
+        assert((revealed_message==0)&(revealed_key==0),"revealed input padding");
+        check_inactive_bounded(credentials,proof,count,credential_index);
+    }
     opened
 }
 fn empty_proof<let N: u32>() -> CredentialProof<N> {
@@ -271,7 +375,7 @@ fn empty_opening<let L: u32>() -> TermOpening<L> {
 fn inactive(proof:CredentialProof<1>,count:u32,bound:u32) -> OpenedCredential<1> {
     check_limits::<1>(count,bound);
     check_inactive([[empty_opening::<1>();4]],proof,count,0);
-    OpenedCredential {rows:[[unbound();3]],active:[false],message:0,graph:unbound()}
+    OpenedCredential {constructed:[],rows:[[unbound();3]],active:[false],message:0,graph:unbound()}
 }
 #[test]
 fn credential_flags_are_exact() { assert(credential_flags::<4>(2,4,1) == [true,true,false,false]); }
@@ -322,7 +426,7 @@ fn dataset_assembly_cannot_hide_a_credential() {
 #[test]
 fn dataset_assembly_copies_every_row_and_flag() {
     let cell=TermCell {bound:true,kind:1,enc:7,key_class:0,key:0,dt:0,lang:0,scope:0};
-    let opened=OpenedCredential {rows:[[cell,cell,cell]],active:[true],message:0,graph:unbound()};
+    let opened=OpenedCredential {constructed:[],rows:[[cell,cell,cell]],active:[true],message:0,graph:unbound()};
     let dataset=append_credential(empty_dataset::<2>(),opened,1);
     assert(crate::table::equal_row(dataset.rows[1], [cell,cell,cell]));assert(dataset.active == [false,true]);
 }
@@ -378,7 +482,7 @@ fn input_cannot_supply_a_verified_issuer_assertion() { check_input_predicate(VER
 #[test]
 fn named_view_keeps_a_graph_per_active_row() {
     let graph=TermCell {bound:true,kind:2,enc:7,key_class:0,key:0,dt:0,lang:0,scope:1};
-    let opened=OpenedCredential {rows:[[unbound();3];2],active:[true,false],message:0,graph};
+    let opened=OpenedCredential {constructed:[],rows:[[unbound();3];2],active:[true,false],message:0,graph};
     let dataset=append_credential(empty_dataset::<2>(),opened,0);
     assert(crate::table::equal_cell(dataset.graphs[0],graph));
     assert(crate::table::equal_cell(dataset.graphs[1],unbound()));
@@ -386,13 +490,13 @@ fn named_view_keeps_a_graph_per_active_row() {
 #[test]
 fn verified_issuer_assertion_is_in_the_default_view() {
     let graph=TermCell {bound:true,kind:2,enc:7,key_class:0,key:0,dt:0,lang:0,scope:1};
-    let opened=OpenedCredential {rows:[[unbound();3]],active:[false],message:0,graph};
+    let opened=OpenedCredential {constructed:[],rows:[[unbound();3]],active:[false],message:0,graph};
     let issuer=crate::term::iri_vc_type();
     let dataset=append_verified_issuer(empty_dataset::<1>(),opened,issuer,true,0);
     assert(dataset.active[0]);assert(!dataset.graphs[0].bound);
     assert(crate::table::equal_cell(dataset.rows[0][0],graph));
     assert(dataset.rows[0][1].enc == VERIFIED_ISSUER_ENCODING);
-    assert(dataset.rows[0][2].enc == issuer.enc());
+    assert(dataset.rows[0][2].enc == issuer.identity());
 }
 #[test(should_fail_with = "issuer assertion capacity")]
 fn issuer_assertion_cannot_escape_the_dataset() {
@@ -453,7 +557,7 @@ fn checked_bounded_test<let T:u32>(byte:u8,datatype:[u8;T],key_class:u8) {
     raw.lexical[0]=byte;raw.lexical_len=1;raw.datatype_len=T;raw.key[0]=key_class;
     for i in 0..T {raw.datatype[i]=datatype[i];}
     let bounded=bounded_raw(raw);let cell=crate::suite_entry::open_bounded_cell(bounded,0);
-    literal_profile(cell,bounded);checked_bounded_literal(cell,bounded);
+    literal_profile(cell,bounded);let _checked=checked_bounded_literal(table_cell(cell),bounded);
 }
 #[test]
 fn bounded_invalid_integer_keeps_its_exact_none_key() {
@@ -513,4 +617,73 @@ fn bounded_suite_conversion_retains_rows_message_and_request_graph() {
 #[test(should_fail_with="credential verifiedIssuer assertion")]
 fn bounded_suite_conversion_refuses_the_reserved_input_predicate() {
     let _opened=bounded_converted_fixture("https://w3id.org/sparq/vcq#verifiedIssuer".as_bytes());
+}
+
+fn index_fixture() -> ([crate::ops_core_profile::QuadOpening<8,32>;1],crate::suite_metadata::OpenedCredential<1>) {
+    let raw=[QuadOpening {
+        subject:ResourceOpening {kind:2,lexical:[98,0,0,0,0,0,0,0],lexical_len:1},
+        predicate:ResourceOpening {kind:1,lexical:[117,114,110,58,112,0,0,0],lexical_len:5},
+        object:ObjectOpening {kind:1,lexical:[117,114,110,58,111,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],lexical_len:5,
+            datatype:[0;41],datatype_len:0,language:[0;1],language_len:0,key:[0;31]},
+    }];
+    let opened=crate::suite::open_bounded_credential_revealed(crate::ops_core_profile::normalize(raw,1),
+        [crate::suite::leaf_salt(7,0)],7,1,[0;2],crate::ops_core_profile::empty::<32>(),
+        crate::ops_core_profile::empty::<32>(),Point{x:compose::issuer::BJJ_GX,y:compose::issuer::BJJ_GY},0);
+    (raw,opened)
+}
+#[test]
+fn dataset_conversion_reuses_the_opening_index_and_request_scope() {
+    let (raw,opened)=index_fixture();
+    let converted=from_authenticated_bounded::<1,8,32,0>(opened,raw,0,
+        [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31]);
+    assert(converted.rows[0][0].scope==1);assert(converted.graph.scope==1);
+    assert(crate::table::equal_cell(converted.graph,table_cell(crate::term::credential_graph([
+        0x000102030405060708090a0b0c0d0e0f,0x101112131415161718191a1b1c1d1e1f],0))));
+}
+#[test(should_fail_with="dataset credential index")]
+fn dataset_conversion_refuses_a_different_credential_index() {
+    let (raw,opened)=index_fixture();
+    let _converted=from_authenticated_bounded::<1,8,32,0>(opened,raw,1,[7;32]);
+}
+
+#[test]
+fn credential_modes_have_exact_active_slots() {
+    assert(credential_mode_flags::<4>(2,3,0,2,[7,8,0,0],[9,10,0,0])==[true,true,false,false]);
+    assert(credential_mode_flags::<4>(2,3,1,0,[0;4],[0;4])==[true,true,false,false]);
+    assert(credential_mode_flags::<1>(0,1,0,0,[0],[0])==[false]);
+}
+#[test(should_fail_with="suite signature mode")]
+fn credential_modes_refuse_unknown_modes() {let _flags=credential_mode_flags::<1>(0,1,2,0,[0],[0]);}
+#[test(should_fail_with="credential count")]
+fn credential_modes_refuse_count_over_request() {let _flags=credential_mode_flags::<4>(3,2,0,3,[1,2,3,0],[1,2,3,0]);}
+#[test(should_fail_with="credential count")]
+fn credential_modes_refuse_bound_over_shape() {let _flags=credential_mode_flags::<1>(0,2,0,0,[0],[0]);}
+#[test(should_fail_with="credential count")]
+fn credential_modes_refuse_zero_bound() {let _flags=credential_mode_flags::<1>(0,0,0,0,[0],[0]);}
+#[test(should_fail_with="revealed credential count")]
+fn credential_modes_refuse_missing_evidence() {let _flags=credential_mode_flags::<1>(1,1,0,0,[0],[0]);}
+#[test(should_fail_with="revealed credential count")]
+fn credential_modes_refuse_extra_evidence() {let _flags=credential_mode_flags::<1>(0,1,0,1,[0],[0]);}
+#[test(should_fail_with="revealed credential count")]
+fn credential_modes_refuse_hidden_evidence() {let _flags=credential_mode_flags::<1>(1,1,1,1,[0],[0]);}
+#[test(should_fail_with="revealed input padding")]
+fn credential_modes_refuse_hidden_message() {let _flags=credential_mode_flags::<1>(1,1,1,0,[7],[0]);}
+#[test(should_fail_with="revealed input padding")]
+fn credential_modes_refuse_hidden_key() {let _flags=credential_mode_flags::<1>(1,1,1,0,[0],[7]);}
+#[test(should_fail_with="revealed input padding")]
+fn credential_modes_refuse_inactive_message() {let _flags=credential_mode_flags::<2>(1,2,0,1,[7,8],[9,0]);}
+#[test(should_fail_with="revealed input padding")]
+fn credential_modes_refuse_inactive_key() {let _flags=credential_mode_flags::<2>(1,2,0,1,[7,0],[9,8]);}
+
+#[test]
+fn table_identity_ignores_the_authenticated_value_key() {
+    let mut raw=crate::ops_core_profile::empty::<65>();raw.bound=true;raw.kind=3;
+    raw.lexical[0]=49;raw.lexical_len=1;
+    let datatype="http://www.w3.org/2001/XMLSchema#integer".as_bytes();
+    raw.datatype_len=datatype.len();for i in 0..datatype.len() {raw.datatype[i]=datatype[i];}
+    let left=crate::suite_entry::open_bounded_cell(raw,0);
+    raw.key[0]=1;raw.key[1]=128;
+    let right=crate::suite_entry::open_bounded_cell(raw,0);
+    assert(crate::table::same_term(table_cell(left),table_cell(right)));
+    assert(!crate::table::equal_cell(table_cell(left),table_cell(right)));
 }

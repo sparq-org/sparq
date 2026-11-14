@@ -218,12 +218,29 @@ vocabulary or the plan's public constants.
 
 The circuit library's `ops_core_profile` contains raw witness structs and
 resource normalization only. Generated credential openings call
-`ops_core_suite::open_bounded_one`, delegating the complete signed opening to
+`ops_core_suite::open_profile_one`, delegating the complete signed opening to
 `suite::open_bounded_credential_hidden` once per credential. Resource datatype,
 language and key bytes are zero; the default graph and active flags are derived.
-Source scans, joins and value consumers call `term::open_key_checked` with fixed datatype
+Scans, joins, GRAPH and DISTINCT compare authenticated term identity, retaining
+blank-node scope. Value consumers call `term::open_key_checked` with fixed datatype
 identifiers. Raw lexical backing is separately bounded for resources, objects
 and scalars. Shape encoding includes all these capacities.
+The verifier selects `capacity::OpeningProfile::{Solid, LongObjects, Extended}`. Its
+`limits()` reports the compiled resource, object, scalar, datatype, language,
+creation and verification-method bounds. `Solid` is the default. Choose
+`LongObjects` for holder Multikey lexical forms with compact resource/metadata
+bounds, or `Extended` for longer identifiers;
+the compiler never resizes a profile from private data. Admission through
+`Credential::cells_with_profile` and witness rendering refuse excess bytes.
+Use `Plan::with_opening_profile` for portable generation, or
+`Compiler::prepare_with_opening_profile(query, bounds, quad_bounds, profile)`
+for native preparation. The matching request constructor is
+`Request::new_authenticated_with_opening_profile(stored, bounds, key,
+issuer_root, quad_bounds, profile)`; typed envelope policies use
+`new_authenticated_with_envelope_and_profile(stored, bounds, key, policy,
+quad_bounds, profile)`. Existing constructors select `Solid`.
+`Request::plan()` restores the selected profile and `opening_profile()` exposes
+it. Different profiles produce different plan hashes and keys.
 The additive envelope seam is `authenticate_bounded` followed by its consumer
 and `from_authenticated_bounded`. Existing unbounded fixture entry points remain
 available, with the same suite authentication relation.
@@ -238,3 +255,116 @@ The query proof tests default to `SPARQ_NOIR_QUERY_PROOF_PROFILE=full`.
 are refused; the workflow dispatch input `full_query_proofs` runs the complete
 acceptance sweep. Each selected proof still checks its engine result and refuses
 an altered answer. Local completion requires the full profile.
+
+The shared Noir bridge exposes `ops_core_expr::temporal_payload(key: Field) ->
+Field` for checked suite keys. It extracts the leading biased time word and
+constrains the remaining payload bytes to zero. Graph and expression dispatchers
+pass the full packed key and retain its checked class separately when constructing
+`TemporalLane`; the lane's key is the scalar word.
+
+The generated authenticated ABI also carries `revealed_count: u32`,
+`revealed_messages: [Field; C]` and `revealed_keys: [Field; C]` after the ordered quad
+bounds and before the statement binding. Hidden mode requires zero words there.
+Revealed mode binds each active credential's message and suite Multikey encoding
+and requires inactive slots to be zero. `statement::RevealedInputs::verify` takes
+ordered `RevealedSignature {key, message, signature}` values and checks each shared
+suite signature before admitting it; its stored messages and keys are private.
+`Layout::reconstruct_revealed` accepts that admitted value and a mode-zero statement.
+`witness::prover_toml_revealed` renders a witness from complete credentials using the
+same verification. The native `Compiler` retains its hidden-only contract; the
+statement adapter must enforce its request's accepted mode before using these APIs.
+Both modes share one suite opening per active credential, with the shared Schnorr
+verifier called for hidden mode. No presentation-supplied layout is accepted.
+
+Authenticated query programs open complete credential identities once. Value-consuming
+FILTER inputs validate each consumed literal on every active input row, including
+rejected rows. Cells identical to verifier-reconstructed public parameters reuse
+those canonical keys; other literal cells carry separate lexical openings. Each checked cell must equal the row's
+authenticated encoding and metadata; no private source index selects the binding.
+Select intermediate row bounds for the full scan output, independently of result
+limits. An overflowing intermediate table refuses the proof.
+
+`interp::Cell::enc` is the suite's key-independent RDF identity for private tables
+and public request parameters. The suite's keyed encoding remains for credential
+commitments, revealed verification keys and envelope trust-member derivation.
+Plain-string equality and membership use identity; typed-literal equality and
+membership remain value consumers. The generated read adapter checks every row
+entering those consumers, including later rejected rows.
+
+Released SELECT cells preserve identity, kind, datatype and language but set
+`key_class` and `key` to zero. `Answer::encode`, `Answer::release`, the interpreter
+and SELECT gadget share this conversion; `Layout` refuses released value metadata.
+Result-local blank-node labels retain their existing canonical form. Public request
+parameter cells keep their canonical value keys.
+
+For toolchain CI, `python3 scripts/zk_query_ci.py hosted` loads and tests the
+committed Noir manifests unchanged, runs the operator contracts, portable host
+checks and small live controls, and checks agreement for every passing operator
+plan. `full` runs the complete core, corpus, expressions and proof sweep and is
+selected by explicit workflow dispatch. Both require the real pinned tools.
+`--list` prints commands and `--root` selects a frozen checkout. Separate runtime
+ledger profiles require every declared live entry and completion; a named XPath
+failure records unavailable comparison rather than claiming byte or key identity.
+
+Private scalar read admission applies the selected parser byte bound and supported
+value datatypes at the consumer. An identity-only source term does not inherit a
+scalar parser bound. Unsupported private value datatypes and oversized scalar
+lexicals return named refusals before native execution; exact public parameter
+matches retain their verifier-reconstructed key shortcut.
+
+`table::assert_canonicalized(input, out)` verifies a stable canonical permutation
+with exact multiplicity and complete metadata. The occurrence ordinals are
+computed from the rows; there is no private permutation index. Scan checks its
+canonical output directly against every source match and retains the first
+matching metadata payload. Projection and SELECT use the permutation verifier.
+Padding, output order and overflow remain part of each relation.
+
+`ops_core_expr::temporal_payload_for_class(key: Field, class: u8) -> Field`
+extracts the scalar word from a checked packed temporal key and checked class.
+Its bounded reconstruction enforces the header and zero tail. The original
+`temporal_payload(key)` byte-based helper remains available. Both keep the same
+suite representation; the class-aware bridge is also pinned to native keys.
+
+`table::assert_selection(input, selected, out)` verifies a complete stable
+subsequence with computed destination ranks and full payload equality. FILTER
+derives the selected flags from true, non-error predicates; inactive input rows
+remain excluded, and an undersized output refuses.
+
+A leading-column projection preserves the input’s canonical row order. It uses
+`table::assert_ordered` to bind each row and its complete payload directly. Other
+projections retain the stable canonical-permutation relation. Both paths check
+cardinality, padding and capacity.
+
+JOIN matches every compatible source pair to the first unused output occurrence
+of its binding, retaining source-pair order for equal identities. The full payload
+is bound at that occurrence. Complete pair coverage and complete output use
+preserve bag multiplicity; an undersized output refuses. All occurrence choices
+are computed inside the gadget.
+
+Plain-string equality classifies its operands from the authenticated datatype
+before value-key guards; identity-only comparison does not inspect unused keys.
+
+`Credential::trust_member` derives the signed issuer, proof verification method and
+verifying key. `authorization_path(trust_members)` obtains the canonical set and
+its membership path through the policy module’s shared builder. Generated envelope
+wiring is available through `codegen::generate_enveloped`; its private evidence
+contains raw fields, while sealed suite cells remain internal.
+
+`codegen::generate` selects the canonical envelope consumer. `generate_enveloped`
+is its explicit spelling. For suite-opening controls without the canonical dataset,
+use `generate_suite_fixture` with `prover_toml_suite_fixture` or
+`prover_toml_suite_fixture_revealed`; operator fixtures remain separate.
+`prover_toml_authenticated_with_envelope` consumes canonical trust-member paths at
+the stored issuer depth, including singleton paths. It renders empty private evidence.
+`prover_toml_enveloped` instead takes an `EnvelopeInput` containing typed policy,
+`EnvelopeWitness` and optional independently verified revealed inputs. The policy
+module owns canonical path construction. `Credential::canonical_issuer_root(depth)`
+checks the complete signed issuer/method/key member against its path.
+
+`Compiler::prove_with_envelope(request, credentials, vocabulary, salt, evidence, now)`
+accepts `EnvelopeWitness`: ordered `CredentialEvidence` slots, shared `HolderWitness`
+signatures and per-row `StatusWitness` paths. Existing `prove` passes empty evidence.
+The renderer derives lexical status/validity openings from signed properties;
+sealed suite cells never enter the ABI. The current status adapter admits its fixed
+bit-tree depth and refuses other depths by name. Public policy and roots always come
+from the stored request. Native proving remains hidden-signature mode.

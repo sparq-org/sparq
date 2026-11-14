@@ -24,7 +24,8 @@ pub trait CheckedOpening<let L: u32> {
     fn open(self) -> Scalar<L>;
 }
 
-// Literal contract mirror of lane A; replace these imports at integration.
+// Contract fields/constants agree with lane A at 3abc203961e075e092d0a0dba0d2f0c11370214a.
+// Replace these imports and the public mirror with A's private cell at integration.
 pub global CLASS_NONE: u8 = 0;
 pub global CLASS_DECIMAL: u8 = 1;
 pub global CLASS_DOUBLE: u8 = 2;
@@ -112,6 +113,9 @@ impl TermCell {
 }
 
 // The adapter must call lane A's open_lexical and, for literals, recompute_key.
+// A also supplies open_key_checked(BoundedTermOpening<L,D,G>, credential,
+// expected_dt), binding raw bytes and checking their key in one construction.
+// That sealed result plus its original constrained bytes is an equivalent path.
 // All bytes here are returned by that constrained adapter, never independent
 // arguments to a function which reads a term's characters.
 use std::collections::bounded_vec::BoundedVec;

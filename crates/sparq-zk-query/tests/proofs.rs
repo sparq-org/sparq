@@ -5,7 +5,7 @@ mod support;
 
 #[path = "support/authenticated.rs"]
 mod authenticated;
-use authenticated::fixture;
+use authenticated::{canonical_fixture as fixture, canonical_policy};
 use fixture_support::{integer, iri};
 use sparq_query_protocol::*;
 use sparq_zk_query::credential::SuiteEncoder as FixtureEncoder;
@@ -20,7 +20,7 @@ use std::{collections::HashSet, sync::Mutex};
 
 const B: Bounds = Bounds {
     credentials: 1,
-    quads_per_credential: 4,
+    quads_per_credential: 8,
     rows_per_table: 4,
 };
 const NOW: u64 = 1_794_576_000;
@@ -59,7 +59,7 @@ fn stored(
             accepted_suites: vec![],
             accepted_mappings: vec![id(PROFILE)],
             accepted_linking: vec![id(PROFILE)],
-            resources: ResourceBounds::new(4, 1 << 24).unwrap(),
+            resources: ResourceBounds::new(prepared.plan.bounds().rows_per_table, 1 << 24).unwrap(),
             methods: vec![prepared.descriptor.clone()],
         })
         .unwrap(),
@@ -88,11 +88,12 @@ fn authenticated_request(
     requirements.source_evidence = Some(SourceEvidence::IssuerAuthenticated);
     requirements.accepted_suites = vec![id(sparq_zk_query::request::SUITE)];
     spec.requirements = QueryRequirements::new(requirements).unwrap();
-    Request::new_authenticated(
+    Request::new_authenticated_with_envelope(
         StoredRequest::new(spec).unwrap(),
         bounds,
         key,
-        authenticated::issuer_root(),
+        canonical_policy(),
+        None,
     )
 }
 
@@ -435,6 +436,11 @@ fn n0_native_proof_profile_matches_the_engine_and_refuses_altered_answers() {
     for (index, case) in cases.into_iter().enumerate() {
         let bounds = Bounds {
             credentials: case.sources.len() as u32,
+            rows_per_table: if matches!(case.name, "projection-bag" | "distinct") {
+                8
+            } else {
+                B.rows_per_table
+            },
             ..B
         };
         let start = std::time::Instant::now();
@@ -444,7 +450,7 @@ fn n0_native_proof_profile_matches_the_engine_and_refuses_altered_answers() {
         let mut vocabulary = vec![];
         for (i, source) in case.sources.iter().enumerate() {
             let (_, terms) = fixture_support::dataset(source);
-            data.push(authenticated::sign(source, i as u64));
+            data.push(authenticated::canonical_sign(source, i as u64));
             vocabulary.extend(terms);
         }
         let request = authenticated_request(
@@ -453,19 +459,29 @@ fn n0_native_proof_profile_matches_the_engine_and_refuses_altered_answers() {
             prepared.verification_key.clone(),
         )
         .unwrap();
-        let cells = data
-            .iter()
-            .enumerate()
-            .map(|(i, c)| c.cells(i as u32).unwrap())
-            .collect::<Vec<_>>();
+        let dataset = sparq_zk_query::credential::assemble_issuer_dataset(
+            &data,
+            &canonical_policy().trust_members,
+            request.digest(),
+        )
+        .unwrap();
         let trace =
-            sparq_zk_query::interp::evaluate(&prepared.plan, &cells, &FixtureEncoder).unwrap();
-        // Slicing uses the method's canonical order; the graph oracle compares
-        // the unsliced relation because SPARQL permits other unspecified orders.
+            sparq_zk_query::interp::evaluate_dataset(&prepared.plan, &dataset, &FixtureEncoder)
+                .unwrap();
+        // The oracle observes the complete default merge, including signed metadata
+        // and the one authenticated issuer assertion per presentation graph.
+        let mut source = String::new();
+        for (i, credential) in data.iter().enumerate() {
+            source.push_str(&credential.credential.document);
+            source.push_str(&format!(
+                "_:graph{i} <{}> <urn:issuer> .\n",
+                sparq_zk_query::credential::VERIFIED_ISSUER
+            ));
+        }
         if case.name != "slice" {
             fixture_support::assert_engine_with_encoder(
                 case.query,
-                &case.sources.join("\n"),
+                &source,
                 &trace.result,
                 &FixtureEncoder,
             );
@@ -831,7 +847,7 @@ fn authenticated_issuer_policy_is_part_of_the_canonical_request() {
         key.clone(),
     )
     .unwrap();
-    let mut other_root = authenticated::issuer_root();
+    let mut other_root = request.issuer_root().unwrap();
     other_root[31] ^= 1;
     let other = Request::new_authenticated(
         StoredRequest::new(request_spec(request.stored())).unwrap(),
@@ -842,7 +858,72 @@ fn authenticated_issuer_policy_is_part_of_the_canonical_request() {
     .unwrap();
     assert_ne!(request.digest(), other.digest());
     assert!(request.canonical_rdf().contains("issuerRoot"));
-    assert_eq!(request.issuer_root().unwrap(), authenticated::issuer_root());
+    assert_eq!(
+        request.issuer_root().unwrap(),
+        sparq_zk_query::envelope_policy::derive(&canonical_policy())
+            .unwrap()
+            .issuer_root
+    );
+}
+
+#[test]
+fn stored_request_reconstructs_the_verifier_selected_opening_profile() {
+    use sparq_zk_query::capacity::OpeningProfile;
+    let query = "ASK {}";
+    let plan = sparq_zk_query::lower::lower(query, B)
+        .unwrap()
+        .with_opening_profile(OpeningProfile::Extended);
+    let key = vec![37; 8];
+    let prepared = Prepared {
+        descriptor: sparq_zk_query::request::descriptor(&plan, &key).unwrap(),
+        plan,
+        verification_key: key.clone(),
+        artifact: serde_json::json!({}),
+    };
+    let mut spec = request_spec(&stored(&prepared, query, 9, "urn:verifier", None));
+    let mut requirements = requirements_spec(&spec.requirements);
+    requirements.source_evidence = Some(SourceEvidence::IssuerAuthenticated);
+    requirements.accepted_suites = vec![id(sparq_zk_query::request::SUITE)];
+    spec.requirements = QueryRequirements::new(requirements).unwrap();
+    let stored = StoredRequest::new(spec).unwrap();
+    let request = Request::new_authenticated_with_opening_profile(
+        stored.clone(),
+        B,
+        key.clone(),
+        authenticated::issuer_root(),
+        None,
+        OpeningProfile::Extended,
+    )
+    .unwrap();
+    assert_eq!(request.opening_profile(), OpeningProfile::Extended);
+    assert_eq!(request.plan().unwrap().hash(), prepared.plan.hash());
+    assert!(request.canonical_rdf().contains("openingProfile"));
+    let policy = sparq_zk_query::envelope_policy::PolicyInput {
+        trust_members: vec![sparq_zk_query::envelope_policy::TrustMember {
+            issuer: oxrdf::NamedNode::new_unchecked("urn:issuer"),
+            verification_method: oxrdf::NamedNode::new_unchecked("urn:issuer#key"),
+            key: sparq_zk::sig::SecretKey::from_seed(19).public_key(),
+        }],
+        validity_time: Some(1_794_614_400_123),
+        ..Default::default()
+    };
+    let typed = Request::new_authenticated_with_envelope_and_profile(
+        stored.clone(),
+        B,
+        key.clone(),
+        policy,
+        None,
+        OpeningProfile::Extended,
+    )
+    .unwrap();
+    assert_eq!(typed.plan().unwrap().hash(), prepared.plan.hash());
+    assert_eq!(typed.opening_profile(), OpeningProfile::Extended);
+    assert_eq!(typed.envelope_inputs().unwrap().now, 1_794_614_400_123);
+    assert_ne!(request.digest(), typed.digest());
+    assert_eq!(
+        Request::new_authenticated(stored, B, key, authenticated::issuer_root()).unwrap_err(),
+        Error::Invalid("method descriptor".into()),
+    );
 }
 
 #[test]
@@ -1042,9 +1123,7 @@ fn request_derives_canonical_policy_roots_and_exact_millisecond_words() {
 }
 
 #[test]
-fn require_envelope_consumer_refuses_canonical_policy_when_tree_depth_matches() {
-    // Exercise Request::require_envelope_consumer through both native entry points,
-    // with a key that would fail later checks if the early policy refusal were omitted.
+fn canonical_policy_is_wired_to_the_native_program() {
     use oxrdf::NamedNode;
     use sparq_zk_query::envelope_policy::{PolicyInput, TrustMember};
     let plan = sparq_zk_query::lower::lower("ASK {}", B).unwrap();
@@ -1078,39 +1157,56 @@ fn require_envelope_consumer_refuses_canonical_policy_when_tree_depth_matches() 
         request.envelope_inputs().unwrap().issuer_depth,
         sparq_zk_query::credential::ISSUER_DEPTH
     );
-    let tmp = tempfile::tempdir().unwrap();
-    let compiler = Compiler::new(
-        tmp.path(),
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../zk"),
-    )
-    .unwrap();
-    let expected = Error::Unsupported("credential envelope policy integration".into());
-    assert_eq!(
-        compiler
-            .prove(&request, &[], &[], &FixtureEncoder, [3; 32], || NOW)
-            .unwrap_err(),
-        expected
-    );
-    let presentation = sparq_zk_query::method::Presentation {
-        request_digest: request.digest(),
-        input_commitment: [0; 32],
-        signature_mode: 1,
-        result: Answer::Ask(true),
-        proof: vec![],
-    };
-    let store = Store::default();
-    assert_eq!(
-        compiler
-            .verify(
-                &request,
-                &presentation,
+    let package = sparq_zk_query::codegen::generate(&request.plan().unwrap()).unwrap();
+    let source = &package.files[&format!("{}/src/main.nr", package.name)];
+    assert!(source.contains("core::envelope::check_policy"));
+    assert!(source.contains("core::ops_core_envelope::open_slot"));
+    assert!(source.contains("core::envelope::check_holder_signatures"));
+    assert!(!source.contains("open_profile_mode_one"));
+}
+
+#[test]
+fn native_acceptance_cases_use_the_complete_method_dataset() {
+    for case in native_proof_cases(None).unwrap() {
+        let bounds = Bounds {
+            credentials: case.sources.len() as u32,
+            rows_per_table: if matches!(case.name, "projection-bag" | "distinct") {
+                8
+            } else {
+                B.rows_per_table
+            },
+            ..B
+        };
+        let plan = sparq_zk_query::lower::lower(case.query, bounds).unwrap();
+        let data = case
+            .sources
+            .iter()
+            .enumerate()
+            .map(|(i, s)| authenticated::canonical_sign(s, i as u64))
+            .collect::<Vec<_>>();
+        let dataset = sparq_zk_query::credential::assemble_issuer_dataset(
+            &data,
+            &canonical_policy().trust_members,
+            [7; 32],
+        )
+        .unwrap();
+        let trace =
+            sparq_zk_query::interp::evaluate_dataset(&plan, &dataset, &FixtureEncoder).unwrap();
+        let mut source = String::new();
+        for (i, credential) in data.iter().enumerate() {
+            source.push_str(&credential.credential.document);
+            source.push_str(&format!(
+                "_:graph{i} <{}> <urn:issuer> .\n",
+                sparq_zk_query::credential::VERIFIED_ISSUER
+            ));
+        }
+        if case.name != "slice" {
+            fixture_support::assert_engine_with_encoder(
+                case.query,
+                &source,
+                &trace.result,
                 &FixtureEncoder,
-                &id("urn:verifier"),
-                &store,
-                || NOW
-            )
-            .unwrap_err(),
-        expected
-    );
-    assert!(store.0.lock().unwrap().is_empty());
+            );
+        }
+    }
 }

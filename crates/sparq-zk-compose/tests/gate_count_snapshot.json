@@ -16,7 +16,16 @@
   "exempt_circuits": {
     "credential_hidden": "suite opening fixture (zk/noir-query/fixtures/hidden) exercised by sparq-merkle-suite tests; not a deployed proving member",
     "credential_revealed": "suite opening fixture (zk/noir-query/fixtures/revealed) exercised by sparq-merkle-suite tests; not a deployed proving member",
-    "query_18f1e50f8314c66e1f2e80dfa3f5ac71d121babc3cd938fcc989ec7515143210": "generated query-compiler smoke fixture (zk/noir-query/fixtures/generated_smoke); not a deployed proving member"
+    "envelope_dataset": "draft credential-statement envelope harness (zk/noir-query/envelope_tests): native tests and private measurement circuits run by run.py; not a deployed proving member",
+    "envelope_freshness": "draft credential-statement envelope harness (zk/noir-query/envelope_tests): native tests and private measurement circuits run by run.py; not a deployed proving member",
+    "envelope_holder": "draft credential-statement envelope harness (zk/noir-query/envelope_tests): native tests and private measurement circuits run by run.py; not a deployed proving member",
+    "envelope_issuer": "draft credential-statement envelope harness (zk/noir-query/envelope_tests): native tests and private measurement circuits run by run.py; not a deployed proving member",
+    "envelope_request": "draft credential-statement envelope harness (zk/noir-query/envelope_tests): native tests and private measurement circuits run by run.py; not a deployed proving member",
+    "envelope_status": "draft credential-statement envelope harness (zk/noir-query/envelope_tests): native tests and private measurement circuits run by run.py; not a deployed proving member",
+    "envelope_tests": "draft credential-statement envelope harness (zk/noir-query/envelope_tests): native tests and private measurement circuits run by run.py; not a deployed proving member",
+    "envelope_validity": "draft credential-statement envelope harness (zk/noir-query/envelope_tests): native tests and private measurement circuits run by run.py; not a deployed proving member",
+    "envelope_total": "draft credential-statement envelope harness (zk/noir-query/envelope_tests): native tests and private measurement circuits run by run.py; not a deployed proving member",
+    "query_3ef37537cbebab7dacff42a2246a046abf73637e6cb9880a0c9d565d653885d6": "generated query-compiler smoke fixture (zk/noir-query/fixtures/generated_smoke); not a deployed proving member"
   },
   "members": {
     "scan_k1_n16_r4": 5991,

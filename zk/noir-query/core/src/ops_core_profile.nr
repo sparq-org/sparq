@@ -34,6 +34,18 @@ pub fn resource<let R:u32,let L:u32>(raw:ResourceOpening<R>,bound:bool) -> Bound
 pub fn optional_resource<let R:u32>(raw:ResourceOpening<R>) -> BoundedTermOpening<R,41,1> {
     resource(raw,raw.kind != 0)
 }
+/// Retain the proof field's backing while enforcing the selected method bound.
+pub fn method<let M:u32>(raw:ResourceOpening<128>) -> BoundedTermOpening<M,41,1> {
+    std::static_assert((M > 0) & (M <= 128),"method profile backing");
+    assert(raw.lexical_len <= M,"credential method lexical capacity");
+    let mut lexical=[0;M];let mut tail:Field=0;
+    for i in 0..128 {
+        if i < M {lexical[i]=raw.lexical[i];} else {tail=tail+raw.lexical[i] as Field;}
+    }
+    assert(tail==0,"credential method backing padding");
+    BoundedTermOpening {bound:raw.kind != 0,kind:raw.kind,lexical,lexical_len:raw.lexical_len,
+        datatype:[0;41],datatype_len:0,language:[0;1],language_len:0,key:[0;31]}
+}
 pub fn empty<let L:u32>() -> BoundedTermOpening<L,41,1> {
     BoundedTermOpening {bound:false,kind:0,lexical:[0;L],lexical_len:0,
         datatype:[0;41],datatype_len:0,language:[0;1],language_len:0,key:[0;31]}
@@ -76,3 +88,20 @@ fn normalized_resource_length_matches_its_backing_array() {
 }
 #[test(should_fail_with="credential normalization count")]
 fn normalized_count_cannot_exceed_its_shape() {let _quads=normalize([fixture()],2);}
+#[test]
+fn selected_method_profile_keeps_all_admitted_bytes() {
+    let mut raw=ResourceOpening {kind:1,lexical:[0;128],lexical_len:32};
+    raw.lexical[31]=97;
+    let opened=method::<32>(raw);assert(opened.lexical[31]==97);assert(opened.lexical_len==32);
+    raw.lexical[100]=98;raw.lexical_len=101;
+    let wide=method::<128>(raw);assert(wide.lexical[100]==98);assert(wide.lexical_len==101);
+}
+#[test(should_fail_with="credential method lexical capacity")]
+fn selected_method_profile_refuses_longer_lexical_forms() {
+    let raw=ResourceOpening {kind:1,lexical:[0;128],lexical_len:33};let _opened=method::<32>(raw);
+}
+#[test(should_fail_with="credential method backing padding")]
+fn selected_method_profile_refuses_hidden_backing_bytes() {
+    let mut raw=ResourceOpening {kind:1,lexical:[0;128],lexical_len:1};raw.lexical[90]=1;
+    let _opened=method::<32>(raw);
+}

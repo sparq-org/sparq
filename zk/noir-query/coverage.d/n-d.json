@@ -125,6 +125,24 @@
       "rejection_cases": [],
       "guest_proof_evidence": "not_asserted",
       "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred."
+    },
+    {
+      "id": "literal_dispatch_and_capacity_controls",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "positive_cases": [
+        "noir:expr_tests::literal_dispatch_matches_recommendation",
+        "noir:expr_tests::capacity_and_error_channels_remain_distinct",
+        "noir:expr_tests::exact_capacity_boundary_is_literal",
+        "rust:expr_tests::literal_dispatch_recommendation_table",
+        "rust:expr_tests::cell_alias_binding_keeps_rdf_identity"
+      ],
+      "rejection_cases": [
+        "noir:expr_tests::language_literal_error_low",
+        "noir:expr_tests::empty_membership_capacity_root_rejected"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Research grade and not externally audited. Isolated expression execution; production suite and query integration remain separate."
     }
   ],
   "functions": [
@@ -347,7 +365,7 @@
         "noir:expr_functions_tests::iri_error_low"
       ],
       "guest_proof_evidence": "not_asserted",
-      "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred. ASCII references use bounded resolution; non-ASCII string references and bracketed authorities are capacity refused pending the upstream resolver. Existing IRIs retain identity."
+      "limits": "Research grade and not externally audited. Isolated function gadgets, typed lowering and mirror/engine comparisons; whole-query proof coverage is not asserted. Checked openings and computed-term constructors use static suite seams. Decimal precision through 18 places and scaled magnitude below 2^112; temporal years 0001 through 9999; mixed timezone-presence comparisons are capacity refusals. General casts and hashes are deferred. ASCII references use bounded resolution; non-ASCII string references and bracketed authorities are capacity refused pending the upstream resolver. Existing IRIs retain identity. Absolute string forms retain their lexical spelling. Relative references with rootless, non-ASCII or bracketed bases are capacity refused."
     },
     {
       "name": "STRDT",
@@ -700,6 +718,118 @@
       "reason": "The engine accepts year zero; the baseline lexical space excludes it.",
       "status": "recommendation_retained",
       "evidence": "rust:expr_functions_tests::date_functions_generated_against_engine"
+    },
+    {
+      "id": "literal-dispatch-0-eq",
+      "tracking": "#7384",
+      "case": "\"a\" = \"a\"@en",
+      "dataset": "empty",
+      "baseline": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "published_2013_expected_mappings": [
+        {}
+      ],
+      "profile_behavior": "Expression error; BIND leaves the result unbound.",
+      "reason": "Nonidentical language-tagged literal pairs use RDFterm-equal; the engine applies a broader string-value mapping.",
+      "status": "recommendation_retained",
+      "evidence": "rust:expr_tests::literal_dispatch_recommendation_table"
+    },
+    {
+      "id": "literal-dispatch-0-ne",
+      "tracking": "#7384",
+      "case": "\"a\" != \"a\"@en",
+      "dataset": "empty",
+      "baseline": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "published_2013_expected_mappings": [
+        {}
+      ],
+      "profile_behavior": "Expression error; BIND leaves the result unbound.",
+      "reason": "Nonidentical language-tagged literal pairs use RDFterm-equal; the engine applies a broader string-value mapping.",
+      "status": "recommendation_retained",
+      "evidence": "rust:expr_tests::literal_dispatch_recommendation_table"
+    },
+    {
+      "id": "literal-dispatch-1-eq",
+      "tracking": "#7384",
+      "case": "\"a\"@en = \"a\"",
+      "dataset": "empty",
+      "baseline": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "published_2013_expected_mappings": [
+        {}
+      ],
+      "profile_behavior": "Expression error; BIND leaves the result unbound.",
+      "reason": "Nonidentical language-tagged literal pairs use RDFterm-equal; the engine applies a broader string-value mapping.",
+      "status": "recommendation_retained",
+      "evidence": "rust:expr_tests::literal_dispatch_recommendation_table"
+    },
+    {
+      "id": "literal-dispatch-1-ne",
+      "tracking": "#7384",
+      "case": "\"a\"@en != \"a\"",
+      "dataset": "empty",
+      "baseline": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "published_2013_expected_mappings": [
+        {}
+      ],
+      "profile_behavior": "Expression error; BIND leaves the result unbound.",
+      "reason": "Nonidentical language-tagged literal pairs use RDFterm-equal; the engine applies a broader string-value mapping.",
+      "status": "recommendation_retained",
+      "evidence": "rust:expr_tests::literal_dispatch_recommendation_table"
+    },
+    {
+      "id": "literal-dispatch-2-eq",
+      "tracking": "#7384",
+      "case": "\"a\"@en = \"b\"@en",
+      "dataset": "empty",
+      "baseline": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "published_2013_expected_mappings": [
+        {}
+      ],
+      "profile_behavior": "Expression error; BIND leaves the result unbound.",
+      "reason": "Nonidentical language-tagged literal pairs use RDFterm-equal; the engine applies a broader string-value mapping.",
+      "status": "recommendation_retained",
+      "evidence": "rust:expr_tests::literal_dispatch_recommendation_table"
+    },
+    {
+      "id": "literal-dispatch-2-ne",
+      "tracking": "#7384",
+      "case": "\"a\"@en != \"b\"@en",
+      "dataset": "empty",
+      "baseline": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "published_2013_expected_mappings": [
+        {}
+      ],
+      "profile_behavior": "Expression error; BIND leaves the result unbound.",
+      "reason": "Nonidentical language-tagged literal pairs use RDFterm-equal; the engine applies a broader string-value mapping.",
+      "status": "recommendation_retained",
+      "evidence": "rust:expr_tests::literal_dispatch_recommendation_table"
+    },
+    {
+      "id": "literal-dispatch-3-eq",
+      "tracking": "#7384",
+      "case": "\"a\"@en = \"a\"@fr",
+      "dataset": "empty",
+      "baseline": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "published_2013_expected_mappings": [
+        {}
+      ],
+      "profile_behavior": "Expression error; BIND leaves the result unbound.",
+      "reason": "Nonidentical language-tagged literal pairs use RDFterm-equal; the engine applies a broader string-value mapping.",
+      "status": "recommendation_retained",
+      "evidence": "rust:expr_tests::literal_dispatch_recommendation_table"
+    },
+    {
+      "id": "literal-dispatch-3-ne",
+      "tracking": "#7384",
+      "case": "\"a\"@en != \"a\"@fr",
+      "dataset": "empty",
+      "baseline": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "published_2013_expected_mappings": [
+        {}
+      ],
+      "profile_behavior": "Expression error; BIND leaves the result unbound.",
+      "reason": "Nonidentical language-tagged literal pairs use RDFterm-equal; the engine applies a broader string-value mapping.",
+      "status": "recommendation_retained",
+      "evidence": "rust:expr_tests::literal_dispatch_recommendation_table"
     }
   ]
 }

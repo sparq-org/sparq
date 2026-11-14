@@ -1,6 +1,6 @@
 //! Typed, bounded algebra. The shape encoding excludes parameter values and variable names.
 
-use crate::capacity::{Bounds, Capacity};
+use crate::capacity::{Bounds, Capacity, OpeningProfile};
 use oxrdf::Term;
 
 pub type Var = u32;
@@ -73,6 +73,7 @@ impl Schema {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operator {
+    Closed(crate::plan_closed::ClosedOperator),
     Unit,
     Scan([Slot; 3]),
     Join(NodeId, NodeId),
@@ -90,6 +91,7 @@ pub enum Operator {
 impl Operator {
     pub fn inputs(&self) -> Vec<NodeId> {
         match self {
+            Self::Closed(op) => op.inputs(),
             Self::Join(a, b) => vec![*a, *b],
             Self::Filter(a, _) | Self::Project(a) | Self::Distinct(a) => vec![*a],
             Self::Slice { input, .. } => vec![*input],
@@ -115,6 +117,7 @@ pub enum ResultForm {
 pub struct Plan {
     pub(crate) bounds: Bounds,
     pub(crate) capacity: Capacity,
+    pub(crate) opening_profile: OpeningProfile,
     pub(crate) credential_quad_bounds: Vec<u32>,
     pub(crate) nodes: Vec<Node>,
     pub(crate) parameters: Vec<Parameter>,
@@ -124,6 +127,14 @@ pub struct Plan {
 }
 
 impl Plan {
+    /// Choose opening bounds from the verifier's request, independently of witnesses.
+    pub fn with_opening_profile(mut self, profile: OpeningProfile) -> Self {
+        self.opening_profile = profile;
+        self
+    }
+    pub fn opening_profile(&self) -> OpeningProfile {
+        self.opening_profile
+    }
     /// Refine public per-credential bounds without using private cardinalities.
     pub fn with_credential_quad_bounds(mut self, bounds: &[u32]) -> Result<Self, crate::Error> {
         if bounds.len() != self.bounds.credentials as usize
@@ -199,16 +210,17 @@ impl Plan {
         for n in self.credential_quad_capacities() {
             w.u32(n);
         }
+        let limits = self.opening_profile.limits();
         for capacity in [
-            crate::credential::RESOURCE_CAPACITY,
-            crate::credential::LEXICAL_CAPACITY,
-            crate::credential::SCALAR_CAPACITY,
-            crate::credential::DATATYPE_CAPACITY,
-            crate::credential::LANGUAGE_CAPACITY,
-            crate::credential::CREATION_CAPACITY,
-            crate::credential::METHOD_CAPACITY,
+            limits.resource,
+            limits.object,
+            limits.scalar,
+            limits.datatype,
+            limits.language,
+            limits.created,
+            limits.method,
         ] {
-            w.u32(capacity as u32);
+            w.u32(capacity);
         }
         w.u32(crate::credential::ISSUER_DEPTH);
         w.u8(match self.form {
@@ -234,6 +246,12 @@ impl Plan {
                 w.u32(v);
             }
             match &node.operator {
+                Operator::Closed(op) => {
+                    w.u8(8);
+                    let bytes = op.canonical_bytes();
+                    w.len(bytes.len());
+                    w.0.extend(bytes);
+                }
                 Operator::Unit => w.u8(0),
                 Operator::Scan(slots) => {
                     w.u8(1);

@@ -1,3 +1,5 @@
+#[path = "support/authenticated.rs"]
+mod authenticated;
 #[path = "support/fixture.rs"]
 mod fixture_support;
 
@@ -15,6 +17,90 @@ const B: Bounds = Bounds {
     quads_per_credential: 4,
     rows_per_table: 4,
 };
+
+#[test]
+fn authenticated_read_witnesses_cover_consumer_inputs_and_public_values() {
+    use sparq_zk_query::{
+        credential::SuiteEncoder, plan::Operator,
+        witness::prover_toml_suite_fixture as prover_toml_authenticated,
+    };
+    let data = authenticated::fixture();
+    let cells = vec![data[0].cells(0).unwrap()];
+    for query in [
+        "SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x > 1)}",
+        "SELECT ?x WHERE {VALUES ?x {7 UNDEF} FILTER(?x > 0)}",
+        "ASK {FILTER(?absent > 0)}",
+    ] {
+        let plan = lower(query, B).unwrap();
+        let trace = evaluate(&plan, &cells, &SuiteEncoder).unwrap();
+        let render = |trace: &_| {
+            prover_toml_authenticated(
+                &plan,
+                &data,
+                trace,
+                [9; 32],
+                [3; 32],
+                authenticated::issuer_root(),
+            )
+        };
+        let text = render(&trace).unwrap();
+        assert_eq!(text, render(&trace).unwrap());
+        let (filter, input) = plan
+            .nodes()
+            .iter()
+            .enumerate()
+            .find_map(|(i, n)| {
+                if let Operator::Filter(input, _) = n.operator {
+                    Some((i, input as usize))
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        let line = text
+            .lines()
+            .find(|l| l.starts_with(&format!("reads_{filter} =")));
+        if query.contains("absent") {
+            assert!(line.is_none());
+            continue;
+        }
+        let line = line.unwrap();
+        let literals = trace.tables[input]
+            .rows
+            .iter()
+            .flatten()
+            .filter(|c| {
+                c.bound
+                    && c.kind == 3
+                    && !plan.parameters().iter().any(|p| {
+                        if let sparq_zk_query::plan::Parameter::Term(t) = p {
+                            use sparq_zk_query::interp::EncodeTerm;
+                            SuiteEncoder.encode(t).unwrap() == **c
+                        } else {
+                            false
+                        }
+                    })
+            })
+            .count();
+        assert_eq!(line.matches("bound = true").count(), literals);
+        assert_eq!(
+            line.matches("bound = false").count(),
+            plan.nodes()[input].output.capacity as usize - literals
+        );
+        let mut forged = trace.clone();
+        let literal = forged.tables[input]
+            .rows
+            .iter_mut()
+            .flatten()
+            .find(|c| c.bound && c.kind == 3)
+            .unwrap();
+        literal.enc[31] ^= 1;
+        assert_eq!(
+            render(&forged).unwrap_err(),
+            Error::Invalid("expression read opening".into())
+        );
+    }
+}
 
 #[test]
 fn supplied_trace_renders_all_tables_and_keeps_the_public_request() {

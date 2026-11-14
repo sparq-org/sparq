@@ -77,8 +77,10 @@ Timezone-free `xsd:date` uses the calendar-day class. Valid timezoned dates get
 engine's mixed-timezone comparison is a partial order. This member adds no
 separate zoned-date key class. Invalid literals get `NONE`. Neither class
 can establish an order. Prefix keys establish an order only when prefixes differ.
-Term identity always uses the full encoding; blank-node identity also uses its
-credential scope.
+RDF term identity is key-independent: use `TermCell::identity()` in Noir and
+`poseidon::term_identity(&term)` in Rust. Scan, join, DISTINCT, sameTerm,
+parameters and released terms use identity; blank nodes also compare credential
+scope. `enc` stays for commitments; value consumers keep full key checks.
 
 ## Noir constructors and openings
 
@@ -89,7 +91,11 @@ and an explicit blank-node scope. It computes every cell component. Never accept
 opening first. Access components through the cell's methods. `term::padding()`
 is the only canonical unbound cell; the bound default graph is distinct.
 
-`open_lexical` binds bounded bytes and metadata to a cell's `enc`.
+`open_lexical` binds bounded bytes and metadata to both the keyed `enc` and
+key-independent `identity()`. Identity hashes the kind and the existing complete
+term frame, which includes lexical, datatype and language bytes for literals.
+The default graph reuses its fixed encoding; padding has zero identity. Synthetic
+credential graph names reuse their dedicated key-free encoding.
 `recompute_key` performs that opening and checks both class and payload. The
 datatype-specialized `recompute_key_for` also
 binds the opened datatype to its expected identifier, so fixed query shapes
@@ -112,11 +118,21 @@ entire key before returning. Pass a fixed pinned datatype identifier, such as
 and the recomputation functions produce checked cells only after full lexical
 key recomputation. Absent and nonliteral openings refuse.
 
+For a fixed-datatype dispatch, call
+`term::open_literal_for_key_check(raw, scope)` once before the scalar branches.
+It returns `OpenedLiteral<L>` with a private cell and its exact lexical vector.
+`term::check_literal_key_for(opened, expected_dt)` returns `KeyCheckedCell`
+after the same private datatype/key recomputation relation. Pass a fixed pinned
+identifier in each arm; keep the string branch at its profile-sized bound.
+`OpenedLiteral::cell()` exposes the constructed cell without claiming a key
+check. The object is ABI-sealed, has no lexical setter, and must be constructed
+in constrained code. `open_key_checked` delegates to this pair.
+
 `suite::credential_root` receives validated quad cells, leaf-salt witnesses, the
 private tree salt and count. It checks RDF positions, strict ordering, padding,
 leaf-salt derivation and the minimal tree. Credential scope must be fixed by the
 caller from the credential's dataset position. A blank-node join compares both
-`enc` and credential scope.
+`identity()` and credential scope.
 
 `suite::{open_credential_hidden, open_credential_revealed}` accept raw quads,
 leaf-salt witnesses, salt/count/configuration, raw creation and verification-method

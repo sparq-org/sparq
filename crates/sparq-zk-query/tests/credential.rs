@@ -8,7 +8,7 @@ use sparq_zk_query::{
     interp::{evaluate, ResultValue},
     lower::lower,
     statement::{Layout, Statement},
-    witness::prover_toml_authenticated,
+    witness::prover_toml_suite_fixture as prover_toml_authenticated,
     Error,
 };
 
@@ -17,6 +17,106 @@ const B: Bounds = Bounds {
     quads_per_credential: 4,
     rows_per_table: 4,
 };
+
+#[test]
+fn opening_profile_limits_are_selected_before_private_data() {
+    use sparq_zk_query::capacity::OpeningProfile;
+    for (length, compact) in [(65, true), (66, false), (137, false), (160, false)] {
+        let credential =
+            authenticated::sign(&format!("<urn:a> <urn:p> \"{}\" .", "m".repeat(length)), 0);
+        assert_eq!(
+            credential
+                .cells_with_profile(0, OpeningProfile::Solid)
+                .is_ok(),
+            compact
+        );
+        assert!(credential
+            .cells_with_profile(0, OpeningProfile::Extended)
+            .is_ok());
+        assert_eq!(
+            credential
+                .cells_with_profile(0, OpeningProfile::LongObjects)
+                .is_ok(),
+            length <= 137
+        );
+    }
+    let credential = authenticated::sign(&format!("<urn:{}> <urn:p> <urn:o> .", "r".repeat(61)), 0);
+    assert!(
+        matches!(credential.cells_with_profile(0, OpeningProfile::Solid),
+        Err(Error::Capacity(reason)) if reason == "opening profile lexical bytes")
+    );
+    assert!(credential
+        .cells_with_profile(0, OpeningProfile::Extended)
+        .is_ok());
+    let credential = authenticated::sign(&format!("<urn:a> <urn:{}> <urn:o> .", "p".repeat(61)), 0);
+    assert!(
+        matches!(credential.cells_with_profile(0, OpeningProfile::Solid),
+        Err(Error::Capacity(reason)) if reason == "opening profile lexical bytes")
+    );
+    assert!(credential
+        .cells_with_profile(0, OpeningProfile::Extended)
+        .is_ok());
+}
+
+#[test]
+fn opening_profile_checks_the_authenticated_verification_method_length() {
+    use sparq_zk_query::capacity::OpeningProfile;
+    let source = "<urn:a> <urn:p> <urn:o> .";
+    let mut credential = authenticated::sign(source, 0);
+    let config = format!(
+        "_:proof <https://w3id.org/security#cryptosuite> \"schnorr-poseidon2-merkle-2026\" .\n_:proof <https://w3id.org/security#verificationMethod> <urn:{}> .",
+        "v".repeat(29)
+    );
+    credential.credential = sparq_merkle_suite::poseidon::issue(
+        source,
+        &config,
+        &sparq_zk::sig::SecretKey::from_seed(19),
+        sparq_merkle_suite::Fr::from(101u64),
+    )
+    .unwrap();
+    assert!(
+        matches!(credential.cells_with_profile(0, OpeningProfile::Solid),
+        Err(Error::Capacity(reason)) if reason=="opening profile metadata bytes")
+    );
+    assert!(credential
+        .cells_with_profile(0, OpeningProfile::Extended)
+        .is_ok());
+}
+
+#[test]
+fn generated_witness_uses_the_selected_lexical_backing() {
+    use sparq_zk_query::capacity::OpeningProfile;
+    let data = vec![authenticated::sign(
+        &format!("<urn:a> <urn:p> \"{}\" .", "z".repeat(137)),
+        0,
+    )];
+    let compact = lower("ASK {}", B).unwrap();
+    let wide = compact
+        .clone()
+        .with_opening_profile(OpeningProfile::Extended);
+    let trace = evaluate(&wide, &[data[0].cells(0).unwrap()], &SuiteEncoder).unwrap();
+    assert_eq!(
+        prover_toml_authenticated(
+            &compact,
+            &data,
+            &trace,
+            [7; 32],
+            [3; 32],
+            authenticated::issuer_root()
+        )
+        .unwrap_err(),
+        Error::Capacity("opening profile lexical bytes".into())
+    );
+    assert!(prover_toml_authenticated(
+        &wide,
+        &data,
+        &trace,
+        [7; 32],
+        [3; 32],
+        authenticated::issuer_root()
+    )
+    .is_ok());
+}
 
 #[test]
 fn suite_credentials_feed_the_same_exact_interpreter_and_public_layout() {
@@ -114,7 +214,7 @@ fn suite_signature_opening_and_named_admission_guards_are_observable() {
     let mut changed = valid.clone();
     changed.issuer_siblings.pop();
     assert_eq!(
-        changed.cells(0).unwrap_err(),
+        changed.issuer_root().unwrap_err(),
         Error::Invalid("issuer membership shape".into())
     );
     let named = authenticated::sign("<urn:a> <urn:p> <urn:o> <urn:g> .", 0);
@@ -137,9 +237,20 @@ fn suite_signature_opening_and_named_admission_guards_are_observable() {
         "<urn:a> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#double> .",
         0,
     );
+    let cells = vec![floating.cells(0).unwrap()];
     assert_eq!(
-        floating.cells(0).unwrap_err(),
-        Error::Unsupported("N0 credential literal datatype".into())
+        evaluate(
+            &lower("ASK {?s <urn:p> ?x}", B).unwrap(),
+            &cells,
+            &SuiteEncoder
+        )
+        .unwrap()
+        .result,
+        ResultValue::Ask(true)
+    );
+    assert!(
+        matches!(evaluate(&lower("ASK {?s <urn:p> ?x FILTER(?x = 1)}", B).unwrap(), &cells, &SuiteEncoder),
+        Err(Error::Unsupported(reason)) if reason == "floating-point comparison")
     );
     let plan=lower("ASK {?s <urn:p> ?x FILTER(?x >= \"2024-01-01Z\"^^<http://www.w3.org/2001/XMLSchema#date>)}",B).unwrap();
     let zoned = authenticated::sign(
@@ -271,6 +382,35 @@ fn signed_dataset_derives_each_issuer_from_its_authorized_identity_method_and_ke
         sign(&document("urn:issuer:1"), Some("urn:method:1"), 1),
         sign(&document("urn:issuer:2"), Some("urn:method:2"), 2),
     ];
+    for credential in &credentials {
+        let (set, index, path) = credential.authorization_path(&trust).unwrap();
+        let leaf = sparq_zk_query::envelope_policy::trust_member_digest(
+            &credential.trust_member().unwrap(),
+        )
+        .unwrap();
+        let mut node = sparq_zk::field::field_from_hex_str_strict(&format!(
+            "0x{}",
+            leaf.iter().map(|b| format!("{b:02x}")).collect::<String>()
+        ))
+        .unwrap();
+        for (level, sibling) in path.iter().enumerate() {
+            let sibling = sparq_zk::field::field_from_hex_str_strict(&format!(
+                "0x{}",
+                sibling
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<String>()
+            ))
+            .unwrap();
+            node = if (index >> level) & 1 == 0 {
+                sparq_zk::poseidon2::hash(&[node, sibling])
+            } else {
+                sparq_zk::poseidon2::hash(&[sibling, node])
+            };
+        }
+        assert_eq!(sparq_zk::field::field_to_be_bytes_32(&node), set.root);
+        assert_eq!(path.len(), set.depth as usize);
+    }
     let dataset = assemble_issuer_dataset(&credentials, &trust, [7; 32]).unwrap();
     assert_eq!(dataset.credential_counts(), [3, 3]);
     let predicate = SuiteEncoder
@@ -420,7 +560,10 @@ fn method_dataset_keeps_named_copies_and_a_deduplicated_default_merge() {
         panic!()
     };
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0][0], cell[2]);
+    let mut released = cell[2];
+    released.key_class = 0;
+    released.key = [0; 32];
+    assert_eq!(rows[0][0], released);
     let plan = lower(
         &format!("SELECT ?issuer WHERE {{?g <{VERIFIED_ISSUER}> ?issuer}}"),
         bounds,
@@ -445,4 +588,221 @@ fn method_dataset_keeps_named_copies_and_a_deduplicated_default_merge() {
     let mut invalid = issuers;
     invalid[0] = sparq_zk_query::interp::Cell::default();
     assert!(assemble_dataset(&credentials, &invalid, [7; 32]).is_err());
+}
+
+#[test]
+fn suite_identity_is_shared_by_sources_parameters_and_released_terms() {
+    use oxrdf::{Literal, NamedNode, Term};
+    use sparq_zk_query::{answer::Answer, interp::EncodeTerm};
+    let terms: Vec<Term> = vec![
+        NamedNode::new_unchecked("urn:identity").into(),
+        Literal::new_simple_literal("one").into(),
+        Literal::new_typed_literal(
+            "1",
+            NamedNode::new_unchecked("http://www.w3.org/2001/XMLSchema#integer"),
+        )
+        .into(),
+        Literal::new_typed_literal(
+            "01",
+            NamedNode::new_unchecked("http://www.w3.org/2001/XMLSchema#integer"),
+        )
+        .into(),
+        Literal::new_language_tagged_literal("one", "en")
+            .unwrap()
+            .into(),
+    ];
+    let mut identities = std::collections::BTreeSet::new();
+    for term in terms {
+        let encoded = SuiteEncoder.encode(&term).unwrap();
+        assert_eq!(
+            encoded.enc,
+            sparq_merkle_suite::poseidon::field_bytes(
+                sparq_merkle_suite::poseidon::term_identity(&term).unwrap()
+            )
+        );
+        assert!(identities.insert(encoded.enc));
+        let source = format!("<urn:s> <urn:p> {term} .");
+        let credential = authenticated::sign(&source, 0);
+        let cells = vec![credential.cells(0).unwrap()];
+        assert_eq!(cells[0].quads[0][2], encoded);
+        let plan = lower("SELECT ?x WHERE {?s <urn:p> ?x}", B).unwrap();
+        let trace = evaluate(&plan, &cells, &SuiteEncoder).unwrap();
+        let answer = Answer::release(
+            &trace.result,
+            &plan,
+            std::slice::from_ref(&term),
+            &SuiteEncoder,
+        )
+        .unwrap();
+        assert_eq!(
+            answer,
+            Answer::Select {
+                variables: vec!["x".into()],
+                rows: vec![vec![Some(term)]]
+            }
+        );
+        assert_eq!(answer.encode(&SuiteEncoder).unwrap(), trace.result);
+        let mut statement = Statement {
+            request_digest: [7; 32],
+            input_commitment: [3; 32],
+            signature_mode: 0,
+            result: trace.result,
+        };
+        assert!(Layout::new(&plan)
+            .reconstruct(&plan, &statement, &SuiteEncoder)
+            .is_ok());
+        let mut class_statement = statement.clone();
+        if let ResultValue::Select { rows, .. } = &mut class_statement.result {
+            rows[0][0].key_class = 1;
+        }
+        assert_eq!(
+            Layout::new(&plan)
+                .reconstruct(&plan, &class_statement, &SuiteEncoder)
+                .unwrap_err(),
+            Error::Invalid("released value metadata".into())
+        );
+        if let ResultValue::Select { rows, .. } = &mut statement.result {
+            assert_eq!(rows[0][0].key_class, 0);
+            assert_eq!(rows[0][0].key, [0; 32]);
+            rows[0][0].key = encoded.enc;
+        }
+        assert_eq!(
+            Layout::new(&plan)
+                .reconstruct(&plan, &statement, &SuiteEncoder)
+                .unwrap_err(),
+            Error::Invalid("released value metadata".into())
+        );
+    }
+}
+
+#[test]
+fn table_identity_keeps_kind_scope_and_excludes_value_metadata() {
+    use sparq_zk_query::interp::Cell;
+    let mut a = Cell {
+        bound: true,
+        kind: 1,
+        enc: [7; 32],
+        ..Cell::default()
+    };
+    let mut b = a;
+    b.kind = 2;
+    assert!(!a.same_term(b));
+    a.kind = 2;
+    a.scope = 1;
+    b.scope = 2;
+    assert!(!a.same_term(b));
+    b.scope = 1;
+    b.key_class = 1;
+    b.key = [9; 32];
+    assert!(a.same_term(b));
+}
+
+#[test]
+fn private_value_read_bounds_do_not_restrict_unrelated_source_identity() {
+    for (literal, error) in [
+        (
+            format!(
+                "\"{}1\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+                "0".repeat(32)
+            ),
+            Error::Capacity("read scalar lexical bytes".into()),
+        ),
+        (
+            "\"1\"^^<http://www.w3.org/2001/XMLSchema#long>".into(),
+            Error::Unsupported("N0 credential value datatype".into()),
+        ),
+    ] {
+        let data = vec![authenticated::sign(
+            &format!("<urn:s> <urn:p> {literal} ."),
+            0,
+        )];
+        let cells = vec![data[0].cells(0).unwrap()];
+        let identity = lower("ASK {?s <urn:p> ?x}", B).unwrap();
+        let trace = evaluate(&identity, &cells, &SuiteEncoder).unwrap();
+        assert_eq!(trace.result, ResultValue::Ask(true));
+        assert!(prover_toml_authenticated(
+            &identity,
+            &data,
+            &trace,
+            [7; 32],
+            [3; 32],
+            authenticated::issuer_root()
+        )
+        .is_ok());
+        let value = lower("ASK {?s <urn:p> ?x FILTER(?x >= 1)}", B).unwrap();
+        let trace = evaluate(&value, &cells, &SuiteEncoder).unwrap();
+        assert_eq!(
+            prover_toml_authenticated(
+                &value,
+                &data,
+                &trace,
+                [7; 32],
+                [3; 32],
+                authenticated::issuer_root()
+            )
+            .unwrap_err(),
+            error
+        );
+    }
+}
+
+#[test]
+fn canonical_witness_paths_bind_the_signed_member_and_public_depth() {
+    use sparq_zk_query::{
+        credential::assemble_issuer_dataset, envelope_policy, interp::evaluate_dataset,
+        statement::EnvelopeInputs, witness::prover_toml_authenticated_with_envelope,
+    };
+    let policy = authenticated::canonical_policy();
+    let public: EnvelopeInputs = envelope_policy::derive(&policy).unwrap().into();
+    let mut credential = authenticated::canonical_fixture().remove(0);
+    let (set, index, path) = credential
+        .authorization_path(&policy.trust_members)
+        .unwrap();
+    credential.issuer_index = index as u64;
+    credential.issuer_siblings = path
+        .into_iter()
+        .map(|word| {
+            sparq_zk::field::field_from_hex_str_strict(&sparq_zk_query::statement::hex(word))
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(
+        credential
+            .canonical_issuer_root(public.issuer_depth)
+            .unwrap(),
+        set.root
+    );
+    let mut wrong = credential.clone();
+    wrong.issuer_index = 1;
+    assert_eq!(
+        wrong.canonical_issuer_root(0).unwrap_err(),
+        Error::Invalid("issuer membership shape".into())
+    );
+    assert_eq!(
+        credential.canonical_issuer_root(1).unwrap_err(),
+        Error::Invalid("issuer membership shape".into())
+    );
+    let plan = lower(
+        "ASK {}",
+        Bounds {
+            quads_per_credential: 8,
+            ..B
+        },
+    )
+    .unwrap();
+    let data = [credential];
+    let dataset = assemble_issuer_dataset(&data, &policy.trust_members, [7; 32]).unwrap();
+    let trace = evaluate_dataset(&plan, &dataset, &SuiteEncoder).unwrap();
+    let render = |public: &EnvelopeInputs| {
+        prover_toml_authenticated_with_envelope(&plan, &data, &trace, [7; 32], [3; 32], public)
+    };
+    let witness = render(&public).unwrap();
+    assert!(witness.contains("issuer_depth = 0\n"));
+    assert_eq!(witness, render(&public).unwrap());
+    let mut wrong = public.clone();
+    wrong.issuer_root = sparq_zk_query::statement::number(1);
+    assert_eq!(
+        render(&wrong).unwrap_err(),
+        Error::Invalid("issuer membership root".into())
+    );
 }

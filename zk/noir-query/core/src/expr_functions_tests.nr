@@ -993,3 +993,39 @@ fn opened_language_literal_remains_a_string() {
     check_text(v.value.string, "chat".as_bytes());
     check_bool(crate::expr_core::ebv((v, false)), true, false);
 }
+
+#[test]
+fn iri_absolute_string_preserves_lexical_form() {
+    let (v, e) = term_fn::iri(
+        (lane(short(KIND_LITERAL, DT_STRING, "urn:a/../b".as_bytes())), false),
+        small_text("http://example.org/".as_bytes()),
+    );
+    assert(!e & !v.capacity);
+    check_text(v.value.lexical, "urn:a/../b".as_bytes());
+}
+
+#[test]
+fn iri_relative_rootless_base_is_capacity() {
+    let (v, e) = term_fn::iri(
+        (lane(short(KIND_LITERAL, DT_STRING, "../c".as_bytes())), false),
+        small_text("urn:a/b".as_bytes()),
+    );
+    assert(!e);
+    assert(v.capacity, "rootless base capacity");
+}
+
+#[test]
+fn iri_relative_base_capacity_table() {
+    for base in [
+        small_text("http://é.org/".as_bytes()),
+        small_text("http://[::1]/".as_bytes()),
+        small_text("urn:a/b".as_bytes()),
+    ] {
+        let (v, e) = term_fn::iri(
+            (lane(short(KIND_LITERAL, DT_STRING, "x".as_bytes())), false),
+            base,
+        );
+        assert(!e);
+        assert(v.capacity);
+    }
+}

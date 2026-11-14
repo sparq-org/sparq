@@ -62,9 +62,6 @@ fn decimal(s: &str, integer: bool) -> std::result::Result<BigInt, Error> {
     let digits = format!("{whole}{frac}{}", "0".repeat(18 - frac.len()));
     let mag = BigInt::parse_bytes(digits.as_bytes(), 10).ok_or(Error::Sparql)?;
     let value = if negative { -mag } else { mag };
-    if value.abs() >= (BigInt::from(1) << 112) {
-        return Err(Error::Capacity);
-    }
     Ok(value)
 }
 pub(super) fn integer_facets(value: &BigInt, dt: &str) -> bool {
@@ -107,6 +104,9 @@ pub(super) fn number(term: &Term) -> std::result::Result<Number, Error> {
             let value = decimal(s, ty == LaneType::Integer)?;
             if ty == LaneType::Integer && !integer_facets(&value, &dt) {
                 return Err(Error::Sparql);
+            }
+            if value.abs() >= (BigInt::from(1) << 112) {
+                return Err(Error::Capacity);
             }
             Ok(Number::Exact(value, ty))
         }
@@ -274,7 +274,11 @@ fn compare(a: &Term, b: &Term, op: &ExprOp) -> std::result::Result<bool, Error> 
         }
         if at == LaneType::String && bt == LaneType::String {
             if matches!(op, ExprOp::Eq | ExprOp::Ne) {
-                let same = a.language() == b.language() && a.value() == b.value();
+                let tagged = a.language().is_some() || b.language().is_some();
+                if tagged && a != b {
+                    return Err(Error::Sparql);
+                }
+                let same = a == b;
                 return Ok(if *op == ExprOp::Eq { same } else { !same });
             }
             if a.language().is_some() || b.language().is_some() {
@@ -400,6 +404,10 @@ pub(super) fn eval(expr: &Expr, vars: &BTreeMap<u32, Term>) -> Result {
                 }
                 ExprOp::SameTerm => Ok(bool_term(arg(0)? == arg(1)?)),
                 ExprOp::In | ExprOp::NotIn => {
+                    let lhs = arg(0);
+                    if lhs == Err(Error::Capacity) {
+                        return lhs;
+                    }
                     let mut result = Ok(false);
                     for i in 1..args.len() {
                         let item =

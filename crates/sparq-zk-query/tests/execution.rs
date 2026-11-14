@@ -126,7 +126,53 @@ fn generated_program_executes_trace_and_refuses_changed_rows_and_results() {
     }
     let input = prover_toml(&plan, &data, &FixtureEncoder, &altered, [7; 32], [3; 32]).unwrap();
     assert!(driver.execute(&input, "changed_result").is_err());
+    larger_table_scan_projection_and_distinct_execute_with_controls();
     support::complete(gate);
+}
+
+fn larger_table_scan_projection_and_distinct_execute_with_controls() {
+    let query = "SELECT DISTINCT ?p WHERE {?s ?p ?o}";
+    let rdf = (0..32)
+        .map(|i| format!("<urn:s{i}> <urn:p{}> <urn:o{i}> .\n", i % 4))
+        .collect::<String>();
+    let (data, _) = fixture_support::dataset(&rdf);
+    let plan = lower(
+        query,
+        Bounds {
+            credentials: 1,
+            quads_per_credential: 64,
+            rows_per_table: 32,
+        },
+    )
+    .unwrap();
+    let trace = evaluate(&plan, &data, &FixtureEncoder).unwrap();
+    fixture_support::assert_engine(query, &rdf, &trace.result);
+    let package = generate(&plan).unwrap();
+    let workspace = Workspace::new(&package);
+    let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+    let artifact = driver.compile().unwrap();
+    sparq_zk_query::statement::Layout::new(&plan)
+        .audit_artifact(&serde_json::from_slice(&std::fs::read(artifact).unwrap()).unwrap())
+        .unwrap();
+    let input = prover_toml(&plan, &data, &FixtureEncoder, &trace, [7; 32], [3; 32]).unwrap();
+    driver.execute(&input, "larger_table_honest").unwrap();
+    for table in 0..trace.tables.len() {
+        let mut changed = trace.clone();
+        changed.tables[table].rows[0][0].enc[31] ^= 1;
+        let input = prover_toml(&plan, &data, &FixtureEncoder, &changed, [7; 32], [3; 32]).unwrap();
+        assert!(
+            driver.execute(&input, "larger_table_changed_row").is_err(),
+            "table {table}"
+        );
+    }
+    let mut changed = trace.clone();
+    changed.tables[0].rows.swap(0, 31);
+    let input = prover_toml(&plan, &data, &FixtureEncoder, &changed, [7; 32], [3; 32]).unwrap();
+    assert!(driver.execute(&input, "larger_table_reordered").is_err());
+    let (overflow, _) =
+        fixture_support::dataset(&(rdf + "<urn:overflow> <urn:p0> <urn:oextra> .\n"));
+    let input = prover_toml(&plan, &overflow, &FixtureEncoder, &trace, [7; 32], [3; 32]).unwrap();
+    assert!(driver.execute(&input, "larger_table_overflow").is_err());
 }
 
 #[test]

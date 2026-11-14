@@ -3,7 +3,7 @@ use super::expr::{ExprOp, LaneType, constant_type};
 use super::expr_semantics::{self as base, Error, Number, Result, XSD};
 use num_bigint::BigInt;
 use num_traits::{Signed, ToPrimitive, Zero};
-use oxrdf::{Literal, Term};
+use oxrdf::{Literal, NamedNode, Term};
 const SCALE: i128 = 1_000_000_000_000_000_000;
 fn simple(term: &Term) -> std::result::Result<&str, Error> {
     match term {
@@ -410,6 +410,13 @@ fn resolve(source: &Term, base: &Term) -> Result {
     else {
         return Err(Error::Sparql);
     };
+    let base_path = base.as_str().split_once(':').map_or("", |(_, path)| path);
+    let base_capacity = !base.as_str().is_ascii()
+        || base.as_str().contains(['[', ']'])
+        || !base_path.starts_with('/');
+    if NamedNode::new(text).is_err() && base_capacity {
+        return Err(Error::Capacity);
+    }
     Ok(n.clone().into())
 }
 pub(super) fn function(op: &ExprOp, args: &[std::result::Result<Term, Error>]) -> Result {

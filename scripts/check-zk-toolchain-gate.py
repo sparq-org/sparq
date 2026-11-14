@@ -31,6 +31,13 @@ WHY
     by construction, and the static command-grammar, feature and `#[ignore]`
     analysis is deleted rather than patched.
 
+QUERY EXECUTION PROFILES
+    The estate job covers non-query sites. A hosted query job runs the declared
+    small live contracts and all operator contract cases. The full query sweep
+    runs only on explicit workflow dispatch. Their ledger profiles partition
+    the inventory; profile selection never removes sites from that inventory.
+    Each job requires its own complete entry/completion ledger.
+
 THE LEDGER
     `zk-toolchain.yml` sets `SPARQ_ZK_LIVE_LEDGER` at JOB level (the name is a
     PRIVATE const inside the gate module, so no test can read or redirect it). Each
@@ -1798,6 +1805,7 @@ def check_ratchet(trees: Trees) -> list[Finding]:
 class Site:
     key: str
     where: str
+    ident: str | None = None
 
 
 def inventory(trees: Trees) -> tuple[list[Site], list[Finding]]:
@@ -1812,6 +1820,7 @@ def inventory(trees: Trees) -> tuple[list[Site], list[Finding]]:
         # region reader did not see is still a call the lane must reach.
         scoped = unit.text
         lines = scoped.splitlines()
+        callers = fn_spans(scoped)
         # Match on text with comments AND string literals blanked: the over-matching
         # regex would otherwise read a panic message that says "the holder gate (..."
         # as a call site. Blanking preserves every offset, so the argument below is
@@ -1850,13 +1859,85 @@ def inventory(trees: Trees) -> tuple[list[Site], list[Finding]]:
                     )
                     continue
                 seen[key] = at
-                sites.append(Site(key=key, where=at))
+                caller = next((name for start, end, name in callers
+                               if start <= i <= end), None)
+                ident = f"{_crate_of(unit.rel)}/{_ident(unit.rel, caller)}" if caller else None
+                sites.append(Site(key=key, where=at, ident=ident))
     return sites, findings
 
 
 # --------------------------------------------------------------------------- #
 # CHECK D
 # --------------------------------------------------------------------------- #
+
+
+def query_policy(root: Path) -> dict:
+    import runpy
+    return runpy.run_path(str(root / "scripts/zk_query_ci.py"))
+
+
+def check_query_workflow(root: Path, doc: dict) -> list[Finding]:
+    findings = []
+    jobs = doc.get("jobs") or {}
+    try:
+        policy = query_policy(root)
+        policy["live_tests"](root)
+    except (OSError, ValueError, KeyError) as error:
+        return [Finding("query profiles", "D", str(error))]
+    for profile in ("hosted", "full"):
+        jid = f"query-{profile}"
+        job = jobs.get(jid)
+        if not isinstance(job, dict):
+            findings.append(Finding(jid, "D", "query execution job is missing")); continue
+        condition = "needs.forge-suite.outputs.zk == 'true'"
+        if profile == "full":
+            condition += " && github.event_name == 'workflow_dispatch' && inputs.full_query_proofs"
+        if str(job.get("if", "")).strip() != condition or job.get("needs") != "forge-suite":
+            findings.append(Finding(jid, "D", "query execution condition or dependency changed"))
+        if job.get("continue-on-error") or job.get("defaults") is not None or doc.get("defaults") is not None:
+            findings.append(Finding(jid, "D", "query execution must propagate failures"))
+        ledger = '${{ github.workspace }}/.zk-query-' + profile + '-${{ github.run_id }}-${{ github.run_attempt }}.txt'
+        if (job.get("env") or {}).get(LEDGER_ENV) != ledger:
+            findings.append(Finding(jid, "D", "query ledger must be set literally at job level"))
+        steps = job.get("steps") or []
+        required = {
+            "Check query execution profiles": "python3 scripts/tests/test_zk_query_ci.py",
+            f"Run {profile} query profile": f"python3 scripts/zk_query_ci.py {profile}",
+            f"Verify {profile} query ledger": f'python3 scripts/check-zk-toolchain-gate.py --verify-ledger "{ledger}" --profile query-{profile}',
+        }
+        for name, command in required.items():
+            matches = [step for step in steps if step.get("name") == name]
+            if len(matches) != 1 or set(matches[0]) != {"name", "run"} or matches[0].get("run") != command:
+                findings.append(Finding(jid, "D", f"required unconditional query step changed: {name}"))
+        if not steps or steps[-1].get("name") != f"Verify {profile} query ledger":
+            findings.append(Finding(jid, "D", "query verification must be last"))
+        if not any(step.get("uses") == "./.github/actions/noir-toolchain" for step in steps):
+            findings.append(Finding(jid, "D", "query job must install the shared pinned tools"))
+        if any(step.get("shell") not in (None, "bash") for step in steps):
+            findings.append(Finding(jid, "D", "query steps require the normal bash failure behavior"))
+    return findings
+
+
+def profile_keys(root: Path, sites: list[Site], profile: str) -> set[str]:
+    keys = {site.key for site in sites} - set(LEDGER_EXCLUSIONS)
+    if profile == "all":
+        return keys
+    if not (root / "scripts/zk_query_ci.py").is_file():
+        raise ValueError("scoped ledger requires explicit query execution profiles")
+    policy = query_policy(root)
+    policy["live_tests"](root)
+    query = {site.key for site in sites if site.key.startswith(policy["QUERY_PREFIX"])}
+    if profile == "estate":
+        return keys - query
+    if profile == "query-full":
+        return keys & query
+    if profile == "query-hosted":
+        expected_ids = {"sparq-zk-query/" + ident for ident in policy["HOSTED_TESTS"]}
+        selected = {site.key for site in sites if site.ident in expected_ids}
+        if {site.ident for site in sites if site.key in selected} != expected_ids:
+            raise ValueError("hosted query ledger inventory is incomplete")
+        return keys & selected
+    raise ValueError("unknown ledger execution profile")
 
 
 def check_workflow(root: Path) -> list[Finding]:
@@ -1888,7 +1969,8 @@ def check_workflow(root: Path) -> list[Finding]:
                     f"expected exactly one step named {VERIFY_STEP!r}, found {total}")
         ]
 
-    findings: list[Finding] = []
+    query_profiles = (root / "scripts/zk_query_ci.py").is_file()
+    findings: list[Finding] = check_query_workflow(root, doc) if query_profiles else []
     jid, job = hosts[0]
     steps = [s or {} for s in (job.get("steps") or [])]
     if not [s for s in steps if s.get("run")]:
@@ -1914,7 +1996,8 @@ def check_workflow(root: Path) -> list[Finding]:
         )
 
     verify = next(s for s in steps if s.get("name") == VERIFY_STEP)
-    if str(verify.get("run", "")).strip() != VERIFY_CMD:
+    expected_verify = VERIFY_CMD + (" --profile estate" if query_profiles else "")
+    if str(verify.get("run", "")).strip() != expected_verify:
         findings.append(
             Finding(VERIFY_STEP, "D",
                     "the run block must be exactly the one verify command with the "
@@ -2035,7 +2118,7 @@ def report_check(root: Path) -> int:
     return 1
 
 
-def verify_ledger(root: Path, ledger: Path) -> int:
+def verify_ledger(root: Path, ledger: Path, profile: str = "all") -> int:
     findings, sites = static_findings(root)
     blocking = findings
     if blocking:
@@ -2076,7 +2159,14 @@ def verify_ledger(root: Path, ledger: Path) -> int:
             print(f"  {line!r}", file=sys.stderr)
         return 1
     keys = {s.key for s in sites}
-    expected = keys - set(LEDGER_EXCLUSIONS)
+    try:
+        expected = profile_keys(root, sites, profile)
+    except (ValueError, OSError) as error:
+        print(f"FAIL: {error}", file=sys.stderr)
+        return 1
+    if not expected:
+        print("FAIL: ledger execution profile has no expected call sites", file=sys.stderr)
+        return 1
     unknown = sorted((entered | completed) - keys)
     orphan = sorted(completed - entered)
     no_entry = sorted(expected - entered)
@@ -3123,13 +3213,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--check", action="store_true", help="check the tree (default)")
     ap.add_argument("--self-test", action="store_true", help="run the negative fixtures")
     ap.add_argument("--verify-ledger", metavar="PATH", help="verify a runtime ledger")
+    ap.add_argument("--profile", choices=("all", "estate", "query-hosted", "query-full"), default="all", help="explicit workflow execution profile")
     ap.add_argument("--root", default=None, help="root to check (default: this repo)")
     args = ap.parse_args(argv)
     if args.self_test:
         return self_test()
     root = Path(args.root).resolve() if args.root else Path(__file__).resolve().parent.parent
     if args.verify_ledger:
-        return verify_ledger(root, Path(args.verify_ledger))
+        return verify_ledger(root, Path(args.verify_ledger), args.profile)
     return report_check(root)
 
 

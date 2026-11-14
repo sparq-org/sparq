@@ -97,8 +97,10 @@ pub struct TermCell {
     pub bound: bool,
     /// Default graph, IRI, blank node, or literal, using the suite byte tag.
     pub kind: u8,
-    /// `P(kind, term_hash, key)`; equality uses this slot.
+    /// Keyed term encoding retained by quad hashes and signed roots.
     pub enc: Fr,
+    /// Key-independent RDF identity; blank nodes also require credential scope.
+    pub identity: Fr,
     /// The key class, also the most significant byte of `key`.
     pub key_class: u8,
     /// The complete comparison key interpreted big-endian.
@@ -147,10 +149,17 @@ pub fn term_cell(term: &Term, credential: u32) -> Result<TermCell, Error> {
 fn cell(bytes: Vec<u8>, key: [u8; KEY_BYTES], dt: Fr, lang: Fr, credential: u32) -> TermCell {
     let kind = bytes[0];
     let k = Fr::from_be_bytes_mod_order(&key);
+    let framed = hash_bytes(TERM_DOMAIN, &bytes);
+    let enc = poseidon2::hash(&[Fr::from(kind), framed, k]);
     TermCell {
         bound: true,
         kind,
-        enc: poseidon2::hash(&[Fr::from(kind), hash_bytes(TERM_DOMAIN, &bytes), k]),
+        enc,
+        identity: if kind == crate::term_kind::DEFAULT_GRAPH {
+            enc
+        } else {
+            poseidon2::hash(&[Fr::from(kind), framed])
+        },
         key_class: key[0],
         key: k,
         dt,
@@ -158,6 +167,14 @@ fn cell(bytes: Vec<u8>, key: [u8; KEY_BYTES], dt: Fr, lang: Fr, credential: u32)
         credential,
         bytes,
     }
+}
+
+/// Key-independent RDF identity over the existing framed term bytes.
+/// Computes `P(kind, hash_bytes(TERM_DOMAIN, framed_bytes))`, without a key.
+/// Literals include lexical form, datatype and language. Blank nodes additionally
+/// require their credential scope at comparison sites. Triple terms are refused.
+pub fn term_identity(term: &Term) -> Result<Fr, Error> {
+    Ok(term_cell(term, 0)?.identity)
 }
 
 /// The default graph's bound cell. This is distinct from an unbound table cell.

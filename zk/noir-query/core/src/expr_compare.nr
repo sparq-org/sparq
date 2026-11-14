@@ -2,7 +2,7 @@
 use crate::expr_arith::{promoted_type, to_double, to_float};
 use crate::expr_core::{
     BOOLEAN, check_numeric, check_string, DATE, DATETIME, DECIMAL, FLOAT, Lane, lane, logical_not,
-    logical_or, NUMERIC, Numeric, Scalar, STRING, StringLane, truth,
+    logical_or, NUMERIC, Numeric, Scalar, STRING, StringLane,
 };
 use crate::expr_term_contract::TermCell;
 use sparq_ieee754::{f32, f64};
@@ -129,7 +129,14 @@ pub fn value_compare<let L: u32>(
     } else if (x.tag == STRING) & (y.tag == STRING) {
         error = error | !x.valid | !y.valid;
         if op == EQ {
-            value = (x.string.lang == y.string.lang) & string_compare(x.string, y.string, EQ);
+            if (x.string.lang == 0) & (y.string.lang == 0) {
+                value = string_compare(x.string, y.string, EQ);
+            } else {
+                // Language-tagged literals are outside the simple/xsd:string
+                // mapping in section 17.3. Apply RDFterm-equal, including error.
+                value = identity(x.term, y.term);
+                error = error | !value;
+            }
         } else {
             error = error | (x.string.lang != 0) | (y.string.lang != 0);
             value = string_compare(x.string, y.string, op);
@@ -162,7 +169,9 @@ pub fn in_list<let L: u32, let N: u32>(
     lhs: (Lane<Scalar<L>>, bool),
     args: [(Lane<Scalar<L>>, bool); N],
 ) -> (Lane<bool>, bool) {
-    let mut result = truth(false, false);
+    // Empty membership ignores a SPARQL error, but cannot clear a capacity
+    // refusal from an already computed input lane.
+    let mut result = (Lane { value: false, capacity: lhs.0.capacity }, false);
     for i in 0..N {
         result = logical_or(result, value_compare(lhs, args[i], EQ));
     }
