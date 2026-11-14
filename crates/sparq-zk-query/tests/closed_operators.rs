@@ -1,4 +1,5 @@
 mod closed_native;
+mod support;
 #[path = "support/fixture.rs"]
 mod fixtures;
 use closed_native::Workspace;
@@ -131,6 +132,12 @@ fn closed_capacity_never_truncates_before_limit() {
 }
 #[test]
 fn generated_closed_circuits_execute_and_reject_altered_tables_and_results() {
+    let Some(gate) = support::gate(
+        "generated_closed_circuits_execute_and_reject_altered_tables_and_results",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
     let data = fixtures::fixture();
     for query in QUERIES {
         let plan = lower(query, B).unwrap();
@@ -180,9 +187,16 @@ fn generated_closed_circuits_execute_and_reject_altered_tables_and_results() {
             "{query}"
         );
     }
+    support::complete(gate);
 }
 #[test]
 fn credential_graphs_are_separate_and_default_merge_deduplicates() {
+    let Some(gate) = support::gate(
+        "credential_graphs_are_separate_and_default_merge_deduplicates",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
     let mut data = fixtures::fixture();
     data.push(data[0].clone());
     let queries = [
@@ -218,6 +232,7 @@ fn credential_graphs_are_separate_and_default_merge_deduplicates() {
                 .unwrap_or_else(|e| panic!("{q}: {e}"));
         }
     }
+    support::complete(gate);
 }
 
 #[test]
@@ -255,6 +270,12 @@ fn closed_corpus_admission_inventory() {
 
 #[test]
 fn seeded_generated_closed_circuits_agree_and_reject_hidden_right_rows() {
+    let Some(gate) = support::gate(
+        "seeded_generated_closed_circuits_agree_and_reject_hidden_right_rows",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
     let queries=[
         "SELECT ?s ?y WHERE {?s <urn:p> ?x OPTIONAL {?s <urn:q> ?y} FILTER NOT EXISTS {?s <urn:p> ?z FILTER(?z < 0)}}",
         "SELECT ?s ?y WHERE {{SELECT DISTINCT ?s WHERE {?s <urn:p> ?x}} ?s <urn:q> ?v BIND(?v AS ?y) MINUS {?s <urn:p> ?z FILTER(?z < 0)}}",
@@ -312,10 +333,17 @@ fn seeded_generated_closed_circuits_agree_and_reject_hidden_right_rows() {
             );
         }
     }
+    support::complete(gate);
 }
 
 #[test]
 fn closed_positive_corpus_executes_with_expected_engine_result_and_controls() {
+    let Some(gate) = support::gate(
+        "closed_positive_corpus_executes_with_expected_engine_result_and_controls",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let corpus: serde_json::Value = serde_json::from_slice(
         &std::fs::read(root.join("../../zk/sparql-evaluator/fixtures/conformance/cases.json")).unwrap(),
@@ -445,10 +473,17 @@ fn closed_positive_corpus_executes_with_expected_engine_result_and_controls() {
         serde_json::to_vec_pretty(&executed).unwrap(),
     )
     .unwrap();
+    support::complete(gate);
 }
 
 #[test]
 fn nested_select_distinct_slice_executes_with_the_core_slice_relation() {
+    let Some(gate) = support::gate(
+        "nested_select_distinct_slice_executes_with_the_core_slice_relation",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
     let data = fixtures::fixture();
     let query = "SELECT ?s WHERE {{SELECT DISTINCT ?s WHERE {?s <urn:p> ?x} LIMIT 1 OFFSET 1}}";
     let plan = lower(query, B).unwrap();
@@ -471,10 +506,17 @@ fn nested_select_distinct_slice_executes_with_the_core_slice_relation() {
     changed.tables[plan.result_node() as usize].rows.clear();
     let changed = prover_toml(&plan, &data, &FixtureEncoder, &changed, [7; 32], [3; 32]).unwrap();
     assert!(driver.execute(&changed, "nested_slice_missing").is_err());
+    support::complete(gate);
 }
 
 #[test]
 fn named_graph_engine_interpreter_and_circuit_differential() {
+    let Some(gate) = support::gate(
+        "named_graph_engine_interpreter_and_circuit_differential",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
     use sparq_zk_query::interp::EncodeTerm;
     let mut data = fixtures::fixture();
     data.push(data[0].clone());
@@ -512,6 +554,7 @@ fn named_graph_engine_interpreter_and_circuit_differential() {
         let changed=prover_toml(&plan,&data,&FixtureEncoder,&changed,[7;32],[3;32]).unwrap();
         assert!(driver.execute(&changed,"graph_hidden_row").is_err(),"{query}");
     }
+    support::complete(gate);
 }
 #[test]
 fn check_issuer_registry() {

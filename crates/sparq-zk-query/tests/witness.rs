@@ -33,7 +33,11 @@ fn canonical_status_witness_admits_bounded_paths_and_refuses_mismatched_lengths(
             rows_per_table: 2,
         },
     )
-    .unwrap();
+    .unwrap()
+    .with_envelope_features(sparq_zk_query::plan::EnvelopeFeatures {
+        status: true,
+        ..Default::default()
+    });
     for depth in [0, 1, 32] {
         let (data, policy, evidence) = authenticated::canonical_status_fixture(depth);
         let dataset = assemble_issuer_dataset(&data, &policy.trust_members, [7; 32]).unwrap();
@@ -221,4 +225,82 @@ fn false_ask_is_an_explicit_result_with_an_empty_private_table() {
     let input = prover_toml(&p, &data, &FixtureEncoder, &trace, [1; 32], [3; 32]).unwrap();
     assert!(input.lines().any(|l| l == "result = false"));
     assert_eq!(trace.tables.last().unwrap().rows.len(), 0);
+}
+
+#[test]
+fn unrequested_validity_does_not_open_unrelated_metadata() {
+    use sparq_zk_query::{
+        capacity::OpeningProfile,
+        credential::{assemble_issuer_dataset, SuiteEncoder},
+        interp::evaluate_dataset,
+        plan::EnvelopeFeatures,
+        witness::{prover_toml_enveloped, EnvelopeInput, EnvelopeWitness},
+    };
+    let plan = lower(
+        "ASK {}",
+        Bounds {
+            credentials: 1,
+            quads_per_credential: 4,
+            rows_per_table: 2,
+        },
+    )
+    .unwrap()
+    .with_opening_profile(OpeningProfile::LongObjects);
+    let policy = authenticated::canonical_policy();
+    for property in [
+        "<urn:credential> <https://www.w3.org/2018/credentials#validFrom> <urn:not-a-time> ."
+            .to_string(),
+        format!(
+            "<urn:credential> <https://www.w3.org/2018/credentials#validUntil> \"{}\" .",
+            "x".repeat(80)
+        ),
+    ] {
+        let data = [authenticated::canonical_sign(&property, 0)];
+        let dataset = assemble_issuer_dataset(&data, &policy.trust_members, [7; 32]).unwrap();
+        let trace = evaluate_dataset(&plan, &dataset, &SuiteEncoder).unwrap();
+        let evidence = EnvelopeWitness::default();
+        let input = prover_toml_enveloped(
+            &plan,
+            &data,
+            &trace,
+            [7; 32],
+            [3; 32],
+            EnvelopeInput {
+                policy: &policy,
+                evidence: &evidence,
+                revealed: None,
+            },
+        )
+        .unwrap();
+        let slot = input
+            .lines()
+            .find(|line| line.starts_with("envelope_0 = "))
+            .expect("first envelope slot");
+        let validity = &slot[slot.find("validity = {").expect("validity table")..];
+        assert!(validity.contains("from_len = 0,"), "{validity}");
+        assert!(validity.contains("until_len = 0 }"), "{validity}");
+        let required = plan.clone().with_envelope_features(EnvelopeFeatures {
+            validity: true,
+            ..Default::default()
+        });
+        let mut required_policy = policy.clone();
+        required_policy.validity_time = Some(0);
+        let error = prover_toml_enveloped(
+            &required,
+            &data,
+            &trace,
+            [7; 32],
+            [3; 32],
+            EnvelopeInput {
+                policy: &required_policy,
+                evidence: &evidence,
+                revealed: None,
+            },
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, Error::Invalid(_) | Error::Capacity(_)),
+            "{error}"
+        );
+    }
 }

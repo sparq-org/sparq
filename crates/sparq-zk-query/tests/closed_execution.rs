@@ -1,6 +1,5 @@
 mod closed_support;
-#[path = "../../sparq-zk-compose/tests/support/mod.rs"]
-mod toolchain;
+mod support;
 
 use closed_support::*;
 use sparq_zk_query::{
@@ -83,21 +82,30 @@ fn package(source: &str) -> tempfile::TempDir {
     tmp
 }
 fn execute(
-    gate: &toolchain::LiveToolchain,
+    gate: &support::LiveToolchain,
     root: &std::path::Path,
     witness: &str,
 ) -> std::process::Output {
     std::fs::write(root.join("Prover.toml"), witness).unwrap();
-    toolchain::live_tool(gate, "nargo")
+    let output = support::live_tool(gate, "nargo")
         .current_dir(root)
         .arg("execute")
         .output()
-        .unwrap()
+        .unwrap();
+    if !output.status.success() {
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("Assertion failed:"),
+            "unexpected native failure: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    output
 }
 
 #[test]
 fn host_group_and_order_witnesses_execute_and_reject_altered_cells() {
-    let Some(gate) = toolchain::gate(
+    let Some(gate) = support::gate(
         "host_group_and_order_witnesses_execute_and_reject_altered_cells",
         &["nargo"],
     ) else {
@@ -197,5 +205,5 @@ fn host_group_and_order_witnesses_execute_and_reject_altered_cells() {
     let rejected = execute(&gate, tmp.path(), &witness(&altered));
     assert!(!rejected.status.success());
     assert!(String::from_utf8_lossy(&rejected.stderr).contains("ORDER BY rows"));
-    toolchain::complete(gate);
+    support::complete(gate);
 }

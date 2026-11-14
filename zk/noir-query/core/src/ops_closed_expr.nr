@@ -4,7 +4,7 @@ use crate::table::{TermCell,Table};
 use crate::ops_core::Boolean;
 use crate::ops_core_expr::Step;
 fn temporal(cell:TermCell)->TermCell {
-    if cell.bound & (cell.kind==3) & ((cell.key_class==3)|(cell.key_class==4)|(cell.key_class==8)) {
+    if cell.bound & (cell.kind==3) & ((cell.dt==crate::suite_constants::DT_DATE)|(cell.dt==crate::suite_constants::DT_DATETIME)) & ((cell.key_class==3)|(cell.key_class==4)|(cell.key_class==8)) {
         let bytes=cell.key.to_be_bytes::<31>();
         assert(bytes[0]==cell.key_class,"temporal key class");
         for i in 1..31 {
@@ -67,6 +67,17 @@ fn datetime_classes_use_the_same_packed_word_contract(){
         let mut b=a;b.enc=2;b.key=b.key+0x100000000000000000000000000000000000000000000;
         let result=evaluate_indexed(crate::table::append(crate::table::empty::<1,1>(),[a],true),[b],[0],program());assert(result[0].value & !result[0].is_error);
     }
+}
+
+#[test]
+fn plain_string_equality_ignores_an_unused_temporal_key(){
+    let a=TermCell{bound:true,kind:3,enc:17,key_class:8,key:8*crate::ops_closed_numeric::PREFIX+1,dt:crate::suite_constants::DT_STRING,lang:crate::suite_constants::LANG_EMPTY,scope:0};
+    let result=evaluate_indexed(crate::table::append(crate::table::empty::<1,1>(),[a],true),[a],[0],[
+        Step{op:0,a:0,b:0,parameter:0,comparison:0},
+        Step{op:1,a:0,b:0,parameter:0,comparison:0},
+        Step{op:2,a:0,b:1,parameter:0,comparison:0},
+    ]);
+    assert(result[0].value & !result[0].is_error);
 }
 
 #[test(should_fail_with="IN list capacity")]

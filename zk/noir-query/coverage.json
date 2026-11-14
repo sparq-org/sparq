@@ -1602,13 +1602,11 @@
     },
     {
       "id": "reject-exists-nested-exists",
-      "status": "refused",
-      "refusal": "capacity refusal: plan structure"
+      "status": "not_attempted"
     },
     {
       "id": "reject-exists-nested-not-exists",
-      "status": "refused",
-      "refusal": "capacity refusal: plan structure"
+      "status": "not_attempted"
     },
     {
       "id": "reject-exists-nested-in-function",

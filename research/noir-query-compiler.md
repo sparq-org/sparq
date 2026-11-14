@@ -251,3 +251,17 @@ are computed inside the gadget.
 
 Plain-string equality classifies its operands from the authenticated datatype
 before value-key guards; identity-only comparison does not inspect unused keys.
+
+Verifier policy selects optional holder, status, validity and freshness consumers
+before compilation. The selection belongs to the plan hash and the stored method
+parameters; request reconstruction derives it from typed policy. Default
+preparation selects issuer authorization alone. Policy roots and instants remain
+parameters, and the public layout stays fixed. The circuit binds public flags to
+the compiled selection and constrains disabled value words to zero. This lets a
+request omit unrequested consumers while keeping requested checks enforced.
+
+The status adapter selects metadata from authenticated rows, constraining the
+row bound, entry subject, predicate and default graph. The canonical envelope
+consumer retains complete status coverage, singleton properties, lexical/key
+checks and snapshot/path checks. Tests include equal-valued properties on an
+unrelated subject, so selection is bound to its source as well as its value.

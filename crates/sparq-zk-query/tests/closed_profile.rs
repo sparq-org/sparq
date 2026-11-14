@@ -1,5 +1,9 @@
 //! Credential profile and generated-runner contract controls.
 
+mod closed_native;
+mod support;
+#[path = "support/fixture.rs"]
+mod fixtures;
 use sparq_zk_query::credential_graphs::evaluate_cells as evaluate;
 use sparq_zk_query::{
     capacity::Bounds,
@@ -29,12 +33,7 @@ fn triple(s: &str, p: &str, o: &str) -> String {
 fn int(n: i64) -> String {
     format!("\"{n}\"^^<{XSD}integer>")
 }
-fn signed(mut rdf: String, issuer: &str, salt: u64) -> Credential {
-    rdf.push_str(&triple(
-        "<urn:credential>",
-        &iri(graphs::ISSUER),
-        &iri(issuer),
-    ));
+fn signed(rdf: String, issuer: &str, salt: u64) -> Credential {
     sign(&rdf, issuer, salt)
 }
 fn issuer_registry() -> Vec<(oxrdf::NamedNode, sparq_zk::sig::PublicKey)> {
@@ -72,15 +71,7 @@ fn sign(source: &str, issuer: &str, salt: u64) -> Credential {
         .position(|(iri, _)| iri.as_str() == issuer)
         .unwrap();
     let key = sparq_zk::sig::SecretKey::from_seed(19 + index as u64);
-    let config =
-        "_:proof <https://w3id.org/security#cryptosuite> \"schnorr-poseidon2-merkle-2026\" .\n";
-    let credential = sparq_merkle_suite::poseidon::issue(
-        source,
-        config,
-        &key,
-        sparq_merkle_suite::Fr::from(salt + 101),
-    )
-    .unwrap();
+    let credential = closed_native::canonical_credential(source, issuer, &key, salt);
     let keys = registry.into_iter().map(|(_, key)| key).collect::<Vec<_>>();
     let issuer_siblings =
         sparq_zk_compose::issuer::key_membership_witness(&keys, 4, index as u64).unwrap();
@@ -97,6 +88,117 @@ fn bounds(_path: &str) -> Bounds {
         quads_per_credential: 8,
         rows_per_table: 4,
     }
+}
+#[test]
+fn nested_exists_corpus_results_and_hidden_matches_are_bound() {
+    let Some(gate) = support::gate(
+        "nested_exists_corpus_results_and_hidden_matches_are_bound",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
+    use sparq_zk_query::{
+        lower::lower, plan::Operator, plan_closed::ClosedOperator, witness::prover_toml,
+    };
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let corpus: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(root.join("../../zk/sparql-evaluator/fixtures/conformance/cases.json"))
+            .unwrap(),
+    )
+    .unwrap();
+    let rdf = std::fs::read_to_string(
+        root.join("../../zk/sparql-evaluator/fixtures/conformance/core.nt"),
+    )
+    .unwrap();
+    let (data, _) = fixtures::dataset(&rdf);
+    for (id, expected_rows) in [
+        ("reject-exists-nested-exists", 3),
+        ("reject-exists-nested-not-exists", 0),
+    ] {
+        let fixture = corpus["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|case| case["id"] == id)
+            .unwrap();
+        let query = fixture["query"].as_str().unwrap();
+        let plan = lower(
+            query,
+            Bounds {
+                credentials: 1,
+                quads_per_credential: 16,
+                rows_per_table: 4,
+            },
+        )
+        .unwrap();
+        let trace = evaluate(&plan, &data, &SuiteEncoder).unwrap();
+        fixtures::assert_engine(query, &rdf, &trace.result);
+        let ResultValue::Select { rows, .. } = &trace.result else {
+            panic!("SELECT result")
+        };
+        assert_eq!(rows.len(), expected_rows, "{id}");
+        let package = codegen::generate_operator_fixture(&plan).unwrap();
+        let workspace = closed_native::Workspace::new(&package);
+        let render = |trace: &sparq_zk_query::interp::Trace| {
+            prover_toml(&plan, &data, &SuiteEncoder, trace, [7; 32], [3; 32]).unwrap()
+        };
+        execute_bounded(
+            &gate,
+            workspace.0.path(),
+            &package.name,
+            &render(&trace),
+            "nested_honest",
+        )
+        .unwrap_or_else(|e| panic!("{id}: {e}"));
+        // Hide a matching scan inside the nested EXISTS, including when
+        // NOT EXISTS leaves the final result empty.
+        let inner = plan
+            .nodes()
+            .iter()
+            .enumerate()
+            .find_map(|(i, node)| {
+                matches!(node.operator, Operator::Closed(ClosedOperator::Scan { .. }))
+                    .then_some(i)
+                    .filter(|&i| !trace.tables[i].rows.is_empty())
+            })
+            .expect("matching nested scan");
+        let mut hidden = trace.clone();
+        hidden.tables[inner].rows.pop();
+        let error = execute_bounded(
+            &gate,
+            workspace.0.path(),
+            &package.name,
+            &render(&hidden),
+            "nested_hidden_match",
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("operator length") || error.contains("operator rows"),
+            "{id}: {error}"
+        );
+        let mut altered = trace.clone();
+        let ResultValue::Select { rows, .. } = &mut altered.result else {
+            unreachable!()
+        };
+        if rows.is_empty() {
+            rows.push(trace.tables[0].rows[0][..1].to_vec());
+        } else {
+            rows.pop();
+        }
+        let error = execute_bounded(
+            &gate,
+            workspace.0.path(),
+            &package.name,
+            &render(&altered),
+            "nested_wrong_result",
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("operator length") || error.contains("operator rows"),
+            "{id}: {error}"
+        );
+    }
+    support::complete(gate);
 }
 #[test]
 fn closed_string_reads_follow_the_shared_equality_contract() {
@@ -149,7 +251,7 @@ fn closed_string_reads_follow_the_shared_equality_contract() {
         .unwrap();
         let credentials = vec![signed(triple("<urn:s>", "<urn:p>", value), "urn:issuer", 3)];
         let trace = graphs::evaluate(&plan, &credentials).unwrap();
-        let package = codegen::generate(&plan).unwrap();
+        let package = codegen::generate_suite_fixture(&plan).unwrap();
         let source = &package.files[&format!("{}/src/main.nr", package.name)];
         let checker = if identities {
             "check_identity_equalities"
@@ -269,6 +371,9 @@ fn signed_blank_node_cannot_alias_the_credential_graph() {
 }
 #[test]
 fn compact_profile_credential_executes() {
+    let Some(gate) = support::gate("compact_profile_credential_executes", &["nargo", "bb"]) else {
+        return;
+    };
     let p = graphs::bind_issuer_registry(
         graphs::lower(
             "ASK {}",
@@ -288,7 +393,7 @@ fn compact_profile_credential_executes() {
         3,
     )];
     let trace = graphs::evaluate(&p, &credentials).unwrap();
-    let pkg = codegen::generate(&p).unwrap();
+    let pkg = codegen::generate_suite_fixture(&p).unwrap();
     let temp = tempfile::tempdir().unwrap();
     for (name, source) in pkg.files {
         let target = temp.path().join(name);
@@ -306,7 +411,7 @@ fn compact_profile_credential_executes() {
     let witness =
         witness_closed::prover_toml(&p, &credentials, &trace, [7; 32], [3; 32], issuer_root())
             .unwrap();
-    execute_bounded(temp.path(), &pkg.name, &witness, "compact_authenticated").unwrap();
+    execute_bounded(&gate, temp.path(), &pkg.name, &witness, "compact_authenticated").unwrap();
     let raw_line = witness
         .lines()
         .find(|line| line.starts_with("credential_0 = "))
@@ -317,7 +422,7 @@ fn compact_profile_credential_executes() {
         let mut raw = raw_line.to_owned();
         raw.replace_range(position..position + 8, "kind = 3");
         let changed = witness.replace(raw_line, &raw);
-        let error = execute_bounded(temp.path(), &pkg.name, &changed, "compact_wrong_position")
+        let error = execute_bounded(&gate, temp.path(), &pkg.name, &changed, "compact_wrong_position")
             .unwrap_err();
         assert!(error.contains(label), "{error}");
     }
@@ -334,6 +439,7 @@ fn compact_profile_credential_executes() {
     assert_eq!(witness.matches(&raw_key(1i64)).count(), 1);
     let changed = witness.replacen(&raw_key(1i64), &raw_key(2i64), 1);
     let error = execute_bounded(
+        &gate,
         temp.path(),
         &pkg.name,
         &changed,
@@ -355,37 +461,47 @@ fn compact_profile_credential_executes() {
     let marker = format!("s = \"{}\"", sparq_zk::field::field_to_hex(&signature.s));
     assert_eq!(witness.matches(&marker).count(), 1);
     let changed = witness.replacen(&marker, "s = \"0\"", 1);
-    let error =
-        execute_bounded(temp.path(), &pkg.name, &changed, "compact_wrong_signature").unwrap_err();
+    let error = execute_bounded(
+        &gate,
+        temp.path(),
+        &pkg.name,
+        &changed,
+        "compact_wrong_signature",
+    )
+    .unwrap_err();
     assert!(
         error.contains("schnorr verification equation failed"),
         "{error}"
     );
+    support::complete(gate);
 }
 
-fn execute_bounded(root: &Path, package: &str, input: &str, tag: &str) -> Result<(), String> {
+fn execute_bounded(
+    gate: &support::LiveToolchain,
+    root: &Path,
+    package: &str,
+    input: &str,
+    tag: &str,
+) -> Result<(), String> {
     for (tool, _) in pins::PINNED_TOOLS {
-        let output = std::process::Command::new(tool)
+        let output = support::live_tool(gate, tool)
             .arg("--version")
             .output()
-            .map_err(|e| e.to_string())?;
-        if !output.status.success() || !pins::pinned_version_output(tool, &output.stdout) {
-            return Err("query method requires the pinned toolchain".into());
-        }
+            .expect("pinned tool version probe starts");
+        assert!(output.status.success(), "{tool} version probe failed");
+        assert!(
+            pins::pinned_version_output(tool, &output.stdout),
+            "query method requires the pinned toolchain: {tool}"
+        );
     }
     std::fs::write(root.join(package).join(format!("Prover_{tag}.toml")), input)
         .map_err(|e| e.to_string())?;
     let witness = root.join("target").join(format!("{tag}.gz"));
-    match std::fs::remove_file(&witness) {
-        Ok(()) => (),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
-        Err(error) => return Err(error.to_string()),
+    if witness.exists() {
+        std::fs::remove_file(&witness).map_err(|e| e.to_string())?;
     }
-    // Bound each native command by the permitted execution-step budget.
-    let output = std::process::Command::new("timeout")
+    let output = support::live_tool(gate, "nargo")
         .args([
-            "600",
-            "nargo",
             "execute",
             "--inliner-aggressiveness",
             "0",
@@ -397,7 +513,15 @@ fn execute_bounded(root: &Path, package: &str, input: &str, tag: &str) -> Result
         ])
         .current_dir(root)
         .output()
-        .map_err(|e| e.to_string())?;
+        .expect("nargo execute starts");
+    if !output.status.success() {
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("Assertion failed:"),
+            "unexpected native failure: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
     if output.status.success() && witness.is_file() {
         Ok(())
     } else {
@@ -414,6 +538,12 @@ mod pins;
 
 #[test]
 fn bounded_runner_requires_a_fresh_witness_for_the_generated_relation() {
+    let Some(gate) = support::gate(
+        "bounded_runner_requires_a_fresh_witness_for_the_generated_relation",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
     let p = sparq_zk_query::lower::lower(
         "ASK {}",
         Bounds {
@@ -442,7 +572,7 @@ fn bounded_runner_requires_a_fresh_witness_for_the_generated_relation() {
     let input =
         sparq_zk_query::witness::prover_toml(&p, &[], &SuiteEncoder, &trace, [7; 32], [3; 32])
             .unwrap();
-    execute_bounded(temp.path(), &package.name, &input, "runner_guard").unwrap();
+    execute_bounded(&gate, temp.path(), &package.name, &input, "runner_guard").unwrap();
     assert!(temp.path().join("target/runner_guard.gz").exists());
     let mut false_result = trace;
     false_result.result = ResultValue::Ask(false);
@@ -455,12 +585,19 @@ fn bounded_runner_requires_a_fresh_witness_for_the_generated_relation() {
         [3; 32],
     )
     .unwrap();
-    assert!(execute_bounded(temp.path(), &package.name, &input, "runner_guard").is_err());
+    assert!(execute_bounded(&gate, temp.path(), &package.name, &input, "runner_guard").is_err());
     assert!(!temp.path().join("target/runner_guard.gz").exists());
+    support::complete(gate);
 }
 
 #[test]
 fn literal_families_are_plan_bound_and_cover_unused_rows() {
+    let Some(gate) = support::gate(
+        "literal_families_are_plan_bound_and_cover_unused_rows",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
     let all = graphs::bind_issuer_registry(
         graphs::lower("ASK {}", bounds("recycled-content")).unwrap(),
         &issuer_registry(),
@@ -533,8 +670,9 @@ fn literal_families_are_plan_bound_and_cover_unused_rows() {
         )
         .unwrap()
     };
-    execute_bounded(temp.path(), &package.name, &render(&valid), "types_honest").unwrap();
+    execute_bounded(&gate, temp.path(), &package.name, &render(&valid), "types_honest").unwrap();
     let error = execute_bounded(
+        &gate,
         temp.path(),
         &package.name,
         &render(&credentials),
@@ -545,4 +683,5 @@ fn literal_families_are_plan_bound_and_cover_unused_rows() {
         error.contains("closed credential literal profile"),
         "{error}"
     );
+    support::complete(gate);
 }

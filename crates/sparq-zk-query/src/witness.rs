@@ -587,17 +587,17 @@ fn prover_toml_authenticated_mode(
                             && !(crate::codegen::identity_string_reads(expr)
                                 && c.dt == string_datatype)
                     }) {
-                        Some(
-                            &literals
-                                .iter()
-                                .find(|(c, _)| *c == cell)
-                                .ok_or_else(|| Error::Invalid("expression read opening".into()))?
-                                .1,
-                        )
+                        Some(match literals.iter().find(|(c, _)| *c == cell) {
+                            Some((_, term)) => term.clone(),
+                            None => crate::witness_closed::computed(cell).map_err(|e| match e {
+                                Error::Capacity(_) => e,
+                                _ => Error::Invalid("expression read opening".into()),
+                            })?,
+                        })
                     } else {
                         None
                     };
-                    row.push(value_read_opening(term, opening.object as usize)?);
+                    row.push(value_read_opening(term.as_ref(), opening.object as usize)?);
                 }
                 reads.push(serde_json::Value::Array(row));
             }

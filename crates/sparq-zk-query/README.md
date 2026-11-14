@@ -8,7 +8,7 @@ Public request bounds choose the smallest fitting credential, quad and table buc
 The key reveals capacities and query structure. Private counts cannot select another bucket; exceeding a bound yields a named refusal, never truncation.
 Separate public quad limits choose the ordered credential-slot buckets. `OpeningProfile` selects compact
 `Solid` bounds, `LongObjects` for holder Multikey lexicals, or `Extended` for larger resource identifiers.
-The request stores the selected profile and the plan hash commits it.
+The request stores selected opening bounds and optional envelope consumers; the plan hash commits both.
 
 Constants are public parameters. Canonical plan encodings include parameter kinds,
 operator wiring, schemas, orders and capacities, while excluding parameter values
@@ -56,7 +56,7 @@ for compatibility; proof and verification use `credential::SuiteEncoder`.
 Structural requests created with `Request::new` cannot produce an authenticated proof.
 Use `prepare_with_opening_profile` and
 `Request::new_authenticated_with_opening_profile` with the same profile for larger openings; `new_authenticated_with_envelope_and_profile` retains typed envelope
-properties as well. Oversized lexical forms receive a capacity refusal.
+properties as well. `prepare_with_envelope_features` selects the optional consumers required by the stored policy; ordinary preparation selects issuer authorization alone. Oversized lexical forms receive a capacity refusal.
 
 The current suite profile opens complete credentials, checks hidden signatures
 and canonical trust-member membership. Source identities are key-independent; value consumers check complete active inputs, including rejected rows. Released RDF clears value-key metadata. Overflow refuses.

@@ -8,7 +8,7 @@ use crate::{
     credential::{Credential, SuiteEncoder},
     interp::{self, EncodeTerm},
     lower::lower,
-    plan::Plan,
+    plan::{EnvelopeFeatures, Plan},
     request::{self, Request},
     statement::{public_input_bytes, Layout, Statement},
     witness, Error,
@@ -92,6 +92,38 @@ impl Compiler {
             plan = plan.with_credential_quad_bounds(quad_bounds)?;
         }
         self.prepare_plan(plan)
+    }
+    /// Prepare the exact optional consumers the verifier will store in its policy.
+    /// Ordinary preparation selects issuer authorization without optional checks.
+    pub fn prepare_with_envelope_features(
+        &self,
+        query: &str,
+        bounds: Bounds,
+        quad_bounds: Option<&[u32]>,
+        profile: OpeningProfile,
+        features: EnvelopeFeatures,
+    ) -> Result<Prepared, Error> {
+        self.prepare_with_table_rows(query, bounds, quad_bounds, profile, features, None)
+    }
+    /// Prepare with per-table row capacities (one per plan node); the request must store
+    /// the same vector so the verifier rebuilds the same plan.
+    pub fn prepare_with_table_rows(
+        &self,
+        query: &str,
+        bounds: Bounds,
+        quad_bounds: Option<&[u32]>,
+        profile: OpeningProfile,
+        features: EnvelopeFeatures,
+        table_rows: Option<&[u32]>,
+    ) -> Result<Prepared, Error> {
+        self.prepare_plan(crate::request::shaped_plan(
+            query,
+            bounds,
+            profile,
+            features,
+            quad_bounds,
+            table_rows,
+        )?)
     }
     fn prepare_plan(&self, plan: Plan) -> Result<Prepared, Error> {
         let compiled = self.compiled(&plan)?;

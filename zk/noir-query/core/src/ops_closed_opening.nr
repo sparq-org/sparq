@@ -82,7 +82,7 @@ fn open_typed<let N:u32,let L:u32,let TYPES:u32,let KEYL:u32>(raw:[[Opening<L>;4
         credentials[i][p]=standard(raw[i][p]);
     }}
     let out=crate::ops_core_suite::open_one(credentials,proof,count,active,quad_bound,credential_index,issuer_root,request_digest);
-    let dataset=crate::ops_core::Dataset{rows:out.rows,active:out.active,graphs:[out.graph;N]};
+    let dataset=crate::ops_core::Dataset{rows:out.rows(),active:out.active(),graphs:[out.graph();N]};
     literal_types(dataset,TYPES);
     out
 }
@@ -96,7 +96,7 @@ fn metadata_padding<let L:u32>()->crate::suite_entry::TermOpening<L>{
 }
 fn empty_opening()->Opening<1>{Opening{bound:false,kind:0,lexical:[0],lexical_len:0,datatype_tag:0,key:[0;31]}}
 fn empty_proof()->CredentialProof<1>{CredentialProof{salt:0,salts:[0],config:[0;2],created:metadata_padding(),method:metadata_padding(),pk:compose::issuer::Point{x:0,y:0},r:compose::issuer::Point{x:0,y:0},s:0,e:0,e_k:0,issuer_index:0,issuer_siblings:[0;4]}}
-#[test] fn compact_padding_is_checked_by_the_suite(){let out=open_one([[empty_opening();4]],empty_proof(),0,false,1,0,0);assert((out.active==[false])&(out.message==0));}
+#[test] fn compact_padding_is_checked_by_the_suite(){let out=open_one([[empty_opening();4]],empty_proof(),0,false,1,0,0);assert((out.active()==[false])&(out.message()==0));}
 #[test(should_fail_with="closed datatype tag")]
 fn compact_opening_rejects_unknown_datatype(){let mut raw=empty_opening();raw.datatype_tag=6;let _dt=datatype(raw);}
 #[test(should_fail_with="closed datatype kind")]

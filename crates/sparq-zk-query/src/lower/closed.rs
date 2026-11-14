@@ -59,6 +59,51 @@ impl Builder {
         vars.dedup();
         vars
     }
+    /// The body can be evaluated once, without substitution, when every
+    /// variable it shares with the outer row is bound on both sides: it is a
+    /// join of triple patterns and GRAPH blocks whose FILTERs read only
+    /// variables those patterns bind, and the shared variables are certainly
+    /// bound in the outer input. Then substitution equals a compatible-row test.
+    fn uncorrelated(&self, body: &GraphPattern, input: NodeId) -> bool {
+        let mut bound = vec![];
+        if !uncorrelated_shape(body, &mut bound) {
+            return false;
+        }
+        let schema = self.schema(input);
+        let certain = self.certain(input);
+        let shared: Vec<Var> = bound
+            .iter()
+            .filter_map(|name| self.plan.variable_names.iter().position(|v| v == name))
+            .map(|i| i as Var)
+            .filter(|v| schema.contains(v))
+            .collect();
+        !shared.is_empty() && shared.iter().all(|v| certain.contains(v))
+    }
+    /// Variables bound in every row of `id` (conservative: unknown forms bind none).
+    fn certain(&self, id: NodeId) -> Vec<Var> {
+        let node = &self.plan.nodes[id as usize];
+        let mut vars = match &node.operator {
+            Operator::Scan(_) | Operator::Closed(C::GraphScan { .. } | C::DatasetScan { .. }) => {
+                node.output.variables.clone()
+            }
+            Operator::Join(a, b) | Operator::Closed(C::Join { left: a, right: b }) => {
+                let mut v = self.certain(*a);
+                v.extend(self.certain(*b));
+                v
+            }
+            Operator::Filter(a, _)
+            | Operator::Project(a)
+            | Operator::Distinct(a)
+            | Operator::Closed(
+                C::Filter { input: a, .. }
+                | C::Extend { input: a, .. }
+                | C::BindBoolean { input: a, .. },
+            ) => self.certain(*a),
+            _ => vec![],
+        };
+        vars.retain(|v| node.output.variables.contains(v));
+        vars
+    }
     pub(super) fn closed_predicate(
         &mut self,
         e: &Expression,
@@ -69,6 +114,9 @@ impl Builder {
         use Expression as E;
         Ok(match e {
             E::Exists(body) => {
+                if context.is_none() && graph.is_none() && self.uncorrelated(body, input) {
+                    return Ok(Predicate::SemiJoin(self.closed_in(body, None, None)?));
+                }
                 let mut rights = vec![];
                 for row in 0..self.plan.capacity.rows_per_table {
                     let vars = context
@@ -370,5 +418,78 @@ impl Builder {
             }
             _ => self.pattern(pattern, true),
         }
+    }
+}
+/// Triple patterns, joins, GRAPH blocks and FILTERs over pattern-bound variables.
+fn uncorrelated_shape(p: &GraphPattern, bound: &mut Vec<String>) -> bool {
+    use spargebra::term::{NamedNodePattern as N, TermPattern as T};
+    use GraphPattern as G;
+    let term = |t: &T, bound: &mut Vec<String>| match t {
+        T::Variable(v) => {
+            bound.push(v.as_str().into());
+            true
+        }
+        T::NamedNode(_) | T::Literal(_) => true,
+        _ => false,
+    };
+    match p {
+        G::Bgp { patterns } => patterns.iter().all(|t| {
+            if let N::Variable(v) = &t.predicate {
+                bound.push(v.as_str().into());
+            }
+            term(&t.subject, bound) && term(&t.object, bound)
+        }),
+        G::Join { left, right } => {
+            uncorrelated_shape(left, bound) && uncorrelated_shape(right, bound)
+        }
+        G::Graph { name, inner } => {
+            if let N::Variable(v) = name {
+                bound.push(v.as_str().into());
+            }
+            uncorrelated_shape(inner, bound)
+        }
+        G::Filter { expr, inner } => {
+            let mut used = vec![];
+            uncorrelated_shape(inner, bound)
+                && expression_variables(expr, &mut used)
+                && used.iter().all(|v| bound.contains(v))
+        }
+        _ => false,
+    }
+}
+/// Collect the variables an expression reads; false for forms that see outside it.
+fn expression_variables(e: &Expression, out: &mut Vec<String>) -> bool {
+    use Expression as E;
+    match e {
+        E::Variable(v) => {
+            out.push(v.as_str().into());
+            true
+        }
+        E::NamedNode(_) | E::Literal(_) => true,
+        E::Or(a, b)
+        | E::And(a, b)
+        | E::Equal(a, b)
+        | E::SameTerm(a, b)
+        | E::Greater(a, b)
+        | E::GreaterOrEqual(a, b)
+        | E::Less(a, b)
+        | E::LessOrEqual(a, b)
+        | E::Add(a, b)
+        | E::Subtract(a, b)
+        | E::Multiply(a, b)
+        | E::Divide(a, b) => expression_variables(a, out) && expression_variables(b, out),
+        E::UnaryPlus(a) | E::UnaryMinus(a) | E::Not(a) => expression_variables(a, out),
+        E::In(a, bs) => {
+            expression_variables(a, out) && bs.iter().all(|b| expression_variables(b, out))
+        }
+        E::If(a, b, c) => {
+            expression_variables(a, out)
+                && expression_variables(b, out)
+                && expression_variables(c, out)
+        }
+        E::Coalesce(args) | E::FunctionCall(_, args) => {
+            args.iter().all(|a| expression_variables(a, out))
+        }
+        _ => false,
     }
 }

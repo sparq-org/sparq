@@ -330,6 +330,7 @@ impl Layout {
         envelope: &EnvelopeInputs,
         revealed: Option<&RevealedInputs>,
     ) -> Result<Vec<Word>, Error> {
+        plan.envelope_features().check(envelope)?;
         let mut words = self.reconstruct_words(
             plan,
             statement,

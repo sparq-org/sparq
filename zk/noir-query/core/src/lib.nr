@@ -70,3 +70,4 @@ mod term_identity_tests;
 pub mod envelope;
 
 pub mod ops_core_envelope;
+mod suite_mixed_tests;

@@ -39,6 +39,12 @@ fn suite_constants_for_closed_profile_match() {
 }
 #[test]
 fn groups_having_subquery_and_empty_sum_execute() {
+    let Some(gate) = support::gate(
+        "groups_having_subquery_and_empty_sum_execute",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
     for query in [
         "SELECT (SUM(?x) AS ?s) (COUNT(?x) AS ?c) WHERE {VALUES ?x {1 2 3}}",
         "SELECT (SUM(?x) AS ?s) (COUNT(?x) AS ?c) WHERE {VALUES ?x {}}",
@@ -53,9 +59,16 @@ fn groups_having_subquery_and_empty_sum_execute() {
         let group=p.nodes().iter().position(|n|matches!(n.operator,sparq_zk_query::plan::Operator::Closed(sparq_zk_query::plan_closed::ClosedOperator::Group{..}))).unwrap();
         let mut bad=trace.clone();bad.tables[group].rows.clear();let input=prover_toml(&p,&[],&SuiteEncoder,&bad,[7;32],[3;32]).unwrap();assert!(driver.execute(&input,"missing_group").is_err());
     }
+    support::complete(gate);
 }
 #[test]
 fn aggregate_corpus_executes_with_engine_expected_and_altered_controls() {
+    let Some(gate) = support::gate(
+        "aggregate_corpus_executes_with_engine_expected_and_altered_controls",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
     use sparq_zk_query::interp::ResultValue;
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let corpus: serde_json::Value =
@@ -154,6 +167,7 @@ fn aggregate_corpus_executes_with_engine_expected_and_altered_controls() {
             .execute(&render(&bad), "aggregate_wrong_result")
             .is_err());
     }
+    support::complete(gate);
 }
 #[test]
 fn issuer_key_name_vector_matches_the_suite() {
@@ -201,7 +215,7 @@ fn credential_profile_codegen_only_wires_the_checked_activation_flags() {
         )],
     )
     .unwrap();
-    let package = sparq_zk_query::codegen::generate(&p).unwrap();
+    let package = sparq_zk_query::codegen::generate_suite_fixture(&p).unwrap();
     let source = &package.files[&format!("{}/src/main.nr", package.name)];
     assert!(source.contains("credential_proof_0.pk, credential_flags[0],"));
     for token in ["assert(", "for ", "if ", " < credential_count"] {
@@ -211,7 +225,7 @@ fn credential_profile_codegen_only_wires_the_checked_activation_flags() {
 
 #[test]
 fn numeric_promotion_and_decimal_sum_bind_execute() {
-    let Some(gate) = support::gate("numeric_promotion_and_decimal_sum_bind_execute", &["nargo"])
+    let Some(gate) = support::gate("numeric_promotion_and_decimal_sum_bind_execute", &["nargo", "bb"])
     else {
         return;
     };
