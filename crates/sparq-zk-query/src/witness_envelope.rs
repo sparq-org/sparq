@@ -23,12 +23,14 @@ pub struct HolderWitness {
 pub struct StatusWitness {
     pub quad_index: usize,
     pub bit_len: u32,
+    /// Actual bit-tree depth, bounded independently of the accepted-set depth.
     pub depth: u32,
     pub root: Word,
     pub accepted_index: u32,
     pub accepted_siblings: Vec<Word>,
     pub bit: bool,
     pub path_index: u64,
+    /// Leaf-to-root siblings, with exactly the actual bit-tree depth entries.
     pub path: Vec<Word>,
 }
 /// Evidence slots are ordered like the presented credentials.
@@ -79,7 +81,7 @@ fn membership(index: u64, path: &[Word], capacity: usize) -> Result<Value, Error
     Ok(json!({"index":index.to_string(),"siblings":siblings}))
 }
 fn empty_status() -> Value {
-    json!({"present":false,"bit_len":0,"root":"0","accepted":{"index":"0","siblings":vec!["0";4]},"bit":false,
+    json!({"depth":0,"present":false,"bit_len":0,"root":"0","accepted":{"index":"0","siblings":vec!["0";4]},"bit":false,
         "path":{"index":"0","siblings":vec!["0";32]},"purpose":vec![0;16],"purpose_len":0,
         "index":vec![0;20],"index_len":0,"size":vec![0;20],"size_len":0})
 }
@@ -97,7 +99,7 @@ fn raw_credential(
         until = lexical(c, &root, "https://www.w3.org/2018/credentials#validUntil")?;
         let quads = c.quads()?;
         for proof in e.into_iter().flat_map(|e| &e.statuses) {
-            if proof.depth != 32 || proof.path.len() != 32 {
+            if proof.depth > 32 || proof.path.len() != proof.depth as usize {
                 return Err(Error::Capacity("status bit tree depth".into()));
             }
             if proof.quad_index >= quads.len() || proof.quad_index >= capacity {
@@ -132,7 +134,7 @@ fn raw_credential(
                 )?,
                 20,
             )?;
-            status[proof.quad_index] = json!({"present":true,"bit_len":proof.bit_len,"root":field_to_hex(&field(proof.root)?),
+            status[proof.quad_index] = json!({"depth":proof.depth,"present":true,"bit_len":proof.bit_len,"root":field_to_hex(&field(proof.root)?),
                 "accepted":membership(proof.accepted_index as u64,&proof.accepted_siblings,4)?,"bit":proof.bit,
                 "path":membership(proof.path_index,&proof.path,32)?,"purpose":purpose,"purpose_len":purpose_len,
                 "index":index,"index_len":index_len,"size":size,"size_len":size_len});

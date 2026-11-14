@@ -147,6 +147,13 @@ of the evaluation context are not modelled. Adapters owe all of these; the READM
 obligation. Because `QueryMethod` implementations are trusted local code, trait compliance is
 not evidence of correctness.
 
+## Noir query compiler
+
+The unpublished `sparq-zk-query` compiler is research grade and not externally
+audited. Its canonical plan and opening profile are reconstructed from the
+verifier's stored request. Credential-slot, quad and table limits select compiled
+capacities; overflow refuses independently of final result limits.
+
 The host compiler modules and presentation values build for WebAssembly; the
 native `method::Compiler` alone owns subprocesses and temporary proof files.
 `Request::plan()` reconstructs the trusted plan and credential limits, while
@@ -158,11 +165,9 @@ Admit it with `Request::new_authenticated_with_policy(stored, bounds, key,
 envelope, quad_bounds)` and obtain it through `Request::envelope_inputs()`.
 `Layout::reconstruct_authenticated_with_envelope` and
 `witness::prover_toml_authenticated_with_envelope` consume the same typed group.
-The existing authenticated methods retain the issuer-only profile. Enabled
-holder, status, validity and freshness policies require the statement lane's
-consumer; the current native driver refuses them by name until it is integrated.
-Typed canonical policy inputs also require that consumer, even when their tree
-depth happens to match the issuer-only relation.
+The authenticated methods use the canonical issuer and envelope consumers.
+Enabled holder, status, validity and freshness policies consume private evidence
+through `Compiler::prove_with_envelope`; `prove` supplies empty evidence.
 `Request::new_authenticated_with_envelope(stored, bounds, key, policy,
 quad_bounds)` takes `envelope_policy::PolicyInput`, derives its canonical roots
 and retains it for fresh `envelope_inputs()` derivation during verification.
@@ -365,6 +370,48 @@ checks the complete signed issuer/method/key member against its path.
 accepts `EnvelopeWitness`: ordered `CredentialEvidence` slots, shared `HolderWitness`
 signatures and per-row `StatusWitness` paths. Existing `prove` passes empty evidence.
 The renderer derives lexical status/validity openings from signed properties;
-sealed suite cells never enter the ABI. The current status adapter admits its fixed
-bit-tree depth and refuses other depths by name. Public policy and roots always come
-from the stored request. Native proving remains hidden-signature mode.
+sealed suite cells never enter the ABI. `StatusWitness.depth` is the actual private
+bit-tree depth and must match the supplied sibling count before bounded padding.
+The shared bounded consumer binds that depth to the snapshot and path; active
+paths constrain unused siblings to zero. The public accepted-snapshot set depth
+is separate. Public policy and roots come from the stored request. Native proving
+remains hidden-signature mode.
+
+### Closed graph fixtures
+
+`credential_graphs` supplies a separate research fixture adapter.
+`canonical_credentials` returns `Result`; propagate metadata-validation errors
+before assigning fixture ranks. Its graph evaluation requires canonical credential
+order and refuses an unsorted fixture. The canonical native method preserves the
+ordered slots selected by its request.
+
+`credential_graphs::lower` and `bind_issuer_registry` produce issuer-registry
+fixture profiles. Use `codegen::generate_operator_fixture` for supplied-cell
+relations. Canonical `codegen::generate` refuses that fixture profile and derives
+issuer authority through the envelope consumer. Suite fixture entry points are
+explicitly named; canonical closed-witness augmentation remains an integration
+item and does not establish target proof acceptance.
+
+For per-table fixture limits, lower a skeleton at the outer-row bound and call
+`plan_closed::with_row_bounds(plan, request_bounds, node_row_buckets)`. Supply a
+supported bucket for every node within the public ceiling. The plan hash commits
+each choice and the shared interpreter checks every table. Read
+`nodes()[i].output.capacity` for intermediate tables; the refined
+`capacity().rows_per_table` selects the public result ABI. EXISTS capture slots
+must match the left table's bucket. These choices come from the receiver's stored
+profile, independently of private cardinalities.
+
+Refinement emits `ClosedOperator::Join` for wide joins. Its supplied-cell fixture
+uses `witness_closed::operator_prover_toml`, which includes private inverse maps
+and makes no credential-authentication claim. `evaluate_cells_for_request` keeps
+credential boundaries and request-scoped graph names; use the witness digest.
+`evaluate_for_request` is the complete-credential fixture evaluator. Value-read
+relations check every active candidate, including rejected NOT EXISTS rows and
+non-minimum aggregate operands. Boolean BIND leaves errors unbound; aggregate
+arithmetic keeps its capacity channel and refuses overflow.
+
+The closed profile admits correlated EXISTS in boolean FILTER/BIND, implicit-group
+MIN/COUNT expressions, exact integer/decimal SUM subqueries and grouped HAVING.
+Lexical openings remain profile-bounded. These operator interfaces are research
+grade and not externally audited; full target execution and proof evidence remain
+required for a whole-method claim.

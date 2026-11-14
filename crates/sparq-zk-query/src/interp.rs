@@ -209,39 +209,23 @@ pub fn evaluate_dataset(
         let input = |id: NodeId| &tables[id as usize].rows;
         let schema = |id: NodeId| &plan.nodes[id as usize].output.variables;
         let mut rows = match &node.operator {
-            Operator::Closed(op) => closed::evaluate(op, node, plan, &tables, &dataset, input_dataset, &params)?,
+            Operator::Closed(crate::plan_closed::ClosedOperator::Scan {
+                pattern,
+                context,
+                credential: None,
+            }) if !crate::credential_graphs::is_profile(plan) => scan_rows(
+                pattern,
+                &node.output.variables,
+                &dataset,
+                &params,
+                Some((schema(*context), input(*context).first().map(Vec::as_slice))),
+            ),
+            Operator::Closed(op) => {
+                closed::evaluate(op, node, plan, &tables, &dataset, input_dataset, &params)?
+            }
             Operator::Unit => vec![vec![]],
             Operator::Scan(pattern) => {
-                let mut rows = vec![];
-                for quad in &dataset {
-                    let mut row = vec![Cell::default(); node.output.variables.len()];
-                    let mut matches = true;
-                    for (i, slot) in pattern.iter().enumerate() {
-                        match slot {
-                            Slot::Parameter(p) => {
-                                matches &=
-                                    quad[i].same_term(params[*p as usize].expect("term parameter"))
-                            }
-                            Slot::Variable(v) => {
-                                let col = node
-                                    .output
-                                    .variables
-                                    .iter()
-                                    .position(|a| a == v)
-                                    .expect("scan schema");
-                                if row[col].bound {
-                                    matches &= row[col].same_term(quad[i]);
-                                } else {
-                                    row[col] = quad[i];
-                                }
-                            }
-                        }
-                    }
-                    if matches {
-                        rows.push(row);
-                    }
-                }
-                rows
+                scan_rows(pattern, &node.output.variables, &dataset, &params, None)
             }
             Operator::Join(a, b) => {
                 let mut rows = vec![];
@@ -326,6 +310,7 @@ pub fn evaluate_dataset(
         if rows.len() > plan.bounds.rows_per_table as usize {
             return Err(Error::Capacity("operator output".into()));
         }
+        crate::plan_closed::check_row_bound(node, rows.len())?;
         rows.sort_by_key(|r| row_key(r));
         tables.push(Table { rows });
     }
@@ -343,6 +328,49 @@ pub fn evaluate_dataset(
         },
     };
     Ok(Trace { tables, result })
+}
+
+fn scan_rows(
+    pattern: &[Slot; 3],
+    variables: &[Var],
+    dataset: &[[Cell; 4]],
+    parameters: &[Option<Cell>],
+    context: Option<(&[Var], Option<&[Cell]>)>,
+) -> Vec<Row> {
+    if context.is_some_and(|(_, row)| row.is_none()) {
+        return vec![];
+    }
+    let mut rows = vec![];
+    for quad in dataset {
+        let mut row = vec![Cell::default(); variables.len()];
+        let mut matches = true;
+        for (i, slot) in pattern.iter().enumerate() {
+            match slot {
+                Slot::Parameter(p) => {
+                    matches &= quad[i].same_term(parameters[*p as usize].expect("term parameter"));
+                }
+                Slot::Variable(v) => {
+                    let captured = context
+                        .and_then(|(schema, row)| row.map(|row| lookup(schema, row, *v)))
+                        .unwrap_or_default();
+                    if captured.bound {
+                        matches &= quad[i].same_term(captured);
+                    } else {
+                        let col = variables.iter().position(|x| x == v).expect("scan schema");
+                        if row[col].bound {
+                            matches &= row[col].same_term(quad[i]);
+                        } else {
+                            row[col] = quad[i];
+                        }
+                    }
+                }
+            }
+        }
+        if matches {
+            rows.push(row);
+        }
+    }
+    rows
 }
 
 // Result blank nodes have presentation-local identities, independent of the

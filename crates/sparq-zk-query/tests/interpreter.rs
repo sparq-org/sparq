@@ -15,6 +15,25 @@ const BOUNDS: Bounds = Bounds {
 };
 
 #[test]
+fn shared_interpreter_enforces_each_verifier_selected_table_bucket() {
+    let bounds = Bounds {
+        credentials: 1,
+        quads_per_credential: 4,
+        rows_per_table: 4,
+    };
+    let plan =
+        sparq_zk_query::credential_graphs::lower("SELECT ?x WHERE {VALUES ?x {1 2 3}}", bounds)
+            .unwrap();
+    assert!(evaluate(&plan, &[], &FixtureEncoder).is_ok());
+    let capacities = vec![2; plan.nodes().len()];
+    let refined = sparq_zk_query::plan_closed::with_row_bounds(plan, bounds, &capacities).unwrap();
+    assert_eq!(
+        evaluate(&refined, &[], &FixtureEncoder).unwrap_err(),
+        Error::Capacity("per-table operator output".into())
+    );
+}
+
+#[test]
 fn medication_input_capacity_covers_rejected_rows_before_the_result_limit() {
     let query = "SELECT ?medication WHERE {?medication <urn:strength> ?strength FILTER(?strength >= 31)} LIMIT 1";
     let input = |count| {

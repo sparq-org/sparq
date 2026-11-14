@@ -19,6 +19,50 @@ const B: Bounds = Bounds {
 };
 
 #[test]
+fn canonical_status_witness_admits_bounded_paths_and_refuses_mismatched_lengths() {
+    use sparq_zk_query::{
+        credential::assemble_issuer_dataset,
+        interp::evaluate_dataset,
+        witness::{prover_toml_enveloped, EnvelopeInput},
+    };
+    let plan = lower(
+        "ASK {}",
+        Bounds {
+            credentials: 1,
+            quads_per_credential: 16,
+            rows_per_table: 2,
+        },
+    )
+    .unwrap();
+    for depth in [0, 1, 32] {
+        let (data, policy, evidence) = authenticated::canonical_status_fixture(depth);
+        let dataset = assemble_issuer_dataset(&data, &policy.trust_members, [7; 32]).unwrap();
+        let trace = evaluate_dataset(&plan, &dataset, &FixtureEncoder).unwrap();
+        let render = |evidence: &_| {
+            prover_toml_enveloped(
+                &plan,
+                &data,
+                &trace,
+                [7; 32],
+                [3; 32],
+                EnvelopeInput {
+                    policy: &policy,
+                    evidence,
+                    revealed: None,
+                },
+            )
+        };
+        render(&evidence).unwrap();
+        let mut altered = evidence.clone();
+        altered.credentials[0].statuses[0].path.push([0; 32]);
+        assert_eq!(
+            render(&altered).unwrap_err(),
+            Error::Capacity("status bit tree depth".into())
+        );
+    }
+}
+
+#[test]
 fn authenticated_read_witnesses_cover_consumer_inputs_and_public_values() {
     use sparq_zk_query::{
         credential::SuiteEncoder, plan::Operator,

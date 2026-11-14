@@ -40,6 +40,11 @@ fn generate_inner(
     authenticated: bool,
     canonical_envelope: bool,
 ) -> Result<Package, Error> {
+    if canonical_envelope && crate::credential_graphs::is_profile(plan) {
+        return Err(Error::Unsupported(
+            "credential graph fixture profile in canonical generation".into(),
+        ));
+    }
     let hash: String = plan.hash().iter().map(|b| format!("{b:02x}")).collect();
     let name = format!("query_{hash}");
     let mut source = String::from(
@@ -211,6 +216,19 @@ fn generate_inner(
         .unwrap();
         if canonical_envelope {
             writeln!(source,"    core::envelope::check_holder_signatures(request_digest,holder_used_{},holder_evidence);",capacities.len()-1).unwrap();
+            if plan.nodes.iter().any(|n| {
+                matches!(
+                    n.operator,
+                    Operator::Closed(crate::plan_closed::ClosedOperator::GraphScan { .. })
+                )
+            }) {
+                writeln!(
+                    source,
+                    "    let closed_named_dataset = ops_core::named_view(dataset_{});",
+                    capacities.len() - 1
+                )
+                .unwrap();
+            }
         }
         let messages = array((0..capacities.len()).map(|c| format!("opened_{c}.message()")));
         writeln!(source,"    core::ops_core_statement::check_suite_dataset({messages}, credential_count, presentation_salt, input_commitment);").unwrap();

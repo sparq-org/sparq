@@ -10,6 +10,93 @@ const B: Bounds = Bounds {
 };
 
 #[test]
+fn canonical_generation_keeps_fixture_issuer_profiles_explicit() {
+    let plan = sparq_zk_query::credential_graphs::lower("ASK {}", B).unwrap();
+    let plan = sparq_zk_query::credential_graphs::bind_issuer_registry(
+        plan,
+        &[(
+            oxrdf::NamedNode::new_unchecked("urn:issuer"),
+            sparq_zk::sig::SecretKey::from_seed(19).public_key(),
+        )],
+    )
+    .unwrap();
+    assert!(matches!(
+        generate(&plan),
+        Err(sparq_zk_query::Error::Unsupported(_))
+    ));
+    assert!(sparq_zk_query::codegen::generate_operator_fixture(&plan).is_ok());
+}
+
+#[test]
+fn exact_targets_use_the_authenticated_named_view() {
+    for (query, credentials, quads, rows, slots) in [
+        (
+            include_str!("fixtures/solid_paths/insurance-count.rq"),
+            2,
+            64,
+            4,
+            vec![16, 64],
+        ),
+        (
+            include_str!("fixtures/solid_paths/insurance-closed.rq"),
+            2,
+            64,
+            16,
+            vec![16, 64],
+        ),
+        (
+            include_str!("fixtures/solid_paths/trial-eligibility.rq"),
+            1,
+            64,
+            32,
+            vec![64],
+        ),
+        (
+            include_str!("fixtures/solid_paths/recycled-min.rq"),
+            4,
+            16,
+            4,
+            vec![16; 4],
+        ),
+        (
+            include_str!("fixtures/solid_paths/recycled-sum.rq"),
+            4,
+            16,
+            4,
+            vec![16; 4],
+        ),
+        (
+            include_str!("fixtures/solid_paths/recycled-having.rq"),
+            4,
+            16,
+            4,
+            vec![16; 4],
+        ),
+    ] {
+        let plan = lower(
+            query,
+            Bounds {
+                credentials,
+                quads_per_credential: quads,
+                rows_per_table: rows,
+            },
+        )
+        .unwrap()
+        .with_credential_quad_bounds(&slots)
+        .unwrap();
+        let package = generate(&plan).unwrap();
+        let source = &package.files[&format!("{}/src/main.nr", package.name)];
+        assert!(source.contains("let closed_named_dataset = ops_core::named_view("));
+        assert!(source.contains("ops_closed_dataset::graph_scan_bound("));
+        assert!(!source.contains("ops_closed_issuer_standin"));
+        assert!(!source.contains("ops_closed_dataset::request_graphs("));
+        assert!(!source.contains("ops_closed_dataset::default_graph"));
+        assert!(!source.contains("assert("));
+        assert!(!source.contains("for "));
+    }
+}
+
+#[test]
 fn generation_is_byte_identical_and_constants_are_inputs() {
     let a = lower(
         "SELECT DISTINCT ?s WHERE {?s <urn:p> ?x FILTER(?x >= 1 && ?x < 3)} LIMIT 1",

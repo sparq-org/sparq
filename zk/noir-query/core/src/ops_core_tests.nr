@@ -6,6 +6,20 @@ fn iri(n: Field) -> TermCell {
 }
 
 #[test]
+fn identity_named_view_excludes_default_assertions_and_inactive_rows() {
+    let source = ops_core::Dataset {
+        rows: [[iri(1),iri(9),iri(10)], [iri(2),iri(9),iri(10)], [iri(3),iri(9),iri(10)]],
+        active: [true,true,false], graphs: [iri(100),unbound(),iri(101)],
+    };
+    let view = ops_core::named_view(source);
+    assert(view.active == [true,false,false]);
+    for i in 0..3 {
+        assert(crate::table::equal_row(view.rows[i], source.rows[i]));
+        assert(crate::table::equal_cell(view.graphs[i], source.graphs[i]));
+    }
+}
+
+#[test]
 fn values_honest() { ops_core::values([[iri(2)], [iri(1)]], Table { rows: [[iri(1)], [iri(2)]], len: 2 }); }
 
 #[test(should_fail_with = "operator length")]
