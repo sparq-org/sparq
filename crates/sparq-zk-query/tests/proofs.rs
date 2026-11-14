@@ -941,6 +941,67 @@ fn stored_request_reconstructs_the_verifier_selected_opening_profile() {
 }
 
 #[test]
+fn stored_request_reconstructs_per_table_row_bounds() {
+    use sparq_zk_query::{capacity::OpeningProfile, plan::EnvelopeFeatures, plan_closed};
+    let query = "SELECT ?s WHERE { ?s <urn:p> ?o FILTER NOT EXISTS { ?s <urn:q> ?x } }";
+    let ceiling = Bounds {
+        rows_per_table: 16,
+        ..B
+    };
+    let lowered = sparq_zk_query::lower::lower(query, ceiling).unwrap();
+    let rows = plan_closed::exists_row_bounds(&lowered, 4, 16);
+    assert!(rows.contains(&4) && rows.contains(&16), "{rows:?}");
+    let shaped = plan_closed::with_row_bounds(lowered, ceiling, &rows).unwrap();
+    let key = vec![41; 8];
+    let prepared = Prepared {
+        descriptor: sparq_zk_query::request::descriptor(&shaped, &key).unwrap(),
+        plan: shaped,
+        verification_key: key.clone(),
+        artifact: serde_json::json!({}),
+    };
+    let mut spec = request_spec(&stored(&prepared, query, 9, "urn:verifier", None));
+    let mut requirements = requirements_spec(&spec.requirements);
+    requirements.source_evidence = Some(SourceEvidence::IssuerAuthenticated);
+    requirements.accepted_suites = vec![id(sparq_zk_query::request::SUITE)];
+    spec.requirements = QueryRequirements::new(requirements).unwrap();
+    let stored = StoredRequest::new(spec).unwrap();
+    let policy = || sparq_zk_query::envelope_policy::PolicyInput {
+        trust_members: vec![sparq_zk_query::envelope_policy::TrustMember {
+            issuer: oxrdf::NamedNode::new_unchecked("urn:issuer"),
+            verification_method: oxrdf::NamedNode::new_unchecked("urn:issuer#key"),
+            key: sparq_zk::sig::SecretKey::from_seed(19).public_key(),
+        }],
+        ..Default::default()
+    };
+    let make = |table_rows: Option<&[u32]>| {
+        Request::new_authenticated_with_envelope_profile_and_table_rows(
+            stored.clone(),
+            ceiling,
+            key.clone(),
+            policy(),
+            None,
+            OpeningProfile::default(),
+            table_rows,
+        )
+    };
+    let request = make(Some(&rows)).unwrap();
+    assert_eq!(request.plan().unwrap().hash(), prepared.plan.hash());
+    assert_eq!(request.table_row_bounds(), Some(rows.as_slice()));
+    assert!(request.canonical_rdf().contains("tableRowBounds"));
+    assert_eq!(EnvelopeFeatures::default(), request.envelope_features());
+    // A verifier that drops or widens the stored buckets rebuilds a different plan.
+    assert_eq!(make(None).unwrap_err(), Error::Invalid("method descriptor".into()));
+    assert_eq!(
+        make(Some(&vec![16; rows.len()])).unwrap_err(),
+        Error::Invalid("method descriptor".into())
+    );
+    assert_eq!(
+        make(Some(&rows[1..])).unwrap_err(),
+        Error::Capacity("per-table row bounds".into())
+    );
+}
+
+#[test]
 fn authenticated_request_admits_and_binds_typed_envelope_properties() {
     use sparq_zk_query::statement::EnvelopeInputs;
     let plan = sparq_zk_query::lower::lower("ASK {}", B)
