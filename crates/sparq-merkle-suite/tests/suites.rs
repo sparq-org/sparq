@@ -29,6 +29,61 @@ const CONFIG: &str =
     "_:p <https://w3id.org/security#cryptosuite> \"schnorr-poseidon2-merkle-2026\" .\n";
 
 #[test]
+fn rdf_identity_binds_kind_lexical_datatype_and_language() {
+    use oxrdf::{BlankNode, Term};
+    let iri = Term::NamedNode(NamedNode::new_unchecked("urn:identity"));
+    let terms = [
+        iri.clone(),
+        Term::NamedNode(NamedNode::new_unchecked("urn:Identity")),
+        Term::BlankNode(BlankNode::new_unchecked("urn:identity")),
+        Term::Literal(Literal::new_simple_literal("example")),
+        Term::Literal(typed("example", "other")),
+        Term::Literal(Literal::new_language_tagged_literal("example", "en").unwrap()),
+        Term::Literal(Literal::new_language_tagged_literal("example", "fr").unwrap()),
+    ];
+    for (i, term) in terms.iter().enumerate() {
+        let identity = p::term_identity(term).unwrap();
+        assert_eq!(identity, p::term_cell(term, 1).unwrap().identity);
+        for other in &terms[i + 1..] {
+            assert_ne!(identity, p::term_identity(other).unwrap());
+        }
+    }
+    assert_eq!(p::default_graph().identity, p::default_graph().enc);
+    let blank = &terms[2];
+    let a = p::term_cell(blank, 1).unwrap();
+    let b = p::term_cell(blank, 2).unwrap();
+    assert_eq!(a.identity, b.identity);
+    assert_ne!(a.credential, b.credential);
+    let graph = sparq_merkle_suite::metadata::graph_name([11, 13], 1).unwrap();
+    assert_eq!(graph.identity, graph.enc);
+}
+
+#[test]
+fn issuer_signed_keys_do_not_change_term_identity() {
+    use oxrdf::Term;
+    use sparq_zk::poseidon2;
+    let term = Term::Literal(typed("1250.50", "decimal"));
+    let a = p::term_cell(&term, 0).unwrap();
+    let mut b = a.clone();
+    b.key += Fr::from(1u64);
+    b.enc = poseidon2::hash(&[
+        Fr::from(b.kind),
+        p::hash_bytes(p::TERM_DOMAIN, &b.bytes),
+        b.key,
+    ]);
+    assert_eq!(a.identity, b.identity);
+    assert_ne!(a.enc, b.enc);
+    let signer = p::keypair_from_seed(&[7; 32]);
+    for cell in [a, b] {
+        let q = p::hash_quad([Fr::from(1u64), Fr::from(2u64), cell.enc, p::default_graph().enc]);
+        let root = p::root(&[q], Fr::from(7u64)).unwrap();
+        let message = p::signed_message(Fr::from(7u64), 1, root, &[9; 32], Fr::from(0u64));
+        let signature = sig::sign_deterministic(&signer, &message);
+        assert!(sig::verify(&signer.public_key(), &message, &signature));
+    }
+}
+
+#[test]
 fn frozen_sha256_copy_matches_existing_vectors_and_new_source() {
     let a = quad(
         "_:c14n0 <http://ex/balance> \"1250.50\"^^<http://www.w3.org/2001/XMLSchema#decimal> .",

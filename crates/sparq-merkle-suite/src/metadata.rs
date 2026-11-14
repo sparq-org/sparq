@@ -127,6 +127,8 @@ pub fn graph_name(request: [u128; 2], index: u32) -> Result<p::TermCell, Error> 
         Fr::from(request[1]),
         Fr::from(index),
     ]);
+    // Synthetic graph names already have a dedicated, key-free encoding.
+    cell.identity = cell.enc;
     cell.credential = scope;
     cell.bytes.clear();
     Ok(cell)

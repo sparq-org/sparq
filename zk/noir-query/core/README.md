@@ -18,6 +18,13 @@ by the constructors, not ABI witness types.
 Their private empty-storage marker makes opaque cells invalid as ABI witnesses.
 Construct them in constrained code; do not obtain them from hints.
 
+Scan, join, DISTINCT, sameTerm, parameters and released terms use
+`TermCell::identity()`; blank nodes additionally compare credential scope.
+`enc()` stays for commitments; value consumers keep full key checks. The identity
+hash shares the complete lexical/datatype/language frame with the keyed encoding.
+Padding has zero identity; the default graph and synthetic credential graph names
+reuse their existing fixed or domain-separated key-free encoding.
+
 For caller-selected backing bounds use
 `suite_entry::BoundedTermOpening<L, D, G>`, `open_bounded_cell(raw, scope)` and
 `open_bounded_quads(raw_quads, scope)`. Runtime lengths remain witnesses and all
