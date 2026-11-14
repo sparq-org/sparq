@@ -50,7 +50,7 @@ fn predicate(p: &Predicate, plan: &Plan, vars: &mut BTreeSet<Var>) {
             predicate(b, plan, vars);
         }
         // EXISTS reads table cardinality. Its child value consumers get their own sites.
-        Predicate::Exists(_) => (),
+        Predicate::Exists(_) | Predicate::SemiJoin(_) => (),
     }
 }
 fn identity_strings(p: &Predicate) -> bool {
@@ -59,7 +59,7 @@ fn identity_strings(p: &Predicate) -> bool {
         Predicate::Arithmetic(_) => false,
         Predicate::Not(a) => identity_strings(a),
         Predicate::And(a, b) | Predicate::Or(a, b) => identity_strings(a) && identity_strings(b),
-        Predicate::Exists(_) => true,
+        Predicate::Exists(_) | Predicate::SemiJoin(_) => true,
     }
 }
 pub(crate) fn sites(plan: &Plan, node: usize) -> Vec<ReadSite> {

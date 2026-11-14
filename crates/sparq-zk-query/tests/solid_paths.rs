@@ -10,11 +10,12 @@ use sparq_zk_query::{
     credential_graphs as graphs,
     interp::{ResultValue, Trace},
     plan::{Operator, Plan},
-    plan_closed::{ClosedOperator, Predicate},
+    plan_closed::{self, ClosedOperator, Predicate},
     witness_closed,
 };
 use std::path::Path;
 const DIGEST: [u8; 32] = [7; 32];
+const OTHER: &str = "urn:fictional:other-subject";
 const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
 const ISSUERS: [&str; 6] = [
     "urn:fictional:insurance-quote:licensing",
@@ -143,6 +144,15 @@ fn fixtures(target: &str, case: &str) -> Vec<Credential> {
             } else {
                 reg += &dates;
             }
+            if case == "other-claim" {
+                // An in-period claim about another subject never correlates.
+                reg += &fact(OTHER, "urn:claim:claims.claim", "<urn:claim:2>");
+                reg += &fact(
+                    "urn:claim:2",
+                    "urn:claim:claims.date",
+                    &lit("2024-03-02", "date"),
+                );
+            }
             if case == "claim" || case == "old-claim" {
                 reg += &fact(owner, "urn:claim:claims.claim", "<urn:claim:1>");
                 reg += &fact(
@@ -184,6 +194,16 @@ fn fixtures(target: &str, case: &str) -> Vec<Credential> {
                 "\"condition-a\""
             },
         );
+        if case == "diagnoses" {
+            // Honest-looking extra claims that widen the outer rows past R4.
+            for i in 0..4 {
+                data += &fact(
+                    owner,
+                    "urn:claim:trial.diagnosis",
+                    &format!("\"condition-{i}\""),
+                );
+            }
+        }
         data += &period(
             if case == "start" {
                 "2026-11-02"
@@ -196,10 +216,16 @@ fn fixtures(target: &str, case: &str) -> Vec<Credential> {
                 "2026-11-13"
             },
         );
+        // "other-excluded" moves an excluded medicine to another subject, so it
+        // never correlates with the owner's row.
         data += &fact(
-            owner,
+            if case == "other-excluded" {
+                OTHER
+            } else {
+                owner
+            },
             "urn:claim:trial.medications",
-            if case == "excluded" {
+            if case == "excluded" || case == "other-excluded" {
                 "\"excluded-x\""
             } else {
                 "\"medicine-a\""
@@ -274,6 +300,7 @@ fn fixtures(target: &str, case: &str) -> Vec<Credential> {
 
 fn canonical_fixtures(
     target: &str,
+    case: &str,
 ) -> (
     Vec<Credential>,
     sparq_zk_query::envelope_policy::PolicyInput,
@@ -281,7 +308,7 @@ fn canonical_fixtures(
     use sparq_zk_query::envelope_policy::TrustMember;
     let mut policy = closed_native::canonical_policy();
     policy.trust_members.clear();
-    let data = fixtures(target, "honest");
+    let data = fixtures(target, case);
     for credential in &data {
         let quads = oxttl::NQuadsParser::new()
             .for_slice(credential.credential.document.as_bytes())
@@ -311,49 +338,9 @@ fn canonical_renderer_executes_all_six_solid_targets() {
     ) else {
         return;
     };
-    use sparq_zk_query::{
-        credential::assemble_issuer_dataset,
-        interp::evaluate_dataset,
-        witness::{prover_toml_enveloped, EnvelopeInput, EnvelopeWitness},
-    };
     for target in TARGETS {
-        let (data, policy) = canonical_fixtures(target);
-        let plan = sparq_zk_query::lower::lower(
-            &query(target),
-            Bounds {
-                credentials: if target.starts_with("recycled-") {
-                    4
-                } else {
-                    data.len() as u32
-                },
-                quads_per_credential: 8,
-                rows_per_table: if target.starts_with("recycled-") {
-                    4
-                } else {
-                    2
-                },
-            },
-        )
-        .unwrap();
-        let dataset = assemble_issuer_dataset(&data, &policy.trust_members, DIGEST).unwrap();
-        let trace = evaluate_dataset(&plan, &dataset, &SuiteEncoder).unwrap();
-        assert_eq!(released_for(target, &trace.result), Some(true), "{target}");
-        assert_eq!(engine(target, &data), Some(true), "{target}");
-        let render = |trace: &Trace| {
-            prover_toml_enveloped(
-                &plan,
-                &data,
-                trace,
-                DIGEST,
-                [3; 32],
-                EnvelopeInput {
-                    policy: &policy,
-                    evidence: &EnvelopeWitness::default(),
-                    revealed: None,
-                },
-            )
-            .unwrap()
-        };
+        let (plan, data, policy, trace) = canonical_case(target, Size::Small);
+        let render = |trace: &Trace| canonical_toml(&plan, &data, &policy, trace);
         let input = render(&trace);
         let package = codegen::generate(&plan).unwrap();
         let source = &package.files[&format!("{}/src/main.nr", package.name)];
@@ -409,6 +396,115 @@ fn canonical_renderer_executes_all_six_solid_targets() {
         eprintln!("canonical target {target}: complete witness and execution accepted; altered result refused");
     }
     support::complete(gate);
+}
+#[derive(Clone, Copy, PartialEq)]
+enum Size {
+    /// Small native buckets.
+    Small,
+    /// The 4 x 64 snapshot capacity.
+    Full,
+    /// The per-request buckets a receiver chooses for each target.
+    Request,
+}
+/// The canonical (production) plan for `target` at `size`.
+fn canonical_plan(target: &str, size: Size) -> Plan {
+    let credentials = fixtures(target, "honest").len() as u32;
+    let recycled = target.starts_with("recycled-");
+    let (bounds, quads) = match size {
+        Size::Small => (
+            Bounds {
+                credentials: if recycled { 4 } else { credentials },
+                quads_per_credential: 8,
+                rows_per_table: if recycled { 4 } else { 2 },
+            },
+            None,
+        ),
+        Size::Full => (
+            Bounds {
+                credentials: 4,
+                quads_per_credential: 64,
+                rows_per_table: 4,
+            },
+            None,
+        ),
+        Size::Request if recycled => (
+            Bounds {
+                credentials: 4,
+                quads_per_credential: 16,
+                rows_per_table: 4,
+            },
+            None,
+        ),
+        Size::Request if target == "trial-eligibility" => (
+            Bounds {
+                credentials: 1,
+                quads_per_credential: 64,
+                rows_per_table: 32,
+            },
+            None,
+        ),
+        Size::Request => (
+            Bounds {
+                credentials: 2,
+                quads_per_credential: 64,
+                rows_per_table: 16,
+            },
+            Some([16, 64]),
+        ),
+    };
+    let plan = sparq_zk_query::lower::lower(&query(target), bounds).unwrap();
+    let plan = match quads {
+        Some(q) => plan.with_credential_quad_bounds(&q).unwrap(),
+        None => plan,
+    };
+    // Request buckets size the NOT EXISTS body for the complete list and the
+    // outer tables for the single subject.
+    if size == Size::Request && matches!(target, "insurance-closed" | "trial-eligibility") {
+        let rows = plan_closed::exists_row_bounds(&plan, 4, bounds.rows_per_table);
+        plan_closed::with_row_bounds(plan, bounds, &rows).unwrap()
+    } else {
+        plan
+    }
+}
+/// The canonical program for `target` at `size` with its honest witness.
+fn canonical_case(
+    target: &str,
+    size: Size,
+) -> (
+    Plan,
+    Vec<Credential>,
+    sparq_zk_query::envelope_policy::PolicyInput,
+    Trace,
+) {
+    use sparq_zk_query::{credential::assemble_issuer_dataset, interp::evaluate_dataset};
+    let (data, policy) = canonical_fixtures(target, "honest");
+    let plan = canonical_plan(target, size);
+    let dataset = assemble_issuer_dataset(&data, &policy.trust_members, DIGEST).unwrap();
+    let trace = evaluate_dataset(&plan, &dataset, &SuiteEncoder).unwrap();
+    assert_eq!(released_for(target, &trace.result), Some(true), "{target}");
+    assert_eq!(engine(target, &data), Some(true), "{target}");
+    (plan, data, policy, trace)
+}
+fn canonical_toml(
+    plan: &Plan,
+    data: &[Credential],
+    policy: &sparq_zk_query::envelope_policy::PolicyInput,
+    trace: &Trace,
+) -> String {
+    use sparq_zk_query::witness::{prover_toml_enveloped, EnvelopeInput, EnvelopeWitness};
+    prover_toml_enveloped(
+        plan,
+        data,
+        trace,
+        DIGEST,
+        [3; 32],
+        EnvelopeInput {
+            policy,
+            evidence: &EnvelopeWitness::default(),
+            revealed: None,
+        },
+    )
+    .unwrap()
 }
 fn query(target: &str) -> String {
     std::fs::read_to_string(
@@ -505,7 +601,10 @@ fn cases(target: &str) -> Vec<(&str, Option<bool>)> {
         ]);
     }
     if target == "insurance-closed" {
-        out.push(("old-claim", Some(true)));
+        out.extend([("old-claim", Some(true)), ("other-claim", Some(true))]);
+    }
+    if target == "trial-eligibility" {
+        out.push(("other-excluded", Some(true)));
     }
     out
 }
@@ -612,6 +711,77 @@ fn engine(target: &str, data: &[Credential]) -> Option<bool> {
         assert_eq!(rows.len(), 1);
         Some(rows[0]["result"]["value"] == "true")
     }
+}
+fn predicates(p: &Plan) -> Vec<&Predicate> {
+    p.nodes()
+        .iter()
+        .filter_map(|n| match &n.operator {
+            Operator::Closed(
+                ClosedOperator::BindBoolean { predicate, .. }
+                | ClosedOperator::Filter { predicate, .. },
+            ) => Some(predicate),
+            _ => None,
+        })
+        .collect()
+}
+fn semi_join(p: &Predicate) -> bool {
+    match p {
+        Predicate::SemiJoin(_) => true,
+        Predicate::Not(a) => semi_join(a),
+        Predicate::And(a, b) | Predicate::Or(a, b) => semi_join(a) || semi_join(b),
+        _ => false,
+    }
+}
+fn captures(p: &Plan) -> usize {
+    p.nodes()
+        .iter()
+        .filter(|n| matches!(n.operator, Operator::Closed(ClosedOperator::Capture { .. })))
+        .count()
+}
+#[test]
+fn canonical_table_buckets_refuse_outer_and_body_overflow() {
+    use sparq_zk_query::{credential::assemble_issuer_dataset, interp::evaluate_dataset};
+    let target = "trial-eligibility";
+    let evaluate = |plan: &Plan, case: &str| {
+        let (data, policy) = canonical_fixtures(target, case);
+        let dataset = assemble_issuer_dataset(&data, &policy.trust_members, DIGEST).unwrap();
+        evaluate_dataset(plan, &dataset, &SuiteEncoder)
+    };
+    let refused = |result: Result<Trace, sparq_zk_query::Error>| {
+        matches!(result, Err(sparq_zk_query::Error::Capacity(m)) if m == "per-table operator output")
+    };
+    // Outer R4, body R32.
+    let plan = canonical_plan(target, Size::Request);
+    let rows: Vec<_> = plan.nodes().iter().map(|n| n.output.capacity).collect();
+    assert!(rows.contains(&4) && rows.contains(&32), "{rows:?}");
+    evaluate(&plan, "honest").unwrap();
+    evaluate(&plan, "medicines").unwrap();
+    assert!(refused(evaluate(&plan, "diagnoses")));
+    // A body bucket below the complete body refuses rather than truncating.
+    let bounds = plan.bounds();
+    let lowered = sparq_zk_query::lower::lower(&query(target), bounds).unwrap();
+    let rows = plan_closed::exists_row_bounds(&lowered, 4, 16);
+    let narrow = plan_closed::with_row_bounds(lowered, bounds, &rows).unwrap();
+    evaluate(&narrow, "honest").unwrap();
+    assert!(refused(evaluate(&narrow, "medicines")));
+}
+#[test]
+fn uncorrelated_not_exists_lowers_its_body_once() {
+    for target in ["insurance-closed", "trial-eligibility"] {
+        let canonical = canonical_case(target, Size::Request).0;
+        for p in [prepare(target, true), canonical] {
+            assert_eq!(captures(&p), 0, "{target}");
+            assert!(predicates(&p).into_iter().any(semi_join), "{target}");
+        }
+    }
+    // A FILTER that reads an outer variable keeps per-row substitution.
+    let text = query("insurance-closed").replace(
+        r#"FILTER(?d >= "2021-11-13"^^xsd:date)"#,
+        "FILTER(?d >= ?from)",
+    );
+    let p = prepare_query("insurance-closed", &text, false);
+    assert!(captures(&p) > 0);
+    assert!(!predicates(&p).into_iter().any(semi_join));
 }
 #[test]
 fn target_queries_match_engine_and_complete_interpreter() {
@@ -755,6 +925,7 @@ fn render(p: &Plan, data: &[Credential], trace: &Trace, auth: bool) -> String {
 fn rights(p: &Predicate, ids: &mut Vec<u32>) {
     match p {
         Predicate::Exists(x) => ids.extend(x),
+        Predicate::SemiJoin(x) => ids.push(*x),
         Predicate::Not(x) => rights(x, ids),
         Predicate::And(a, b) | Predicate::Or(a, b) => {
             rights(a, ids);
@@ -987,6 +1158,38 @@ fn recycled_having_authenticated() {
     };
     exercise(&gate, "recycled-having", true);
     support::complete(gate);
+}
+#[test]
+fn export_canonical_solid_programs_when_requested() {
+    let Ok(root) = std::env::var("SPARQ_CANONICAL_EXPORT_DIR") else {
+        return;
+    };
+    for target in TARGETS {
+        let size = if std::env::var_os("SPARQ_CANONICAL_EXPORT_REQUEST").is_some() {
+            Size::Request
+        } else {
+            Size::Full
+        };
+        let (plan, data, policy, trace) = canonical_case(target, size);
+        let pkg = codegen::generate(&plan).unwrap();
+        let root = Path::new(&root).join(target);
+        std::fs::create_dir_all(&root).unwrap();
+        write_package(&pkg, &root);
+        std::fs::write(root.join("package-name"), &pkg.name).unwrap();
+        let dir = root.join(&pkg.name);
+        std::fs::write(
+            dir.join("Prover.toml"),
+            canonical_toml(&plan, &data, &policy, &trace),
+        )
+        .unwrap();
+        let mut wrong = trace.clone();
+        alter_result(target, &mut wrong);
+        std::fs::write(
+            dir.join("Prover_wrong.toml"),
+            canonical_toml(&plan, &data, &policy, &wrong),
+        )
+        .unwrap();
+    }
 }
 #[test]
 fn export_solid_path_programs_when_requested() {

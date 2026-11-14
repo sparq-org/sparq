@@ -317,6 +317,15 @@ fn predicate_source(
             array(rights.iter().map(|id| format!("t{id}")))
         )
         .unwrap(),
+        Predicate::SemiJoin(right) => writeln!(
+            out,
+            "    let {name} = core::ops_closed_negation::semi_join(t{input}, t{right}, {});",
+            columns(
+                &plan.nodes[*right as usize].output.variables,
+                &plan.nodes[input as usize].output.variables
+            )
+        )
+        .unwrap(),
         Predicate::Arithmetic(e) => {
             let input_vars = &plan.nodes[input as usize].output.variables;
             let mut vars = input_vars.clone();
@@ -646,10 +655,14 @@ fn emit_reads(i: usize, plan: &Plan, out: &mut String) {
     }
 }
 
-/// The shared generator's bound is a per-table limit. Closed profiles can use
-/// that public value as a ceiling above independently compiled table buckets.
+/// The shared generator's bound is a per-table limit. Closed profiles and
+/// plans with per-table buckets use that public value as a ceiling above
+/// independently compiled (and hashed) table buckets.
 pub(super) fn finish(plan: &Plan, out: &mut String) {
-    if crate::credential_graphs::is_profile(plan) {
+    let ceiling = plan.bounds().rows_per_table;
+    if crate::credential_graphs::is_profile(plan)
+        || plan.nodes.iter().any(|n| n.output.capacity != ceiling)
+    {
         *out = out.replace(
             "ops_core::check_bound(",
             "core::ops_closed_common::check_bound(",

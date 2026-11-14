@@ -73,8 +73,9 @@ fn invalid_and_incomplete_bucket_choices_refuse() {
             Err(Error::Capacity(_))
         ));
     }
+    // Correlated: the body's FILTER reads ?x, which only the outer row binds.
     let p = graphs::lower(
-        "ASK { ?s <urn:p> ?x FILTER NOT EXISTS {?s <urn:q> ?x} }",
+        "ASK { ?s <urn:p> ?x FILTER NOT EXISTS {?s <urn:q> ?y FILTER(?y = ?x)} }",
         bounds(4),
     )
     .unwrap();

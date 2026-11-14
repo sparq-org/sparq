@@ -385,7 +385,7 @@ pub(super) fn evaluate(
                     &eval_row,
                     params,
                     tables,
-                    &plan.parameters,
+                    plan,
                 )?;
                 let bound = if error {
                     Cell::default()
@@ -415,7 +415,7 @@ pub(super) fn evaluate(
             for (i, r) in rows(*input).iter().enumerate() {
                 let (vars, row) = context_row(*context, schema(*input), r);
                 let (v, e) =
-                    predicate_value(predicate, i, &vars, &row, params, tables, &plan.parameters)?;
+                    predicate_value(predicate, i, &vars, &row, params, tables, plan)?;
                 if v && !e {
                     output.push(r.clone());
                 }
@@ -431,19 +431,29 @@ fn predicate_value(
     row: &[Cell],
     params: &[Option<Cell>],
     tables: &[Table],
-    public: &[Parameter],
+    plan: &Plan,
 ) -> Result<(bool, bool), Error> {
     Ok(match p {
         Predicate::Arithmetic(e) => e.evaluate(vars, row, params)?,
-        Predicate::Expression(e) => eval(e, vars, row, params, public)?.ebv()?,
+        Predicate::Expression(e) => eval(e, vars, row, params, &plan.parameters)?.ebv()?,
         Predicate::Exists(ids) => (!tables[ids[index] as usize].rows.is_empty(), false),
+        Predicate::SemiJoin(id) => {
+            let schema = &plan.nodes[*id as usize].output.variables;
+            let found = tables[*id as usize].rows.iter().any(|b| {
+                vars.iter().zip(row).all(|(v, l)| {
+                    let r = lookup(schema, b, *v);
+                    !l.bound || !r.bound || l.same_term(r)
+                })
+            });
+            (found, false)
+        }
         Predicate::Not(a) => {
-            let (v, e) = predicate_value(a, index, vars, row, params, tables, public)?;
+            let (v, e) = predicate_value(a, index, vars, row, params, tables, plan)?;
             (!v, e)
         }
         Predicate::And(a, b) | Predicate::Or(a, b) => {
-            let (a, ae) = predicate_value(a, index, vars, row, params, tables, public)?;
-            let (b, be) = predicate_value(b, index, vars, row, params, tables, public)?;
+            let (a, ae) = predicate_value(a, index, vars, row, params, tables, plan)?;
+            let (b, be) = predicate_value(b, index, vars, row, params, tables, plan)?;
             if matches!(p, Predicate::And(..)) {
                 (a && b, (ae || be) && !(!a && !ae || !b && !be))
             } else {

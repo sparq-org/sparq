@@ -16,7 +16,7 @@ fn extend(out: Table<4, 1>) {bind::extend(two(), [1], 0, 0, unbound(), false, ou
 
 #[test]
 fn optional_honest() {
-    let mut out = two();
+    let out = two();
     optional(out);
 }
 
@@ -50,7 +50,7 @@ fn optional_padding() {
 
 #[test]
 fn minus_honest() {
-    let mut out = two();
+    let out = two();
     minus(out);
 }
 
@@ -84,7 +84,7 @@ fn minus_padding() {
 
 #[test]
 fn exists_honest() {
-    let mut out = two();
+    let out = two();
     exists(out);
 }
 
@@ -118,7 +118,7 @@ fn exists_padding() {
 
 #[test]
 fn not_exists_honest() {
-    let mut out = two();
+    let out = two();
     not_exists(out);
 }
 
@@ -152,7 +152,7 @@ fn not_exists_padding() {
 
 #[test]
 fn union_honest() {
-    let mut out = two();
+    let out = two();
     union(out);
 }
 
@@ -186,7 +186,7 @@ fn union_padding() {
 
 #[test]
 fn extend_honest() {
-    let mut out = two();
+    let out = two();
     extend(out);
 }
 
@@ -281,7 +281,7 @@ fn substitute(out: Table<4,1>) {
 
 #[test]
 fn graph_honest() {
-    let mut out = graph_expected();
+    let out = graph_expected();
     graph(out);
 }
 
@@ -315,7 +315,7 @@ fn graph_padding() {
 
 #[test]
 fn scan_honest() {
-    let mut out = two();
+    let out = two();
     scan(out);
 }
 
@@ -349,7 +349,7 @@ fn scan_padding() {
 
 #[test]
 fn substitute_honest() {
-    let mut out = two();
+    let out = two();
     substitute(out);
 }
 
@@ -434,7 +434,7 @@ fn context_unit(out: Table<4,1>) {
 
 #[test]
 fn capture_honest() {
-    let mut out = append(empty::<4,1>(), [cell(1)], true);
+    let out = append(empty::<4,1>(), [cell(1)], true);
     capture(out);
 }
 

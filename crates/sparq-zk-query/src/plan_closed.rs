@@ -8,6 +8,9 @@ pub enum Predicate {
     Expression(Expr),
     Arithmetic(crate::closed_arith::Comparison),
     Exists(Vec<NodeId>),
+    /// Uncorrelated EXISTS: the body is evaluated once and a row passes when
+    /// some body row is compatible with it on their shared variables.
+    SemiJoin(NodeId),
     Not(Box<Predicate>),
     And(Box<Predicate>, Box<Predicate>),
     Or(Box<Predicate>, Box<Predicate>),
@@ -347,6 +350,7 @@ impl Predicate {
         match self {
             Self::Expression(_) | Self::Arithmetic(_) => (),
             Self::Exists(rights) => ids.extend(rights),
+            Self::SemiJoin(right) => ids.push(*right),
             Self::Not(a) => a.inputs(ids),
             Self::And(a, b) | Self::Or(a, b) => {
                 a.inputs(ids);
@@ -446,6 +450,10 @@ impl Writer {
                     self.id(*id);
                 }
             }
+            Predicate::SemiJoin(right) => {
+                self.byte(6);
+                self.id(*right);
+            }
             Predicate::Not(a) => {
                 self.byte(2);
                 self.predicate(a);
@@ -463,21 +471,48 @@ impl Writer {
     }
 }
 
-/// Apply verifier-selected row limits to a closed graph-profile skeleton.
-/// Evaluate through credential_graphs so every intermediate row limit is checked.
-/// Every node has one limit; private row counts never choose a capacity. The
-/// resulting schema capacities already belong to the canonical plan encoding.
+/// Per-node row limits from two public numbers: `body` for every table of an
+/// EXISTS or NOT EXISTS body and `outer` for every other table. Pass the result
+/// to [`with_row_bounds`] with `max(outer, body)` as the request ceiling.
+pub fn exists_row_bounds(plan: &crate::plan::Plan, outer: u32, body: u32) -> Vec<u32> {
+    let mut rows = vec![outer; plan.nodes.len()];
+    let mut stack = vec![];
+    for node in &plan.nodes {
+        if let crate::plan::Operator::Closed(
+            ClosedOperator::Filter { predicate, .. }
+            | ClosedOperator::BindBoolean { predicate, .. },
+        ) = &node.operator
+        {
+            predicate.inputs(&mut stack);
+        }
+    }
+    while let Some(id) = stack.pop() {
+        let id = id as usize;
+        if rows[id] == body {
+            continue;
+        }
+        rows[id] = body;
+        // A captured outer row belongs to the outer side.
+        if !matches!(
+            plan.nodes[id].operator,
+            crate::plan::Operator::Closed(ClosedOperator::Capture { .. })
+        ) {
+            stack.extend(plan.nodes[id].operator.inputs());
+        }
+    }
+    rows
+}
+
+/// Apply verifier-selected row limits to a closed plan. Both evaluators check
+/// every node against its own limit, so an overflow refuses. Every node has one
+/// limit; private row counts never choose a capacity. The resulting schema
+/// capacities already belong to the canonical plan encoding.
 pub fn with_row_bounds(
     mut plan: crate::plan::Plan,
     bounds: crate::capacity::Bounds,
     rows: &[u32],
 ) -> Result<crate::plan::Plan, crate::Error> {
     use crate::{capacity::Bounds, Error};
-    if !crate::credential_graphs::is_profile(&plan) {
-        return Err(Error::Unsupported(
-            "per-table bounds require the closed graph evaluator".into(),
-        ));
-    }
     if bounds.credentials != plan.bounds.credentials
         || bounds.quads_per_credential != plan.bounds.quads_per_credential
         || rows.len() != plan.nodes.len()
