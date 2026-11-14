@@ -5,7 +5,7 @@ use crate::ops_closed_numeric::{encode,OFFSET,PREFIX};
 use crate::ops_closed_group::Aggregate;
 fn int(n:u64)->TermCell {
     let mut c=encode(OFFSET+n as Field*1000000000000000000,false);c.key=c.key+PREFIX;
-    c.lang=crate::term::hash_bytes(crate::suite_constants::LANGUAGE_DOMAIN,std::collections::bounded_vec::BoundedVec::<u8,0>::new());c
+    c.lang=crate::suite_constants::LANG_EMPTY;c
 }
 fn input()->Table<4,1>{crate::table::canonicalize(append(append(empty(),[int(1)],true),[int(2)],true))}
 fn sum(out:Table<4,1>){crate::ops_closed_group_plan::group(input(),out,[],[Aggregate{kind:2,column:0,distinct:false}]);}

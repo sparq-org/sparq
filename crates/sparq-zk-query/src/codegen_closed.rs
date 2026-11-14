@@ -90,7 +90,7 @@ pub(super) fn generate(
                     offset += n;
                 }
                 let messages =
-                    array((0..plan.capacity().credentials).map(|c| format!("opened_{c}.message")));
+                    array((0..plan.capacity().credentials).map(|c| format!("opened_{c}.message()")));
                 writeln!(out,"    core::ops_closed_dataset::canonical_credentials({messages}, credential_count);").unwrap();
             }
             let source = if out.contains("credential_0:") {
@@ -473,6 +473,8 @@ fn scan_source(
             capacities.iter().take(c as usize).sum::<u32>(),
             capacities[c as usize]
         )
+    } else if out.contains("let closed_default_dataset =") {
+        "closed_default_dataset".into()
     } else if crate::credential_graphs::is_profile(plan) {
         ensure_graphs(plan, out);
         if !out.contains("let closed_default_dataset =") {

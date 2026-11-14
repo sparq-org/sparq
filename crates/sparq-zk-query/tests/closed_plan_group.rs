@@ -215,7 +215,7 @@ fn credential_profile_codegen_only_wires_the_checked_activation_flags() {
         )],
     )
     .unwrap();
-    let package = sparq_zk_query::codegen::generate(&p).unwrap();
+    let package = sparq_zk_query::codegen::generate_suite_fixture(&p).unwrap();
     let source = &package.files[&format!("{}/src/main.nr", package.name)];
     assert!(source.contains("credential_proof_0.pk, credential_flags[0],"));
     for token in ["assert(", "for ", "if ", " < credential_count"] {

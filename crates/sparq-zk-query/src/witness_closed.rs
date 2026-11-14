@@ -45,7 +45,7 @@ fn raw(term: Option<&Term>, len: usize) -> Result<serde_json::Value, Error> {
         "datatype_len":datatype.len(),"language":pad(language,1)?,"language_len":language.len(),"key":key.as_slice()}),
     )
 }
-fn computed(cell: Cell) -> Result<Term, Error> {
+pub(crate) fn computed(cell: Cell) -> Result<Term, Error> {
     for value in [false, true] {
         let term = Term::Literal(Literal::from(value));
         if SuiteEncoder.encode(&term)? == cell {
@@ -84,7 +84,7 @@ pub fn prover_toml(
     issuer_root: [u8; 32],
 ) -> Result<String, Error> {
     crate::credential_graphs::check_issuer_registry(plan, credentials)?;
-    let mut out = crate::witness::prover_toml_authenticated(
+    let mut out = crate::witness::prover_toml_suite_fixture(
         plan,
         credentials,
         trace,
@@ -92,6 +92,17 @@ pub fn prover_toml(
         salt,
         issuer_root,
     )?;
+    append_authenticated(plan, credentials, trace, &mut out)?;
+    Ok(out)
+}
+
+/// Append closed value reads and inverse maps to an already authenticated witness.
+pub(crate) fn append_authenticated(
+    plan: &Plan,
+    credentials: &[Credential],
+    trace: &Trace,
+    out: &mut String,
+) -> Result<(), Error> {
     let mut literals = vec![];
     for c in credentials {
         for q in c.quads()? {
@@ -150,8 +161,8 @@ pub fn prover_toml(
             .unwrap();
         }
     }
-    append_join_pairs(plan, trace, &mut out)?;
-    Ok(out)
+    append_join_pairs(plan, trace, out)?;
+    Ok(())
 }
 
 fn append_join_pairs(plan: &Plan, trace: &Trace, out: &mut String) -> Result<(), Error> {

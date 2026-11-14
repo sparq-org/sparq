@@ -1,4 +1,30 @@
 #![allow(dead_code)]
+#[path = "../support/authenticated.rs"]
+mod authenticated;
+pub fn canonical_policy() -> sparq_zk_query::envelope_policy::PolicyInput {
+    authenticated::canonical_policy()
+}
+
+pub fn canonical_credential(
+    source: &str,
+    issuer: &str,
+    key: &sparq_zk::sig::SecretKey,
+    salt: u64,
+) -> sparq_merkle_suite::poseidon::Credential {
+    let template = authenticated::canonical_sign(source, salt);
+    let document = template
+        .credential
+        .document
+        .replace("<urn:issuer>", &format!("<{issuer}>"));
+    sparq_merkle_suite::poseidon::issue(
+        &document,
+        &template.credential.proof_config,
+        key,
+        sparq_merkle_suite::Fr::from(salt + 101),
+    )
+    .unwrap()
+}
+
 // Temporary directories are unique across sandbox PID namespaces as well as threads.
 pub struct Workspace(pub tempfile::TempDir);
 impl Workspace {

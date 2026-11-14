@@ -53,20 +53,9 @@ fn issuer_root() -> [u8; 32] {
         .unwrap(),
     )
 }
-fn sign(mut source: String, issuer: usize, salt: u64) -> Credential {
-    source += &format!(
-        "<urn:credential> <{}> <{}> .\n",
-        graphs::ISSUER,
-        ISSUERS[issuer]
-    );
+fn sign(source: String, issuer: usize, salt: u64) -> Credential {
     let key = sparq_zk::sig::SecretKey::from_seed(19 + issuer as u64);
-    let credential = sparq_merkle_suite::poseidon::issue(
-        &source,
-        "_:proof <https://w3id.org/security#cryptosuite> \"schnorr-poseidon2-merkle-2026\" .\n",
-        &key,
-        sparq_merkle_suite::Fr::from(salt + 101),
-    )
-    .unwrap();
+    let credential = closed_native::canonical_credential(&source, ISSUERS[issuer], &key, salt);
     Credential {
         credential,
         issuer: key.public_key(),
@@ -282,6 +271,145 @@ fn fixtures(target: &str, case: &str) -> Vec<Credential> {
     };
     graphs::canonical_credentials(data).unwrap()
 }
+
+fn canonical_fixtures(
+    target: &str,
+) -> (
+    Vec<Credential>,
+    sparq_zk_query::envelope_policy::PolicyInput,
+) {
+    use sparq_zk_query::envelope_policy::TrustMember;
+    let mut policy = closed_native::canonical_policy();
+    policy.trust_members.clear();
+    let data = fixtures(target, "honest");
+    for credential in &data {
+        let quads = oxttl::NQuadsParser::new()
+            .for_slice(credential.credential.document.as_bytes())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let issuer = quads
+            .iter()
+            .find(|q| q.predicate.as_str() == graphs::ISSUER)
+            .unwrap();
+        let oxrdf::Term::NamedNode(issuer) = &issuer.object else {
+            panic!("issuer IRI")
+        };
+        policy.trust_members.push(TrustMember {
+            issuer: issuer.clone(),
+            verification_method: oxrdf::NamedNode::new_unchecked("urn:method"),
+            key: credential.issuer,
+        });
+    }
+    (data, policy)
+}
+
+#[test]
+fn canonical_renderer_executes_all_six_solid_targets() {
+    let Some(gate) = support::gate(
+        "canonical_renderer_executes_all_six_solid_targets",
+        &["nargo"],
+    ) else {
+        return;
+    };
+    use sparq_zk_query::{
+        credential::assemble_issuer_dataset,
+        interp::evaluate_dataset,
+        witness::{prover_toml_enveloped, EnvelopeInput, EnvelopeWitness},
+    };
+    for target in TARGETS {
+        let (data, policy) = canonical_fixtures(target);
+        let plan = sparq_zk_query::lower::lower(
+            &query(target),
+            Bounds {
+                credentials: if target.starts_with("recycled-") {
+                    4
+                } else {
+                    data.len() as u32
+                },
+                quads_per_credential: 8,
+                rows_per_table: if target.starts_with("recycled-") {
+                    4
+                } else {
+                    2
+                },
+            },
+        )
+        .unwrap();
+        let dataset = assemble_issuer_dataset(&data, &policy.trust_members, DIGEST).unwrap();
+        let trace = evaluate_dataset(&plan, &dataset, &SuiteEncoder).unwrap();
+        assert_eq!(released_for(target, &trace.result), Some(true), "{target}");
+        assert_eq!(engine(target, &data), Some(true), "{target}");
+        let render = |trace: &Trace| {
+            prover_toml_enveloped(
+                &plan,
+                &data,
+                trace,
+                DIGEST,
+                [3; 32],
+                EnvelopeInput {
+                    policy: &policy,
+                    evidence: &EnvelopeWitness::default(),
+                    revealed: None,
+                },
+            )
+            .unwrap()
+        };
+        let input = render(&trace);
+        let package = codegen::generate(&plan).unwrap();
+        let source = &package.files[&format!("{}/src/main.nr", package.name)];
+        let signature = source
+            .split("fn main(\n")
+            .nth(1)
+            .unwrap()
+            .split(") {")
+            .next()
+            .unwrap();
+        let mut names = std::collections::BTreeSet::new();
+        for line in input.lines() {
+            let (name, _) = line.split_once(" = ").unwrap();
+            assert!(
+                names.insert(name),
+                "duplicate {target} witness field {name}"
+            );
+        }
+        assert!(
+            names.iter().any(|name| name.starts_with("closed_reads_")),
+            "{target}"
+        );
+        for line in signature.lines() {
+            let (name, _) = line.trim().split_once(':').unwrap();
+            assert!(
+                names.contains(name),
+                "{target} missing witness field {name}"
+            );
+        }
+        let workspace = closed_native::Workspace::new(&package);
+        execute(
+            &gate,
+            workspace.0.path(),
+            &package.name,
+            &input,
+            "canonical_target",
+        )
+        .unwrap_or_else(|e| panic!("{target}: {e}"));
+        let mut altered = trace.clone();
+        alter_result(target, &mut altered);
+        assert_ne!(altered.result, trace.result, "{target}");
+        assert!(
+            execute(
+                &gate,
+                workspace.0.path(),
+                &package.name,
+                &render(&altered),
+                "canonical_wrong_result"
+            )
+            .is_err(),
+            "{target}"
+        );
+        eprintln!("canonical target {target}: complete witness and execution accepted; altered result refused");
+    }
+    support::complete(gate);
+}
 fn query(target: &str) -> String {
     std::fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -355,7 +483,7 @@ fn prepare_query(target: &str, text: &str, full: bool) -> Plan {
         } else if target == "trial-eligibility" {
             vec![8]
         } else {
-            vec![4; p.capacity().credentials as usize]
+            vec![8; p.capacity().credentials as usize]
         };
         p.with_credential_quad_bounds(&quad_bounds).unwrap()
     }
@@ -535,8 +663,8 @@ fn public_constants_and_membership_length_do_not_change_shape_or_source() {
         let aa = graphs::bind_issuer_registry(a.clone(), &registry()).unwrap();
         let bb = graphs::bind_issuer_registry(b.clone(), &registry()).unwrap();
         assert_eq!(
-            codegen::generate(&aa).unwrap(),
-            codegen::generate(&bb).unwrap(),
+            codegen::generate_suite_fixture(&aa).unwrap(),
+            codegen::generate_suite_fixture(&bb).unwrap(),
             "authenticated {target}"
         );
         assert_eq!(
@@ -638,7 +766,7 @@ fn rights(p: &Predicate, ids: &mut Vec<u32>) {
 fn exercise(gate: &support::LiveToolchain, target: &str, auth: bool) {
     let p = prepare(target, false);
     let package = if auth {
-        codegen::generate(&p)
+        codegen::generate_suite_fixture(&p)
     } else {
         codegen::generate_operator_fixture(&p)
     }
@@ -872,7 +1000,7 @@ fn export_solid_path_programs_when_requested() {
                 let data = fixtures(target, "honest");
                 let trace = graphs::evaluate_for_request(&p, &data, DIGEST).unwrap();
                 let pkg = if auth {
-                    codegen::generate(&p)
+                    codegen::generate_suite_fixture(&p)
                 } else {
                     codegen::generate_operator_fixture(&p)
                 }
@@ -1052,7 +1180,7 @@ fn required_closed_value_reads_fail_at_actual_query_sites() {
         let p = prepare(target, false);
         let data = fixtures(target, case);
         let trace = graphs::evaluate_for_request(&p, &data, DIGEST).unwrap();
-        let package = codegen::generate(&p).unwrap();
+        let package = codegen::generate_suite_fixture(&p).unwrap();
         let workspace = tempfile::tempdir().unwrap();
         write_package(&package, workspace.path());
         let honest = render(&p, &data, &trace, true);

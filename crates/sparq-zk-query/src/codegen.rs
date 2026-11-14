@@ -224,6 +224,12 @@ fn generate_inner(
             }) {
                 writeln!(
                     source,
+                    "    let closed_default_dataset = dataset_{};",
+                    capacities.len() - 1
+                )
+                .unwrap();
+                writeln!(
+                    source,
                     "    let closed_named_dataset = ops_core::named_view(dataset_{});",
                     capacities.len() - 1
                 )

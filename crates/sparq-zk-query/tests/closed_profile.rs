@@ -33,12 +33,7 @@ fn triple(s: &str, p: &str, o: &str) -> String {
 fn int(n: i64) -> String {
     format!("\"{n}\"^^<{XSD}integer>")
 }
-fn signed(mut rdf: String, issuer: &str, salt: u64) -> Credential {
-    rdf.push_str(&triple(
-        "<urn:credential>",
-        &iri(graphs::ISSUER),
-        &iri(issuer),
-    ));
+fn signed(rdf: String, issuer: &str, salt: u64) -> Credential {
     sign(&rdf, issuer, salt)
 }
 fn issuer_registry() -> Vec<(oxrdf::NamedNode, sparq_zk::sig::PublicKey)> {
@@ -76,15 +71,7 @@ fn sign(source: &str, issuer: &str, salt: u64) -> Credential {
         .position(|(iri, _)| iri.as_str() == issuer)
         .unwrap();
     let key = sparq_zk::sig::SecretKey::from_seed(19 + index as u64);
-    let config =
-        "_:proof <https://w3id.org/security#cryptosuite> \"schnorr-poseidon2-merkle-2026\" .\n";
-    let credential = sparq_merkle_suite::poseidon::issue(
-        source,
-        config,
-        &key,
-        sparq_merkle_suite::Fr::from(salt + 101),
-    )
-    .unwrap();
+    let credential = closed_native::canonical_credential(source, issuer, &key, salt);
     let keys = registry.into_iter().map(|(_, key)| key).collect::<Vec<_>>();
     let issuer_siblings =
         sparq_zk_compose::issuer::key_membership_witness(&keys, 4, index as u64).unwrap();
@@ -264,7 +251,7 @@ fn closed_string_reads_follow_the_shared_equality_contract() {
         .unwrap();
         let credentials = vec![signed(triple("<urn:s>", "<urn:p>", value), "urn:issuer", 3)];
         let trace = graphs::evaluate(&plan, &credentials).unwrap();
-        let package = codegen::generate(&plan).unwrap();
+        let package = codegen::generate_suite_fixture(&plan).unwrap();
         let source = &package.files[&format!("{}/src/main.nr", package.name)];
         let checker = if identities {
             "check_identity_equalities"
@@ -406,7 +393,7 @@ fn compact_profile_credential_executes() {
         3,
     )];
     let trace = graphs::evaluate(&p, &credentials).unwrap();
-    let pkg = codegen::generate(&p).unwrap();
+    let pkg = codegen::generate_suite_fixture(&p).unwrap();
     let temp = tempfile::tempdir().unwrap();
     for (name, source) in pkg.files {
         let target = temp.path().join(name);
