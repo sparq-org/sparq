@@ -17,6 +17,7 @@ mod suite_entry_tests;
 pub mod table;
 pub mod ops_core;
 pub mod ops_core_expr;
+pub mod ops_core_reads;
 pub mod ops_core_statement;
 pub mod ops_core_suite;
 mod ops_core_tests;
@@ -39,13 +40,13 @@ pub mod ops_closed_arith;
 mod ops_closed_plan_tests;
 pub mod ops_closed_opening;
 pub mod ops_closed_issuer_standin;
+mod ops_core_scan_tests;
 
 pub mod expr_term_contract;
 pub mod expr_core;
 pub mod expr_compare;
 pub mod expr_arith;
 mod expr_tests;
-// The pass-two function files are retained but are not wired into this package yet.
 pub mod expr_to_term;
 pub mod expr_open;
 mod expr_binding_tests;
@@ -57,3 +58,9 @@ pub mod ops_core_profile;
 mod ops_closed_bind_tests;
 
 pub mod ops_closed_expr;
+pub mod expr_language;
+pub mod expr_term;
+pub mod expr_date;
+pub mod expr_numeric;
+pub mod expr_construct;
+mod expr_functions_tests;

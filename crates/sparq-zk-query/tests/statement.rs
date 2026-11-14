@@ -197,14 +197,39 @@ fn envelope_policy_has_canonical_optional_values_and_binds_wide_times() {
 }
 
 #[test]
-fn explicit_empty_holder_scope_is_distinct_from_an_absent_scope() {
+fn explicit_empty_holder_scope_is_refused_while_an_absent_scope_selects_all() {
     let mut all = sparq_zk_query::statement::EnvelopeInputs::issuer_only([7; 32]);
     all.holder_required = true;
     let mut none = all.clone();
     none.holder_issuers_present = true;
     assert!(all.words().is_ok());
-    assert!(none.words().is_ok());
-    assert_ne!(all.words().unwrap(), none.words().unwrap());
+    assert_eq!(
+        none.words().unwrap_err(),
+        sparq_zk_query::Error::Invalid("empty holder issuer list".into())
+    );
+}
+
+#[test]
+fn envelope_instants_use_the_authenticated_timestamp_range() {
+    use sparq_zk_query::{statement::EnvelopeInputs, Error};
+    let mut policy = EnvelopeInputs::issuer_only([7; 32]);
+    policy.validity_required = true;
+    policy.freshness_required = true;
+    policy.now = i64::MAX as u64;
+    policy.earliest_created = i64::MAX as u64;
+    assert!(policy.words().is_ok());
+    for freshness in [false, true] {
+        let mut invalid = policy.clone();
+        if freshness {
+            invalid.earliest_created += 1;
+        } else {
+            invalid.now += 1;
+        }
+        assert_eq!(
+            invalid.words().unwrap_err(),
+            Error::Invalid("envelope instant range".into())
+        );
+    }
 }
 
 #[test]
@@ -225,4 +250,95 @@ fn computed_boolean_answers_do_not_require_a_source_vocabulary_entry() {
             }
         );
     }
+}
+
+#[test]
+fn revealed_inputs_verify_signatures_and_reconstruct_ordered_padded_words() {
+    use sparq_zk::{
+        field::{field_to_be_bytes_32, Fr},
+        sig,
+    };
+    use sparq_zk_query::statement::{number, EnvelopeInputs, RevealedInputs, RevealedSignature};
+    let plan = lower(
+        "ASK {}",
+        Bounds {
+            credentials: 2,
+            ..B
+        },
+    )
+    .unwrap();
+    let secret = sig::SecretKey::from_seed(19);
+    let message = Fr::from(7u64);
+    let item = RevealedSignature {
+        key: secret.public_key(),
+        message: field_to_be_bytes_32(&message),
+        signature: sig::sign_deterministic(&secret, &message),
+    };
+    let admitted = RevealedInputs::verify(std::slice::from_ref(&item)).unwrap();
+    let envelope = EnvelopeInputs::issuer_only(number(9));
+    let layout = Layout::new(&plan);
+    let mut statement = Statement {
+        request_digest: [0; 32],
+        input_commitment: [0; 32],
+        signature_mode: 0,
+        result: ResultValue::Ask(true),
+    };
+    let words = layout
+        .reconstruct_revealed(&plan, &statement, &envelope, &admitted)
+        .unwrap();
+    let key = field_to_be_bytes_32(
+        &sparq_merkle_suite::metadata::key_cell(&item.key)
+            .unwrap()
+            .enc,
+    );
+    assert_eq!(
+        &words[words.len() - 6..words.len() - 1],
+        &[number(1), item.message, number(0), key, number(0)]
+    );
+    let mut other = item.clone();
+    other.message = number(8);
+    other.signature = sig::sign_deterministic(&secret, &Fr::from(8u64));
+    let ordered = RevealedInputs::verify(&[item.clone(), other.clone()]).unwrap();
+    let reversed = RevealedInputs::verify(&[other.clone(), item.clone()]).unwrap();
+    assert_ne!(
+        layout
+            .reconstruct_revealed(&plan, &statement, &envelope, &ordered)
+            .unwrap()
+            .last(),
+        layout
+            .reconstruct_revealed(&plan, &statement, &envelope, &reversed)
+            .unwrap()
+            .last()
+    );
+    let over = RevealedInputs::verify(&[item.clone(), item.clone(), item.clone()]).unwrap();
+    assert!(layout
+        .reconstruct_revealed(&plan, &statement, &envelope, &over)
+        .is_err());
+    assert!(RevealedInputs::verify(&vec![item.clone(); 5]).is_err());
+    for field in ["message", "key", "signature"] {
+        let mut changed = item.clone();
+        match field {
+            "message" => changed.message = number(8),
+            "key" => changed.key = sig::SecretKey::from_seed(20).public_key(),
+            _ => changed.signature = other.signature,
+        }
+        assert!(
+            RevealedInputs::verify(&[changed]).is_err(),
+            "altered revealed {field} accepted"
+        );
+    }
+    let mut noncanonical = item;
+    noncanonical.message = [255; 32];
+    assert!(RevealedInputs::verify(&[noncanonical]).is_err());
+    assert!(layout
+        .reconstruct_authenticated_with_envelope(&plan, &statement, &envelope)
+        .is_err());
+    statement.signature_mode = 1;
+    assert!(layout
+        .reconstruct_revealed(&plan, &statement, &envelope, &admitted)
+        .is_err());
+    let hidden = layout
+        .reconstruct_authenticated_with_envelope(&plan, &statement, &envelope)
+        .unwrap();
+    assert_eq!(&hidden[hidden.len() - 6..hidden.len() - 1], &[[0; 32]; 5]);
 }

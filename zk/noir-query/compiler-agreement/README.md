@@ -15,3 +15,10 @@ The checker takes a package directory, native artifact path, native key path and
 private cache directory. An optional final argument selects the CRS cache. Using
 `--compile-only` in place of the native key compares ABI and bytecode and leaves
 the key comparison pending; it does not satisfy the full corpus ratchet.
+
+The corpus records the approved pinned XPath dependency loading failure by name
+for each affected passing plan. `--record-known-failures` permits only the
+registered dependency revision and diagnostic, records that bytecode and keys
+were not compared, and returns a distinct status. Other failures remain errors.
+The normal checker stays strict. A dependency revision change makes comparison
+mandatory again; no source or manifest is patched during this check.

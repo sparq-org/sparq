@@ -1,28 +1,32 @@
 # sparq-zk-query
 
-Research grade query compiler for the Noir query method; not externally audited.
-This internal crate is opt-in through workspace package selection and is not published.
+Research grade Noir query compiler; not externally audited, unpublished and opt-in.
 
 ## ✨ Compiler contracts
 
 Public request bounds choose the smallest fitting credential, quad and table buckets.
 The key reveals those capacities and the query structure. Private counts cannot
 select another bucket; exceeding a bound yields a named refusal, never truncation.
-Separate public quad limits select buckets for the ordered credential slots.
+Separate public quad limits select buckets for the ordered credential slots. The
+verifier also selects an `OpeningProfile`: `Solid` uses the compact resource
+and object bounds; `LongObjects` admits holder Multikey lexicals with compact
+resource and metadata bounds; `Extended` also admits larger resource identifiers. The selected profile is stored in the request and included in the plan hash.
 
 Constants are public parameters. Canonical plan encodings include parameter kinds,
 operator wiring, schemas, orders and capacities, while excluding parameter values
 and variable names. Constant membership lists use a fixed parameter block and public
 active length, so values and list lengths preserve the shape within the profile.
 Rows are ordered lexicographically by term encoding in schema order; duplicates
-remain unless DISTINCT is requested. The composed manifest is superseded by the query method.
+remain unless DISTINCT is requested. Scans deduplicate complete matching bindings
+within the emitted table. Stable sorting networks preserve the first payload of
+equal bindings; DISTINCT compares adjacent rows after validating canonical input. The composed manifest is superseded by the query method.
 
 The expression dispatcher uses the shared comparison, boolean and membership
 gadgets. Its value, SPARQL error and capacity channels remain separate. Capacity is
 asserted at the expression root and cannot be absorbed as a SPARQL error.
-The initial credential literal profile admits integer, decimal, date, dateTime,
-boolean and string datatypes. Unsupported datatypes and lexical forms beyond the
-profile are refused. Value comparisons outside its exact ranges receive a capacity refusal.
+The credential literal profile admits integer, decimal, date, dateTime, boolean and
+string datatypes. Unsupported datatypes, oversized lexical forms and comparisons
+outside the exact value ranges receive a named refusal.
 
 ## 🚀 Host contracts
 
@@ -45,10 +49,13 @@ limits. `Compiler::prove` accepts complete `credential::Credential` inputs with
 private lexical, signature and membership material. Its encoder argument remains
 for compatibility; proof and verification use `credential::SuiteEncoder`.
 Structural requests created with `Request::new` cannot produce an authenticated proof.
+Use `prepare_with_opening_profile` and
+`Request::new_authenticated_with_opening_profile` with the same profile for larger openings; `new_authenticated_with_envelope_and_profile` retains typed envelope
+properties as well. Oversized lexical forms receive a capacity refusal.
 
-The current suite profile opens complete credentials, checks supported literal
-keys, hidden signatures and issuer key membership. The verifier reconstructs the
-plan and constants from its stored request, re-encodes the released RDF answer,
+The current suite profile opens complete credentials, checks hidden signatures
+and issuer key membership. Source identities retain normalized literal cells; value consumers also check complete active inputs, including rejected rows. Overflow refuses.
+The verifier reconstructs the plan and constants from its stored request, re-encodes the released RDF answer,
 and consumes the shared challenge after proof verification and a final validity check.
 Supplied-cell programs are isolated operator fixtures.
 
@@ -56,20 +63,27 @@ The request digest is SHA-256 over RDFC canonical N-Quads of this method's reque
 The exact typed protocol encoding is a named method parameter within that RDF.
 Public inputs, in order, are request digest, salted input commitment, signature
 mode, request bounds, constant cells, index parameters, canonical result, envelope
-policy group, ordered credential quad bounds and statement binding. The envelope
+policy group, ordered credential quad bounds, revealed count/messages/keys and
+statement binding. The envelope
 group carries issuer root/depth, holder flags and issuer list, status flags and
 snapshot root/depth, validity flag/time, and freshness flag/earliest creation.
 `statement::Layout` generates declarations, reconstructs canonical big endian field
 words, and audits the locally compiled ABI. Cells flatten as bound, kind, encoding,
 key class, key, datatype, language and credential scope. SELECT tables flatten
-padded rows before length. Openings, signatures, presentation salt and traces are private.
-The dataset commitment binds the ordered authenticated suite messages under a
-method domain and presentation salt, separately from the detached evaluator's profile.
+padded rows before length. Hidden-mode signature witnesses and all openings,
+presentation salts and traces are private. Revealed-mode messages and signer key
+encodings are public; `RevealedInputs::verify` verifies their external signatures
+before `Layout::reconstruct_revealed` builds the words. `prover_toml_revealed` renders
+that circuit mode; the native `Compiler` driver currently accepts hidden mode.
+The dataset commitment binds ordered authenticated suite messages under a method
+domain and presentation salt, separately from the detached evaluator's profile.
 
-`new_authenticated_with_policy` admits typed envelope words, returned through
-`Request::envelope_inputs`. Canonical policy derivation and the statement lane's
-consumer are still being integrated. Enabled envelope requirements retain a named
-native integration refusal until that consumer is connected.
+`new_authenticated_with_envelope` stores typed policy properties and uses
+`envelope_policy::derive` for admission and verifier reconstruction. Time values
+are Unix epoch milliseconds. Present-empty holder issuer lists are refused.
+The existing `new_authenticated_with_policy` accepts verifier-stored policy words.
+Canonical policy inputs and enabled envelope requirements retain a named native
+integration refusal until the statement lane's consumer is connected.
 The dataset helpers retain named credential copies and a default merge with
 method-generated issuer assertions. Their production wiring awaits the graph
 dispatcher and canonical issuer trust consumer.
@@ -84,6 +98,11 @@ operator program; the workflow loads committed Noir manifests unchanged.
 Native execution uses the shared live-toolchain gate. Run it with
 `cargo test -p sparq-zk-query --test execution -- --ignored`, or use
 `cargo test -p sparq-zk-query -- --include-ignored` for the full live suite.
+`SPARQ_NOIR_QUERY_PROOF_PROFILE` selects `full` (default) or `smoke` for the
+native proof sweep. Hosted CI uses the authenticated sample and an explicit
+differential seed; workflow dispatch with `full_query_proofs` selects the complete
+acceptance sweep and default seed set. Differential execution checks operator
+fixtures; authenticated altered-witness controls run separately.
 `SPARQ_NOIR_QUERY_EVIDENCE`, unset by default, accepts an external JSONL output path
 for native proof-test plans and measurements. Keep the output outside the repository.
 

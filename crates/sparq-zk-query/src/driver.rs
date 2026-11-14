@@ -3,7 +3,7 @@
 
 use crate::{
     answer::Answer,
-    capacity::Bounds,
+    capacity::{Bounds, OpeningProfile},
     codegen,
     credential::{Credential, SuiteEncoder},
     interp::{self, EncodeTerm},
@@ -78,6 +78,20 @@ impl Compiler {
         quad_bounds: &[u32],
     ) -> Result<Prepared, Error> {
         self.prepare_plan(lower(query, bounds)?.with_credential_quad_bounds(quad_bounds)?)
+    }
+    /// Select lexical and metadata bounds from the verifier's request.
+    pub fn prepare_with_opening_profile(
+        &self,
+        query: &str,
+        bounds: Bounds,
+        quad_bounds: Option<&[u32]>,
+        profile: OpeningProfile,
+    ) -> Result<Prepared, Error> {
+        let mut plan = lower(query, bounds)?.with_opening_profile(profile);
+        if let Some(quad_bounds) = quad_bounds {
+            plan = plan.with_credential_quad_bounds(quad_bounds)?;
+        }
+        self.prepare_plan(plan)
     }
     fn prepare_plan(&self, plan: Plan) -> Result<Prepared, Error> {
         let compiled = self.compiled(&plan)?;
@@ -154,7 +168,7 @@ impl Compiler {
         now: impl Fn() -> u64,
     ) -> Result<Presentation, Error> {
         let envelope = request.envelope_inputs()?;
-        envelope.require_consumer()?;
+        request.require_envelope_consumer(&envelope)?;
         let plan = request.plan()?;
         let compiled = self.checked_key(request, &plan)?;
         freshness(request, now())?;
@@ -162,7 +176,7 @@ impl Compiler {
         let cells = credentials
             .iter()
             .enumerate()
-            .map(|(i, c)| c.cells(i as u32))
+            .map(|(i, c)| c.cells_with_profile(i as u32, plan.opening_profile()))
             .collect::<Result<Vec<_>, _>>()?;
         let trace = interp::evaluate(&plan, &cells, encoder)?;
         let result = Answer::release(&trace.result, &plan, vocabulary, encoder)?;
@@ -225,7 +239,7 @@ impl Compiler {
     ) -> Result<Answer, Error> {
         let encoder = &SuiteEncoder;
         let envelope = request.envelope_inputs()?;
-        envelope.require_consumer()?;
+        request.require_envelope_consumer(&envelope)?;
         if request.stored().audience() != expected_audience {
             return Err(Error::Invalid("request audience".into()));
         }

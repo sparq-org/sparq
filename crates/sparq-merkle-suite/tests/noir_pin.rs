@@ -8,8 +8,11 @@ fn every_noir_constant_equals_its_rust_source() {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../zk/noir-query/core/src");
     for entry in std::fs::read_dir(directory).unwrap() {
         let path = entry.unwrap().path();
+        // Scope: the credential suite's own files. Other lanes pin their own constants.
+        let name = path.file_name().unwrap().to_string_lossy();
         if path.extension().is_some_and(|e| e == "nr")
-            && path.file_name().unwrap() != "suite_constants.nr"
+            && (name.starts_with("suite") || name.starts_with("term"))
+            && name != "suite_constants.nr"
         {
             let source = std::fs::read_to_string(&path).unwrap();
             assert!(

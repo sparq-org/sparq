@@ -39,13 +39,6 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
     {
         source = source.replacen("\nfn main(", "\nuse core::ops_core_expr;\nfn main(", 1);
     }
-    if plan
-        .nodes
-        .iter()
-        .any(|n| matches!(n.operator, Operator::Scan(..) | Operator::Values(..)))
-    {
-        source = source.replacen("\nfn main(", "\nuse core::table::unbound;\nfn main(", 1);
-    }
     let term_ids: Vec<_> = plan
         .parameters
         .iter()
@@ -77,7 +70,20 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
         )
     };
     let cap = plan.capacity;
-    let lexical = crate::credential::LEXICAL_CAPACITY;
+    let opening = plan.opening_profile().limits();
+    let lexical = opening.object;
+    let resource = opening.resource;
+    let method = opening.method;
+    let check_keys = u8::from(plan.nodes.iter().any(|n| {
+        !matches!(
+            n.operator,
+            Operator::Unit
+                | Operator::Project(_)
+                | Operator::Distinct(_)
+                | Operator::Slice { .. }
+                | Operator::Values(_)
+        )
+    }));
     let layout = crate::statement::Layout::new(plan);
     source.push_str(&if authenticated {
         layout.declarations_authenticated()
@@ -86,7 +92,7 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
     });
     if authenticated {
         for (c, n) in plan.credential_quad_capacities().into_iter().enumerate() {
-            writeln!(source,"    credential_{c}: [[core::suite_entry::TermOpening<{lexical}>; 4]; {n}],\n    credential_proof_{c}: core::ops_core_suite::CredentialProof<{n}>,").unwrap();
+            writeln!(source,"    credential_{c}: [core::ops_core_profile::QuadOpening<{resource}, {lexical}>; {n}],\n    credential_proof_{c}: core::ops_core_suite::BoundedCredentialProof<{n}>,").unwrap();
         }
         writeln!(
             source,
@@ -105,6 +111,15 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
             node.output.abi_width()
         )
         .unwrap();
+        if authenticated {
+            if let Operator::Filter(input, expr) = &node.operator {
+                let columns = read_columns(expr, &plan.nodes[*input as usize].output.variables);
+                if !columns.is_empty() {
+                    writeln!(source, "    reads_{i}: [[core::suite_entry::BoundedTermOpening<{lexical}, 41, 1>; {}]; {}],",
+                        columns.len(), plan.nodes[*input as usize].output.capacity).unwrap();
+                }
+            }
+        }
     }
     writeln!(source,") {{\n    ops_core::check_parameters(parameters, {});\n    ops_core::check_indices(indices, {});",term_ids.len(),index_ids.len()).unwrap();
     let dataset_name = if plan
@@ -119,7 +134,7 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
     if authenticated {
         let capacities = plan.credential_quad_capacities();
         let total: u32 = capacities.iter().sum();
-        writeln!(source,"    let credential_flags = core::ops_core_suite::credential_flags::<{}>(credential_count, bounds[0], signature_mode);",cap.credentials).unwrap();
+        writeln!(source,"    let credential_flags = core::ops_core_suite::credential_mode_flags::<{}>(credential_count, bounds[0], signature_mode, revealed_count, revealed_messages, revealed_keys);",cap.credentials).unwrap();
         let mut offset = 0;
         writeln!(
             source,
@@ -127,7 +142,8 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
         )
         .unwrap();
         for (c, n) in capacities.iter().enumerate() {
-            writeln!(source,"    let opened_{c} = core::ops_core_suite::open_one(credential_{c}, credential_proof_{c}, counts[{c}], credential_flags[{c}], credential_quad_bounds[{c}], {c}, issuer_root, request_digest);").unwrap();
+            writeln!(source, "    let credential_index_{c}: u32 = {c};").unwrap();
+            writeln!(source,"    let opened_{c} = core::ops_core_suite::open_profile_mode_one::<{n}, {resource}, {lexical}, {check_keys}, {method}>(credential_{c}, credential_proof_{c}, counts[{c}], credential_flags[{c}], credential_quad_bounds[{c}], credential_index_{c}, issuer_root, request_digest, signature_mode, revealed_messages[{c}], revealed_keys[{c}]);").unwrap();
             let prior = if c == 0 {
                 "dataset_start".to_owned()
             } else {
@@ -200,6 +216,15 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
                 writeln!(source, "    ops_core::distinct(t{a}, t{i});").unwrap()
             }
             Operator::Filter(a, expr) => {
+                let read_columns = read_columns(expr, &plan.nodes[*a as usize].output.variables);
+                if authenticated && !read_columns.is_empty() {
+                    writeln!(
+                        source,
+                        "    core::ops_core_reads::check_with_parameters(t{a}, reads_{i}, {}, parameters);",
+                        array(read_columns.iter().map(usize::to_string))
+                    )
+                    .unwrap();
+                }
                 let mut steps = vec![];
                 expression(
                     expr,
@@ -255,7 +280,7 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
         ResultForm::Select => "bind_select",
     };
     let binder = if authenticated {
-        format!("{binder}_authenticated")
+        format!("{binder}_authenticated_modes")
     } else {
         binder.to_owned()
     };
@@ -272,13 +297,51 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
     } else {
         ""
     };
-    writeln!(source, "    ops_core_statement::{binder}({issuer_argument}request_digest, input_commitment, signature_mode, bounds, parameters, indices, result, statement_binding);\n}}\n").unwrap();
+    let revealed_argument = if authenticated {
+        "revealed_count, revealed_messages, revealed_keys, "
+    } else {
+        ""
+    };
+    writeln!(source, "    ops_core_statement::{binder}({issuer_argument}request_digest, input_commitment, signature_mode, bounds, parameters, indices, result, {revealed_argument}statement_binding);\n}}\n").unwrap();
+    if source.contains("unbound()") {
+        source = source.replacen("\nfn main(", "\nuse core::table::unbound;\nfn main(", 1);
+    }
     let files=BTreeMap::from([
         ("Nargo.toml".into(),format!("[workspace]\nmembers = [\"{name}\"]\n")),
         (format!("{name}/Nargo.toml"),format!("[package]\nname = \"{name}\"\ntype = \"bin\"\nauthors = [\"sparq\"]\ncompiler_version = \">=1.0.0\"\n\n[dependencies]\ncore = {{ path = \"../zk/noir-query/core\" }}\n")),
         (format!("{name}/src/main.nr"),source),
     ]);
     Ok(Package { name, files })
+}
+
+/// Static variable columns consumed by an expression, checked on its entire input.
+/// Parameter cells are public and reconstructed by the verifier from the request.
+pub(crate) fn read_columns(expr: &Expr, schema: &[Var]) -> Vec<usize> {
+    fn collect(expr: &Expr, schema: &[Var], columns: &mut std::collections::BTreeSet<usize>) {
+        match expr {
+            Expr::Term(Slot::Variable(v)) => {
+                // An absent variable remains unbound in the expression VM.
+                if let Some(column) = schema.iter().position(|a| a == v) {
+                    columns.insert(column);
+                }
+            }
+            Expr::Term(Slot::Parameter(_)) => {}
+            Expr::Compare(_, a, b) | Expr::And(a, b) | Expr::Or(a, b) => {
+                collect(a, schema, columns);
+                collect(b, schema, columns);
+            }
+            Expr::Not(a) | Expr::InList { value: a, .. } => collect(a, schema, columns),
+            Expr::In(a, list) => {
+                collect(a, schema, columns);
+                for b in list {
+                    collect(b, schema, columns);
+                }
+            }
+        }
+    }
+    let mut columns = std::collections::BTreeSet::new();
+    collect(expr, schema, &mut columns);
+    columns.into_iter().collect()
 }
 
 fn array(items: impl IntoIterator<Item = String>) -> String {

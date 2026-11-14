@@ -101,13 +101,13 @@ where
     T: CheckedOpening<L>,
 {
     let value = opening.open();
-    let is_error = !value.term.bound;
+    let is_error = !value.term.bound();
     assert(value.tag <= DATETIME, "scalar tag");
     (lane(value), is_error)
 }
 pub fn as_numeric<let L: u32>(a: (Lane<Scalar<L>>, bool)) -> (Lane<Numeric>, bool) {
     let (a, e) = a;
-    let error = e | !a.value.term.bound | !a.value.valid | (a.value.tag != NUMERIC);
+    let error = e | !a.value.term.bound() | !a.value.valid | (a.value.tag != NUMERIC);
     let value = if error {
         zero_numeric()
     } else {
@@ -120,7 +120,7 @@ pub fn ebv<let L: u32>(a: (Lane<Scalar<L>>, bool)) -> (Lane<bool>, bool) {
     let (a, e) = a;
     let v = a.value;
     let admitted = (v.tag == BOOLEAN) | (v.tag == NUMERIC) | (v.tag == STRING);
-    let error = e | !v.term.bound | !admitted;
+    let error = e | !v.term.bound() | !admitted;
     let mut value = false;
     if v.tag == BOOLEAN {
         value = v.valid & v.boolean;
@@ -195,10 +195,22 @@ pub fn coalesce<T, let N: u32>(args: [(Lane<T>, bool); N], error_value: T) -> (L
     (selected, !found)
 }
 pub fn bound(cell: TermCell) -> (Lane<bool>, bool) {
-    truth(cell.bound, false)
+    truth(cell.bound(), false)
 }
 pub fn filter_accept(a: (Lane<bool>, bool)) -> bool {
     let (a, error) = a;
     assert(!a.capacity, "expression capacity");
     a.value & !error
+}
+
+pub fn as_string<let L: u32>(input: (Lane<Scalar<L>>, bool)) -> (Lane<StringLane<L>>, bool) {
+    let (a, e) = input;
+    let error = e | !a.value.term.bound() | !a.value.valid | (a.value.tag != STRING);
+    let value = if error {
+        StringLane { bytes: [0; L], len: 0, lang: 0 }
+    } else {
+        a.value.string
+    };
+    check_string(value);
+    (Lane { value, capacity: a.capacity }, error)
 }

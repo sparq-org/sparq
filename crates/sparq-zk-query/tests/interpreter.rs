@@ -15,6 +15,45 @@ const BOUNDS: Bounds = Bounds {
 };
 
 #[test]
+fn medication_input_capacity_covers_rejected_rows_before_the_result_limit() {
+    let query = "SELECT ?medication WHERE {?medication <urn:strength> ?strength FILTER(?strength >= 31)} LIMIT 1";
+    let input = |count| {
+        (0..count).map(|i| format!(
+        "<urn:medication:{i}> <urn:strength> \"{i}\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n"
+    )).collect::<String>()
+    };
+    let bounds = Bounds {
+        credentials: 1,
+        quads_per_credential: 64,
+        rows_per_table: 32,
+    };
+    let plan = lower(query, bounds).unwrap();
+    let (data, _) = dataset(&input(32));
+    let trace = evaluate(&plan, &data, &FixtureEncoder).unwrap();
+    assert!(trace.tables.iter().any(|t| t.rows.len() == 32));
+    assert!(matches!(&trace.result, ResultValue::Select {rows,..} if rows.len()==1));
+    assert_engine(query, &input(32), &trace.result);
+    let narrow = lower(
+        query,
+        Bounds {
+            rows_per_table: 4,
+            ..bounds
+        },
+    )
+    .unwrap();
+    assert_ne!(plan.hash(), narrow.hash());
+    assert_eq!(
+        evaluate(&narrow, &data, &FixtureEncoder).unwrap_err(),
+        Error::Capacity("operator output".into())
+    );
+    let (overflow, _) = dataset(&input(33));
+    assert_eq!(
+        evaluate(&plan, &overflow, &FixtureEncoder).unwrap_err(),
+        Error::Capacity("operator output".into())
+    );
+}
+
+#[test]
 fn bag_projection_distinct_join_values_and_false_ask() {
     let data = fixture();
     let run = |q| {
@@ -245,11 +284,55 @@ fn differential(seed: u64) {
 }
 
 #[test]
-fn mixed_string_equality_preserves_false_and_error_as_the_engine_does() {
-    for (query, expected) in fixture_support::mixed_string_queries() {
+fn mixed_string_equality_uses_recommendation_dispatch_and_records_engine_extension() {
+    for (query, expected, engine_expected) in fixture_support::mixed_string_queries() {
         let plan = lower(&query, BOUNDS).unwrap();
         let result = evaluate(&plan, &[], &FixtureEncoder).unwrap().result;
         assert_eq!(result, ResultValue::Ask(expected), "{query}");
+        fixture_support::assert_engine(&query, "", &ResultValue::Ask(engine_expected));
+    }
+}
+
+#[test]
+fn malformed_numeric_and_boolean_ebv_is_false_without_a_sparql_error() {
+    for datatype in [
+        "integer",
+        "decimal",
+        "boolean",
+        "double",
+        "float",
+        "unsignedByte",
+    ] {
+        let query =
+            format!("ASK {{FILTER(!\"bad\"^^<http://www.w3.org/2001/XMLSchema#{datatype}>)}}");
+        let plan = lower(&query, BOUNDS).unwrap();
+        let result = evaluate(&plan, &[], &FixtureEncoder).unwrap().result;
+        assert_eq!(result, ResultValue::Ask(true));
         fixture_support::assert_engine(&query, "", &result);
     }
+}
+
+#[test]
+fn zero_bytes_in_strings_preserve_ebv_and_identity_without_implying_lexical_order() {
+    for (query, expected) in [
+        (r#"ASK { FILTER("\u0000") }"#, true),
+        (r#"ASK { FILTER(!"\u0000") }"#, false),
+        (r#"ASK { FILTER("" = "\u0000") }"#, false),
+        (r#"ASK { FILTER("a" = "a\u0000") }"#, false),
+    ] {
+        let expected = ResultValue::Ask(expected);
+        fixture_support::assert_engine(query, "", &expected);
+        assert_eq!(
+            evaluate(&lower(query, BOUNDS).unwrap(), &[], &FixtureEncoder)
+                .unwrap()
+                .result,
+            expected
+        );
+    }
+    let query = r#"ASK { FILTER("a" < "a\u0000") }"#;
+    fixture_support::assert_engine(query, "", &ResultValue::Ask(true));
+    assert_eq!(
+        evaluate(&lower(query, BOUNDS).unwrap(), &[], &FixtureEncoder).unwrap_err(),
+        sparq_zk_query::Error::Unsupported("string comparison capacity".into())
+    );
 }

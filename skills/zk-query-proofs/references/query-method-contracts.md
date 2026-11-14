@@ -161,7 +161,14 @@ envelope, quad_bounds)` and obtain it through `Request::envelope_inputs()`.
 The existing authenticated methods retain the issuer-only profile. Enabled
 holder, status, validity and freshness policies require the statement lane's
 consumer; the current native driver refuses them by name until it is integrated.
-The canonical policy-root module remains a neighbouring-lane integration.
+Typed canonical policy inputs also require that consumer, even when their tree
+depth happens to match the issuer-only relation.
+`Request::new_authenticated_with_envelope(stored, bounds, key, policy,
+quad_bounds)` takes `envelope_policy::PolicyInput`, derives its canonical roots
+and retains it for fresh `envelope_inputs()` derivation during verification.
+Validity and freshness times are exact nonnegative Unix epoch milliseconds within
+the suite's signed timestamp range. A present-empty
+holder issuer list is refused; omit holder binding to require no holder keys.
 
 Expression evaluation uses the shared typed gadgets, with a separate capacity
 channel. The generated-query coverage ratchet requires native and WebAssembly
@@ -191,6 +198,13 @@ copies for the graph dispatcher. The method-generated issuer assertions occur
 only in the default view. These helpers await production wiring to the envelope
 consumer and graph dispatcher.
 
+`credential::assemble_issuer_dataset` accepts complete signed credentials, typed
+trust members and the request digest. It derives each assertion's issuer from
+the credential's unique root and issuer property, authenticated verification
+method and signing key. Trust roots use `envelope_policy`'s canonical set
+construction. This host helper prepares the issuer dataset; the generated
+consumer remains required to enforce its relation within a proof.
+
 The Noir seam is `ops_core_suite::authenticate` followed by the envelope checks
 and `from_authenticated`; inactive slots use `inactive_credential`. This reuses
 the authenticated suite object and its metadata getters. `Dataset` retains
@@ -202,17 +216,69 @@ and adds its default-only assertion. It does not supply that trust check itself.
 they were absent from the source vocabulary. Other result terms use the supplied
 vocabulary or the plan's public constants.
 
-The circuit library's `ops_core_profile::open_quads` accepts compact resource and
-object openings and returns suite cells. A private literal tag selects a supported
-fixed datatype for `term::open_key_checked`; resources pass through
-`suite_entry::open_bounded_quads` with empty metadata. The returned cells still
-require the suite's root, count, salt, signature and metadata authentication. This
-helper alone is not a credential verifier.
-`open_identity_quads` supplies the complete identity table for root authentication.
-A comparison, function or aggregate must obtain its value through a checked lexical
-opening; the identity route alone does not provide that value contract.
+The circuit library's `ops_core_profile` contains raw witness structs and
+resource normalization only. Generated credential openings call
+`ops_core_suite::open_profile_one`, delegating the complete signed opening to
+`suite::open_bounded_credential_hidden` once per credential. Resource datatype,
+language and key bytes are zero; the default graph and active flags are derived.
+Source scans, joins and value consumers call `term::open_key_checked` with fixed datatype
+identifiers. Raw lexical backing is separately bounded for resources, objects
+and scalars. Shape encoding includes all these capacities.
+The verifier selects `capacity::OpeningProfile::{Solid, LongObjects, Extended}`. Its
+`limits()` reports the compiled resource, object, scalar, datatype, language,
+creation and verification-method bounds. `Solid` is the default. Choose
+`LongObjects` for holder Multikey lexical forms with compact resource/metadata
+bounds, or `Extended` for longer identifiers;
+the compiler never resizes a profile from private data. Admission through
+`Credential::cells_with_profile` and witness rendering refuse excess bytes.
+Use `Plan::with_opening_profile` for portable generation, or
+`Compiler::prepare_with_opening_profile(query, bounds, quad_bounds, profile)`
+for native preparation. The matching request constructor is
+`Request::new_authenticated_with_opening_profile(stored, bounds, key,
+issuer_root, quad_bounds, profile)`; typed envelope policies use
+`new_authenticated_with_envelope_and_profile(stored, bounds, key, policy,
+quad_bounds, profile)`. Existing constructors select `Solid`.
+`Request::plan()` restores the selected profile and `opening_profile()` exposes
+it. Different profiles produce different plan hashes and keys.
+The additive envelope seam is `authenticate_bounded` followed by its consumer
+and `from_authenticated_bounded`. Existing unbounded fixture entry points remain
+available, with the same suite authentication relation.
 
 String equality keeps type errors distinct from false. Term-identity tokens are
 local to same-datatype string equality; mixed string types and value families
 pass through the shared comparison's type classes. These tokens must never be
 used as lexical input by string functions.
+
+The query proof tests default to `SPARQ_NOIR_QUERY_PROOF_PROFILE=full`.
+`smoke` selects a small authenticated ASK sample for hosted CI. Unknown values
+are refused; the workflow dispatch input `full_query_proofs` runs the complete
+acceptance sweep. Each selected proof still checks its engine result and refuses
+an altered answer. Local completion requires the full profile.
+
+The shared Noir bridge exposes `ops_core_expr::temporal_payload(key: Field) ->
+Field` for checked suite keys. It extracts the leading biased time word and
+constrains the remaining payload bytes to zero. Graph and expression dispatchers
+pass the full packed key and retain its checked class separately when constructing
+`TemporalLane`; the lane's key is the scalar word.
+
+The generated authenticated ABI also carries `revealed_count: u32`,
+`revealed_messages: [Field; C]` and `revealed_keys: [Field; C]` after the ordered quad
+bounds and before the statement binding. Hidden mode requires zero words there.
+Revealed mode binds each active credential's message and suite Multikey encoding
+and requires inactive slots to be zero. `statement::RevealedInputs::verify` takes
+ordered `RevealedSignature {key, message, signature}` values and checks each shared
+suite signature before admitting it; its stored messages and keys are private.
+`Layout::reconstruct_revealed` accepts that admitted value and a mode-zero statement.
+`witness::prover_toml_revealed` renders a witness from complete credentials using the
+same verification. The native `Compiler` retains its hidden-only contract; the
+statement adapter must enforce its request's accepted mode before using these APIs.
+Both modes share one suite opening per active credential, with the shared Schnorr
+verifier called for hidden mode. No presentation-supplied layout is accepted.
+
+Authenticated query programs open complete credential identities once. Value-consuming
+FILTER inputs validate each consumed literal on every active input row, including
+rejected rows. Cells identical to verifier-reconstructed public parameters reuse
+those canonical keys; other literal cells carry separate lexical openings. Each checked cell must equal the row's
+authenticated encoding and metadata; no private source index selects the binding.
+Select intermediate row bounds for the full scan output, independently of result
+limits. An overflowing intermediate table refuses the proof.

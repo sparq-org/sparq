@@ -231,7 +231,7 @@ pub fn n0_cases() -> Vec<N0Case> {
 }
 
 #[allow(dead_code)]
-pub fn mixed_string_queries() -> Vec<(String, bool)> {
+pub fn mixed_string_queries() -> Vec<(String, bool, bool)> {
     let mut cases = vec![];
     for lhs in [
         "\"a\"",
@@ -248,11 +248,19 @@ pub fn mixed_string_queries() -> Vec<(String, bool)> {
             ("<urn:a>", true),
         ] {
             for (left, right) in [(lhs, rhs), (rhs, lhs)] {
-                cases.push((format!("ASK {{ FILTER(!({left} = {right})) }}"), expected));
+                cases.push((
+                    format!("ASK {{ FILTER(!({left} = {right})) }}"),
+                    expected && rhs != "\"a\"@en",
+                    expected,
+                ));
             }
         }
     }
     for (lhs, rhs, expected) in [
+        (r#""a\u0000""#, r#""a""#, true),
+        (r#""\u0000""#, r#""\u0000""#, false),
+        (r#""\u0000""#, r#""""#, true),
+        (r#""a\u0000""#, r#""a\u0000b""#, true),
         (
             "\"same-prefix-that-is-long-enough-to-have-a-suffix-a\"",
             "\"same-prefix-that-is-long-enough-to-have-a-suffix-b\"",
@@ -261,7 +269,11 @@ pub fn mixed_string_queries() -> Vec<(String, bool)> {
         ("\"a\"@en", "\"a\"@en", false),
         ("\"a\"@en", "\"a\"@fr", true),
     ] {
-        cases.push((format!("ASK {{ FILTER(!({lhs} = {rhs})) }}"), expected));
+        cases.push((
+            format!("ASK {{ FILTER(!({lhs} = {rhs})) }}"),
+            expected && !lhs.ends_with("@en"),
+            expected,
+        ));
     }
     cases
 }

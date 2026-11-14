@@ -22,9 +22,55 @@ const DATASET_DOMAIN: &[u8; 16] = b"NQ/SUPPLIED/V1\0\0";
 pub struct Statement {
     pub request_digest: Word,
     pub input_commitment: Word,
-    /// The draft supplied-cell profile uses absence of a signature mode.
+    /// Selector interpreted by the authenticated or supplied-cell layout.
     pub signature_mode: u8,
     pub result: ResultValue,
+}
+
+/// Revealed suite signature over an ordered credential message.
+#[derive(Clone, Debug)]
+pub struct RevealedSignature {
+    pub key: sparq_zk::sig::PublicKey,
+    pub message: Word,
+    pub signature: sparq_zk::sig::Signature,
+}
+
+/// Public message/key values admitted only after external signature verification.
+#[derive(Clone, Debug)]
+pub struct RevealedInputs {
+    messages: Vec<Word>,
+    keys: Vec<Word>,
+}
+impl RevealedInputs {
+    pub fn verify(signatures: &[RevealedSignature]) -> Result<Self, Error> {
+        if signatures.len() > 4 {
+            return Err(Error::Capacity("revealed credential count".into()));
+        }
+        let mut messages = Vec::with_capacity(signatures.len());
+        let mut keys = Vec::with_capacity(signatures.len());
+        for signature in signatures {
+            let message = field(signature.message)?;
+            if !sparq_zk::sig::verify(&signature.key, &message, &signature.signature) {
+                return Err(Error::Invalid("revealed credential signature".into()));
+            }
+            let key = sparq_merkle_suite::metadata::key_cell(&signature.key)
+                .map_err(|e| Error::Invalid(e.to_string()))?;
+            messages.push(signature.message);
+            keys.push(field_to_be_bytes_32(&key.enc));
+        }
+        Ok(Self { messages, keys })
+    }
+    pub(crate) fn words(&self, plan: &Plan) -> Result<(u32, Vec<Word>, Vec<Word>), Error> {
+        if self.messages.len() > plan.bounds().credentials as usize {
+            return Err(Error::Capacity("revealed credential count".into()));
+        }
+        let mut messages = self.messages.clone();
+        let mut keys = self.keys.clone();
+        let count = messages.len() as u32;
+        messages.resize(plan.capacity().credentials as usize, [0; 32]);
+        keys.resize(plan.capacity().credentials as usize, [0; 32]);
+        Ok((count, messages, keys))
+    }
 }
 
 /// Verifier-stored envelope policy in its public-input order.
@@ -42,9 +88,31 @@ pub struct EnvelopeInputs {
     pub snapshot_root: Word,
     pub snapshot_depth: u32,
     pub validity_required: bool,
+    /// Unix epoch milliseconds when validity is requested.
     pub now: u64,
     pub freshness_required: bool,
+    /// Earliest acceptable creation instant in Unix epoch milliseconds.
     pub earliest_created: u64,
+}
+impl From<crate::envelope_policy::PublicPolicy> for EnvelopeInputs {
+    fn from(policy: crate::envelope_policy::PublicPolicy) -> Self {
+        Self {
+            issuer_root: policy.issuer_root,
+            issuer_depth: policy.issuer_depth,
+            holder_required: policy.holder_required,
+            holder_issuers_present: policy.holder_issuers_present,
+            holder_issuer_count: policy.holder_issuer_count,
+            holder_issuers: policy.holder_issuers,
+            status_required: policy.status_required,
+            allow_missing_status: policy.allow_missing_status,
+            snapshot_root: policy.snapshot_root,
+            snapshot_depth: policy.snapshot_depth,
+            validity_required: policy.validity_required,
+            now: policy.now,
+            freshness_required: policy.freshness_required,
+            earliest_created: policy.earliest_created,
+        }
+    }
 }
 impl EnvelopeInputs {
     /// Existing issuer-membership profile, pending the canonical policy-root integration.
@@ -69,7 +137,13 @@ impl EnvelopeInputs {
     pub fn validate(&self) -> Result<(), Error> {
         field(self.issuer_root)?;
         field(self.snapshot_root)?;
+        if self.now > i64::MAX as u64 || self.earliest_created > i64::MAX as u64 {
+            return Err(Error::Invalid("envelope instant range".into()));
+        }
         let n = self.holder_issuer_count as usize;
+        if self.holder_required && self.holder_issuers_present && n == 0 {
+            return Err(Error::Invalid("empty holder issuer list".into()));
+        }
         if n > self.holder_issuers.len()
             || (!self.holder_required && self.holder_issuers_present)
             || (!self.holder_issuers_present && n != 0)
@@ -112,8 +186,9 @@ impl EnvelopeInputs {
         Ok(words)
     }
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn require_consumer(&self) -> Result<(), Error> {
-        if self.issuer_depth != crate::credential::ISSUER_DEPTH
+    pub(crate) fn require_consumer(&self, canonical_policy: bool) -> Result<(), Error> {
+        if canonical_policy
+            || self.issuer_depth != crate::credential::ISSUER_DEPTH
             || self.holder_required
             || self.status_required
             || self.validity_required
@@ -189,6 +264,16 @@ impl Layout {
                 Abi::array(Abi::UInt(32), self.credentials),
             ),
         );
+        for group in [
+            ("revealed_count", Abi::UInt(32)),
+            (
+                "revealed_messages",
+                Abi::array(Abi::Field, self.credentials),
+            ),
+            ("revealed_keys", Abi::array(Abi::Field, self.credentials)),
+        ] {
+            groups.insert(groups.len() - 1, group);
+        }
         groups
     }
     fn envelope_groups() -> Vec<(&'static str, Abi)> {
@@ -240,12 +325,48 @@ impl Layout {
         statement: &Statement,
         envelope: &EnvelopeInputs,
     ) -> Result<Vec<Word>, Error> {
-        let mut words =
-            self.reconstruct_words(plan, statement, &crate::credential::SuiteEncoder, 1)?;
+        self.reconstruct_authenticated_mode(plan, statement, envelope, None)
+    }
+    /// Reconstruct revealed-mode words from externally verified signatures.
+    /// Circuit membership binds each revealed signer to the stored trust policy.
+    pub fn reconstruct_revealed(
+        &self,
+        plan: &Plan,
+        statement: &Statement,
+        envelope: &EnvelopeInputs,
+        revealed: &RevealedInputs,
+    ) -> Result<Vec<Word>, Error> {
+        self.reconstruct_authenticated_mode(plan, statement, envelope, Some(revealed))
+    }
+    fn reconstruct_authenticated_mode(
+        &self,
+        plan: &Plan,
+        statement: &Statement,
+        envelope: &EnvelopeInputs,
+        revealed: Option<&RevealedInputs>,
+    ) -> Result<Vec<Word>, Error> {
+        let mut words = self.reconstruct_words(
+            plan,
+            statement,
+            &crate::credential::SuiteEncoder,
+            u8::from(revealed.is_none()),
+        )?;
         words.extend(envelope.words()?);
         let mut bounds = plan.credential_quad_bounds();
         bounds.resize(self.credentials, 0);
         words.extend(bounds.into_iter().map(|n| number(u64::from(n))));
+        let (count, messages, keys) = if let Some(revealed) = revealed {
+            revealed.words(plan)?
+        } else {
+            (
+                0,
+                vec![[0; 32]; self.credentials],
+                vec![[0; 32]; self.credentials],
+            )
+        };
+        words.push(number(u64::from(count)));
+        words.extend(messages);
+        words.extend(keys);
         words.push(binding(&words)?);
         Ok(words)
     }
@@ -530,7 +651,13 @@ mod literal_tests {
     #[test]
     fn require_consumer_refuses_each_pending_policy_independently() {
         let base = EnvelopeInputs::issuer_only(number(1));
-        assert_eq!(base.require_consumer(), Ok(()));
+        assert_eq!(base.require_consumer(false), Ok(()));
+        assert_eq!(
+            base.require_consumer(true),
+            Err(Error::Unsupported(
+                "credential envelope policy integration".into()
+            ))
+        );
         for case in 0..5 {
             let mut policy = base.clone();
             match case {
@@ -542,7 +669,7 @@ mod literal_tests {
                 _ => unreachable!(),
             }
             assert_eq!(
-                policy.require_consumer(),
+                policy.require_consumer(false),
                 Err(Error::Unsupported(
                     "credential envelope policy integration".into()
                 )),

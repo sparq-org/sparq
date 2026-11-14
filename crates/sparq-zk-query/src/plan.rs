@@ -1,6 +1,6 @@
 //! Typed, bounded algebra. The shape encoding excludes parameter values and variable names.
 
-use crate::capacity::{Bounds, Capacity};
+use crate::capacity::{Bounds, Capacity, OpeningProfile};
 use oxrdf::Term;
 
 pub type Var = u32;
@@ -117,6 +117,7 @@ pub enum ResultForm {
 pub struct Plan {
     pub(crate) bounds: Bounds,
     pub(crate) capacity: Capacity,
+    pub(crate) opening_profile: OpeningProfile,
     pub(crate) credential_quad_bounds: Vec<u32>,
     pub(crate) nodes: Vec<Node>,
     pub(crate) parameters: Vec<Parameter>,
@@ -126,6 +127,14 @@ pub struct Plan {
 }
 
 impl Plan {
+    /// Choose opening bounds from the verifier's request, independently of witnesses.
+    pub fn with_opening_profile(mut self, profile: OpeningProfile) -> Self {
+        self.opening_profile = profile;
+        self
+    }
+    pub fn opening_profile(&self) -> OpeningProfile {
+        self.opening_profile
+    }
     /// Refine public per-credential bounds without using private cardinalities.
     pub fn with_credential_quad_bounds(mut self, bounds: &[u32]) -> Result<Self, crate::Error> {
         if bounds.len() != self.bounds.credentials as usize
@@ -190,7 +199,7 @@ impl Plan {
     /// Length-prefixed, tagged, little-endian shape encoding. No serializer defaults.
     /// Parameter kinds and occurrence positions are encoded; their values are not.
     pub fn canonical_bytes(&self) -> Vec<u8> {
-        let mut w = Encoding(b"sparq.noir-query.plan\0\x02".to_vec());
+        let mut w = Encoding(b"sparq.noir-query.plan\0\x03".to_vec());
         for n in [
             self.capacity.credentials,
             self.capacity.quads_per_credential,
@@ -201,7 +210,18 @@ impl Plan {
         for n in self.credential_quad_capacities() {
             w.u32(n);
         }
-        w.u32(crate::credential::LEXICAL_CAPACITY as u32);
+        let limits = self.opening_profile.limits();
+        for capacity in [
+            limits.resource,
+            limits.object,
+            limits.scalar,
+            limits.datatype,
+            limits.language,
+            limits.created,
+            limits.method,
+        ] {
+            w.u32(capacity);
+        }
         w.u32(crate::credential::ISSUER_DEPTH);
         w.u8(match self.form {
             ResultForm::Select => 0,

@@ -18,6 +18,7 @@ pub enum LaneType {
     Date,
     DateTime,
     Term,
+    Duration,
     Dynamic,
 }
 
@@ -44,6 +45,29 @@ pub enum ExprOp {
     Div,
     UnaryPlus,
     UnaryMinus,
+    IsIri,
+    IsBlank,
+    IsLiteral,
+    IsNumeric,
+    Str,
+    Lang,
+    Datatype,
+    LangMatches,
+    Iri,
+    StrDt,
+    StrLang,
+    Year,
+    Month,
+    Day,
+    Hours,
+    Minutes,
+    Seconds,
+    Timezone,
+    Tz,
+    Abs,
+    Round,
+    Ceil,
+    Floor,
     Unsupported(String),
 }
 
@@ -70,6 +94,29 @@ impl ExprOp {
             Self::Div => "/",
             Self::UnaryPlus => "unary +",
             Self::UnaryMinus => "unary -",
+            Self::IsIri => "isIRI",
+            Self::IsBlank => "isBlank",
+            Self::IsLiteral => "isLiteral",
+            Self::IsNumeric => "isNumeric",
+            Self::Str => "STR",
+            Self::Lang => "LANG",
+            Self::Datatype => "DATATYPE",
+            Self::LangMatches => "LANGMATCHES",
+            Self::Iri => "IRI",
+            Self::StrDt => "STRDT",
+            Self::StrLang => "STRLANG",
+            Self::Year => "YEAR",
+            Self::Month => "MONTH",
+            Self::Day => "DAY",
+            Self::Hours => "HOURS",
+            Self::Minutes => "MINUTES",
+            Self::Seconds => "SECONDS",
+            Self::Timezone => "TIMEZONE",
+            Self::Tz => "TZ",
+            Self::Abs => "ABS",
+            Self::Round => "ROUND",
+            Self::Ceil => "CEIL",
+            Self::Floor => "FLOOR",
             Self::Unsupported(name) => name,
         }
     }
@@ -130,6 +177,10 @@ pub enum Gadget {
     Bound(u32),
     Ebv,
     AsNumeric,
+    AsString,
+    ReadTemporal,
+    NumericDatatype,
+    TemporalCompare(ExprOp),
     /// Retain an existing cell; serialize only a newly computed typed value.
     ToTerm,
     Call(ExprOp),
@@ -196,7 +247,7 @@ pub fn lower_bind(expr: &Expr) -> Result<TypedDag, Refusal> {
     let mut dag = lower(expr)?;
     if !matches!(
         dag.nodes[dag.root].ty,
-        LaneType::Boolean | LaneType::Integer | LaneType::Decimal
+        LaneType::Boolean | LaneType::Integer | LaneType::Decimal | LaneType::Term
     ) {
         return Err(refuse(
             "BIND",
@@ -263,10 +314,31 @@ impl Builder {
             }
             Expr::Call { op, args } => {
                 if let ExprOp::Unsupported(name) = op {
-                    return Err(refuse(name, "outside the first expression group"));
+                    return Err(refuse(name, "outside the current expression groups"));
                 }
                 let valid_arity = match op {
-                    ExprOp::Not | ExprOp::UnaryPlus | ExprOp::UnaryMinus => args.len() == 1,
+                    ExprOp::Not
+                    | ExprOp::UnaryPlus
+                    | ExprOp::UnaryMinus
+                    | ExprOp::IsIri
+                    | ExprOp::IsBlank
+                    | ExprOp::IsLiteral
+                    | ExprOp::IsNumeric
+                    | ExprOp::Str
+                    | ExprOp::Lang
+                    | ExprOp::Datatype
+                    | ExprOp::Year
+                    | ExprOp::Month
+                    | ExprOp::Day
+                    | ExprOp::Hours
+                    | ExprOp::Minutes
+                    | ExprOp::Seconds
+                    | ExprOp::Timezone
+                    | ExprOp::Tz
+                    | ExprOp::Abs
+                    | ExprOp::Round
+                    | ExprOp::Ceil
+                    | ExprOp::Floor => args.len() == 1,
                     ExprOp::If => args.len() == 3,
                     ExprOp::Coalesce => true,
                     ExprOp::In | ExprOp::NotIn => !args.is_empty(),
@@ -322,6 +394,91 @@ impl Builder {
                         }
                         ty
                     }
+                    ExprOp::Abs | ExprOp::Round | ExprOp::Ceil | ExprOp::Floor => {
+                        let ty = if numeric(types[0]) {
+                            types[0]
+                        } else {
+                            LaneType::Dynamic
+                        };
+                        inputs[0] = self.convert(inputs[0], Gadget::AsNumeric, ty);
+                        ty
+                    }
+                    ExprOp::Str | ExprOp::Lang => {
+                        inputs[0] = self.convert(inputs[0], Gadget::ToTerm, LaneType::Term);
+                        LaneType::String
+                    }
+                    ExprOp::Tz => {
+                        inputs[0] =
+                            self.convert(inputs[0], Gadget::ReadTemporal, LaneType::DateTime);
+                        LaneType::String
+                    }
+                    ExprOp::Datatype
+                        if numeric(types[0])
+                            && matches!(
+                                self.nodes[inputs[0]].gadget,
+                                Gadget::Call(
+                                    ExprOp::Add
+                                        | ExprOp::Sub
+                                        | ExprOp::Mul
+                                        | ExprOp::Div
+                                        | ExprOp::UnaryMinus
+                                        | ExprOp::Abs
+                                        | ExprOp::Round
+                                        | ExprOp::Ceil
+                                        | ExprOp::Floor
+                                )
+                            ) =>
+                    {
+                        return Ok(self.node(Gadget::NumericDatatype, inputs, LaneType::Term));
+                    }
+                    ExprOp::Datatype | ExprOp::Iri | ExprOp::StrDt | ExprOp::StrLang => {
+                        for input in &mut inputs {
+                            *input = self.convert(*input, Gadget::ToTerm, LaneType::Term);
+                        }
+                        LaneType::Term
+                    }
+                    ExprOp::IsIri | ExprOp::IsBlank | ExprOp::IsLiteral | ExprOp::IsNumeric => {
+                        inputs[0] = self.convert(inputs[0], Gadget::ToTerm, LaneType::Term);
+                        LaneType::Boolean
+                    }
+                    ExprOp::LangMatches => {
+                        for input in &mut inputs {
+                            *input = self.convert(*input, Gadget::AsString, LaneType::String);
+                        }
+                        LaneType::Boolean
+                    }
+                    ExprOp::Year
+                    | ExprOp::Month
+                    | ExprOp::Day
+                    | ExprOp::Hours
+                    | ExprOp::Minutes => {
+                        inputs[0] =
+                            self.convert(inputs[0], Gadget::ReadTemporal, LaneType::DateTime);
+                        LaneType::Integer
+                    }
+                    ExprOp::Seconds => {
+                        inputs[0] =
+                            self.convert(inputs[0], Gadget::ReadTemporal, LaneType::DateTime);
+                        LaneType::Decimal
+                    }
+                    ExprOp::Timezone => {
+                        inputs[0] =
+                            self.convert(inputs[0], Gadget::ReadTemporal, LaneType::DateTime);
+                        LaneType::Duration
+                    }
+                    ExprOp::Eq | ExprOp::Ne | ExprOp::Lt | ExprOp::Le | ExprOp::Gt | ExprOp::Ge
+                        if matches!(types[0], LaneType::Date | LaneType::DateTime)
+                            && types[0] == types[1] =>
+                    {
+                        for input in &mut inputs {
+                            *input = self.convert(*input, Gadget::ReadTemporal, types[0]);
+                        }
+                        return Ok(self.node(
+                            Gadget::TemporalCompare(op.clone()),
+                            inputs,
+                            LaneType::Boolean,
+                        ));
+                    }
                     ExprOp::SameTerm => {
                         for input in &mut inputs {
                             *input = self.convert(*input, Gadget::ToTerm, LaneType::Term);
@@ -352,6 +509,16 @@ pub fn from_spargebra_with_boolean_inputs(
     slots: &BTreeMap<String, (u32, LaneType)>,
     booleans: &[(spargebra::algebra::GraphPattern, u32)],
 ) -> Result<Expr, Refusal> {
+    from_spargebra_with_context(expr, slots, booleans, None)
+}
+
+/// The query base is a receiver-bound public IRI parameter for IRI construction.
+pub fn from_spargebra_with_context(
+    expr: &Expression,
+    slots: &BTreeMap<String, (u32, LaneType)>,
+    booleans: &[(spargebra::algebra::GraphPattern, u32)],
+    base: Option<&oxrdf::NamedNode>,
+) -> Result<Expr, Refusal> {
     let slot = |name: &str| {
         slots
             .get(name)
@@ -363,7 +530,7 @@ pub fn from_spargebra_with_boolean_inputs(
             op,
             args: args
                 .into_iter()
-                .map(|a| from_spargebra_with_boolean_inputs(a, slots, booleans))
+                .map(|a| from_spargebra_with_context(a, slots, booleans, base))
                 .collect::<Result<_, _>>()?,
         })
     };
@@ -400,12 +567,52 @@ pub fn from_spargebra_with_boolean_inputs(
             std::iter::once(lhs.as_ref()).chain(args.iter()).collect(),
         ),
         E::FunctionCall(function, args) => {
-            let name = match function {
-                Function::Custom(iri) => iri.as_str().to_owned(),
-                _ => function.to_string(),
+            if *function == Function::Iri {
+                if args.len() != 1 {
+                    return Err(refuse("IRI", "argument count"));
+                }
+                let base = base.ok_or_else(|| refuse("IRI", "public query base is required"))?;
+                return Ok(Expr::Call {
+                    op: ExprOp::Iri,
+                    args: vec![
+                        from_spargebra_with_context(&args[0], slots, booleans, Some(base))?,
+                        Expr::Constant(base.clone().into()),
+                    ],
+                });
+            }
+            let op = match function {
+                Function::IsIri => ExprOp::IsIri,
+                Function::IsBlank => ExprOp::IsBlank,
+                Function::IsLiteral => ExprOp::IsLiteral,
+                Function::IsNumeric => ExprOp::IsNumeric,
+                Function::Str => ExprOp::Str,
+                Function::Lang => ExprOp::Lang,
+                Function::Datatype => ExprOp::Datatype,
+                Function::LangMatches => ExprOp::LangMatches,
+                Function::Iri => ExprOp::Iri,
+                Function::StrDt => ExprOp::StrDt,
+                Function::StrLang => ExprOp::StrLang,
+                Function::Year => ExprOp::Year,
+                Function::Month => ExprOp::Month,
+                Function::Day => ExprOp::Day,
+                Function::Hours => ExprOp::Hours,
+                Function::Minutes => ExprOp::Minutes,
+                Function::Seconds => ExprOp::Seconds,
+                Function::Timezone => ExprOp::Timezone,
+                Function::Tz => ExprOp::Tz,
+                Function::Abs => ExprOp::Abs,
+                Function::Round => ExprOp::Round,
+                Function::Ceil => ExprOp::Ceil,
+                Function::Floor => ExprOp::Floor,
+                _ => {
+                    let name = match function {
+                        Function::Custom(iri) => iri.as_str().to_owned(),
+                        _ => function.to_string(),
+                    };
+                    return Err(refuse(&name, "outside the current expression groups"));
+                }
             };
-            let _ = args;
-            Err(refuse(&name, "outside the first expression group"))
+            call(op, args.iter().collect())
         }
         E::Exists(pattern) => booleans
             .iter()

@@ -19,6 +19,106 @@ const B: Bounds = Bounds {
 };
 
 #[test]
+fn opening_profile_limits_are_selected_before_private_data() {
+    use sparq_zk_query::capacity::OpeningProfile;
+    for (length, compact) in [(65, true), (66, false), (137, false), (160, false)] {
+        let credential =
+            authenticated::sign(&format!("<urn:a> <urn:p> \"{}\" .", "m".repeat(length)), 0);
+        assert_eq!(
+            credential
+                .cells_with_profile(0, OpeningProfile::Solid)
+                .is_ok(),
+            compact
+        );
+        assert!(credential
+            .cells_with_profile(0, OpeningProfile::Extended)
+            .is_ok());
+        assert_eq!(
+            credential
+                .cells_with_profile(0, OpeningProfile::LongObjects)
+                .is_ok(),
+            length <= 137
+        );
+    }
+    let credential = authenticated::sign(&format!("<urn:{}> <urn:p> <urn:o> .", "r".repeat(61)), 0);
+    assert!(
+        matches!(credential.cells_with_profile(0, OpeningProfile::Solid),
+        Err(Error::Capacity(reason)) if reason == "opening profile lexical bytes")
+    );
+    assert!(credential
+        .cells_with_profile(0, OpeningProfile::Extended)
+        .is_ok());
+    let credential = authenticated::sign(&format!("<urn:a> <urn:{}> <urn:o> .", "p".repeat(61)), 0);
+    assert!(
+        matches!(credential.cells_with_profile(0, OpeningProfile::Solid),
+        Err(Error::Capacity(reason)) if reason == "opening profile lexical bytes")
+    );
+    assert!(credential
+        .cells_with_profile(0, OpeningProfile::Extended)
+        .is_ok());
+}
+
+#[test]
+fn opening_profile_checks_the_authenticated_verification_method_length() {
+    use sparq_zk_query::capacity::OpeningProfile;
+    let source = "<urn:a> <urn:p> <urn:o> .";
+    let mut credential = authenticated::sign(source, 0);
+    let config = format!(
+        "_:proof <https://w3id.org/security#cryptosuite> \"schnorr-poseidon2-merkle-2026\" .\n_:proof <https://w3id.org/security#verificationMethod> <urn:{}> .",
+        "v".repeat(29)
+    );
+    credential.credential = sparq_merkle_suite::poseidon::issue(
+        source,
+        &config,
+        &sparq_zk::sig::SecretKey::from_seed(19),
+        sparq_merkle_suite::Fr::from(101u64),
+    )
+    .unwrap();
+    assert!(
+        matches!(credential.cells_with_profile(0, OpeningProfile::Solid),
+        Err(Error::Capacity(reason)) if reason=="opening profile metadata bytes")
+    );
+    assert!(credential
+        .cells_with_profile(0, OpeningProfile::Extended)
+        .is_ok());
+}
+
+#[test]
+fn generated_witness_uses_the_selected_lexical_backing() {
+    use sparq_zk_query::capacity::OpeningProfile;
+    let data = vec![authenticated::sign(
+        &format!("<urn:a> <urn:p> \"{}\" .", "z".repeat(137)),
+        0,
+    )];
+    let compact = lower("ASK {}", B).unwrap();
+    let wide = compact
+        .clone()
+        .with_opening_profile(OpeningProfile::Extended);
+    let trace = evaluate(&wide, &[data[0].cells(0).unwrap()], &SuiteEncoder).unwrap();
+    assert_eq!(
+        prover_toml_authenticated(
+            &compact,
+            &data,
+            &trace,
+            [7; 32],
+            [3; 32],
+            authenticated::issuer_root()
+        )
+        .unwrap_err(),
+        Error::Capacity("opening profile lexical bytes".into())
+    );
+    assert!(prover_toml_authenticated(
+        &wide,
+        &data,
+        &trace,
+        [7; 32],
+        [3; 32],
+        authenticated::issuer_root()
+    )
+    .is_ok());
+}
+
+#[test]
 fn suite_credentials_feed_the_same_exact_interpreter_and_public_layout() {
     for case in fixture_support::n0_cases() {
         let bounds = Bounds {
@@ -122,7 +222,13 @@ fn suite_signature_opening_and_named_admission_guards_are_observable() {
         named.cells(0).unwrap_err(),
         Error::Unsupported("credential named graph".into())
     );
-    let long = authenticated::sign(&format!("<urn:{}> <urn:p> <urn:o> .", "a".repeat(40)), 0);
+    let long = authenticated::sign(
+        &format!(
+            "<urn:{}> <urn:p> <urn:o> .",
+            "a".repeat(sparq_zk_query::credential::RESOURCE_CAPACITY)
+        ),
+        0,
+    );
     assert_eq!(
         long.cells(0).unwrap_err(),
         Error::Capacity("opened lexical bytes".into())
@@ -219,6 +325,130 @@ fn credentials_cannot_supply_the_method_issuer_assertion() {
     assert_eq!(
         credential.cells(0).unwrap_err(),
         Error::Excluded("credential verifiedIssuer assertion".into())
+    );
+}
+
+#[test]
+fn signed_dataset_derives_each_issuer_from_its_authorized_identity_method_and_key() {
+    use oxrdf::{NamedNode, Term};
+    use sparq_zk_query::{
+        credential::{assemble_issuer_dataset, Credential, VERIFIED_ISSUER},
+        envelope_policy::TrustMember,
+        interp::EncodeTerm,
+    };
+    let sign = |document: &str, method: Option<&str>, seed: u64| {
+        let key = sparq_zk::sig::SecretKey::from_seed(seed);
+        let mut configuration = "<urn:proof> <https://w3id.org/security#cryptosuite> \"schnorr-poseidon2-merkle-2026\" .\n".to_string();
+        if let Some(method) = method {
+            configuration.push_str(&format!(
+                "<urn:proof> <https://w3id.org/security#verificationMethod> <{method}> .\n"
+            ));
+        }
+        Credential {
+            credential: sparq_merkle_suite::poseidon::issue(
+                document,
+                &configuration,
+                &key,
+                sparq_merkle_suite::Fr::from(101u64),
+            )
+            .unwrap(),
+            issuer: key.public_key(),
+            issuer_index: 0,
+            issuer_siblings: vec![sparq_merkle_suite::Fr::from(0u64); 4],
+        }
+    };
+    let document = |issuer: &str| {
+        format!("<urn:credential> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://www.w3.org/2018/credentials#VerifiableCredential> .\n<urn:credential> <https://www.w3.org/2018/credentials#issuer> <{issuer}> .\n<urn:subject> <urn:fact> <urn:value> .\n")
+    };
+    let trust: Vec<_> = (1..=2)
+        .map(|i| TrustMember {
+            issuer: NamedNode::new_unchecked(format!("urn:issuer:{i}")),
+            verification_method: NamedNode::new_unchecked(format!("urn:method:{i}")),
+            key: sparq_zk::sig::SecretKey::from_seed(i).public_key(),
+        })
+        .collect();
+    let credentials = [
+        sign(&document("urn:issuer:1"), Some("urn:method:1"), 1),
+        sign(&document("urn:issuer:2"), Some("urn:method:2"), 2),
+    ];
+    let dataset = assemble_issuer_dataset(&credentials, &trust, [7; 32]).unwrap();
+    assert_eq!(dataset.credential_counts(), [3, 3]);
+    let predicate = SuiteEncoder
+        .encode(&Term::NamedNode(NamedNode::new_unchecked(VERIFIED_ISSUER)))
+        .unwrap();
+    for (i, member) in trust.iter().enumerate() {
+        let graph = sparq_zk_query::credential::credential_graph([7; 32], i as u32).unwrap();
+        let issuer = SuiteEncoder
+            .encode(&Term::NamedNode(member.issuer.clone()))
+            .unwrap();
+        assert!(dataset
+            .quads()
+            .contains(&[graph, predicate, issuer, Default::default()]));
+        assert_eq!(dataset.quads().iter().filter(|q| q[3] == graph).count(), 3);
+    }
+    let mut reordered = trust.clone();
+    reordered.reverse();
+    reordered.push(trust[0].clone());
+    assert_eq!(
+        dataset,
+        assemble_issuer_dataset(&credentials, &reordered, [7; 32]).unwrap()
+    );
+    let authorization = Error::Invalid("issuer authorization set".into());
+    for changed in [
+        sign(&document("urn:issuer:2"), Some("urn:method:1"), 1),
+        sign(&document("urn:issuer:1"), Some("urn:method:2"), 1),
+        sign(&document("urn:issuer:1"), Some("urn:method:1"), 2),
+    ] {
+        assert_eq!(
+            assemble_issuer_dataset(&[changed], &trust, [7; 32]).unwrap_err(),
+            authorization
+        );
+    }
+    let missing_method = sign(&document("urn:issuer:1"), None, 1);
+    assert_eq!(
+        assemble_issuer_dataset(&[missing_method], &trust, [7; 32]).unwrap_err(),
+        Error::Invalid("credential verification method".into())
+    );
+    let rootless = sign(
+        "<urn:subject> <urn:fact> <urn:value> .",
+        Some("urn:method:1"),
+        1,
+    );
+    let two_roots = sign(&format!("{}<urn:other> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://www.w3.org/2018/credentials#VerifiableCredential> .", document("urn:issuer:1")), Some("urn:method:1"), 1);
+    for changed in [rootless, two_roots] {
+        assert_eq!(
+            assemble_issuer_dataset(&[changed], &trust, [7; 32]).unwrap_err(),
+            Error::Invalid("credential root cardinality".into())
+        );
+    }
+    let ambiguous_issuer = sign(
+        &format!(
+            "{}<urn:credential> <https://www.w3.org/2018/credentials#issuer> <urn:issuer:2> .",
+            document("urn:issuer:1")
+        ),
+        Some("urn:method:1"),
+        1,
+    );
+    let literal_issuer = sign(
+        &document("urn:issuer:1").replace("<urn:issuer:1>", "\"urn:issuer:1\""),
+        Some("urn:method:1"),
+        1,
+    );
+    for changed in [ambiguous_issuer, literal_issuer] {
+        assert_eq!(
+            assemble_issuer_dataset(&[changed], &trust, [7; 32]).unwrap_err(),
+            Error::Invalid("credential issuer cardinality or kind".into())
+        );
+    }
+    let mut altered = credentials[0].clone();
+    altered.credential.document = altered
+        .credential
+        .document
+        .replace("<urn:value>", "<urn:tampered>");
+    assert!(assemble_issuer_dataset(&[altered], &trust, [7; 32]).is_err());
+    assert_eq!(
+        assemble_issuer_dataset(&credentials, &[], [7; 32]).unwrap_err(),
+        Error::Invalid("empty policy set".into())
     );
 }
 #[test]

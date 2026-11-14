@@ -388,18 +388,12 @@ impl Value {
             Self::Boolean(v, e) => (v, e),
             Self::Term(c) if !c.bound || c.kind != 3 => (false, true),
             Self::Term(c) => match c.key_class {
-                0 if c.dt
-                    == sparq_merkle_suite::poseidon::field_bytes(
-                        sparq_merkle_suite::poseidon::hash_bytes(
-                            sparq_merkle_suite::poseidon::DATATYPE_DOMAIN,
-                            b"http://www.w3.org/1999/02/22-rdf-syntax-ns#langString",
-                        ),
-                    ) =>
-                {
+                0 if c.dt == *LANGUAGE_STRING_DATATYPE => {
                     return Err(Error::Unsupported(
                         "language-tagged effective boolean value".into(),
                     ));
                 }
+                0 if NUMERIC_BOOLEAN_DATATYPES.contains(&c.dt) => (false, false),
                 1 => {
                     check_exact_magnitude(c)?;
                     let mut zero = [0; 32];
@@ -455,8 +449,32 @@ static LANGUAGE_STRING_DATATYPE: std::sync::LazyLock<Word> = std::sync::LazyLock
 fn plain_string(c: Cell) -> bool {
     c.lang == [0; 32] || c.dt == *STRING_DATATYPE
 }
+static NUMERIC_BOOLEAN_DATATYPES: std::sync::LazyLock<Vec<Word>> = std::sync::LazyLock::new(|| {
+    [
+        "integer",
+        "decimal",
+        "double",
+        "float",
+        "boolean",
+        "nonPositiveInteger",
+        "negativeInteger",
+        "long",
+        "int",
+        "short",
+        "byte",
+        "nonNegativeInteger",
+        "unsignedLong",
+        "unsignedInt",
+        "unsignedShort",
+        "unsignedByte",
+        "positiveInteger",
+    ]
+    .iter()
+    .map(|name| datatype_id(format!("http://www.w3.org/2001/XMLSchema#{name}").as_bytes()))
+    .collect()
+});
 fn string_cell(cell: Cell) -> bool {
-    cell.kind == 3 && (matches!(cell.key_class, 6 | 7) || cell.dt == *LANGUAGE_STRING_DATATYPE)
+    cell.kind == 3 && matches!(cell.key_class, 6 | 7)
 }
 
 fn compare(op: Compare, a: Value, b: Value) -> Result<Value, Error> {
@@ -513,6 +531,11 @@ fn compare(op: Compare, a: Value, b: Value) -> Result<Value, Error> {
         }
         if op == Compare::Equal && string_cell(a) && string_cell(b) {
             return Ok(Value::Boolean(a.same_term(b), false));
+        }
+        if op == Compare::Equal
+            && (a.dt == *LANGUAGE_STRING_DATATYPE || b.dt == *LANGUAGE_STRING_DATATYPE)
+        {
+            return Ok(Value::Boolean(a.same_term(b), !a.same_term(b)));
         }
         if op == Compare::Equal && (string_cell(a) || string_cell(b)) {
             return Ok(Value::Boolean(false, true));
