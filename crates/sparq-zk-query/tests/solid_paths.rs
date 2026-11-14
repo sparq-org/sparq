@@ -311,49 +311,9 @@ fn canonical_renderer_executes_all_six_solid_targets() {
     ) else {
         return;
     };
-    use sparq_zk_query::{
-        credential::assemble_issuer_dataset,
-        interp::evaluate_dataset,
-        witness::{prover_toml_enveloped, EnvelopeInput, EnvelopeWitness},
-    };
     for target in TARGETS {
-        let (data, policy) = canonical_fixtures(target);
-        let plan = sparq_zk_query::lower::lower(
-            &query(target),
-            Bounds {
-                credentials: if target.starts_with("recycled-") {
-                    4
-                } else {
-                    data.len() as u32
-                },
-                quads_per_credential: 8,
-                rows_per_table: if target.starts_with("recycled-") {
-                    4
-                } else {
-                    2
-                },
-            },
-        )
-        .unwrap();
-        let dataset = assemble_issuer_dataset(&data, &policy.trust_members, DIGEST).unwrap();
-        let trace = evaluate_dataset(&plan, &dataset, &SuiteEncoder).unwrap();
-        assert_eq!(released_for(target, &trace.result), Some(true), "{target}");
-        assert_eq!(engine(target, &data), Some(true), "{target}");
-        let render = |trace: &Trace| {
-            prover_toml_enveloped(
-                &plan,
-                &data,
-                trace,
-                DIGEST,
-                [3; 32],
-                EnvelopeInput {
-                    policy: &policy,
-                    evidence: &EnvelopeWitness::default(),
-                    revealed: None,
-                },
-            )
-            .unwrap()
-        };
+        let (plan, data, policy, trace) = canonical_case(target, false);
+        let render = |trace: &Trace| canonical_toml(&plan, &data, &policy, trace);
         let input = render(&trace);
         let package = codegen::generate(&plan).unwrap();
         let source = &package.files[&format!("{}/src/main.nr", package.name)];
@@ -409,6 +369,60 @@ fn canonical_renderer_executes_all_six_solid_targets() {
         eprintln!("canonical target {target}: complete witness and execution accepted; altered result refused");
     }
     support::complete(gate);
+}
+/// The canonical (production) program for `target`. `full` asks for the
+/// 4 x 64 snapshot the consumer proves; otherwise small native buckets.
+fn canonical_case(
+    target: &str,
+    full: bool,
+) -> (
+    Plan,
+    Vec<Credential>,
+    sparq_zk_query::envelope_policy::PolicyInput,
+    Trace,
+) {
+    use sparq_zk_query::{credential::assemble_issuer_dataset, interp::evaluate_dataset};
+    let (data, policy) = canonical_fixtures(target);
+    let recycled = target.starts_with("recycled-");
+    let plan = sparq_zk_query::lower::lower(
+        &query(target),
+        Bounds {
+            credentials: if full || recycled {
+                4
+            } else {
+                data.len() as u32
+            },
+            quads_per_credential: if full { 64 } else { 8 },
+            rows_per_table: if full || recycled { 4 } else { 2 },
+        },
+    )
+    .unwrap();
+    let dataset = assemble_issuer_dataset(&data, &policy.trust_members, DIGEST).unwrap();
+    let trace = evaluate_dataset(&plan, &dataset, &SuiteEncoder).unwrap();
+    assert_eq!(released_for(target, &trace.result), Some(true), "{target}");
+    assert_eq!(engine(target, &data), Some(true), "{target}");
+    (plan, data, policy, trace)
+}
+fn canonical_toml(
+    plan: &Plan,
+    data: &[Credential],
+    policy: &sparq_zk_query::envelope_policy::PolicyInput,
+    trace: &Trace,
+) -> String {
+    use sparq_zk_query::witness::{prover_toml_enveloped, EnvelopeInput, EnvelopeWitness};
+    prover_toml_enveloped(
+        plan,
+        data,
+        trace,
+        DIGEST,
+        [3; 32],
+        EnvelopeInput {
+            policy,
+            evidence: &EnvelopeWitness::default(),
+            revealed: None,
+        },
+    )
+    .unwrap()
 }
 fn query(target: &str) -> String {
     std::fs::read_to_string(
@@ -987,6 +1001,33 @@ fn recycled_having_authenticated() {
     };
     exercise(&gate, "recycled-having", true);
     support::complete(gate);
+}
+#[test]
+fn export_canonical_solid_programs_when_requested() {
+    let Ok(root) = std::env::var("SPARQ_CANONICAL_EXPORT_DIR") else {
+        return;
+    };
+    for target in TARGETS {
+        let (plan, data, policy, trace) = canonical_case(target, true);
+        let pkg = codegen::generate(&plan).unwrap();
+        let root = Path::new(&root).join(target);
+        std::fs::create_dir_all(&root).unwrap();
+        write_package(&pkg, &root);
+        std::fs::write(root.join("package-name"), &pkg.name).unwrap();
+        let dir = root.join(&pkg.name);
+        std::fs::write(
+            dir.join("Prover.toml"),
+            canonical_toml(&plan, &data, &policy, &trace),
+        )
+        .unwrap();
+        let mut wrong = trace.clone();
+        alter_result(target, &mut wrong);
+        std::fs::write(
+            dir.join("Prover_wrong.toml"),
+            canonical_toml(&plan, &data, &policy, &wrong),
+        )
+        .unwrap();
+    }
 }
 #[test]
 fn export_solid_path_programs_when_requested() {
