@@ -122,7 +122,7 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
     if authenticated {
         let capacities = plan.credential_quad_capacities();
         let total: u32 = capacities.iter().sum();
-        writeln!(source,"    let credential_flags = core::ops_core_suite::credential_flags::<{}>(credential_count, bounds[0], signature_mode);",cap.credentials).unwrap();
+        writeln!(source,"    let credential_flags = core::ops_core_suite::credential_mode_flags::<{}>(credential_count, bounds[0], signature_mode, revealed_count, revealed_messages, revealed_keys);",cap.credentials).unwrap();
         let mut offset = 0;
         writeln!(
             source,
@@ -131,7 +131,7 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
         .unwrap();
         for (c, n) in capacities.iter().enumerate() {
             writeln!(source, "    let credential_index_{c}: u32 = {c};").unwrap();
-            writeln!(source,"    let opened_{c} = core::ops_core_suite::open_profile_one::<{n}, {resource}, {lexical}, {check_keys}, {method}>(credential_{c}, credential_proof_{c}, counts[{c}], credential_flags[{c}], credential_quad_bounds[{c}], credential_index_{c}, issuer_root, request_digest);").unwrap();
+            writeln!(source,"    let opened_{c} = core::ops_core_suite::open_profile_mode_one::<{n}, {resource}, {lexical}, {check_keys}, {method}>(credential_{c}, credential_proof_{c}, counts[{c}], credential_flags[{c}], credential_quad_bounds[{c}], credential_index_{c}, issuer_root, request_digest, signature_mode, revealed_messages[{c}], revealed_keys[{c}]);").unwrap();
             let prior = if c == 0 {
                 "dataset_start".to_owned()
             } else {
@@ -258,7 +258,7 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
         ResultForm::Select => "bind_select",
     };
     let binder = if authenticated {
-        format!("{binder}_authenticated")
+        format!("{binder}_authenticated_modes")
     } else {
         binder.to_owned()
     };
@@ -275,7 +275,12 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
     } else {
         ""
     };
-    writeln!(source, "    ops_core_statement::{binder}({issuer_argument}request_digest, input_commitment, signature_mode, bounds, parameters, indices, result, statement_binding);\n}}\n").unwrap();
+    let revealed_argument = if authenticated {
+        "revealed_count, revealed_messages, revealed_keys, "
+    } else {
+        ""
+    };
+    writeln!(source, "    ops_core_statement::{binder}({issuer_argument}request_digest, input_commitment, signature_mode, bounds, parameters, indices, result, {revealed_argument}statement_binding);\n}}\n").unwrap();
     if source.contains("unbound()") {
         source = source.replacen("\nfn main(", "\nuse core::table::unbound;\nfn main(", 1);
     }

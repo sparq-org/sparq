@@ -170,12 +170,8 @@ pub fn bind_select_authenticated<let C: u32, let P: u32, let I: u32, let R: u32,
     bounds: [u32; 3], parameters: [TermCell; P], indices: [u32; I],
     result: Table<R, V>, statement_binding: Field,
 ) {
-    let mut state = prefix(request_digest, input_commitment, signature_mode, bounds, parameters, indices);
-    for row in result.rows { for cell in row { state = absorb_cell(state, cell); } }
-    state = h2(state, result.len as Field);
-    let mut state = state;
-    for word in envelope { state = h2(state, word); }
-    for bound in credential_quad_bounds { state = h2(state, bound as Field); }
+    let state = select_state(request_digest,input_commitment,signature_mode,bounds,parameters,indices,result);
+    let state = authenticated_suffix(state,envelope,credential_quad_bounds);
     assert(state == statement_binding, "authenticated statement binding");
 }
 
@@ -185,9 +181,7 @@ pub fn bind_ask_authenticated<let C: u32, let P: u32, let I: u32>(
     result: bool, statement_binding: Field,
 ) {
     let state = h2(prefix(request_digest, input_commitment, signature_mode, bounds, parameters, indices), result as Field);
-    let mut state = state;
-    for word in envelope { state = h2(state, word); }
-    for bound in credential_quad_bounds { state = h2(state, bound as Field); }
+    let state = authenticated_suffix(state,envelope,credential_quad_bounds);
     assert(state == statement_binding, "authenticated statement binding");
 }
 
@@ -241,4 +235,41 @@ fn absent_holder_scope_selects_all_trusted_issuers() {
 #[test(should_fail_with="empty holder issuer list")]
 fn explicit_empty_holder_scope_is_refused() {
     let _none=envelope_words(9,4,true,true,0,[0;4],false,false,0,0,false,0,false,0);
+}
+
+pub fn bind_select_authenticated_modes<let C:u32,let P:u32,let I:u32,let R:u32,let V:u32>(
+    envelope:[Field;17],credential_quad_bounds:[u32;C],request_digest:[u8;32],input_commitment:[u8;32],signature_mode:u8,
+    bounds:[u32;3],parameters:[TermCell;P],indices:[u32;I],result:Table<R,V>,
+    revealed_count:u32,revealed_messages:[Field;C],revealed_keys:[Field;C],statement_binding:Field) {
+    let state=select_state(request_digest,input_commitment,signature_mode,bounds,parameters,indices,result);
+    let state=authenticated_suffix(state,envelope,credential_quad_bounds);
+    let state=revealed_suffix(state,revealed_count,revealed_messages,revealed_keys);
+    assert(state==statement_binding,"authenticated statement binding");
+}
+pub fn bind_ask_authenticated_modes<let C:u32,let P:u32,let I:u32>(
+    envelope:[Field;17],credential_quad_bounds:[u32;C],request_digest:[u8;32],input_commitment:[u8;32],signature_mode:u8,
+    bounds:[u32;3],parameters:[TermCell;P],indices:[u32;I],result:bool,
+    revealed_count:u32,revealed_messages:[Field;C],revealed_keys:[Field;C],statement_binding:Field) {
+    let state=h2(prefix(request_digest,input_commitment,signature_mode,bounds,parameters,indices),result as Field);
+    let state=authenticated_suffix(state,envelope,credential_quad_bounds);
+    let state=revealed_suffix(state,revealed_count,revealed_messages,revealed_keys);
+    assert(state==statement_binding,"authenticated statement binding");
+}
+
+fn select_state<let P:u32,let I:u32,let R:u32,let V:u32>(request_digest:[u8;32],input_commitment:[u8;32],signature_mode:u8,
+    bounds:[u32;3],parameters:[TermCell;P],indices:[u32;I],result:Table<R,V>) -> Field {
+    let mut state=prefix(request_digest,input_commitment,signature_mode,bounds,parameters,indices);
+    for row in result.rows {for cell in row {state=absorb_cell(state,cell);}}
+    h2(state,result.len as Field)
+}
+fn authenticated_suffix<let C:u32>(mut state:Field,envelope:[Field;17],credential_quad_bounds:[u32;C]) -> Field {
+    for word in envelope {state=h2(state,word);}
+    for bound in credential_quad_bounds {state=h2(state,bound as Field);}
+    state
+}
+fn revealed_suffix<let C:u32>(state:Field,count:u32,messages:[Field;C],keys:[Field;C]) -> Field {
+    let mut state=h2(state,count as Field);
+    for message in messages {state=h2(state,message);}
+    for key in keys {state=h2(state,key);}
+    state
 }

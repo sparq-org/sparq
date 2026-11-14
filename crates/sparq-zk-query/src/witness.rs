@@ -214,6 +214,57 @@ pub fn prover_toml_authenticated_with_envelope(
     presentation_salt: [u8; 32],
     envelope: &crate::statement::EnvelopeInputs,
 ) -> Result<String, Error> {
+    prover_toml_authenticated_mode(
+        plan,
+        credentials,
+        trace,
+        request_digest,
+        presentation_salt,
+        envelope,
+        None,
+    )
+}
+
+/// Render the revealed-signature circuit mode after native signature verification.
+pub fn prover_toml_revealed(
+    plan: &Plan,
+    credentials: &[crate::credential::Credential],
+    trace: &Trace,
+    request_digest: [u8; 32],
+    presentation_salt: [u8; 32],
+    envelope: &crate::statement::EnvelopeInputs,
+) -> Result<String, Error> {
+    let signatures = credentials
+        .iter()
+        .map(|c| {
+            Ok(crate::statement::RevealedSignature {
+                key: c.issuer,
+                message: sparq_zk::field::field_to_be_bytes_32(&c.signed_message()?),
+                signature: c.credential.signature,
+            })
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
+    let revealed = crate::statement::RevealedInputs::verify(&signatures)?;
+    prover_toml_authenticated_mode(
+        plan,
+        credentials,
+        trace,
+        request_digest,
+        presentation_salt,
+        envelope,
+        Some(&revealed),
+    )
+}
+
+fn prover_toml_authenticated_mode(
+    plan: &Plan,
+    credentials: &[crate::credential::Credential],
+    trace: &Trace,
+    request_digest: [u8; 32],
+    presentation_salt: [u8; 32],
+    envelope: &crate::statement::EnvelopeInputs,
+    revealed: Option<&crate::statement::RevealedInputs>,
+) -> Result<String, Error> {
     let issuer_root = envelope.issuer_root;
     use crate::credential::SuiteEncoder;
     use sha2::{Digest, Sha256};
@@ -230,11 +281,15 @@ pub fn prover_toml_authenticated_with_envelope(
     let statement = crate::statement::Statement {
         request_digest,
         input_commitment,
-        signature_mode: 1,
+        signature_mode: u8::from(revealed.is_none()),
         result: trace.result.clone(),
     };
-    let words = crate::statement::Layout::new(plan)
-        .reconstruct_authenticated_with_envelope(plan, &statement, envelope)?;
+    let layout = crate::statement::Layout::new(plan);
+    let words = if let Some(revealed) = revealed {
+        layout.reconstruct_revealed(plan, &statement, envelope, revealed)?
+    } else {
+        layout.reconstruct_authenticated_with_envelope(plan, &statement, envelope)?
+    };
     let base = prover_toml(
         plan,
         &cells,
@@ -290,11 +345,18 @@ pub fn prover_toml_authenticated_with_envelope(
                 metadata.verification_method.as_ref(),
                 crate::credential::METHOD_CAPACITY,
             )?;
-            proofs.push(serde_json::json!({"created":created,"method":method,"salt":field_to_hex(&credential.credential.salt),"salts":salts,
+            let mut proof = serde_json::json!({"created":created,"method":method,"salt":field_to_hex(&credential.credential.salt),"salts":salts,
                 "config":[u128::from_be_bytes(config[..16].try_into().unwrap()).to_string(),u128::from_be_bytes(config[16..].try_into().unwrap()).to_string()],
                 "pk":{"x":field_to_hex(&w.pk_x),"y":field_to_hex(&w.pk_y)},"r":{"x":field_to_hex(&w.r_x),"y":field_to_hex(&w.r_y)},
                 "s":field_to_hex(&w.s),"e":field_to_hex(&w.e),"e_k":field_to_hex(&w.e_k),"issuer_index":credential.issuer_index,
-                "issuer_siblings":credential.issuer_siblings.iter().map(field_to_hex).collect::<Vec<_>>()}));
+                "issuer_siblings":credential.issuer_siblings.iter().map(field_to_hex).collect::<Vec<_>>()});
+            if revealed.is_some() {
+                proof["r"] = serde_json::json!({"x":"0","y":"0"});
+                for name in ["s", "e", "e_k"] {
+                    proof[name] = serde_json::json!("0");
+                }
+            }
+            proofs.push(proof);
         } else {
             proofs.push(serde_json::json!({"created":metadata_opening(None, crate::credential::CREATION_CAPACITY)?,
                 "method":resource_opening(None, crate::credential::METHOD_CAPACITY)?,"salt":"0","salts":vec!["0";capacity as usize],"config":["0","0"],
@@ -323,7 +385,7 @@ pub fn prover_toml_authenticated_with_envelope(
             )
             .unwrap();
         } else if line.starts_with("signature_mode = ") {
-            writeln!(out, "signature_mode = 1").unwrap();
+            writeln!(out, "signature_mode = {}", statement.signature_mode).unwrap();
         } else if line.starts_with("statement_binding = ") {
             writeln!(out, "statement_binding = {}", field(*words.last().unwrap())).unwrap();
         } else {
@@ -364,6 +426,28 @@ pub fn prover_toml_authenticated_with_envelope(
     writeln!(out, "now = {}", envelope.now).unwrap();
     writeln!(out, "freshness_required = {}", envelope.freshness_required).unwrap();
     writeln!(out, "earliest_created = {}", envelope.earliest_created).unwrap();
+    let (count, messages, keys) = if let Some(revealed) = revealed {
+        revealed.words(plan)?
+    } else {
+        (
+            0,
+            vec![[0; 32]; cap.credentials as usize],
+            vec![[0; 32]; cap.credentials as usize],
+        )
+    };
+    writeln!(out, "revealed_count = {count}").unwrap();
+    writeln!(
+        out,
+        "revealed_messages = {}",
+        array(messages.into_iter().map(field))
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "revealed_keys = {}",
+        array(keys.into_iter().map(field))
+    )
+    .unwrap();
     for (c, proof) in proofs.iter().enumerate() {
         writeln!(out, "credential_proof_{c} = {}", json_toml(proof)).unwrap();
     }

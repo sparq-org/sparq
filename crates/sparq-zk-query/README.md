@@ -1,15 +1,14 @@
 # sparq-zk-query
 
-Research grade query compiler for the Noir query method; not externally audited.
-This internal crate is opt-in through workspace package selection and is not published.
+Research grade Noir query compiler; not externally audited, unpublished and opt-in.
 
 ## ✨ Compiler contracts
 
 Public request bounds choose the smallest fitting credential, quad and table buckets.
 The key reveals those capacities and the query structure. Private counts cannot
 select another bucket; exceeding a bound yields a named refusal, never truncation.
-Separate public quad limits select buckets for the ordered credential slots.
-The verifier also selects an `OpeningProfile`: `Solid` uses the compact resource
+Separate public quad limits select buckets for the ordered credential slots. The
+verifier also selects an `OpeningProfile`: `Solid` uses the compact resource
 and object bounds; `LongObjects` admits holder Multikey lexicals with compact
 resource and metadata bounds; `Extended` also admits larger resource identifiers. The selected profile is stored in the request and included in the plan hash.
 
@@ -25,9 +24,9 @@ equal bindings; DISTINCT compares adjacent rows after validating canonical input
 The expression dispatcher uses the shared comparison, boolean and membership
 gadgets. Its value, SPARQL error and capacity channels remain separate. Capacity is
 asserted at the expression root and cannot be absorbed as a SPARQL error.
-The initial credential literal profile admits integer, decimal, date, dateTime,
-boolean and string datatypes. Unsupported datatypes and lexical forms beyond the
-profile are refused. Value comparisons outside its exact ranges receive a capacity refusal.
+The credential literal profile admits integer, decimal, date, dateTime, boolean and
+string datatypes. Unsupported datatypes, oversized lexical forms and comparisons
+outside the exact value ranges receive a named refusal.
 
 ## 🚀 Host contracts
 
@@ -50,9 +49,8 @@ limits. `Compiler::prove` accepts complete `credential::Credential` inputs with
 private lexical, signature and membership material. Its encoder argument remains
 for compatibility; proof and verification use `credential::SuiteEncoder`.
 Structural requests created with `Request::new` cannot produce an authenticated proof.
-The default opening profile is `Solid`. Use `prepare_with_opening_profile` and
-`Request::new_authenticated_with_opening_profile` with the same profile for larger
-openings; `new_authenticated_with_envelope_and_profile` retains typed envelope
+Use `prepare_with_opening_profile` and
+`Request::new_authenticated_with_opening_profile` with the same profile for larger openings; `new_authenticated_with_envelope_and_profile` retains typed envelope
 properties as well. Oversized lexical forms receive a capacity refusal.
 
 The current suite profile opens complete credentials, checks hidden signatures
@@ -65,15 +63,20 @@ The request digest is SHA-256 over RDFC canonical N-Quads of this method's reque
 The exact typed protocol encoding is a named method parameter within that RDF.
 Public inputs, in order, are request digest, salted input commitment, signature
 mode, request bounds, constant cells, index parameters, canonical result, envelope
-policy group, ordered credential quad bounds and statement binding. The envelope
+policy group, ordered credential quad bounds, revealed count/messages/keys and
+statement binding. The envelope
 group carries issuer root/depth, holder flags and issuer list, status flags and
 snapshot root/depth, validity flag/time, and freshness flag/earliest creation.
 `statement::Layout` generates declarations, reconstructs canonical big endian field
 words, and audits the locally compiled ABI. Cells flatten as bound, kind, encoding,
 key class, key, datatype, language and credential scope. SELECT tables flatten
-padded rows before length. Openings, signatures, presentation salt and traces are private.
-The dataset commitment binds the ordered authenticated suite messages under a
-method domain and presentation salt, separately from the detached evaluator's profile.
+padded rows before length. Hidden-mode signature witnesses and all openings,
+presentation salts and traces are private. Revealed-mode messages and signer key
+encodings are public; `RevealedInputs::verify` verifies their external signatures
+before `Layout::reconstruct_revealed` builds the words. `prover_toml_revealed` renders
+that circuit mode; the native `Compiler` driver currently accepts hidden mode.
+The dataset commitment binds ordered authenticated suite messages under a method
+domain and presentation salt, separately from the detached evaluator's profile.
 
 `new_authenticated_with_envelope` stores typed policy properties and uses
 `envelope_policy::derive` for admission and verifier reconstruction. Time values

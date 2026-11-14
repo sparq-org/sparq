@@ -257,6 +257,10 @@ pub fn mixed_string_queries() -> Vec<(String, bool, bool)> {
         }
     }
     for (lhs, rhs, expected) in [
+        (r#""a\u0000""#, r#""a""#, true),
+        (r#""\u0000""#, r#""\u0000""#, false),
+        (r#""\u0000""#, r#""""#, true),
+        (r#""a\u0000""#, r#""a\u0000b""#, true),
         (
             "\"same-prefix-that-is-long-enough-to-have-a-suffix-a\"",
             "\"same-prefix-that-is-long-enough-to-have-a-suffix-b\"",

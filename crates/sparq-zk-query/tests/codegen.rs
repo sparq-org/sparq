@@ -32,8 +32,8 @@ fn generation_is_byte_identical_and_constants_are_inputs() {
             "{op}"
         );
     }
-    assert!(source.contains("ops_core_statement::bind_select_authenticated("));
-    assert!(source.contains("core::ops_core_suite::open_profile_one"));
+    assert!(source.contains("ops_core_statement::bind_select_authenticated_modes("));
+    assert!(source.contains("core::ops_core_suite::open_profile_mode_one"));
     assert!(!source.contains("urn:p"));
     assert!(!source.contains("assert("));
     assert!(!source.contains("for "));
@@ -91,11 +91,11 @@ fn source_scans_and_joins_use_the_normalized_literal_profile() {
     ] {
         let package = generate(&lower(query, B).unwrap()).unwrap();
         let source = &package.files[&format!("{}/src/main.nr", package.name)];
-        assert!(source.contains("open_profile_one::<4, 64, 65, 1, 32>"));
+        assert!(source.contains("open_profile_mode_one::<4, 64, 65, 1, 32>"));
     }
     let package = generate(&lower("ASK {}", B).unwrap()).unwrap();
     let source = &package.files[&format!("{}/src/main.nr", package.name)];
-    assert!(source.contains("open_profile_one::<4, 64, 65, 0, 32>"));
+    assert!(source.contains("open_profile_mode_one::<4, 64, 65, 0, 32>"));
 }
 
 #[test]
@@ -173,14 +173,14 @@ fn verifier_selects_opening_profile_and_one_index_binding_per_slot() {
     assert_ne!(compact.hash(), long.hash());
     let p = generate(&long).unwrap();
     assert!(p.files[&format!("{}/src/main.nr", p.name)]
-        .contains("open_profile_one::<4, 64, 137, 0, 32>"));
+        .contains("open_profile_mode_one::<4, 64, 137, 0, 32>"));
     let wide = compact
         .clone()
         .with_opening_profile(OpeningProfile::Extended);
     assert_ne!(compact.hash(), wide.hash());
     let package = generate(&wide).unwrap();
     let source = &package.files[&format!("{}/src/main.nr", package.name)];
-    assert!(source.contains("open_profile_one::<4, 128, 160, 0, 128>"));
+    assert!(source.contains("open_profile_mode_one::<4, 128, 160, 0, 128>"));
     for i in 0..2 {
         assert_eq!(
             source

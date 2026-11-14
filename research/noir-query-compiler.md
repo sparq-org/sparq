@@ -26,7 +26,7 @@ complete payload in each run. Scan retains each matching complete binding once. 
 source position is a constant or an output column, equal complete bindings
 identify equal matching triples. The retained output rows serve as the bounded
 duplicate cache; a further distinct match still triggers capacity refusal.
-Blank nodes from separate credentials remain distinct. Sorting uses a stable
+Blank nodes from separate credentials remain distinct. Sorting uses stable
 networks for the supported compiled buckets and the existing general fallback
 elsewhere. Larger networks use bitonic stages over the same total key, including
 the original ordinal, so their final order remains stable.
@@ -44,8 +44,9 @@ independent verifier reconstruction, and checks the locally compiled ABI before
 key creation. The generated main has no public return value. Intermediate tables,
 raw credential openings and the presentation salt are private. The statement
 binding absorbs every public word in ABI order through the shared Poseidon hash chain.
-The production opening delegates lexical binding, complete credential roots and
-hidden signatures to the shared suite library. Value consumers use its fixed
+Production delegates lexical binding, complete credential roots and authenticated
+metadata opening to the shared suite library. Hidden signatures call the shared
+Schnorr verifier over that opening's authenticated message. Value consumers use its fixed
 datatype checked-key constructors. Its private
 issuer membership path uses the existing compose relation and host helpers.
 The verifier-stored envelope policy and ordered per-credential quad limits follow
@@ -147,7 +148,8 @@ the assembly helpers alone do not establish a target-query proof.
 The production adapter contains raw witness structs and resource normalization.
 It constructs zero resource metadata and default graph openings, then calls the
 suite's bounded credential entry point once per credential. The suite owns term
-construction, packing, root/metadata binding and signature verification. B's value
+construction, packing, root/metadata binding and authenticated signer metadata. The signature-mode adapter calls the shared
+Schnorr verifier or binds externally verified evidence. B's value
 consumers use fixed datatype checked-key calls with separate scalar bounds.
 Shape encoding includes every resource, object and metadata capacity. The verifier
 chooses Solid, the LongObjects profile for larger object backing, or Extended
@@ -161,3 +163,20 @@ Language-tagged literals retain the selected Recommendation's RDF term equality
 and error dispatch; explicit engine extension outcomes are recorded separately.
 Temporal keys pass the suite's first payload word to the shared temporal lane,
 with the remaining payload constrained to zero.
+
+Revealed-mode inputs extend the same authenticated layout after ordered quad
+bounds with the evidence count, credential messages and suite signer encodings.
+External signature verification admits the ordered evidence record before public
+reconstruction; callers cannot replace its private message/key arrays. The circuit
+opens each credential once and binds that opening to the public message and signer,
+while inactive slots and hidden-mode evidence words are zero. The ABI audit checks
+that every message slot is public. Both modes retain the existing statement hash
+chain with the extra words in declaration order. The native Compiler continues to
+accept hidden mode; the statement adapter owns accepted-mode admission and the
+revealed presentation path.
+
+The shared temporal_payload bridge extracts the suite time word and constrains
+the remaining packed payload to zero. Temporal comparisons receive that scalar
+word with the original key class retained separately. Native date and dateTime
+range controls include epoch boundaries and compare the answer with the engine;
+packed-word and bypassed-helper omissions exercise the comparison range guard.

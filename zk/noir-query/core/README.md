@@ -106,3 +106,14 @@ Resource-only openings may use empty datatype and language backing capacities
 when assembled from ABI-safe raw witnesses inside constrained code. Empty
 datatype capacity excludes literals; the constructor still checks metadata and
 canonical backing padding. Term identifiers and the byte encoding remain pinned.
+
+The generated query wiring uses `ops_core_suite::open_profile_mode_one`.
+`authenticate_profile_bounded_mode` returns the same opaque suite opening for
+later envelope checks. It calls the shared Schnorr verifier in hidden mode;
+revealed mode binds the opening's message and suite signer encoding to public
+inputs and requires the unused signature witness to be zero. Global mode flags
+bind the revealed count and inactive-slot padding. Legacy hidden-only wrappers
+retain their existing signatures. The public layout and external signature
+admission live in the query crate; the native Compiler currently accepts hidden
+mode. `ops_core_expr::temporal_payload` is the shared packed-time adapter for
+operator consumers, retaining the exact zero-tail constraint.

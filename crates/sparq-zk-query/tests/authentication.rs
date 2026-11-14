@@ -446,3 +446,300 @@ fn incorrect_key_signed_witness(
     changed["statement_binding"] = json!(sparq_zk_query::statement::hex(*words.last().unwrap()));
     changed
 }
+
+#[test]
+#[ignore = "requires the pinned native query toolchain"]
+fn authenticated_temporal_ranges_use_the_checked_scalar_payload() {
+    let Some(gate) = support::gate(
+        "authenticated_temporal_ranges_use_the_checked_scalar_payload",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
+    for (datatype, lo, hi) in [
+        ("date", "2024-01-01", "2024-02-01"),
+        ("date", "1969-12-31", "1970-01-01"),
+        (
+            "dateTime",
+            "1969-12-31T23:59:59.999Z",
+            "1970-01-01T00:00:00.000Z",
+        ),
+        (
+            "dateTime",
+            "1969-12-31T23:59:59.999",
+            "1970-01-01T00:00:00.000",
+        ),
+    ] {
+        let query=format!("PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE {{?s <urn:p> ?d FILTER(?d >= \"{lo}\"^^xsd:{datatype} && ?d < \"{hi}\"^^xsd:{datatype})}}");
+        let source=format!("<urn:a> <urn:p> \"{lo}\"^^<http://www.w3.org/2001/XMLSchema#{datatype}> .\n<urn:b> <urn:p> \"{hi}\"^^<http://www.w3.org/2001/XMLSchema#{datatype}> .\n");
+        let plan = lower(
+            &query,
+            Bounds {
+                credentials: 1,
+                quads_per_credential: 4,
+                rows_per_table: 2,
+            },
+        )
+        .unwrap();
+        let data = vec![authenticated::sign(&source, 0)];
+        let cells = vec![data[0]
+            .cells_with_profile(0, plan.opening_profile())
+            .unwrap()];
+        let trace = evaluate(&plan, &cells, &SuiteEncoder).unwrap();
+        fixture_support::assert_engine_with_encoder(&query, &source, &trace.result, &SuiteEncoder);
+        let input = prover_toml_authenticated(
+            &plan,
+            &data,
+            &trace,
+            [7; 32],
+            [3; 32],
+            authenticated::issuer_root(),
+        )
+        .unwrap();
+        let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+        let workspace = fixture_support::Workspace::new(&package);
+        let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+        let artifact = driver.compile().unwrap();
+        Layout::new(&plan)
+            .audit_authenticated_artifact(
+                &serde_json::from_slice(&std::fs::read(artifact).unwrap()).unwrap(),
+            )
+            .unwrap();
+        driver
+            .execute(&input, "temporal_range_honest")
+            .unwrap_or_else(|e| panic!("{datatype} {lo}: {e}"));
+        let mut changed = trace.clone();
+        changed.tables[plan.result_node() as usize].rows.clear();
+        let input = prover_toml_authenticated(
+            &plan,
+            &data,
+            &changed,
+            [7; 32],
+            [3; 32],
+            authenticated::issuer_root(),
+        )
+        .unwrap();
+        assert!(driver
+            .execute(&input, "temporal_range_missing_row")
+            .is_err());
+    }
+    support::complete(gate);
+}
+
+#[test]
+#[ignore = "requires the pinned native query toolchain"]
+fn revealed_messages_keys_and_count_are_public_and_bound_to_the_opening() {
+    use sparq_zk::{field::field_to_be_bytes_32, sig};
+    use sparq_zk_query::statement::{EnvelopeInputs, RevealedInputs, RevealedSignature};
+    let Some(gate) = support::gate(
+        "revealed_messages_keys_and_count_are_public_and_bound_to_the_opening",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
+    let plan = lower(
+        "ASK {?s <urn:p> ?o}",
+        Bounds {
+            credentials: 2,
+            quads_per_credential: 4,
+            rows_per_table: 2,
+        },
+    )
+    .unwrap();
+    let data = vec![authenticated::sign("<urn:a> <urn:p> <urn:o> .", 0)];
+    let cells = vec![data[0]
+        .cells_with_profile(0, plan.opening_profile())
+        .unwrap()];
+    let trace = evaluate(&plan, &cells, &SuiteEncoder).unwrap();
+    let envelope = EnvelopeInputs::issuer_only(authenticated::issuer_root());
+    let input = sparq_zk_query::witness::prover_toml_revealed(
+        &plan, &data, &trace, [7; 32], [3; 32], &envelope,
+    )
+    .unwrap();
+    let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+    let workspace = fixture_support::Workspace::new(&package);
+    let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+    let artifact = driver.compile().unwrap();
+    let artifact: Value = serde_json::from_slice(&std::fs::read(artifact).unwrap()).unwrap();
+    let layout = Layout::new(&plan);
+    layout.audit_authenticated_artifact(&artifact).unwrap();
+    for name in ["revealed_messages", "revealed_keys", "revealed_count"] {
+        let mut changed = artifact.clone();
+        changed["abi"]["parameters"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|p| p["name"] != name);
+        assert!(
+            layout.audit_authenticated_artifact(&changed).is_err(),
+            "missing {name}"
+        );
+    }
+    let mut changed = artifact.clone();
+    let messages = changed["abi"]["parameters"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|p| p["name"] == "revealed_messages")
+        .unwrap();
+    messages["type"]["length"] = json!(1);
+    assert!(
+        layout.audit_authenticated_artifact(&changed).is_err(),
+        "missing one credential message"
+    );
+    driver.execute(&input, "revealed_honest").unwrap();
+    let message = data[0].signed_message().unwrap();
+    let statement = Statement {
+        request_digest: [7; 32],
+        input_commitment: sparq_zk_query::credential::dataset_commitment(&data, [3; 32]).unwrap(),
+        signature_mode: 0,
+        result: trace.result,
+    };
+    for (label, key, message) in [
+        (
+            "message",
+            sig::SecretKey::from_seed(19),
+            message + sparq_merkle_suite::Fr::from(1u64),
+        ),
+        ("key", sig::SecretKey::from_seed(20), message),
+    ] {
+        let evidence = RevealedInputs::verify(&[RevealedSignature {
+            key: key.public_key(),
+            message: field_to_be_bytes_32(&message),
+            signature: sig::sign_deterministic(&key, &message),
+        }])
+        .unwrap();
+        let words = layout
+            .reconstruct_revealed(&plan, &statement, &envelope, &evidence)
+            .unwrap();
+        let mut changed = parse(&input);
+        if label == "message" {
+            changed["revealed_messages"][0] = json!(sparq_zk::field::field_to_hex(&message));
+        } else {
+            changed["revealed_keys"][0] = json!(sparq_zk::field::field_to_hex(
+                &sparq_merkle_suite::metadata::key_cell(&key.public_key())
+                    .unwrap()
+                    .enc
+            ));
+        }
+        changed["statement_binding"] =
+            json!(sparq_zk_query::statement::hex(*words.last().unwrap()));
+        assert!(
+            driver
+                .execute(&render(&changed), "revealed_changed")
+                .is_err(),
+            "altered revealed {label} accepted"
+        );
+    }
+    // Keep the valid public message/key while changing only the evidence count.
+    let key = sig::SecretKey::from_seed(19);
+    let admitted = RevealedInputs::verify(&[RevealedSignature {
+        key: key.public_key(),
+        message: field_to_be_bytes_32(&message),
+        signature: sig::sign_deterministic(&key, &message),
+    }])
+    .unwrap();
+    let mut words = layout
+        .reconstruct_revealed(&plan, &statement, &envelope, &admitted)
+        .unwrap();
+    let count_word = words.len() - 6;
+    words[count_word] = [0; 32];
+    let rebound = sparq_zk_query::statement::binding(&words[..words.len() - 1]).unwrap();
+    let mut changed = parse(&input);
+    changed["revealed_count"] = json!(0);
+    changed["statement_binding"] = json!(sparq_zk_query::statement::hex(rebound));
+    assert!(
+        driver
+            .execute(&render(&changed), "revealed_changed_count")
+            .is_err(),
+        "altered revealed count accepted"
+    );
+    for field in ["r.x", "r.y", "s", "e", "e_k"] {
+        let mut changed = parse(&input);
+        let proof = &mut changed["credential_proof_0"];
+        if let Some(coordinate) = field.strip_prefix("r.") {
+            proof["r"][coordinate] = json!("1");
+        } else {
+            proof[field] = json!("1");
+        }
+        assert!(
+            driver
+                .execute(&render(&changed), "revealed_signature_padding")
+                .is_err(),
+            "altered revealed signature padding accepted: {field}"
+        );
+    }
+    let two = vec![
+        data[0].clone(),
+        authenticated::sign("<urn:b> <urn:p> <urn:o> .", 1),
+    ];
+    let cells = two
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            c.cells_with_profile(i as u32, plan.opening_profile())
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let trace = evaluate(&plan, &cells, &SuiteEncoder).unwrap();
+    let input = sparq_zk_query::witness::prover_toml_revealed(
+        &plan, &two, &trace, [7; 32], [3; 32], &envelope,
+    )
+    .unwrap();
+    driver.execute(&input, "revealed_two_honest").unwrap();
+    let evidence = two
+        .iter()
+        .map(|c| RevealedSignature {
+            key: c.issuer,
+            message: field_to_be_bytes_32(&c.signed_message().unwrap()),
+            signature: c.credential.signature,
+        })
+        .collect::<Vec<_>>();
+    let statement = Statement {
+        request_digest: [7; 32],
+        input_commitment: sparq_zk_query::credential::dataset_commitment(&two, [3; 32]).unwrap(),
+        signature_mode: 0,
+        result: trace.result,
+    };
+    for label in ["message", "key", "order"] {
+        let mut signatures = evidence.clone();
+        match label {
+            "message" => {
+                let key = sig::SecretKey::from_seed(19);
+                let message = two[1].signed_message().unwrap() + sparq_merkle_suite::Fr::from(1u64);
+                signatures[1].message = field_to_be_bytes_32(&message);
+                signatures[1].signature = sig::sign_deterministic(&key, &message);
+            }
+            "key" => {
+                let key = sig::SecretKey::from_seed(20);
+                signatures[1].key = key.public_key();
+                signatures[1].signature =
+                    sig::sign_deterministic(&key, &two[1].signed_message().unwrap());
+            }
+            _ => signatures.swap(0, 1),
+        }
+        let admitted = RevealedInputs::verify(&signatures).unwrap();
+        let words = layout
+            .reconstruct_revealed(&plan, &statement, &envelope, &admitted)
+            .unwrap();
+        let mut changed = parse(&input);
+        changed["revealed_messages"] = json!(signatures
+            .iter()
+            .map(|s| sparq_zk_query::statement::hex(s.message))
+            .collect::<Vec<_>>());
+        changed["revealed_keys"] = json!(signatures
+            .iter()
+            .map(|s| sparq_zk::field::field_to_hex(
+                &sparq_merkle_suite::metadata::key_cell(&s.key).unwrap().enc
+            ))
+            .collect::<Vec<_>>());
+        changed["statement_binding"] =
+            json!(sparq_zk_query::statement::hex(*words.last().unwrap()));
+        assert!(
+            driver
+                .execute(&render(&changed), "revealed_later_slot")
+                .is_err(),
+            "altered later revealed {label} accepted"
+        );
+    }
+    support::complete(gate);
+}

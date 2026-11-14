@@ -254,3 +254,23 @@ The query proof tests default to `SPARQ_NOIR_QUERY_PROOF_PROFILE=full`.
 are refused; the workflow dispatch input `full_query_proofs` runs the complete
 acceptance sweep. Each selected proof still checks its engine result and refuses
 an altered answer. Local completion requires the full profile.
+
+The shared Noir bridge exposes `ops_core_expr::temporal_payload(key: Field) ->
+Field` for checked suite keys. It extracts the leading biased time word and
+constrains the remaining payload bytes to zero. Graph and expression dispatchers
+pass the full packed key and retain its checked class separately when constructing
+`TemporalLane`; the lane's key is the scalar word.
+
+The generated authenticated ABI also carries `revealed_count: u32`,
+`revealed_messages: [Field; C]` and `revealed_keys: [Field; C]` after the ordered quad
+bounds and before the statement binding. Hidden mode requires zero words there.
+Revealed mode binds each active credential's message and suite Multikey encoding
+and requires inactive slots to be zero. `statement::RevealedInputs::verify` takes
+ordered `RevealedSignature {key, message, signature}` values and checks each shared
+suite signature before admitting it; its stored messages and keys are private.
+`Layout::reconstruct_revealed` accepts that admitted value and a mode-zero statement.
+`witness::prover_toml_revealed` renders a witness from complete credentials using the
+same verification. The native `Compiler` retains its hidden-only contract; the
+statement adapter must enforce its request's accepted mode before using these APIs.
+Both modes share one suite opening per active credential, with the shared Schnorr
+verifier called for hidden mode. No presentation-supplied layout is accepted.

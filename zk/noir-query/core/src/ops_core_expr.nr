@@ -42,6 +42,16 @@ fn is_string(cell:TermCell) -> bool {
     cell.bound & (cell.kind == 3) & ((cell.key_class == 6) | (cell.key_class == 7))
 }
 
+/// Leading scalar word of a checked suite temporal key, with canonical padding.
+/// The input includes the suite class header; the result is its biased time word.
+pub fn temporal_payload(key:Field) -> Field {
+    let bytes=key.to_be_bytes::<32>();
+    let mut instant:u64=0;
+    for i in 2..10 {instant=instant*256+bytes[i] as u64;}
+    for i in 10..32 {assert(bytes[i]==0,"temporal key zero tail");}
+    instant as Field
+}
+
 // Equality uses a term-identity token only for strings of the same datatype. Ordering uses the checked
 // short-string key, whose zero padding preserves the lexical order. Neither
 // representation is exposed as a lexical opening to other expression gadgets.
@@ -86,11 +96,7 @@ fn scalar(cell: TermCell, equality: bool, effective_boolean: bool, class_only:bo
             value.boolean = cell.key != prefix;
         } else if (cell.key_class == 3) | (cell.key_class == 4) | (cell.key_class == 8) {
             value.tag = if cell.key_class == 8 { DATE } else { DATETIME };
-            let bytes=cell.key.to_be_bytes::<32>();
-            let mut instant:u64=0;
-            for i in 2..10 {instant=instant*256+bytes[i] as u64;}
-            for i in 10..32 {assert(bytes[i]==0,"temporal key zero tail");}
-            value.temporal = TemporalLane { key_class: cell.key_class, key: instant as Field };
+            value.temporal = TemporalLane { key_class: cell.key_class, key: temporal_payload(cell.key) };
         } else if (cell.key_class == 6) | (cell.key_class == 7) {
             value.tag = STRING;
             value.string.lang = if cell.dt == DT_STRING { 0 } else { cell.lang };

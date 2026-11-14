@@ -70,6 +70,21 @@ pub fn credential_flags<let C: u32>(count: u32, bound: u32, signature_mode: u8) 
     flags
 }
 
+pub fn credential_mode_flags<let C:u32>(count:u32,bound:u32,signature_mode:u8,
+    revealed_count:u32,revealed_messages:[Field;C],revealed_keys:[Field;C]) -> [bool;C] {
+    assert(signature_mode<=1,"suite signature mode");
+    assert((bound>0)&(bound<=C)&(count<=bound),"credential count");
+    assert(revealed_count==if signature_mode==0 {count}else{0},"revealed credential count");
+    let mut flags=[false;C];
+    for c in 0..C {
+        flags[c]=c<count;
+        if (signature_mode==1)|(c>=count) {
+            assert((revealed_messages[c]==0)&(revealed_keys[c]==0),"revealed input padding");
+        }
+    }
+    flags
+}
+
 pub fn open_one<let N: u32, let L: u32>(
     credentials: [[TermOpening<L>; 4]; N], proof: CredentialProof<N>,
     count: u32, active: bool, quad_bound: u32, credential_index: u32, issuer_root: Field,
@@ -277,6 +292,47 @@ pub fn open_profile_one<let N:u32,let R:u32,let L:u32,let CHECK:u32,let M:u32>(
         key_set_membership(proof.pk,issuer_root,proof.issuer_index,proof.issuer_siblings);
         opened=from_authenticated_bounded::<N,R,L,CHECK>(authenticated,credentials,credential_index,request_digest);
     } else {check_inactive_bounded(credentials,proof,count,credential_index);}
+    opened
+}
+
+/// Open once and enforce the selected signature mode before the envelope consumes metadata.
+pub fn authenticate_profile_bounded_mode<let N:u32,let R:u32,let L:u32,let M:u32>(
+    credentials:[crate::ops_core_profile::QuadOpening<R,L>;N],proof:BoundedCredentialProof<N>,
+    count:u32,quad_bound:u32,credential_index:u32,signature_mode:u8,
+    revealed_message:Field,revealed_key:Field) -> crate::suite_metadata::OpenedCredential<N> {
+    assert(signature_mode<=1,"suite signature mode");
+    check_limits::<N>(count,quad_bound);
+    let raw=crate::ops_core_profile::normalize(credentials,count);
+    let authenticated=crate::suite::open_bounded_credential_revealed(raw,proof.salts,proof.salt,count,proof.config,
+        proof.created,crate::ops_core_profile::method::<M>(proof.method),proof.pk,credential_index);
+    if signature_mode==1 {
+        assert((revealed_message==0)&(revealed_key==0),"revealed input padding");
+        compose::issuer::schnorr_verify(proof.pk,proof.r,proof.s,proof.e,proof.e_k,authenticated.message());
+    } else {
+        assert(authenticated.message()==revealed_message,"revealed credential message");
+        assert(authenticated.verification_key().enc()==revealed_key,"revealed credential key");
+        assert((proof.r.x==0)&(proof.r.y==0)&(proof.s==0)&(proof.e==0)&(proof.e_k==0),"revealed signature witness padding");
+    }
+    authenticated
+}
+
+/// Shared complete opening; the selected signature mode consumes it once.
+pub fn open_profile_mode_one<let N:u32,let R:u32,let L:u32,let CHECK:u32,let M:u32>(
+    credentials:[crate::ops_core_profile::QuadOpening<R,L>;N],proof:BoundedCredentialProof<N>,
+    count:u32,active:bool,quad_bound:u32,credential_index:u32,issuer_root:Field,request_digest:[u8;32],
+    signature_mode:u8,revealed_message:Field,revealed_key:Field) -> OpenedCredential<N> {
+    assert(signature_mode<=1,"suite signature mode");
+    check_limits::<N>(count,quad_bound);
+    let mut opened=OpenedCredential {rows:[[unbound();3];N],active:[false;N],message:0,graph:unbound()};
+    if active {
+        let authenticated=authenticate_profile_bounded_mode::<N,R,L,M>(credentials,proof,count,quad_bound,credential_index,
+            signature_mode,revealed_message,revealed_key);
+        key_set_membership(proof.pk,issuer_root,proof.issuer_index,proof.issuer_siblings);
+        opened=from_authenticated_bounded::<N,R,L,CHECK>(authenticated,credentials,credential_index,request_digest);
+    } else {
+        assert((revealed_message==0)&(revealed_key==0),"revealed input padding");
+        check_inactive_bounded(credentials,proof,count,credential_index);
+    }
     opened
 }
 fn empty_proof<let N: u32>() -> CredentialProof<N> {
@@ -558,3 +614,32 @@ fn dataset_conversion_refuses_a_different_credential_index() {
     let (raw,opened)=index_fixture();
     let _converted=from_authenticated_bounded::<1,8,32,0>(opened,raw,1,[7;32]);
 }
+
+#[test]
+fn credential_modes_have_exact_active_slots() {
+    assert(credential_mode_flags::<4>(2,3,0,2,[7,8,0,0],[9,10,0,0])==[true,true,false,false]);
+    assert(credential_mode_flags::<4>(2,3,1,0,[0;4],[0;4])==[true,true,false,false]);
+    assert(credential_mode_flags::<1>(0,1,0,0,[0],[0])==[false]);
+}
+#[test(should_fail_with="suite signature mode")]
+fn credential_modes_refuse_unknown_modes() {let _flags=credential_mode_flags::<1>(0,1,2,0,[0],[0]);}
+#[test(should_fail_with="credential count")]
+fn credential_modes_refuse_count_over_request() {let _flags=credential_mode_flags::<4>(3,2,0,3,[1,2,3,0],[1,2,3,0]);}
+#[test(should_fail_with="credential count")]
+fn credential_modes_refuse_bound_over_shape() {let _flags=credential_mode_flags::<1>(0,2,0,0,[0],[0]);}
+#[test(should_fail_with="credential count")]
+fn credential_modes_refuse_zero_bound() {let _flags=credential_mode_flags::<1>(0,0,0,0,[0],[0]);}
+#[test(should_fail_with="revealed credential count")]
+fn credential_modes_refuse_missing_evidence() {let _flags=credential_mode_flags::<1>(1,1,0,0,[0],[0]);}
+#[test(should_fail_with="revealed credential count")]
+fn credential_modes_refuse_extra_evidence() {let _flags=credential_mode_flags::<1>(0,1,0,1,[0],[0]);}
+#[test(should_fail_with="revealed credential count")]
+fn credential_modes_refuse_hidden_evidence() {let _flags=credential_mode_flags::<1>(1,1,1,1,[0],[0]);}
+#[test(should_fail_with="revealed input padding")]
+fn credential_modes_refuse_hidden_message() {let _flags=credential_mode_flags::<1>(1,1,1,0,[7],[0]);}
+#[test(should_fail_with="revealed input padding")]
+fn credential_modes_refuse_hidden_key() {let _flags=credential_mode_flags::<1>(1,1,1,0,[0],[7]);}
+#[test(should_fail_with="revealed input padding")]
+fn credential_modes_refuse_inactive_message() {let _flags=credential_mode_flags::<2>(1,2,0,1,[7,8],[9,0]);}
+#[test(should_fail_with="revealed input padding")]
+fn credential_modes_refuse_inactive_key() {let _flags=credential_mode_flags::<2>(1,2,0,1,[7,0],[9,8]);}
