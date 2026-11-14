@@ -104,3 +104,7 @@ artifacts. Run `npm test` for behavioral tests. On Linux,
 enforces network isolation using the system seccomp library. CI builds the host
 and runs these tests offline. The proof exchange example in
 `crates/sparq-zk-result-wasm/examples/crosscheck.rs` is separate manual evidence.
+
+Shared build and runtime support is copied from `js/zk-shared` into the package
+during the maintainer build. The bundled copy keeps installations self-contained;
+drift checks cover the dependency pins, CRS handling and backend settings.

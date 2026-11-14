@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { installPinnedCrs } from './crs.mjs';
+import { installPinnedCrs } from '../../zk-shared/crs.mjs';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const assets = fileURLToPath(new URL('../assets/', import.meta.url));

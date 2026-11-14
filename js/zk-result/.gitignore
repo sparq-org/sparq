@@ -1,3 +1,5 @@
 /wasm/
 /assets/crs/
 /.host-*/
+/internal/
+LICENSE

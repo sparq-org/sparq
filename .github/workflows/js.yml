@@ -39,6 +39,8 @@ on:
       - "crates/sparq-wasm/**"
       - "crates/sparq-*-wasm/**"
       - "crates/sparq-lws-core/**"
+      - "crates/sparq-zk-query/**"
+      - "crates/sparq-merkle-suite/**"
       - "crates/sparq-engine/Cargo.toml"
       - "crates/sparq-forms/Cargo.toml"
       - "crates/sparq-shacl/Cargo.toml"
@@ -282,3 +284,31 @@ jobs:
         run: node js/zk-result/scripts/build.mjs
       - name: Exercise the bundled package without network access
         run: python3 js/zk-result/scripts/offline.py node --test --test-concurrency=1 js/zk-result/test/*.test.js
+
+  zk-query:
+    name: authenticated-query Node package
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: js/zk-query/package-lock.json
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install pinned binding generator
+        run: |
+          bindgen_version="$(python3 -c 'import tomllib; print(next(p["version"] for p in tomllib.load(open("Cargo.lock", "rb"))["package"] if p["name"] == "wasm-bindgen"))')"
+          cargo install wasm-bindgen-cli --version "=$bindgen_version" --locked -j 2
+      - name: Install pinned package dependencies
+        run: npm ci --prefix js/zk-query --ignore-scripts
+      - name: Build host bindings and fetch pinned CRS
+        run: node js/zk-query/scripts/build.mjs
+      - name: Exercise the bundled package without network access
+        run: python3 js/zk-query/scripts/offline.py node --test --test-concurrency=1 js/zk-query/test/*.test.js

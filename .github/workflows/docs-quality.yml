@@ -419,6 +419,8 @@ jobs:
         run: python3 scripts/check-zk-toolchain-gate.py --self-test
       - name: zk-toolchain live-gate — checker tests — GATING
         run: python3 scripts/tests/test_zk_toolchain_gate.py
+      - name: Query package execution contracts
+        run: python3 scripts/tests/test_zk_query_package_ci.py
 
       # ---- inference-conformance report drift (sq-t099c + sq-1d528 / issue #3171) ----
       # Two beads landed this gate independently; the script unifies them and

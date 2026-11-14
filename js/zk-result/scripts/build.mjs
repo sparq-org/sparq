@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
-import { installPinnedCrs } from './crs.mjs';
+import { installPinnedCrs } from '../../zk-shared/crs.mjs';
+import { syncShared } from '../../zk-shared/sync.mjs';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const assets = fileURLToPath(new URL('../assets/', import.meta.url));
@@ -17,6 +18,7 @@ if (execFileSync('wasm-bindgen', ['--version'], { encoding: 'utf8' }).trim() !==
 }
 const run = (cmd, args) => execFileSync(cmd, args, { cwd: root, stdio: 'inherit' });
 const digest = path => createHash('sha256').update(readFileSync(path)).digest('hex');
+syncShared(fileURLToPath(new URL('../', import.meta.url)));
 const staging = mkdtempSync(join(assets, '..', '.host-'));
 try {
   run('cargo', ['build', '--locked', '-p', 'sparq-zk-result-wasm', '--target', 'wasm32-unknown-unknown', '--release', '-j', '2']);
@@ -35,6 +37,8 @@ try {
     'crates/sparq-zk-compose/src/result/signed.rs', 'crates/sparq-zk-compose/src/nonce.rs',
     'crates/sparq-zk-compose/src/verifier_wasm.rs', 'Cargo.lock', '.cargo/config.toml',
     'js/zk-result/scripts/build.mjs', 'js/zk-result/scripts/crs.mjs', 'js/zk-result/index.js',
+    'js/zk-shared/runtime.mjs', 'js/zk-shared/crs.mjs', 'js/zk-shared/offline.py',
+    'js/zk-shared/package-pins.json', 'js/zk-shared/sync.mjs',
     'js/zk-result/assets/members.json', 'js/zk-result/assets/crs.pins.json',
   ];
   const provenance = {

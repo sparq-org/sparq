@@ -1,0 +1,221 @@
+{
+  "profile": "authenticated-query",
+  "compilerAgreement": {
+    "operator": "required",
+    "authenticated": {
+      "status": "skipped-by-design",
+      "reason": "Authenticated catalogue programs are compiled natively; holders derive the plan from the query and check pinned artifacts and keys. The pinned XPath dependency also blocks the WebAssembly resolver."
+    },
+    "xpathKnownFailure": "noir_XPath at the pinned tag vendors sha256 under an alias equal to a nested module basename; the WebAssembly compiler rejects that dependency graph. These are named known failures pending the upstream alias repair."
+  },
+  "entries": [
+    {
+      "planHash": "3ef37537cbebab7dacff42a2246a046abf73637e6cb9880a0c9d565d653885d6",
+      "packageName": "query_3ef37537cbebab7dacff42a2246a046abf73637e6cb9880a0c9d565d653885d6",
+      "acir": "3ef37537cbebab7dacff42a2246a046abf73637e6cb9880a0c9d565d653885d6.json",
+      "vk": "3ef37537cbebab7dacff42a2246a046abf73637e6cb9880a0c9d565d653885d6.vk.hex",
+      "acirSha256": "a36f5d0bfec34049ff0e854c0e58bc01b8439f68313ef915ed1c1df031d8b6ee",
+      "vkSha256": "f7130d66e278401d206478e1a949da27e8453a603a013763ec5a5d44424b53c5",
+      "wasmProving": true,
+      "example": {
+        "query": "ASK {}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 2,
+          "rowsPerTable": 1
+        }
+      }
+    },
+    {
+      "planHash": "1a2ff64d6fd4b20f6491896a5a59be524472e9b9857cb8b18e40d59954991d27",
+      "packageName": "query_1a2ff64d6fd4b20f6491896a5a59be524472e9b9857cb8b18e40d59954991d27",
+      "acir": "1a2ff64d6fd4b20f6491896a5a59be524472e9b9857cb8b18e40d59954991d27.json",
+      "vk": "1a2ff64d6fd4b20f6491896a5a59be524472e9b9857cb8b18e40d59954991d27.vk.hex",
+      "acirSha256": "874e9882424f75cbb4a4f6bf8a3f651373d0b75eb15956f548a26e230c1dc5d4",
+      "vkSha256": "c1699ce325f0f9a401675d3697344cfd528acec6a4c8fd6457236baa8f12a56b",
+      "wasmProving": true,
+      "example": {
+        "query": "SELECT ?s ?x WHERE {?s <urn:p> ?x}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "0ec1254103eabf8b9f2632195fe56b059b9269b3371f37e281c26d3f300826a1",
+      "packageName": "query_0ec1254103eabf8b9f2632195fe56b059b9269b3371f37e281c26d3f300826a1",
+      "acir": "0ec1254103eabf8b9f2632195fe56b059b9269b3371f37e281c26d3f300826a1.json",
+      "vk": "0ec1254103eabf8b9f2632195fe56b059b9269b3371f37e281c26d3f300826a1.vk.hex",
+      "acirSha256": "10ed4cd6066c8479c5c00466c428c4ced3c1bc7ed1777257f70c347fedc7fef8",
+      "vkSha256": "475c0abb308f9c0c64e79b02654473b94c3d6cf59b7123f160f8ce0580cdca2f",
+      "wasmProving": true,
+      "example": {
+        "query": "SELECT ?s WHERE {?s <urn:p> ?x . ?s <urn:q> ?y}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 8,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "abf1ed072a39a52a49995a22aefd87a36dbfe2b0c0c5bbad8d3e26659bd4497a",
+      "packageName": "query_abf1ed072a39a52a49995a22aefd87a36dbfe2b0c0c5bbad8d3e26659bd4497a",
+      "acir": "abf1ed072a39a52a49995a22aefd87a36dbfe2b0c0c5bbad8d3e26659bd4497a.json",
+      "vk": "abf1ed072a39a52a49995a22aefd87a36dbfe2b0c0c5bbad8d3e26659bd4497a.vk.hex",
+      "acirSha256": "aa5d5767efb83122d45a476faf07b4bd915c01923493ca5b525b41da358c002d",
+      "vkSha256": "43e0f5ad170e57718e3358a906ab2945cffb0efeb66e1c0ec1686f2eb43f9c8c",
+      "wasmProving": true,
+      "example": {
+        "query": "SELECT ?s WHERE {?s <urn:p> ?x . ?s <urn:q> ?y}",
+        "bounds": {
+          "credentials": 2,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "fb8ae5835f05280bf93c80cf10ef748659c31542d88c04ee904720373745cefc",
+      "packageName": "query_fb8ae5835f05280bf93c80cf10ef748659c31542d88c04ee904720373745cefc",
+      "acir": "fb8ae5835f05280bf93c80cf10ef748659c31542d88c04ee904720373745cefc.json",
+      "vk": "fb8ae5835f05280bf93c80cf10ef748659c31542d88c04ee904720373745cefc.vk.hex",
+      "acirSha256": "194af4a97a80a66b676a4f437a02bbb2710a369db437b4920020fda169c4564a",
+      "vkSha256": "ef58b6d9be4db4053650d07883b74719b0925532c10bb116167eecb102aeb92b",
+      "wasmProving": true,
+      "example": {
+        "query": "SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x >= 1 && ?x < 2)}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "253617f70d451656a199da343b93d541b400c172b6b1893e8f043940db029783",
+      "packageName": "query_253617f70d451656a199da343b93d541b400c172b6b1893e8f043940db029783",
+      "acir": "253617f70d451656a199da343b93d541b400c172b6b1893e8f043940db029783.json",
+      "vk": "253617f70d451656a199da343b93d541b400c172b6b1893e8f043940db029783.vk.hex",
+      "acirSha256": "5b53067563da131dd9b72d56fd64e4ade520c9596a7b232c80de82acc2d7f154",
+      "vkSha256": "0f2ab19266d87aa6fe25e9c07a7b036bc4f7158507af22215d34a411f38cbcd5",
+      "wasmProving": true,
+      "example": {
+        "query": "SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x IN (1,3))}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "e0af48cd5288d1147a1ebfc16a9bd13f433cbab198f71b95f25a6577ad0c04a7",
+      "packageName": "query_e0af48cd5288d1147a1ebfc16a9bd13f433cbab198f71b95f25a6577ad0c04a7",
+      "acir": "e0af48cd5288d1147a1ebfc16a9bd13f433cbab198f71b95f25a6577ad0c04a7.json",
+      "vk": "e0af48cd5288d1147a1ebfc16a9bd13f433cbab198f71b95f25a6577ad0c04a7.vk.hex",
+      "acirSha256": "49383b0816878b9033e8054b8c875488631a81796fb12e05efa342a2cecf8b0e",
+      "vkSha256": "966dfb028a106ee28d42016b61776f8e1038adf1f39ae65241086e4e8061e2e8",
+      "wasmProving": true,
+      "example": {
+        "query": "SELECT ?s WHERE {?s <urn:p> ?x VALUES ?x {1 UNDEF}}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "37acdc9560a356c949259c359fad67f8ddbf1434d194bfb5bafa8abea89163ef",
+      "packageName": "query_37acdc9560a356c949259c359fad67f8ddbf1434d194bfb5bafa8abea89163ef",
+      "acir": "37acdc9560a356c949259c359fad67f8ddbf1434d194bfb5bafa8abea89163ef.json",
+      "vk": "37acdc9560a356c949259c359fad67f8ddbf1434d194bfb5bafa8abea89163ef.vk.hex",
+      "acirSha256": "388bdf9e70e6ff7800116d2798c4f1995355650faccdaf54b1ebb7383906d9bc",
+      "vkSha256": "88d185b83543043a646dc50968097160e90180c1721cc1db8132d2a768d45620",
+      "wasmProving": true,
+      "example": {
+        "query": "SELECT ?p WHERE {?s ?p ?o}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 8
+        }
+      }
+    },
+    {
+      "planHash": "7f03eba09cc4df4e7e86615e2f5cb656022feac84d109754c2b3462fc6c7eb74",
+      "packageName": "query_7f03eba09cc4df4e7e86615e2f5cb656022feac84d109754c2b3462fc6c7eb74",
+      "acir": "7f03eba09cc4df4e7e86615e2f5cb656022feac84d109754c2b3462fc6c7eb74.json",
+      "vk": "7f03eba09cc4df4e7e86615e2f5cb656022feac84d109754c2b3462fc6c7eb74.vk.hex",
+      "acirSha256": "2405445d89cf1a8107460fbbc491ba253a963cd36181d735bd004a5126af696b",
+      "vkSha256": "5f15a3945cfe285aa9b99ed7afe52483f62eb6e897c3fe4d283d0e68e07ff438",
+      "wasmProving": true,
+      "example": {
+        "query": "SELECT DISTINCT ?p WHERE {?s ?p ?o}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 8
+        }
+      }
+    },
+    {
+      "planHash": "26dfc126d68303792c9d8c4a6d43fa03febf75d9567947d9b3d23246349b1fd5",
+      "packageName": "query_26dfc126d68303792c9d8c4a6d43fa03febf75d9567947d9b3d23246349b1fd5",
+      "acir": "26dfc126d68303792c9d8c4a6d43fa03febf75d9567947d9b3d23246349b1fd5.json",
+      "vk": "26dfc126d68303792c9d8c4a6d43fa03febf75d9567947d9b3d23246349b1fd5.vk.hex",
+      "acirSha256": "f96e7890f5986307d51c19ea32722fe7f4de13230862449621fda552413cabe9",
+      "vkSha256": "54ac9d6bec48fc925d13da1a27f9c09350f68b895f0f6768401843a09bc27a0f",
+      "wasmProving": true,
+      "example": {
+        "query": "SELECT ?s WHERE {?s <urn:p> ?x} LIMIT 1 OFFSET 1",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "135c367b94a913ad2f7e0f3c4b74ac2c17156fda2456efd6cd33a2ba5b5d9e60",
+      "packageName": "query_135c367b94a913ad2f7e0f3c4b74ac2c17156fda2456efd6cd33a2ba5b5d9e60",
+      "acir": "135c367b94a913ad2f7e0f3c4b74ac2c17156fda2456efd6cd33a2ba5b5d9e60.json",
+      "vk": "135c367b94a913ad2f7e0f3c4b74ac2c17156fda2456efd6cd33a2ba5b5d9e60.vk.hex",
+      "acirSha256": "f3f0e2e021c98f9ca6eeabc62318e4b1fd82948da38ba2600327da36a308e777",
+      "vkSha256": "4527711090fe3479f5ddc878045cb6a36ad3c8d30c92f9aaf72c1628b6a885b7",
+      "wasmProving": true,
+      "example": {
+        "query": "ASK {?s <urn:p> ?x}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "686f1aa9f79069b9eadca2455f1d7de21607fda64e332884fa1463364ccd8ecf",
+      "packageName": "query_686f1aa9f79069b9eadca2455f1d7de21607fda64e332884fa1463364ccd8ecf",
+      "acir": "686f1aa9f79069b9eadca2455f1d7de21607fda64e332884fa1463364ccd8ecf.json",
+      "vk": "686f1aa9f79069b9eadca2455f1d7de21607fda64e332884fa1463364ccd8ecf.vk.hex",
+      "acirSha256": "228cc684d74daa8c0cf510d9c660d1c729074f9960b2f0dfd70f74ed2da416a2",
+      "vkSha256": "3811592bfe77c426a1bbeebab5d7aca7e4d96ba6e681c3f6453b4a2b54dffda5",
+      "wasmProving": true,
+      "example": {
+        "query": "ASK {?s <urn:p> ?x FILTER(?x > 8)}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 4
+        }
+      }
+    }
+  ],
+  "sourceBundleSha256": "c3734af827f97aa1fda4b3667b273405044dc8bc691c48085c8120c573e82c2c",
+  "crsPinsSha256": "261dbd696cb86060421ae74cefe9967e2940517a1dd52cd30df0c7a08da88f40",
+  "notYetCatalogued": [],
+  "nativeKnownFailures": []
+}

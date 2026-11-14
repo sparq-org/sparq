@@ -88,9 +88,11 @@ class QueryProfiles(unittest.TestCase):
         estate = gate.profile_keys(ROOT, sites, "estate")
         full = gate.profile_keys(ROOT, sites, "query-full")
         hosted = gate.profile_keys(ROOT, sites, "query-hosted")
+        package = gate.profile_keys(ROOT, sites, "query-package")
         self.assertTrue(full and hosted)
         self.assertFalse(estate & full)
-        self.assertEqual(estate | full, all_keys)
+        self.assertFalse(package & (estate | full))
+        self.assertEqual(estate | full | package, all_keys)
         self.assertLessEqual(hosted, full)
         self.assertEqual(len(hosted), len(profile.HOSTED_TESTS))
         with self.assertRaises(ValueError):

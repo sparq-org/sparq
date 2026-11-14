@@ -1,14 +1,15 @@
-import { readFileSync, statSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
 import { Noir } from '@noir-lang/noir_js';
-import { BarretenbergSync, BackendType, Crs, UltraHonkBackend, UltraHonkVerifierBackend } from '@aztec/bb.js';
+import { UltraHonkBackend, UltraHonkVerifierBackend } from '@aztec/bb.js';
+
+import { createBackend, proofOptions } from './internal/runtime.mjs';
 
 const require = createRequire(import.meta.url);
 const host = require('./wasm/sparq_zk_result_wasm.cjs');
 const assets = new URL('./assets/', import.meta.url);
-const proofOptions = Object.freeze({ verifierTarget: 'noir-recursive' });
+const crsPins = () => parse(readFileSync(new URL('crs.pins.json', assets), 'utf8'));
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const parse = text => JSON.parse(text);
 
@@ -42,22 +43,7 @@ function safePolicy(policy) {
 }
 
 async function backend() {
-  const crsPath = fileURLToPath(new URL('crs/', assets));
-  const size = statSync(new URL('crs/bn254_g1.dat', assets)).size;
-  if (!size || size % 64 || statSync(new URL('crs/bn254_g2.dat', assets)).size !== 128) {
-    throw new Error('bundled CRS rejected');
-  }
-  // The synchronous WASM API permits an explicit SRS capacity without the
-  // asynchronous constructor's unrelated default SRS allocation or native fallback.
-  const crs = await Crs.new(size / 64, crsPath);
-  const api = await BarretenbergSync.new({ backend: BackendType.Wasm, crsPath });
-  try {
-    api.srsInitSrs({ pointsBuf: crs.getG1Data(), numPoints: crs.numPoints, g2Point: crs.getG2Data() });
-    return api;
-  } catch (error) {
-    api.destroy();
-    throw error;
-  }
+  return createBackend(new URL('crs/', assets), crsPins());
 }
 
 export function testIssuerKeygen(seedHex) {

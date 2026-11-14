@@ -1,0 +1,11 @@
+/node_modules/
+/wasm/
+/internal/
+/assets/*.json
+!/assets/catalogue.json
+!/assets/toolchain.pins.json
+!/assets/crs.pins.json
+/assets/crs/
+/*.tgz
+.host-*/
+LICENSE
