@@ -871,6 +871,14 @@
                   "path": "core::ops_core_envelope::RawStatus",
                   "fields": [
                     {
+                      "name": "depth",
+                      "type": {
+                        "kind": "integer",
+                        "sign": "unsigned",
+                        "width": 32
+                      }
+                    },
+                    {
                       "name": "present",
                       "type": {
                         "kind": "boolean"
@@ -1496,6 +1504,10 @@
         "error_kind": "string",
         "string": "predicate kind"
       },
+      "9061869317984665486": {
+        "error_kind": "string",
+        "string": "status index depth"
+      },
       "9141357195180953097": {
         "error_kind": "string",
         "string": "credential root"
@@ -1519,6 +1531,10 @@
       "9560167555061956828": {
         "error_kind": "string",
         "string": "leaf salt not derived from tree salt"
+      },
+      "9636088263192316034": {
+        "error_kind": "string",
+        "string": "status path padding"
       },
       "9698390346799968641": {
         "error_kind": "string",
@@ -1643,6 +1659,10 @@
       "13177482699382835398": {
         "error_kind": "string",
         "string": "credential method backing padding"
+      },
+      "13521209128316054856": {
+        "error_kind": "string",
+        "string": "status depth capacity"
       },
       "13659395267648872468": {
         "error_kind": "string",
