@@ -20,6 +20,7 @@ HOSTED_TESTS = (
 )
 OPERATORS = ("scan", "join", "filter", "project", "distinct", "slice", "values", "ask", "select")
 ROWS_CONTRACTS = (
+    "identity_named_view_excludes_default_assertions_and_inactive_rows",
     "rows_plain_string_numeric_class_is_not_a_numeric_value",
     "rows_plain_string_range_class_still_compares_identity",
     "expression_string_ordering_keeps_checked_payloads",

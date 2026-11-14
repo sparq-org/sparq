@@ -48,7 +48,7 @@ fn first_matching_occurrence_retains_the_complete_payload() {
         Table {rows:[[matched],[unbound()],[unbound()],[unbound()]],len:1});
 }
 
-#[test(should_fail_with="operator capacity")]
+#[test(should_fail_with="scan completeness or capacity")]
 fn scan_cannot_evict_an_emitted_row_to_fit_another_match() {
     crate::ops_core::scan([
         [iri(1),iri(9),iri(10)],[iri(2),iri(9),iri(10)],[iri(3),iri(9),iri(10)],

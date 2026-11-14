@@ -66,6 +66,7 @@ fn merged_manifest() -> Value {
                                 | ("features", "term_functions_second_group")
                                 | ("features", "temporal_functions_second_group")
                                 | ("features", "numeric_functions_second_group")
+                                | ("features", "literal_dispatch_and_capacity_controls")
                                 | ("functions", "to_term(boolean,integer,decimal)")
                         ),
                         "unknown inventory row: {group}/{name}"
@@ -183,20 +184,7 @@ fn manifest_covers_the_corpus_without_overstating_and_never_lowers_the_floor() {
         }
     }
     for row in m["isolated_extensions"].as_array().into_iter().flatten() {
-        assert_eq!(row["guest_proof_evidence"], "not_asserted");
-        for (group, rejection) in [("positive_cases", false), ("rejection_cases", true)] {
-            for id in row[group].as_array().unwrap() {
-                let id = id.as_str().unwrap();
-                if let Some(reference) = id.strip_prefix("noir:") {
-                    assert_noir_reference(reference, rejection);
-                } else if let Some(reference) = id.strip_prefix("rust:") {
-                    assert!(!rejection);
-                    assert_rust_reference(reference);
-                } else {
-                    panic!("unknown isolated evidence reference: {id}");
-                }
-            }
-        }
+        assert_isolated_extension(row);
     }
     let floor: Value = serde_json::from_str(
         &std::fs::read_to_string(root().join("zk/noir-query/coverage-floor.json")).unwrap(),
@@ -212,7 +200,67 @@ fn manifest_covers_the_corpus_without_overstating_and_never_lowers_the_floor() {
     }
 }
 
-fn assert_rust_reference(reference: &str) {
+#[test]
+fn isolated_expression_extensions_require_noir_controls() {
+    let manifest = merged_manifest();
+    for row in manifest["isolated_extensions"].as_array().unwrap() {
+        assert_isolated_extension(row);
+    }
+    let mut host_only = manifest["isolated_extensions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == "literal_dispatch_and_capacity_controls")
+        .unwrap()
+        .clone();
+    host_only["positive_cases"] =
+        serde_json::json!(["rust:expr_tests::literal_dispatch_recommendation_table"]);
+    assert!(std::panic::catch_unwind(|| assert_isolated_extension(&host_only)).is_err());
+}
+
+fn assert_isolated_extension(row: &Value) {
+    assert_eq!(row["guest_proof_evidence"], "not_asserted");
+    assert!(
+        row["positive_cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id.as_str().is_some_and(|s| s.starts_with("noir:"))),
+        "isolated expression coverage needs a native gadget control"
+    );
+    for (group, rejection) in [("positive_cases", false), ("rejection_cases", true)] {
+        for id in row[group].as_array().unwrap() {
+            let id = id.as_str().unwrap();
+            if let Some(reference) = id.strip_prefix("noir:") {
+                assert_noir_reference(reference, rejection);
+            } else if let Some(reference) = id.strip_prefix("rust:") {
+                assert!(!rejection);
+                if matches!(
+                    reference,
+                    "expr_tests::literal_dispatch_recommendation_table"
+                        | "expr_tests::cell_alias_binding_keeps_rdf_identity"
+                ) {
+                    // These supplemental host controls run in the ordinary Rust legs.
+                    // Native gadget controls above remain independently required.
+                    let (module, function, _) = rust_test_source(reference);
+                    let inventory = std::fs::read_to_string(
+                        root().join("crates/sparq-zk-query/tests/live-tests.txt"),
+                    )
+                    .unwrap();
+                    assert!(!inventory
+                        .lines()
+                        .any(|line| line == format!("live src/lower/{module}.rs::{function}")));
+                } else {
+                    assert_rust_reference(reference);
+                }
+            } else {
+                panic!("unknown isolated evidence reference: {id}");
+            }
+        }
+    }
+}
+
+fn rust_test_source(reference: &str) -> (String, String, String) {
     let (module, function) = reference.split_once("::").expect("Rust test reference");
     for identifier in [module, function] {
         assert!(
@@ -228,7 +276,7 @@ fn assert_rust_reference(reference: &str) {
             .join(format!("{module}.rs")),
     )
     .unwrap();
-    let (before, body) = source
+    let (before, _) = source
         .split_once(&format!("fn {function}("))
         .expect("referenced live Rust test");
     assert_eq!(
@@ -240,6 +288,14 @@ fn assert_rust_reference(reference: &str) {
             .trim(),
         "#[test]"
     );
+    (module.to_owned(), function.to_owned(), source)
+}
+
+fn assert_rust_reference(reference: &str) {
+    let (module, function, source) = rust_test_source(reference);
+    let (_, body) = source
+        .split_once(&format!("fn {function}("))
+        .expect("referenced live Rust test");
     // The gate checker parses Rust functions, including their embedded Noir tests.
     assert!(body.contains("crate::support::gate("));
     assert!(body.contains("crate::support::complete("));

@@ -1132,6 +1132,118 @@ fn canonical_envelope_program_keeps_raw_evidence_outside_sealed_views() {
 
 #[test]
 #[ignore = "requires the pinned native query toolchain"]
+fn canonical_status_depth_binds_the_snapshot_and_padding() {
+    let Some(gate) = support::gate(
+        "canonical_status_depth_binds_the_snapshot_and_padding",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
+    use sparq_zk_query::{
+        credential::assemble_issuer_dataset,
+        interp::evaluate_dataset,
+        witness::{prover_toml_enveloped, EnvelopeInput},
+    };
+    let plan = lower(
+        "ASK {}",
+        Bounds {
+            credentials: 1,
+            quads_per_credential: 16,
+            rows_per_table: 2,
+        },
+    )
+    .unwrap();
+    let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+    let workspace = fixture_support::Workspace::new(&package);
+    let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+    for depth in [0, 1, 32] {
+        let (data, policy, evidence) = authenticated::canonical_status_fixture(depth);
+        let dataset = assemble_issuer_dataset(&data, &policy.trust_members, [7; 32]).unwrap();
+        let trace = evaluate_dataset(&plan, &dataset, &SuiteEncoder).unwrap();
+        let input = prover_toml_enveloped(
+            &plan,
+            &data,
+            &trace,
+            [7; 32],
+            [3; 32],
+            EnvelopeInput {
+                policy: &policy,
+                evidence: &evidence,
+                revealed: None,
+            },
+        )
+        .unwrap();
+        let row = evidence.credentials[0].statuses[0].quad_index;
+        let parsed = parse(&input);
+        assert_eq!(parsed["envelope_0"]["status"][row]["depth"], json!(depth));
+        driver
+            .execute(&input, &format!("status_depth_{depth}"))
+            .unwrap();
+        for changed_depth in [if depth == 0 { 1 } else { depth - 1 }, 33] {
+            let mut altered = parsed.clone();
+            altered["envelope_0"]["status"][row]["depth"] = json!(changed_depth);
+            assert!(driver
+                .execute(
+                    &render(&altered),
+                    &format!("changed_depth_{depth}_{changed_depth}")
+                )
+                .is_err());
+        }
+        if depth == 1 {
+            let mut altered = parsed.clone();
+            altered["envelope_0"]["status"][row]["path"]["siblings"][1] = json!("1");
+            assert!(driver.execute(&render(&altered), "status_padding").is_err());
+        }
+    }
+    support::complete(gate);
+}
+
+#[test]
+#[ignore = "requires the pinned native query toolchain"]
+fn canonical_graph_views_keep_method_assertions_in_the_default_graph() {
+    let Some(gate) = support::gate(
+        "canonical_graph_views_keep_method_assertions_in_the_default_graph",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
+    use sparq_zk_query::{
+        credential::{assemble_issuer_dataset, VERIFIED_ISSUER},
+        interp::{evaluate_dataset, ResultValue},
+        witness::{prover_toml_enveloped, EnvelopeInput, EnvelopeWitness},
+    };
+    let policy = authenticated::canonical_policy();
+    let data = [authenticated::canonical_sign(
+        "<urn:a> <urn:p> <urn:o> .",
+        0,
+    )];
+    let digest = [7; 32];
+    let dataset = assemble_issuer_dataset(&data, &policy.trust_members, digest).unwrap();
+    for (query, expected) in [
+        ("ASK {GRAPH ?g {?s <urn:p> ?o}}".to_owned(), true),
+        (format!("ASK {{GRAPH ?g {{?g <{VERIFIED_ISSUER}> ?issuer}}}}"), false),
+        (format!("ASK {{VALUES ?issuer {{<urn:issuer>}} FILTER EXISTS {{?g <{VERIFIED_ISSUER}> ?issuer}}}}"), true),
+        (format!("ASK {{VALUES ?issuer {{<urn:other>}} FILTER EXISTS {{?g <{VERIFIED_ISSUER}> ?issuer}}}}"), false),
+    ] {
+        let plan = lower(&query, Bounds {credentials:1,quads_per_credential:4,rows_per_table:2}).unwrap();
+        let trace = evaluate_dataset(&plan,&dataset,&SuiteEncoder).unwrap();
+        assert_eq!(trace.result,ResultValue::Ask(expected),"{query}");
+        let input = prover_toml_enveloped(&plan,&data,&trace,digest,[3;32],EnvelopeInput {
+            policy:&policy,evidence:&EnvelopeWitness::default(),revealed:None,
+        }).unwrap();
+        let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+        let workspace = fixture_support::Workspace::new(&package);
+        let driver = ProgramProver::new(&workspace.0,&package.name).unwrap();
+        driver.execute(&input,"canonical_graph").unwrap();
+        let mut altered = parse(&input);
+        altered["result"] = json!(!expected);
+        assert!(driver.execute(&render(&altered),"altered_graph_result").is_err());
+    }
+    support::complete(gate);
+}
+
+#[test]
+#[ignore = "requires the pinned native query toolchain"]
 fn canonical_envelope_executes_complete_private_evidence_and_policy_controls() {
     let Some(gate) = support::gate(
         "canonical_envelope_executes_complete_private_evidence_and_policy_controls",
