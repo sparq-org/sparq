@@ -81,6 +81,15 @@ credential calls directly in generated wiring. The general cell/table
 constructors retain their existing behavior; RDF-role specialization is private
 to complete credential openings.
 
+When a few quads need a longer lexical bound, call
+`suite::{open_bounded_credential_mixed_hidden, open_bounded_credential_mixed_revealed}`.
+They take `S` short rows at `BoundedTermOpening<L, D, G>`, `K` long rows at
+`BoundedTermOpening<LL, D, G>` and a private `long_index: [u32; K]` with `S + K = N`.
+Long indices strictly increase below `N`; an unused long slot is a padding row at
+the trailing indices. Short rows fill the remaining tree positions in order, so the
+leaves, root and returned `OpenedCredential<N>` equal the uniform opening. A quad
+too long for the short bound needs a long slot; otherwise no proof exists.
+
 Use `open_status_index` for decimal string indices, `open_status_purpose` for
 literal purposes, and `open_multikey` for the private codec. Synthetic credential
 graph names come from `term::credential_graph` and include the request digest and

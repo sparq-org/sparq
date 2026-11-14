@@ -15,3 +15,4 @@ mod suite_metadata_tests;
 mod suite_entry_tests;
 
 mod term_identity_tests;
+mod suite_mixed_tests;
