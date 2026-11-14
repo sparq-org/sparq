@@ -335,6 +335,42 @@ mod tests {
     }
 
     #[test]
+    fn envelope_snapshot_depth_vectors_match_noir() {
+        let list = suite::field_bytes(
+            suite::term_cell(
+                &Term::NamedNode(NamedNode::new_unchecked("urn:snapshot")),
+                0,
+            )
+            .unwrap()
+            .enc,
+        );
+        let purpose = suite::field_bytes(
+            suite::term_cell(
+                &Term::Literal(oxrdf::Literal::new_simple_literal("revocation")),
+                0,
+            )
+            .unwrap()
+            .enc,
+        );
+        for (depth, expected) in [
+            (
+                1,
+                "0x21fee3d80bb93e4729b47a9b29e2de1401eff4941174578f9eec2c2fe1a10e5a",
+            ),
+            (
+                32,
+                "0x20c9c57f3dda8ce0d2de515ed2f11ab5085a0a3fa720970a293424f706b56d57",
+            ),
+        ] {
+            let expected = suite::field_bytes(field_from_hex_str_strict(expected).unwrap());
+            assert_eq!(
+                snapshot_digest(list, purpose, 2, depth, number(17)).unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[test]
     fn envelope_encodings_bind_each_input() {
         let digest = std::array::from_fn(|i| i as u8);
         let message = holder_message(&digest);

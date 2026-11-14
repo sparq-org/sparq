@@ -233,8 +233,12 @@ pub struct Snapshot {
     pub root: Field,
 }
 pub fn snapshot_digest<let D: u32>(s: Snapshot) -> Field {
+    snapshot_digest_at_depth(s, D)
+}
+/// Encode the actual bit-tree depth; the status consumer constrains its bound.
+pub fn snapshot_digest_at_depth(s: Snapshot, depth: u32) -> Field {
     commit_fold(
-        [SNAPSHOT, s.list.enc(), s.purpose.enc(), s.bit_len as Field, D as Field, s.root],
+        [SNAPSHOT, s.list.enc(), s.purpose.enc(), s.bit_len as Field, depth as Field, s.root],
         6,
     )
 }
@@ -260,7 +264,62 @@ pub struct StatusEvidence<let D: u32, let A: u32> {
     pub index: BoundedVec<u8, 20>,
     pub size: BoundedVec<u8, 20>,
 }
-/// Cover every signed status row, with no witnessed absence or selected subset.
+/// Private status evidence with a bounded actual bit-tree depth.
+/// Accepted-set depth remains a separate public policy value.
+pub struct BoundedStatusEvidence<let MAX: u32, let A: u32> {
+    pub depth: u32,
+    pub present: bool,
+    pub snapshot: Snapshot,
+    pub accepted: Membership<A>,
+    pub bit: bool,
+    pub path: Membership<MAX>,
+    pub purpose: BoundedVec<u8, 16>,
+    pub index: BoundedVec<u8, 20>,
+    pub size: BoundedVec<u8, 20>,
+}
+/// Reduce only actual bit-path levels; unused siblings and index bits are zero.
+/// Hashing dominates the bounded path. The maximum also bounds decomposition.
+pub fn status_merkle_root<let MAX: u32>(leaf: Field, member: Membership<MAX>, depth: u32) -> Field {
+    assert(depth <= MAX, "status depth capacity");
+    let bits: [bool; MAX] = member.index.to_le_bits();
+    let mut node = leaf;
+    for level in 0..MAX {
+        if level < depth {
+            node = h2(
+                if bits[level] {
+                    member.siblings[level]
+                } else {
+                    node
+                },
+                if bits[level] {
+                    node
+                } else {
+                    member.siblings[level]
+                },
+            );
+        } else {
+            assert(!bits[level], "status index depth");
+            assert(member.siblings[level] == 0, "status path padding");
+        }
+    }
+    node
+}
+fn fixed_status_evidence<let D: u32, let A: u32>(
+    e: StatusEvidence<D, A>,
+) -> BoundedStatusEvidence<D, A> {
+    BoundedStatusEvidence {
+        depth: D,
+        present: e.present,
+        snapshot: e.snapshot,
+        accepted: e.accepted,
+        bit: e.bit,
+        path: e.path,
+        purpose: e.purpose,
+        index: e.index,
+        size: e.size,
+    }
+}
+/// Fixed-depth compatibility entry; all status constraints live in the bounded relation.
 pub fn check_status<let N: u32, let D: u32, let A: u32>(
     c: OpenedCredential<N>,
     snapshot_root: Field,
@@ -268,12 +327,22 @@ pub fn check_status<let N: u32, let D: u32, let A: u32>(
     allow_missing: bool,
     evidence: [StatusEvidence<D, A>; N],
 ) {
-    check_credential(c);
-    assert(D <= 32, "status tree depth");
-    let mut capacity: Field = 1;
-    for _ in 0..D {
-        capacity = capacity * 2;
+    let mut bounded = [fixed_status_evidence(evidence[0]); N];
+    for i in 0..N {
+        bounded[i] = fixed_status_evidence(evidence[i]);
     }
+    check_status_bounded(c, snapshot_root, snapshot_depth, allow_missing, bounded);
+}
+/// Cover every signed status row, with no witnessed absence or selected subset.
+pub fn check_status_bounded<let N: u32, let MAX: u32, let A: u32>(
+    c: OpenedCredential<N>,
+    snapshot_root: Field,
+    snapshot_set_depth: u32,
+    allow_missing: bool,
+    evidence: [BoundedStatusEvidence<MAX, A>; N],
+) {
+    check_credential(c);
+    assert(MAX <= 32, "status tree depth");
     let mut count: u32 = 0;
     let rows = c.quads();
     let subject = c.credential_subject();
@@ -285,6 +354,13 @@ pub fn check_status<let N: u32, let D: u32, let A: u32>(
         count = count + hit as u32;
         if hit {
             let e = evidence[i];
+            assert(e.depth <= MAX, "status depth capacity");
+            let mut capacity: u64 = 1;
+            for level in 0..MAX {
+                if level < e.depth {
+                    capacity = capacity * 2;
+                }
+            }
             let entry = rows[i][2];
             assert(entry.kind() != 3, "status entry kind");
             assert(
@@ -322,15 +398,20 @@ pub fn check_status<let N: u32, let D: u32, let A: u32>(
             }
             check_snapshot_identity(e.snapshot, list, purpose);
             assert(index < e.snapshot.bit_len as u64, "status index length");
-            assert((e.snapshot.bit_len as Field).lt(capacity + 1), "snapshot capacity");
+            assert(e.path.index == index as Field, "status index binding");
+            let path_root = status_merkle_root(status_leaf(e.bit), e.path, e.depth);
+            assert(e.snapshot.bit_len as u64 <= capacity, "snapshot capacity");
             assert(
-                set_merkle_root(snapshot_digest::<D>(e.snapshot), e.accepted, snapshot_depth)
+                set_merkle_root(
+                    snapshot_digest_at_depth(e.snapshot, e.depth),
+                    e.accepted,
+                    snapshot_set_depth,
+                )
                     == snapshot_root,
                 "snapshot policy",
             );
-            assert(e.path.index == index as Field, "status index binding");
             assert(!e.bit, "status bit set");
-            assert(merkle_root(status_leaf(e.bit), e.path) == e.snapshot.root, "status path");
+            assert(path_root == e.snapshot.root, "status path");
         }
     }
     assert((count > 0) | allow_missing, "status entry absent");
@@ -861,4 +942,510 @@ fn snapshot_metadata_refuses_a_different_key_with_the_same_identity() {
     check_snapshot_identity(
         Snapshot { list, purpose: changed, bit_len: 1, root: 1 }, list, purpose,
     );
+}
+
+mod bounded_status_tests {
+    use crate::suite_entry::TermOpening;
+    use crate::term::same_term;
+    use super::{
+        BoundedStatusEvidence, check_status, check_status_bounded, CredentialOpening, iri_bytes,
+        Membership, merkle_root, open_suite_credential, OpenedCredential, Point, required_property,
+        Signature, Snapshot, snapshot_digest, snapshot_digest_at_depth, snapshot_test_purpose,
+        status_leaf, status_merkle_root, StatusEvidence,
+    };
+    use compose::hashes::h2;
+    use std::collections::bounded_vec::BoundedVec;
+    // The signed fixture is the existing envelope status vector from the issuance example.
+    fn absent<let L: u32>() -> TermOpening<L> {
+        TermOpening {
+            bound: false,
+            kind: 0,
+            lexical: [0; L],
+            lexical_len: 0,
+            datatype: [0; 128],
+            datatype_len: 0,
+            language: [0; 64],
+            language_len: 0,
+            key: [0; 31],
+        }
+    }
+    fn raw<let L: u32, let T: u32, let D: u32, let G: u32>(
+        kind: u8,
+        text: [u8; T],
+        dt: [u8; D],
+        lang: [u8; G],
+        key: [u8; 31],
+    ) -> TermOpening<L> {
+        let mut r = absent::<L>();
+        r.bound = true;
+        r.kind = kind;
+        r.lexical_len = T;
+        r.datatype_len = D;
+        r.language_len = G;
+        r.key = key;
+        for i in 0..T {
+            r.lexical[i] = text[i];
+        }
+        for i in 0..D {
+            r.datatype[i] = dt[i];
+        }
+        for i in 0..G {
+            r.language[i] = lang[i];
+        }
+        r
+    }
+    fn credential_proof<let N: u32>() -> CredentialOpening<N, 160> {
+        let mut rows = [[absent::<160>(); 4]; N];
+        let mut salts = [0; N];
+        rows[0] = [
+            raw(
+                1,
+                "urn:credential".as_bytes(),
+                "".as_bytes(),
+                "".as_bytes(),
+                [0; 31],
+            ),
+            raw(
+                1,
+                "http://www.w3.org/1999/02/22-rdf-syntax-ns#type".as_bytes(),
+                "".as_bytes(),
+                "".as_bytes(),
+                [0; 31],
+            ),
+            raw(
+                1,
+                "https://www.w3.org/2018/credentials#VerifiableCredential".as_bytes(),
+                "".as_bytes(),
+                "".as_bytes(),
+                [0; 31],
+            ),
+            raw(0, "".as_bytes(), "".as_bytes(), "".as_bytes(), [0; 31]),
+        ];
+        salts[0] = 0x0a845faa4ea64651b38b59b526c347b3d2bdea2b334ca9987a154d12bb524dbd;
+        rows[1] = [
+            raw(
+                1,
+                "urn:status:0".as_bytes(),
+                "".as_bytes(),
+                "".as_bytes(),
+                [0; 31],
+            ),
+            raw(
+                1,
+                "https://www.w3.org/ns/credentials/status#statusListCredential".as_bytes(),
+                "".as_bytes(),
+                "".as_bytes(),
+                [0; 31],
+            ),
+            raw(
+                1,
+                "urn:list:revocation".as_bytes(),
+                "".as_bytes(),
+                "".as_bytes(),
+                [0; 31],
+            ),
+            raw(0, "".as_bytes(), "".as_bytes(), "".as_bytes(), [0; 31]),
+        ];
+        salts[1] = 0x141da10894efebf23d64d7057749fd50806335ba04bb7c24c8dd6673f848888b;
+        rows[2] = [
+            raw(
+                1,
+                "urn:subject".as_bytes(),
+                "".as_bytes(),
+                "".as_bytes(),
+                [0; 31],
+            ),
+            raw(
+                1,
+                "urn:fact:issuer".as_bytes(),
+                "".as_bytes(),
+                "".as_bytes(),
+                [0; 31],
+            ),
+            raw(
+                1,
+                "urn:fact:1".as_bytes(),
+                "".as_bytes(),
+                "".as_bytes(),
+                [0; 31],
+            ),
+            raw(0, "".as_bytes(), "".as_bytes(), "".as_bytes(), [0; 31]),
+        ];
+        salts[2] = 0x1536b237355f7230bdb01d3a05b8cfc78cf3ef772a4cfbfc0f56649734853935;
+        rows[3] = [
+            raw(
+                1,
+                "urn:status:0".as_bytes(),
+                "".as_bytes(),
+                "".as_bytes(),
+                [0; 31],
+            ),
+            raw(
+                1,
+                "http://www.w3.org/1999/02/22-rdf-syntax-ns#type".as_bytes(),
+                "".as_bytes(),
+                "".as_bytes(),
+                [0; 31],
+            ),
+            raw(
+                1,
+                "https://www.w3.org/ns/credentials/status#BitstringStatusListEntry".as_bytes(),
+                "".as_bytes(),
+                "".as_bytes(),
+                [0; 31],
+            ),
+            raw(0, "".as_bytes(), "".as_bytes(), "".as_bytes(), [0; 31]),
+        ];
+        salts[3] = 0x15e469943c9c1c82fd66018353dc543b33a23076177ad35c4c267e7795b4cb0a;
+        rows[4] = [
+            raw(
+                1,
+                "urn:subject".as_bytes(),
+                "".as_bytes(),
+                "".as_bytes(),
+                [0; 31],
+            ),
+            raw(
+                1,
+                "urn:shared".as_bytes(),
+                "".as_bytes(),
+                "".as_bytes(),
+                [0; 31],
+            ),
+            raw(
+                1,
+                "urn:value".as_bytes(),
+                "".as_bytes(),
+                "".as_bytes(),
+                [0; 31],
+            ),
+            raw(0, "".as_bytes(), "".as_bytes(), "".as_bytes(), [0; 31]),
+        ];
+        salts[4] = 0x03bff45413336a47a4ace38258984c0dd09bb3f4e77b87357dc8952ecfae337a;
+        rows[5] = [
+            raw(
+                1,
+                "urn:credential".as_bytes(),
+                "".as_bytes(),
+                "".as_bytes(),
+                [0; 31],
+            ),
+            raw(
+                1,
+                "https://www.w3.org/2018/credentials#credentialStatus".as_bytes(),
+                "".as_bytes(),
+                "".as_bytes(),
+                [0; 31],
+            ),
+            raw(
+                1,
+                "urn:status:0".as_bytes(),
+                "".as_bytes(),
+                "".as_bytes(),
+                [0; 31],
+            ),
+            raw(0, "".as_bytes(), "".as_bytes(), "".as_bytes(), [0; 31]),
+        ];
+        salts[5] = 0x2d6ac64036592573c76df594cf54d2cabf7a2d69679a8eb7236147b74189c555;
+        rows[6] = [
+            raw(
+                1,
+                "urn:credential".as_bytes(),
+                "".as_bytes(),
+                "".as_bytes(),
+                [0; 31],
+            ),
+            raw(
+                1,
+                "https://www.w3.org/2018/credentials#issuer".as_bytes(),
+                "".as_bytes(),
+                "".as_bytes(),
+                [0; 31],
+            ),
+            raw(
+                1,
+                "urn:issuer:1".as_bytes(),
+                "".as_bytes(),
+                "".as_bytes(),
+                [0; 31],
+            ),
+            raw(0, "".as_bytes(), "".as_bytes(), "".as_bytes(), [0; 31]),
+        ];
+        salts[6] = 0x0c3d6e496122a8ac066ea6f128ec4c11f8b8f15687868d2f4e1c4ecdd9025a7a;
+        rows[7] = [
+            raw(
+                1,
+                "urn:status:0".as_bytes(),
+                "".as_bytes(),
+                "".as_bytes(),
+                [0; 31],
+            ),
+            raw(
+                1,
+                "https://www.w3.org/ns/credentials/status#statusPurpose".as_bytes(),
+                "".as_bytes(),
+                "".as_bytes(),
+                [0; 31],
+            ),
+            raw(
+                3,
+                "revocation".as_bytes(),
+                "http://www.w3.org/2001/XMLSchema#string".as_bytes(),
+                "".as_bytes(),
+                [
+                    6, 114, 101, 118, 111, 99, 97, 116, 105, 111, 110, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                ],
+            ),
+            raw(0, "".as_bytes(), "".as_bytes(), "".as_bytes(), [0; 31]),
+        ];
+        salts[7] = 0x03f6578610d053c4c3ec246fdb1ea631d1c540eec29522bc5f9537e052a7cc35;
+        rows[8] = [
+            raw(
+                1,
+                "urn:status:0".as_bytes(),
+                "".as_bytes(),
+                "".as_bytes(),
+                [0; 31],
+            ),
+            raw(
+                1,
+                "https://www.w3.org/ns/credentials/status#statusListIndex".as_bytes(),
+                "".as_bytes(),
+                "".as_bytes(),
+                [0; 31],
+            ),
+            raw(
+                3,
+                "0001".as_bytes(),
+                "http://www.w3.org/2001/XMLSchema#string".as_bytes(),
+                "".as_bytes(),
+                [
+                    6, 48, 48, 48, 49, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0,
+                ],
+            ),
+            raw(0, "".as_bytes(), "".as_bytes(), "".as_bytes(), [0; 31]),
+        ];
+        salts[8] = 0x0c3dfb14cda6e1e3915d1a8c4136a80ad63e07daf0b38982d3d68d2929e98f41;
+        CredentialOpening {
+            raw: rows,
+            salts,
+            salt: 0x297e6ca1cd19c915b7d424aa73c4542f7581c011d74bf672222f8c230973170f,
+            count: 9,
+            configuration: [
+                286021852831425289605033915724327055018,
+                109278919710069188030686208432707155326,
+            ],
+            created: absent(),
+            method: raw(
+                1,
+                "urn:method:1".as_bytes(),
+                "".as_bytes(),
+                "".as_bytes(),
+                [0; 31],
+            ),
+            pk: Point {
+                x: 0x1932c73aa883c1bb2df0890c2e5eaf9f4ba79582867ed1bd906d863b87b5fe78,
+                y: 0x21a0ff4c5132dc1cf212fb066ed462850c724ecf6726149b97a7a1cb5433ebb9,
+            },
+            signature: Signature {
+                present: true,
+                r: Point {
+                    x: 0x0bcad2a85197bfbff9f6d94a5750b35bc5b908832a923dbde52676ba63d3f52e,
+                    y: 0x189dafb1a82257906d64863a0f97578acacc91920583155fcd1911b80ccd88a0,
+                },
+                s: 0x04ba587da90a7adcf35a30748a9a9e17e8cb174e698cc258029af324e4d33370,
+                e: 0x04549acda5b418b06b8820aa9a8ce74d7e76249e63799e58cbae499dec4652a5,
+                e_k: 0x0000000000000000000000000000000000000000000000000000000000000005,
+            },
+        }
+    }
+    fn credential() -> OpenedCredential<16> {
+        open_suite_credential(credential_proof::<16>(), 0)
+    }
+    fn row(c: OpenedCredential<16>) -> u32 {
+        let mut found = 0;
+        let rows = c.quads();
+        for i in 0..16 {
+            if (i < c.count())
+                & same_term(rows[i][0], c.credential_subject())
+                & same_term(rows[i][1], crate::term::iri_credential_status()) {
+                found = i;
+            }
+        }
+        found
+    }
+    fn evidence<let MAX: u32>(
+        c: OpenedCredential<16>,
+        depth: u32,
+    ) -> [BoundedStatusEvidence<MAX, 1>; 16] {
+        let mut siblings = [0; MAX];
+        for level in 0..MAX {
+            if level < depth {
+                siblings[level] = 9;
+            }
+        }
+        let path = Membership { index: 1, siblings };
+        let entry = c.quads()[row(c)][2];
+        let snapshot = Snapshot {
+            list: required_property(c, entry, crate::term::iri_status_list()),
+            purpose: required_property(c, entry, crate::term::iri_status_purpose()),
+            bit_len: 2,
+            root: status_merkle_root(status_leaf(false), path, depth),
+        };
+        let mut out = [
+            BoundedStatusEvidence {
+                depth,
+                present: false,
+                snapshot,
+                accepted: Membership { index: 0, siblings: [0] },
+                bit: false,
+                path,
+                purpose: BoundedVec::from_array("revocation".as_bytes()),
+                index: BoundedVec::from_array("0001".as_bytes()),
+                size: BoundedVec::from_array("1".as_bytes()),
+            }; 16
+        ];
+        out[row(c)].present = true;
+        out
+    }
+    fn policy<let MAX: u32>(
+        c: OpenedCredential<16>,
+        es: [BoundedStatusEvidence<MAX, 1>; 16],
+    ) -> Field {
+        let entry = es[row(c)];
+        snapshot_digest_at_depth(entry.snapshot, entry.depth)
+    }
+    #[test]
+    fn bounded_status_shallow_depth_is_accepted() {
+        let c = credential();
+        let es = evidence::<32>(c, 1);
+        check_status_bounded(c, policy(c, es), 0, false, es);
+    }
+    #[test]
+    fn bounded_status_maximum_depth_is_accepted() {
+        let c = credential();
+        let es = evidence::<32>(c, 32);
+        check_status_bounded(c, policy(c, es), 0, false, es);
+    }
+    #[test(should_fail_with = "status depth capacity")]
+    fn bounded_status_depth_above_maximum_is_refused() {
+        let c = credential();
+        let mut es = evidence::<4>(c, 1);
+        es[row(c)].depth = 5;
+        check_status_bounded(c, 1, 0, false, es);
+    }
+    #[test(should_fail_with = "status path padding")]
+    fn bounded_status_unused_sibling_is_refused() {
+        let c = credential();
+        let mut es = evidence::<32>(c, 1);
+        es[row(c)].path.siblings[1] = 7;
+        check_status_bounded(c, policy(c, es), 0, false, es);
+    }
+    #[test(should_fail_with = "status index depth")]
+    fn bounded_status_index_at_depth_limit_is_refused() {
+        let c = credential();
+        let mut es = evidence::<32>(c, 1);
+        es[row(c)].depth = 0;
+        check_status_bounded(c, policy(c, es), 0, false, es);
+    }
+    #[test(should_fail_with = "snapshot policy")]
+    fn bounded_status_snapshot_depth_relabelling_is_refused() {
+        let c = credential();
+        let mut es = evidence::<32>(c, 1);
+        let root = policy(c, es);
+        es[row(c)].depth = 2;
+        check_status_bounded(c, root, 0, false, es);
+    }
+    #[test(should_fail_with = "snapshot capacity")]
+    fn bounded_status_bit_length_above_capacity_is_refused() {
+        let c = credential();
+        let mut es = evidence::<32>(c, 1);
+        es[row(c)].snapshot.bit_len = 3;
+        check_status_bounded(c, policy(c, es), 0, false, es);
+    }
+    #[test(should_fail_with = "status bit set")]
+    fn bounded_status_set_bit_is_refused() {
+        let c = credential();
+        let mut es = evidence::<32>(c, 1);
+        es[row(c)].bit = true;
+        check_status_bounded(c, policy(c, es), 0, false, es);
+    }
+    #[test]
+    fn bounded_status_path_stops_at_the_actual_depth() {
+        let leaf = status_leaf(false);
+        let path = Membership { index: 1, siblings: [9, 0, 0, 0] };
+        assert(status_merkle_root(leaf, path, 1) == h2(9, leaf));
+        assert(status_merkle_root(leaf, path, 1) != merkle_root(leaf, path));
+        assert(status_merkle_root(leaf, Membership { index: 0, siblings: [0; 4] }, 0) == leaf);
+    }
+    #[test(should_fail_with = "status index depth")]
+    fn bounded_status_path_refuses_a_high_index_bit() {
+        let _root = status_merkle_root(
+            status_leaf(false),
+            Membership { index: 2, siblings: [0; 4] },
+            1,
+        );
+    }
+    #[test(should_fail)]
+    fn bounded_status_path_refuses_an_index_above_the_compiled_range() {
+        let _root = status_merkle_root(
+            status_leaf(false),
+            Membership { index: 0x100000000, siblings: [0; 32] },
+            32,
+        );
+    }
+    #[test]
+    fn fixed_status_api_and_bounded_status_share_the_relation() {
+        let c = credential();
+        let es = evidence::<1>(c, 1);
+        let mut fixed = [
+            StatusEvidence {
+                present: false,
+                snapshot: es[0].snapshot,
+                accepted: es[0].accepted,
+                bit: es[0].bit,
+                path: es[0].path,
+                purpose: es[0].purpose,
+                index: es[0].index,
+                size: es[0].size,
+            }; 16
+        ];
+        for i in 0..16 {
+            let e = es[i];
+            fixed[i] = StatusEvidence {
+                present: e.present,
+                snapshot: e.snapshot,
+                accepted: e.accepted,
+                bit: e.bit,
+                path: e.path,
+                purpose: e.purpose,
+                index: e.index,
+                size: e.size,
+            };
+        }
+        let root = policy(c, es);
+        check_status(c, root, 0, false, fixed);
+        check_status_bounded(c, root, 0, false, es);
+    }
+    #[test]
+    fn bounded_status_snapshot_vectors_match_rust() {
+        let s = Snapshot {
+            list: iri_bytes("urn:snapshot".as_bytes()),
+            purpose: snapshot_test_purpose(false),
+            bit_len: 2,
+            root: 17,
+        };
+        assert(
+            snapshot_digest_at_depth(s, 1)
+                == 0x21fee3d80bb93e4729b47a9b29e2de1401eff4941174578f9eec2c2fe1a10e5a,
+        );
+        assert(
+            snapshot_digest_at_depth(s, 32)
+                == 0x20c9c57f3dda8ce0d2de515ed2f11ab5085a0a3fa720970a293424f706b56d57,
+        );
+        assert(snapshot_digest::<1>(s) == snapshot_digest_at_depth(s, 1));
+        assert(snapshot_digest::<32>(s) == snapshot_digest_at_depth(s, 32));
+    }
 }
