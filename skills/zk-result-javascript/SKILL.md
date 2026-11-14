@@ -35,12 +35,26 @@ multiple hidden date comparisons reject.
 
 Policy `issuers?: Record<string, string>` maps issuer IRIs to trusted compressed
 public keys; `trustedIssuers?: string[]` remains an additional trust list.
+Optional `trustMembers?: { issuer, verificationMethod, publicKey }[]` accepts the
+same roster as `@sparq-org/zk-query`, allowing one policy object for both packages.
+Each member requires absolute issuer and verification-method IRIs and a canonical
+lowercase, unprefixed compressed public key. Members supply both trusted keys and
+issuer IRI mappings; `trustedIssuers` may be omitted. When both lists are supplied,
+their key sets must be equal, ignoring order and duplicates, or admission rejects
+`trust member keys differ from trusted issuers`. Any overlapping `issuers` entry
+must agree with each member key, or admission rejects
+`trust member key differs from issuer map`. Unrelated map entries still grant trust.
+The shared Rust adapter validates both proving and verification. Verification-method
+IRIs label policy members; the proof does not authenticate or resolve those IRIs.
 For a scoped query, use `?g vcq:verifiedIssuer <urn:issuer:a> . GRAPH ?g { ... }`,
 where `vcq:` is `https://w3id.org/sparq/vcq#`. The WHERE may contain only those
 declarations and GRAPH blocks over the admitted BGP/JOIN/FILTER fragment.
 Each graph variable must be declared, used as a graph name, and occur nowhere
 else; FILTERs stay inside GRAPH blocks. Every declaration must name the same IRI,
-resolved through the policy map, or admission rejects `issuer-not-in-policy`.
+resolved through the policy map or members, or admission rejects `issuer-not-in-policy`.
+Multiple member keys for a scoped issuer IRI reject `issuer-scope-ambiguous-key`,
+even when only one key is used in the proof. Unscoped queries allow that roster;
+multiple verification methods with the same key remain unambiguous.
 Different IRIs reject `per-fact-issuer-binding-needs-query-method`, even if their
 keys coincide. Multiple graph variables with the same IRI may use separate
 credentials. The Rust adapter lowers both paths, restricts proving credentials
@@ -95,6 +109,12 @@ public issuer slot carries its policy key. Unscoped `issuers` resolves rebuilt
 signature-slot coordinates to matching policy IRIs (sorted per slot), or canonical
 compressed key hex if unnamed, in lexicographic key-slot order, preserving repeats.
 Policies with only `trustedIssuers` retain their existing hex report.
+When supplied, `report.trustMembers` echoes the entire validated policy roster,
+sorted by issuer, verification method and public key, with exact duplicates
+removed. Unused members remain; this is receiver policy metadata and does not
+attribute facts or slots to verification methods. When absent, the report shape
+is unchanged. The query package's report `issuers` means the whole trusted key set
+instead; consumers must preserve that distinction.
 Every slot authenticates a private credential trusted by the receiver; a slot can
 be padding or unused by the selected solutions. This is neither
 the whole trust list nor an attribution of facts to issuers, and it makes no

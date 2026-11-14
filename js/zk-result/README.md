@@ -67,16 +67,46 @@ Policy shape:
 {
   trustedIssuers?: string[],
   issuers?: { [iri: string]: string },
+  trustMembers?: { issuer: string, verificationMethod: string, publicKey: string }[],
   snapshots: { status_list: string, version: number, bits: number[] }[],
   minVersion: number,
   maxVersion: number
 }
 ```
 
-Both policy properties grant trust: `trustedIssuers` retains its existing key
-list, and `issuers` maps issuer IRIs to compressed public keys. An issuer IRI in a
-query must resolve through `issuers`; a trusted key alone does not name an IRI.
-Unknown IRIs reject with `issuer-not-in-policy`.
+`trustedIssuers` retains its existing key list, and `issuers` maps issuer IRIs to
+compressed public keys. Optional `trustMembers` accepts the same roster shape as
+`@sparq-org/zk-query`, so an adapter can use one policy object for both packages:
+
+```js
+const policy = {
+  trustedIssuers: [issuer.publicKey],
+  trustMembers: [{
+    issuer: 'urn:issuer:a',
+    verificationMethod: 'urn:issuer:a#key',
+    publicKey: issuer.publicKey,
+  }],
+  snapshots, minVersion, maxVersion,
+};
+```
+
+Each member requires absolute issuer and verification-method IRIs and a canonical
+lowercase, unprefixed compressed public key. Members grant trust and name issuer
+IRIs; `trustedIssuers` may be omitted. When both lists are present, their key sets
+must be equal, ignoring order and duplicates, or admission rejects with
+`trust member keys differ from trusted issuers`. Overlapping `issuers` and
+`trustMembers` entries must agree on the key, or admission rejects with
+`trust member key differs from issuer map`. Unrelated map entries still grant
+trust. Validation runs in the shared Rust adapter for proving and verification;
+JavaScript passes the roster through. A verification-method IRI identifies a
+policy member; this proof does not authenticate that IRI or resolve it externally.
+
+An issuer IRI in a query must resolve through `issuers` or `trustMembers`; a
+trusted key alone does not name an IRI. Unknown IRIs reject with
+`issuer-not-in-policy`. Multiple member keys for one issuer IRI are accepted for
+unscoped queries. A scoped query naming that IRI rejects with
+`issuer-scope-ambiguous-key`, even if only one key appears in the proof's slots.
+Multiple verification methods using the same key remain unambiguous.
 
 ## Issuer-scoped queries
 
@@ -179,6 +209,7 @@ Only successful `verify` calls return `report`:
 {
   rule: { query: string, member: string },
   issuers: string[],
+  trustMembers?: { issuer: string, verificationMethod: string, publicKey: string }[],
   subject: [],
   fresh: string,
   complete: false
@@ -199,6 +230,14 @@ report. This reports actual authenticated slots, not the entire trust set. A slo
 may be padding or unused by the selected solutions. The list establishes neither
 distinct credential count nor which issuer signed which fact: selected
 credential/leaf references stay private.
+
+When supplied, `report.trustMembers` echoes the entire validated policy roster,
+sorted by issuer, verification method and public key, with exact duplicate entries
+removed. It is receiver policy metadata, including unused members; it does not
+attribute facts or proof slots to verification methods. Without `trustMembers`,
+the report keeps its existing shape. In `@sparq-org/zk-query`, the report's
+`issuers` field means the whole trusted key set instead. Consumers must preserve
+this difference when reading the two packages' reports.
 
 `subject` is empty because this statement has no holder binding. `fresh` is the
 canonical nonce only after the caller's store has consumed it. `complete` is
