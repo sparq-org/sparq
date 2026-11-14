@@ -185,21 +185,6 @@ impl EnvelopeInputs {
         ]);
         Ok(words)
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn require_consumer(&self, canonical_policy: bool) -> Result<(), Error> {
-        if canonical_policy
-            || self.issuer_depth != crate::credential::ISSUER_DEPTH
-            || self.holder_required
-            || self.status_required
-            || self.validity_required
-            || self.freshness_required
-        {
-            return Err(Error::Unsupported(
-                "credential envelope policy integration".into(),
-            ));
-        }
-        Ok(())
-    }
 }
 
 /// One source for public declarations, field flattening and ABI auditing.
@@ -649,37 +634,6 @@ fn structure(value: &serde_json::Value, expected: &[(&str, Abi)]) -> bool {
 #[cfg(test)]
 mod literal_tests {
     use super::*;
-
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn require_consumer_refuses_each_pending_policy_independently() {
-        let base = EnvelopeInputs::issuer_only(number(1));
-        assert_eq!(base.require_consumer(false), Ok(()));
-        assert_eq!(
-            base.require_consumer(true),
-            Err(Error::Unsupported(
-                "credential envelope policy integration".into()
-            ))
-        );
-        for case in 0..5 {
-            let mut policy = base.clone();
-            match case {
-                0 => policy.issuer_depth = 0,
-                1 => policy.holder_required = true,
-                2 => policy.status_required = true,
-                3 => policy.validity_required = true,
-                4 => policy.freshness_required = true,
-                _ => unreachable!(),
-            }
-            assert_eq!(
-                policy.require_consumer(false),
-                Err(Error::Unsupported(
-                    "credential envelope policy integration".into()
-                )),
-                "policy case {case}"
-            );
-        }
-    }
 
     #[test]
     fn noir_verified_issuer_predicate_is_a_literal_equal_to_the_suite() {

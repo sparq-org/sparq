@@ -167,19 +167,58 @@ impl Compiler {
         salt: [u8; 32],
         now: impl Fn() -> u64,
     ) -> Result<Presentation, Error> {
+        self.prove_with_envelope(
+            request,
+            credentials,
+            vocabulary,
+            salt,
+            &witness::EnvelopeWitness::default(),
+            now,
+        )
+    }
+
+    /// Prove with private holder signatures and status paths for the stored policy.
+    /// Public envelope values are reconstructed from `request`.
+    pub fn prove_with_envelope(
+        &self,
+        request: &Request,
+        credentials: &[Credential],
+        vocabulary: &[Term],
+        salt: [u8; 32],
+        evidence: &witness::EnvelopeWitness,
+        now: impl Fn() -> u64,
+    ) -> Result<Presentation, Error> {
         let envelope = request.envelope_inputs()?;
-        request.require_envelope_consumer(&envelope)?;
         let plan = request.plan()?;
         let compiled = self.checked_key(request, &plan)?;
         freshness(request, now())?;
+        let authorized;
+        let credentials = if let Some(policy) = request.envelope_policy() {
+            authorized = witness::authorize(credentials, policy, &envelope)?;
+            authorized.as_slice()
+        } else {
+            credentials
+        };
+        for credential in credentials {
+            if credential.canonical_issuer_root(envelope.issuer_depth)? != envelope.issuer_root {
+                return Err(Error::Invalid("issuer membership root".into()));
+            }
+        }
         let encoder = &SuiteEncoder;
         let cells = credentials
             .iter()
             .enumerate()
             .map(|(i, c)| c.cells_with_profile(i as u32, plan.opening_profile()))
             .collect::<Result<Vec<_>, _>>()?;
-        let trace = interp::evaluate(&plan, &cells, encoder)?;
-        let result = Answer::release(&trace.result, &plan, vocabulary, encoder)?;
+        let mut issuers = Vec::with_capacity(credentials.len());
+        for credential in credentials {
+            let issuer = Term::NamedNode(credential.trust_member()?.issuer);
+            issuers.push(encoder.encode(&issuer)?);
+        }
+        let vocabulary = release_vocabulary(credentials, vocabulary)?;
+        let dataset = crate::credential::assemble_dataset(&cells, &issuers, request.digest())?;
+        let trace = interp::evaluate_dataset(&plan, &dataset, encoder)?;
+        let result = Answer::release(&trace.result, &plan, &vocabulary, encoder)?;
         let input_commitment = crate::credential::dataset_commitment(credentials, salt)?;
         agreement(request, input_commitment)?;
         let statement = Statement {
@@ -192,13 +231,17 @@ impl Compiler {
             &Layout::new(&plan)
                 .reconstruct_authenticated_with_envelope(&plan, &statement, &envelope)?,
         );
-        let input = witness::prover_toml_authenticated_with_envelope(
+        let input = witness::render_canonical(
             &plan,
             credentials,
             &trace,
             request.digest(),
             salt,
-            &envelope,
+            witness::CanonicalInput {
+                public: &envelope,
+                evidence,
+                revealed: None,
+            },
         )?;
         let work = tempfile::Builder::new()
             .prefix("proof_")
@@ -239,7 +282,6 @@ impl Compiler {
     ) -> Result<Answer, Error> {
         let encoder = &SuiteEncoder;
         let envelope = request.envelope_inputs()?;
-        request.require_envelope_consumer(&envelope)?;
         if request.stored().audience() != expected_audience {
             return Err(Error::Invalid("request audience".into()));
         }
@@ -284,6 +326,17 @@ impl Compiler {
         }
         Ok(compiled)
     }
+}
+
+fn release_vocabulary(credentials: &[Credential], vocabulary: &[Term]) -> Result<Vec<Term>, Error> {
+    let mut terms = vocabulary.to_vec();
+    for credential in credentials {
+        for quad in credential.quads()? {
+            terms.extend([quad.subject.into(), quad.predicate.into(), quad.object]);
+        }
+    }
+    terms.push(oxrdf::NamedNode::new_unchecked(crate::credential::VERIFIED_ISSUER).into());
+    Ok(terms)
 }
 
 fn freshness(request: &Request, now: u64) -> Result<(), Error> {
@@ -350,4 +403,53 @@ fn library_files(zk: &Path) -> Result<BTreeMap<String, Vec<u8>>, Error> {
         visit(zk, &zk.join(dir), &mut out)?;
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn released_vocabulary_covers_signed_metadata_and_the_issuer_assertion() {
+        use crate::envelope_policy::{PolicyInput, TrustMember};
+        use oxrdf::NamedNode;
+        let key = sparq_zk::sig::SecretKey::from_seed(19);
+        let source = "<urn:credential> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://www.w3.org/2018/credentials#VerifiableCredential> .\n<urn:credential> <https://www.w3.org/2018/credentials#issuer> <urn:issuer> .\n<urn:s> <urn:p> <urn:o> .\n";
+        let config = "_:p <https://w3id.org/security#cryptosuite> \"schnorr-poseidon2-merkle-2026\" .\n_:p <https://w3id.org/security#verificationMethod> <urn:method> .\n";
+        let data = [Credential {
+            credential: sparq_merkle_suite::poseidon::issue(
+                source,
+                config,
+                &key,
+                sparq_merkle_suite::Fr::from(101u64),
+            )
+            .unwrap(),
+            issuer: key.public_key(),
+            issuer_index: 0,
+            issuer_siblings: vec![],
+        }];
+        let policy = PolicyInput {
+            trust_members: vec![TrustMember {
+                issuer: NamedNode::new_unchecked("urn:issuer"),
+                verification_method: NamedNode::new_unchecked("urn:method"),
+                key: key.public_key(),
+            }],
+            ..Default::default()
+        };
+        let plan = lower(
+            "SELECT ?p WHERE {?s ?p ?o}",
+            Bounds {
+                credentials: 1,
+                quads_per_credential: 4,
+                rows_per_table: 4,
+            },
+        )
+        .unwrap();
+        let dataset =
+            crate::credential::assemble_issuer_dataset(&data, &policy.trust_members, [7; 32])
+                .unwrap();
+        let trace = interp::evaluate_dataset(&plan, &dataset, &SuiteEncoder).unwrap();
+        let terms = release_vocabulary(&data, &[]).unwrap();
+        let answer = Answer::release(&trace.result, &plan, &terms, &SuiteEncoder).unwrap();
+        assert_eq!(answer.encode(&SuiteEncoder).unwrap(), trace.result);
+    }
 }

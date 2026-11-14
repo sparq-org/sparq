@@ -186,7 +186,8 @@ fn table(rows: &[Vec<Cell>], schema: &Schema) -> Result<String, Error> {
     ))
 }
 
-/// Render complete lexical openings, suite signatures and issuer membership.
+/// Render a canonical issuer-only witness with the compiled trust-set depth.
+/// Credentials carry canonical trust-member paths supplied independently of the proof.
 pub fn prover_toml_authenticated(
     plan: &Plan,
     credentials: &[crate::credential::Credential],
@@ -205,8 +206,75 @@ pub fn prover_toml_authenticated(
     )
 }
 
-/// Encode the stored envelope inputs alongside the authenticated witness.
+/// Render canonical issuer and envelope inputs with no private holder/status evidence.
+/// Use `prover_toml_enveloped` when the stored policy requires private evidence.
 pub fn prover_toml_authenticated_with_envelope(
+    plan: &Plan,
+    credentials: &[crate::credential::Credential],
+    trace: &Trace,
+    request_digest: [u8; 32],
+    presentation_salt: [u8; 32],
+    envelope: &crate::statement::EnvelopeInputs,
+) -> Result<String, Error> {
+    envelope::render_canonical(
+        plan,
+        credentials,
+        trace,
+        request_digest,
+        presentation_salt,
+        envelope::CanonicalInput {
+            public: envelope,
+            evidence: &EnvelopeWitness::default(),
+            revealed: None,
+        },
+    )
+}
+
+/// Render the canonical envelope in revealed mode after native signature checks.
+pub fn prover_toml_revealed(
+    plan: &Plan,
+    credentials: &[crate::credential::Credential],
+    trace: &Trace,
+    request_digest: [u8; 32],
+    presentation_salt: [u8; 32],
+    envelope: &crate::statement::EnvelopeInputs,
+) -> Result<String, Error> {
+    let revealed = revealed_inputs(credentials)?;
+    envelope::render_canonical(
+        plan,
+        credentials,
+        trace,
+        request_digest,
+        presentation_salt,
+        envelope::CanonicalInput {
+            public: envelope,
+            evidence: &EnvelopeWitness::default(),
+            revealed: Some(&revealed),
+        },
+    )
+}
+
+/// Render the suite-opening fixture, without canonical envelope claims.
+pub fn prover_toml_suite_fixture(
+    plan: &Plan,
+    credentials: &[crate::credential::Credential],
+    trace: &Trace,
+    request_digest: [u8; 32],
+    presentation_salt: [u8; 32],
+    issuer_root: [u8; 32],
+) -> Result<String, Error> {
+    prover_toml_suite_fixture_with_envelope(
+        plan,
+        credentials,
+        trace,
+        request_digest,
+        presentation_salt,
+        &crate::statement::EnvelopeInputs::issuer_only(issuer_root),
+    )
+}
+
+/// Encode public words for the suite-opening fixture.
+pub fn prover_toml_suite_fixture_with_envelope(
     plan: &Plan,
     credentials: &[crate::credential::Credential],
     trace: &Trace,
@@ -221,12 +289,15 @@ pub fn prover_toml_authenticated_with_envelope(
         request_digest,
         presentation_salt,
         envelope,
-        None,
+        Authentication {
+            revealed: None,
+            canonical: false,
+        },
     )
 }
 
-/// Render the revealed-signature circuit mode after native signature verification.
-pub fn prover_toml_revealed(
+/// Render the suite-opening fixture in revealed-signature mode.
+pub fn prover_toml_suite_fixture_revealed(
     plan: &Plan,
     credentials: &[crate::credential::Credential],
     trace: &Trace,
@@ -234,6 +305,24 @@ pub fn prover_toml_revealed(
     presentation_salt: [u8; 32],
     envelope: &crate::statement::EnvelopeInputs,
 ) -> Result<String, Error> {
+    let revealed = revealed_inputs(credentials)?;
+    prover_toml_authenticated_mode(
+        plan,
+        credentials,
+        trace,
+        request_digest,
+        presentation_salt,
+        envelope,
+        Authentication {
+            revealed: Some(&revealed),
+            canonical: false,
+        },
+    )
+}
+
+fn revealed_inputs(
+    credentials: &[crate::credential::Credential],
+) -> Result<crate::statement::RevealedInputs, Error> {
     let signatures = credentials
         .iter()
         .map(|c| {
@@ -244,18 +333,13 @@ pub fn prover_toml_revealed(
             })
         })
         .collect::<Result<Vec<_>, Error>>()?;
-    let revealed = crate::statement::RevealedInputs::verify(&signatures)?;
-    prover_toml_authenticated_mode(
-        plan,
-        credentials,
-        trace,
-        request_digest,
-        presentation_salt,
-        envelope,
-        Some(&revealed),
-    )
+    crate::statement::RevealedInputs::verify(&signatures)
 }
 
+struct Authentication<'a> {
+    revealed: Option<&'a crate::statement::RevealedInputs>,
+    canonical: bool,
+}
 fn prover_toml_authenticated_mode(
     plan: &Plan,
     credentials: &[crate::credential::Credential],
@@ -263,8 +347,12 @@ fn prover_toml_authenticated_mode(
     request_digest: [u8; 32],
     presentation_salt: [u8; 32],
     envelope: &crate::statement::EnvelopeInputs,
-    revealed: Option<&crate::statement::RevealedInputs>,
+    authentication: Authentication<'_>,
 ) -> Result<String, Error> {
+    let Authentication {
+        revealed,
+        canonical,
+    } = authentication;
     let issuer_root = envelope.issuer_root;
     use crate::credential::SuiteEncoder;
     use sha2::{Digest, Sha256};
@@ -306,7 +394,7 @@ fn prover_toml_authenticated_mode(
     for (c, &capacity) in capacities.iter().enumerate() {
         let mut quads = vec![];
         if let Some(credential) = credentials.get(c) {
-            if credential.issuer_root()? != issuer_root {
+            if !canonical && credential.issuer_root()? != issuer_root {
                 return Err(Error::Invalid("issuer membership root".into()));
             }
             for q in credential.quads()? {
@@ -346,10 +434,12 @@ fn prover_toml_authenticated_mode(
                 crate::credential::METHOD_CAPACITY,
             )?;
             let mut proof = serde_json::json!({"created":created,"method":method,"salt":field_to_hex(&credential.credential.salt),"salts":salts,
-                "config":[u128::from_be_bytes(config[..16].try_into().unwrap()).to_string(),u128::from_be_bytes(config[16..].try_into().unwrap()).to_string()],
-                "pk":{"x":field_to_hex(&w.pk_x),"y":field_to_hex(&w.pk_y)},"r":{"x":field_to_hex(&w.r_x),"y":field_to_hex(&w.r_y)},
-                "s":field_to_hex(&w.s),"e":field_to_hex(&w.e),"e_k":field_to_hex(&w.e_k),"issuer_index":credential.issuer_index,
-                "issuer_siblings":credential.issuer_siblings.iter().map(field_to_hex).collect::<Vec<_>>()});
+            "config":[u128::from_be_bytes(config[..16].try_into().unwrap()).to_string(),u128::from_be_bytes(config[16..].try_into().unwrap()).to_string()],
+            "pk":{"x":field_to_hex(&w.pk_x),"y":field_to_hex(&w.pk_y)},"r":{"x":field_to_hex(&w.r_x),"y":field_to_hex(&w.r_y)},
+            "s":field_to_hex(&w.s),"e":field_to_hex(&w.e),"e_k":field_to_hex(&w.e_k),"issuer_index":credential.issuer_index,
+            "issuer_siblings":({
+                let mut path=credential.issuer_siblings.iter().map(field_to_hex).collect::<Vec<_>>();path.resize(4,"0".into());path
+            })});
             if revealed.is_some() {
                 proof["r"] = serde_json::json!({"x":"0","y":"0"});
                 for name in ["s", "e", "e_k"] {
@@ -618,3 +708,12 @@ fn json_toml(value: &serde_json::Value) -> String {
         _ => value.to_string(),
     }
 }
+
+#[path = "witness_envelope.rs"]
+mod envelope;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use envelope::{authorize, render_canonical, CanonicalInput};
+pub use envelope::{
+    prover_toml_enveloped, CredentialEvidence, EnvelopeInput, EnvelopeWitness, HolderWitness,
+    StatusWitness,
+};

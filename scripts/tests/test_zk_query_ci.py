@@ -24,6 +24,8 @@ class QueryProfiles(unittest.TestCase):
             "tests/authentication.rs::suite_program_checks_authentication_membership_keys_and_credential_limits",
             "tests/authentication.rs::suite_constant_scan_preserves_literal_identity",
             "tests/authentication.rs::read_site_keys_bind_complete_consumer_inputs_and_lexical_openings",
+            "tests/authentication.rs::canonical_envelope_executes_complete_private_evidence_and_policy_controls",
+            "tests/authentication.rs::converted_credential_view_cannot_be_witnessed_or_constructed",
         }
         self.assertEqual(set(profile.HOSTED_TESTS), required)
         hosted = profile.steps(ROOT, "hosted")
@@ -70,6 +72,13 @@ class QueryProfiles(unittest.TestCase):
                 profile.check_noir_listing("\n".join(names[:missing] + names[missing + 1:] ))
         with self.assertRaises(ValueError):
             profile.check_noir_listing("")
+
+    def test_hosted_noir_filters_reach_every_declared_contract(self):
+        names = {f"ops_core_tests::{op}_{case}" for op in profile.OPERATORS
+                 for case in ("honest", "missing", "extra", "reordered", "padding", "overflow")}
+        names |= {f"ops_core_tests::{name}" for name in profile.ROWS_CONTRACTS}
+        for name in names:
+            self.assertTrue(any(selected in name for selected in profile.NOIR_FILTERS), name)
 
     def test_ledger_profiles_partition_the_real_inventory(self):
         trees = gate.collect(ROOT)

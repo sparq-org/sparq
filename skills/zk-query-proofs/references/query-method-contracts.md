@@ -343,3 +343,28 @@ are computed inside the gadget.
 
 Plain-string equality classifies its operands from the authenticated datatype
 before value-key guards; identity-only comparison does not inspect unused keys.
+
+`Credential::trust_member` derives the signed issuer, proof verification method and
+verifying key. `authorization_path(trust_members)` obtains the canonical set and
+its membership path through the policy module’s shared builder. Generated envelope
+wiring is available through `codegen::generate_enveloped`; its private evidence
+contains raw fields, while sealed suite cells remain internal.
+
+`codegen::generate` selects the canonical envelope consumer. `generate_enveloped`
+is its explicit spelling. For suite-opening controls without the canonical dataset,
+use `generate_suite_fixture` with `prover_toml_suite_fixture` or
+`prover_toml_suite_fixture_revealed`; operator fixtures remain separate.
+`prover_toml_authenticated_with_envelope` consumes canonical trust-member paths at
+the stored issuer depth, including singleton paths. It renders empty private evidence.
+`prover_toml_enveloped` instead takes an `EnvelopeInput` containing typed policy,
+`EnvelopeWitness` and optional independently verified revealed inputs. The policy
+module owns canonical path construction. `Credential::canonical_issuer_root(depth)`
+checks the complete signed issuer/method/key member against its path.
+
+`Compiler::prove_with_envelope(request, credentials, vocabulary, salt, evidence, now)`
+accepts `EnvelopeWitness`: ordered `CredentialEvidence` slots, shared `HolderWitness`
+signatures and per-row `StatusWitness` paths. Existing `prove` passes empty evidence.
+The renderer derives lexical status/validity openings from signed properties;
+sealed suite cells never enter the ABI. The current status adapter admits its fixed
+bit-tree depth and refuses other depths by name. Public policy and roots always come
+from the stored request. Native proving remains hidden-signature mode.

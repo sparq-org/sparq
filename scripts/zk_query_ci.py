@@ -15,9 +15,14 @@ HOSTED_TESTS = (
     "tests/authentication.rs::suite_program_checks_authentication_membership_keys_and_credential_limits",
     "tests/authentication.rs::suite_constant_scan_preserves_literal_identity",
     "tests/authentication.rs::read_site_keys_bind_complete_consumer_inputs_and_lexical_openings",
+    "tests/authentication.rs::canonical_envelope_executes_complete_private_evidence_and_policy_controls",
+    "tests/authentication.rs::converted_credential_view_cannot_be_witnessed_or_constructed",
 )
 OPERATORS = ("scan", "join", "filter", "project", "distinct", "slice", "values", "ask", "select")
 ROWS_CONTRACTS = (
+    "rows_plain_string_numeric_class_is_not_a_numeric_value",
+    "rows_plain_string_range_class_still_compares_identity",
+    "expression_string_ordering_keeps_checked_payloads",
     "rows_plain_string_identity_ignores_unused_key_classes",
     "rows_join_excludes_inactive_source_pairs",
     "rows_join_preserves_bag_multiplicity",
@@ -81,6 +86,7 @@ NOIR_FILTERS = tuple(f"ops_core_tests::{op}_" for op in OPERATORS) + (
     "ops_core_tests::rows_", "ops_core_reads::", "ops_core_suite::table_identity_", "ops_core_tests::identity_",
     "ops_core_tests::expression_temporal_key_",
     "ops_core_tests::expression_same_type_strings_compare_authenticated_identity",
+    "ops_core_tests::expression_string_ordering_keeps_checked_payloads",
 )
 
 

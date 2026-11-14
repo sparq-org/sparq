@@ -102,8 +102,8 @@ constructor. The envelope integration can call `ops_core_suite::authenticate`,
 check its returned opaque suite object, and pass it to `from_authenticated`.
 `append_verified_issuer` consumes the envelope-authenticated issuer cell and adds
 a default-only assertion. Constant-list evaluation uses `evaluate_indexed` with
-the public active-length index. The canonical policy-root consumer and graph
-dispatch remain separate integrations.
+the public active-length index. Canonical policy consumption uses the envelope module; graph
+dispatch retains its own admission contract.
 
 The `ops_core_profile` adapter holds raw witness structs and normalization only.
 It constructs zero resource datatype, language and key fields and derives bound
@@ -122,7 +122,9 @@ when assembled from ABI-safe raw witnesses inside constrained code. Empty
 datatype capacity excludes literals; the constructor still checks metadata and
 canonical backing padding. Term identifiers and the byte encoding remain pinned.
 
-The generated query wiring uses `ops_core_suite::open_profile_mode_one`.
+The generated query wiring uses `ops_core_envelope::open_slot` and the shared
+public-policy consumer. It accumulates holder coverage before checking signatures,
+and uses the returned issuer with `append_verified_issuer`.
 `authenticate_profile_bounded_mode` returns the same opaque suite opening for
 later envelope checks. It calls the shared Schnorr verifier in hidden mode;
 revealed mode binds the opening's message and suite signer encoding to public
@@ -166,3 +168,9 @@ are computed inside the gadget.
 
 Plain-string equality classifies its operands from the authenticated datatype
 before value-key guards; identity-only comparison does not inspect unused keys.
+
+The converted operator view exposes `rows()`, `active()`, `message()` and `graph()`.
+Its private construction marker excludes it from entry-point witnesses and external
+struct construction. Generated slots return that view after their envelope checks.
+Scalar read sites share `open_literal_for_key_check` before fixed-datatype dispatch;
+full-cell association and canonical unused/backing padding remain constrained.

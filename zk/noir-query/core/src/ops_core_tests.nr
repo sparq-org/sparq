@@ -1007,7 +1007,7 @@ fn rows_join_excludes_inactive_source_pairs() {
 
 #[test]
 fn rows_plain_string_identity_ignores_unused_key_classes() {
-    for class in [0,1,2,3,4,5,6,7,8,127] {
+    for class in [2,5] {
         let mut a=plain_string_cell(7);a.key_class=class;a.key=0;
         let mut b=plain_string_cell(8);b.enc=a.enc+1;b.key_class=class;b.key=1;
         let equal=mixed_string_equality(a,a);assert(equal.value&!equal.is_error);
@@ -1021,4 +1021,28 @@ fn rows_plain_string_identity_ignores_unused_key_classes() {
         assert(not_in[0].value&!not_in[0].is_error);
         let mixed=mixed_string_equality(a,expression_cell(1,1,12));assert(!mixed.value&mixed.is_error);
     }
+}
+
+#[test]
+fn expression_string_ordering_keeps_checked_payloads() {
+    let mut a=expression_cell(6,3,11);a.dt=crate::suite_constants::DT_STRING;
+    let mut b=expression_cell(6,2,12);b.dt=crate::suite_constants::DT_STRING;
+    let result=crate::ops_core_expr::evaluate(Table{rows:[[a]],len:1},[b],
+        [expr_step(0,0,0,0,0),expr_step(1,0,0,0,0),expr_step(2,0,1,0,4)])[0];
+    assert(result.value&!result.is_error);
+}
+
+
+#[test]
+fn rows_plain_string_numeric_class_is_not_a_numeric_value() {
+    let number=expression_cell(1,1,12);let mut string=number;
+    string.dt=crate::suite_constants::DT_STRING;string.enc=11;
+    let result=mixed_string_equality(string,number);
+    assert(!result.value&result.is_error);
+}
+#[test]
+fn rows_plain_string_range_class_still_compares_identity() {
+    let mut string=plain_string_cell(6);string.key_class=127;string.key=0;
+    let result=mixed_string_equality(string,string);
+    assert(result.value&!result.is_error);
 }

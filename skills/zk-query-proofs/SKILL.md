@@ -69,10 +69,11 @@ and registers no method. See [query-method contracts](references/query-method-co
 The query compiler's verifier-selected `OpeningProfile` is part of its plan hash
 and stored request. Its compact default and explicit larger-opening profile are
 documented in the query-method contracts.
-The research Noir query compiler additionally exposes portable host reconstruction
-and `Request::new_authenticated_with_envelope` policy derivation there, including
-exact millisecond instants, issuer-authenticated dataset preparation and
-parameterized membership lists; its subprocess method driver remains native.
+The research-grade, externally unaudited Noir query compiler exposes portable host
+reconstruction and `Request::new_authenticated_with_envelope` policy derivation.
+Generated programs consume canonical trust and envelope policy; the native
+`Compiler::prove_with_envelope` adds private holder/status evidence, while `prove`
+uses empty evidence. Both derive public policy from the stored request.
 
 The detached exact-evaluator host crate's optional `vcq` feature (off by default) adds
 the first `QueryMethod` adapter, `sparq_proved_evaluator::vcq::Risc0ExactV3`, over the V3 relation:
@@ -183,9 +184,9 @@ The query compiler exposes the same explicit path setting. Its draft
 `method::Compiler::{prepare, prove, verify}` primitive lives in `driver.rs`;
 `request::Request` owns the stored protocol request, bounds and expected key.
 The generated proof path opens complete Poseidon Merkle-suite credentials and
-uses the shared hidden signature and issuer-membership relations. Construct its
-request with `Request::new_authenticated`, providing the verifier's authoritative
-issuer-set root. `Compiler::prove` takes `credential::Credential` inputs; the fixed
+uses shared hidden signatures and canonical trust-member membership. Construct its
+request with `Request::new_authenticated_with_envelope` for typed policy, or provide
+the authoritative canonical root through `Request::new_authenticated`. `Compiler::prove` takes `credential::Credential` inputs; the fixed
 `credential::SuiteEncoder` drives request constants and RDF result reconstruction.
 For distinct public quad limits per credential slot, use
 `prepare_with_credential_quad_bounds` and

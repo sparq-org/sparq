@@ -57,10 +57,18 @@ fn table_cell(cell: crate::term::TermCell) -> TermCell {
 fn table_identity(cell:crate::term::TermCell) -> Field { cell.identity() }
 
 pub struct OpenedCredential<let N: u32> {
+    constructed: [u8;0],
     pub rows: [[TermCell; 3]; N],
     pub active: [bool; N],
     pub message: Field,
     pub graph: TermCell,
+}
+
+impl<let N:u32> OpenedCredential<N> {
+    pub fn rows(self) -> [[TermCell;3];N] {self.rows}
+    pub fn active(self) -> [bool;N] {self.active}
+    pub fn message(self) -> Field {self.message}
+    pub fn graph(self) -> TermCell {self.graph}
 }
 
 pub fn credential_flags<let C: u32>(count: u32, bound: u32, signature_mode: u8) -> [bool; C] {
@@ -92,7 +100,7 @@ pub fn open_one<let N: u32, let L: u32>(
     request_digest: [u8;32],
 ) -> OpenedCredential<N> {
     check_limits::<N>(count, quad_bound);
-    let mut opened = OpenedCredential {rows: [[unbound(); 3]; N], active: [false; N], message: 0, graph: unbound()};
+    let mut opened = OpenedCredential {constructed:[],rows: [[unbound(); 3]; N], active: [false; N], message: 0, graph: unbound()};
     if active {
         let authenticated = authenticate(credentials,proof,count,quad_bound,credential_index);
         key_set_membership(proof.pk, issuer_root, proof.issuer_index, proof.issuer_siblings);
@@ -122,7 +130,7 @@ fn convert_authenticated<let N:u32>(authenticated:crate::suite_metadata::OpenedC
     credential_index:u32,request_digest:[u8;32]) -> OpenedCredential<N> {
         let quads = authenticated.quads();
         let count=authenticated.count();
-        let mut opened=OpenedCredential {rows:[[unbound();3];N],active:[false;N],message:authenticated.message(),graph:unbound()};
+        let mut opened=OpenedCredential {constructed:[],rows:[[unbound();3];N],active:[false;N],message:authenticated.message(),graph:unbound()};
         let mut request: [u128;2] = [0;2];
         for i in 0..32 { request[i/16] = request[i/16] * 256 + request_digest[i] as u128; }
         opened.graph = table_cell(crate::term::credential_graph(request, credential_index));
@@ -150,7 +158,7 @@ pub fn inactive_credential<let N:u32, let L:u32>(credentials:[[TermOpening<L>;4]
     count:u32,quad_bound:u32,credential_index:u32) -> OpenedCredential<N> {
     check_limits::<N>(count,quad_bound);
     check_inactive(credentials,proof,count,credential_index);
-    OpenedCredential {rows:[[unbound();3];N],active:[false;N],message:0,graph:unbound()}
+    OpenedCredential {constructed:[],rows:[[unbound();3];N],active:[false;N],message:0,graph:unbound()}
 }
 
 fn check_limits<let N:u32>(count:u32, quad_bound:u32) {
@@ -237,11 +245,12 @@ pub fn checked_bounded_literal<let L:u32>(cell:TermCell,raw:BoundedTermOpening<L
         let mut tail:Field=0;
         for i in 32..L {tail=tail+raw.lexical[i] as Field;}
         assert(tail==0,"read scalar backing padding");
-        if cell.dt==DT_INTEGER {crate::term::open_key_checked(scalar,0,DT_INTEGER).cell()}
-        else if cell.dt==DT_DECIMAL {crate::term::open_key_checked(scalar,0,DT_DECIMAL).cell()}
-        else if cell.dt==DT_DATE {crate::term::open_key_checked(scalar,0,DT_DATE).cell()}
-        else if cell.dt==DT_DATETIME {crate::term::open_key_checked(scalar,0,DT_DATETIME).cell()}
-        else {assert(cell.dt==DT_BOOLEAN,"N0 credential literal datatype");crate::term::open_key_checked(scalar,0,DT_BOOLEAN).cell()}
+        let opened=crate::term::open_literal_for_key_check(scalar,0);
+        if cell.dt==DT_INTEGER {crate::term::check_literal_key_for(opened,DT_INTEGER).cell()}
+        else if cell.dt==DT_DECIMAL {crate::term::check_literal_key_for(opened,DT_DECIMAL).cell()}
+        else if cell.dt==DT_DATE {crate::term::check_literal_key_for(opened,DT_DATE).cell()}
+        else if cell.dt==DT_DATETIME {crate::term::check_literal_key_for(opened,DT_DATETIME).cell()}
+        else {assert(cell.dt==DT_BOOLEAN,"N0 credential literal datatype");crate::term::check_literal_key_for(opened,DT_BOOLEAN).cell()}
     };
     table_cell(checked)
 }
@@ -285,6 +294,19 @@ fn check_inactive_bounded<let N:u32,let R:u32,let L:u32>(
     check_proof_padding(proof.salt,proof.salts,proof.config,proof.pk,proof.r,proof.s,proof.e,proof.e_k,
         proof.issuer_index,proof.issuer_siblings);
 }
+/// Canonical inactive view; active slots defer their opening to the caller.
+pub fn inactive_bounded<let N:u32,let R:u32,let L:u32>(
+    raw:[crate::ops_core_profile::QuadOpening<R,L>;N],proof:BoundedCredentialProof<N>,
+    count:u32,quad_bound:u32,credential_index:u32,active:bool,revealed_message:Field,revealed_key:Field,
+) -> OpenedCredential<N> {
+    check_limits::<N>(count,quad_bound);
+    if !active {
+        assert((revealed_message==0)&(revealed_key==0),"revealed input padding");
+        check_inactive_bounded(raw,proof,count,credential_index);
+    }
+    OpenedCredential{constructed:[],rows:[[unbound();3];N],active:[false;N],message:0,graph:unbound()}
+}
+
 /// Thin lifecycle dispatch; the suite owns the only credential opener.
 pub fn open_bounded_one<let N:u32,let R:u32,let L:u32,let CHECK:u32>(
     credentials:[crate::ops_core_profile::QuadOpening<R,L>;N],proof:BoundedCredentialProof<N>,
@@ -295,7 +317,7 @@ pub fn open_profile_one<let N:u32,let R:u32,let L:u32,let CHECK:u32,let M:u32>(
     credentials:[crate::ops_core_profile::QuadOpening<R,L>;N],proof:BoundedCredentialProof<N>,
     count:u32,active:bool,quad_bound:u32,credential_index:u32,issuer_root:Field,request_digest:[u8;32]) -> OpenedCredential<N> {
     check_limits::<N>(count,quad_bound);
-    let mut opened=OpenedCredential {rows:[[unbound();3];N],active:[false;N],message:0,graph:unbound()};
+    let mut opened=OpenedCredential {constructed:[],rows:[[unbound();3];N],active:[false;N],message:0,graph:unbound()};
     if active {
         let authenticated=authenticate_profile_bounded::<N,R,L,M>(credentials,proof,count,quad_bound,credential_index);
         key_set_membership(proof.pk,issuer_root,proof.issuer_index,proof.issuer_siblings);
@@ -332,7 +354,7 @@ pub fn open_profile_mode_one<let N:u32,let R:u32,let L:u32,let CHECK:u32,let M:u
     signature_mode:u8,revealed_message:Field,revealed_key:Field) -> OpenedCredential<N> {
     assert(signature_mode<=1,"suite signature mode");
     check_limits::<N>(count,quad_bound);
-    let mut opened=OpenedCredential {rows:[[unbound();3];N],active:[false;N],message:0,graph:unbound()};
+    let mut opened=OpenedCredential {constructed:[],rows:[[unbound();3];N],active:[false;N],message:0,graph:unbound()};
     if active {
         let authenticated=authenticate_profile_bounded_mode::<N,R,L,M>(credentials,proof,count,quad_bound,credential_index,
             signature_mode,revealed_message,revealed_key);
@@ -353,7 +375,7 @@ fn empty_opening<let L: u32>() -> TermOpening<L> {
 fn inactive(proof:CredentialProof<1>,count:u32,bound:u32) -> OpenedCredential<1> {
     check_limits::<1>(count,bound);
     check_inactive([[empty_opening::<1>();4]],proof,count,0);
-    OpenedCredential {rows:[[unbound();3]],active:[false],message:0,graph:unbound()}
+    OpenedCredential {constructed:[],rows:[[unbound();3]],active:[false],message:0,graph:unbound()}
 }
 #[test]
 fn credential_flags_are_exact() { assert(credential_flags::<4>(2,4,1) == [true,true,false,false]); }
@@ -404,7 +426,7 @@ fn dataset_assembly_cannot_hide_a_credential() {
 #[test]
 fn dataset_assembly_copies_every_row_and_flag() {
     let cell=TermCell {bound:true,kind:1,enc:7,key_class:0,key:0,dt:0,lang:0,scope:0};
-    let opened=OpenedCredential {rows:[[cell,cell,cell]],active:[true],message:0,graph:unbound()};
+    let opened=OpenedCredential {constructed:[],rows:[[cell,cell,cell]],active:[true],message:0,graph:unbound()};
     let dataset=append_credential(empty_dataset::<2>(),opened,1);
     assert(crate::table::equal_row(dataset.rows[1], [cell,cell,cell]));assert(dataset.active == [false,true]);
 }
@@ -460,7 +482,7 @@ fn input_cannot_supply_a_verified_issuer_assertion() { check_input_predicate(VER
 #[test]
 fn named_view_keeps_a_graph_per_active_row() {
     let graph=TermCell {bound:true,kind:2,enc:7,key_class:0,key:0,dt:0,lang:0,scope:1};
-    let opened=OpenedCredential {rows:[[unbound();3];2],active:[true,false],message:0,graph};
+    let opened=OpenedCredential {constructed:[],rows:[[unbound();3];2],active:[true,false],message:0,graph};
     let dataset=append_credential(empty_dataset::<2>(),opened,0);
     assert(crate::table::equal_cell(dataset.graphs[0],graph));
     assert(crate::table::equal_cell(dataset.graphs[1],unbound()));
@@ -468,7 +490,7 @@ fn named_view_keeps_a_graph_per_active_row() {
 #[test]
 fn verified_issuer_assertion_is_in_the_default_view() {
     let graph=TermCell {bound:true,kind:2,enc:7,key_class:0,key:0,dt:0,lang:0,scope:1};
-    let opened=OpenedCredential {rows:[[unbound();3]],active:[false],message:0,graph};
+    let opened=OpenedCredential {constructed:[],rows:[[unbound();3]],active:[false],message:0,graph};
     let issuer=crate::term::iri_vc_type();
     let dataset=append_verified_issuer(empty_dataset::<1>(),opened,issuer,true,0);
     assert(dataset.active[0]);assert(!dataset.graphs[0].bound);

@@ -70,8 +70,8 @@ binding absorbs every public word in ABI order through the shared Poseidon hash 
 Production delegates lexical binding, complete credential roots and authenticated
 metadata opening to the shared suite library. Hidden signatures call the shared
 Schnorr verifier over that opening's authenticated message. Value consumers use its fixed
-datatype checked-key constructors. Its private
-issuer membership path uses the existing compose relation and host helpers.
+datatype checked-key constructors. Its private issuer path uses canonical trust-member leaves and the policy module's
+shared builder and consumer.
 The verifier-stored envelope policy and ordered per-credential quad limits follow
 the result in the public layout. The group carries issuer and snapshot roots,
 canonical holder restrictions, status flags and validity/freshness times. Its
@@ -92,11 +92,15 @@ challenge last. The authenticated constructor requires the supported suite and i
 source policy. Typed envelope properties are admitted and bound to canonical request RDF.
 Typed policy inputs use the shared canonical policy derivation at admission and
 again at verifier reconstruction. Validity and freshness instants are Unix epoch
-milliseconds. A present-empty holder issuer list is refused. Enabled policy checks
-receive a named native refusal until the statement lane's consumer is integrated.
-The typed canonical relation is refused even at a matching issuer-only tree depth.
-Lane E supplies the public adapter, trust membership and envelope consumer. The structural request constructor
-cannot satisfy the authenticated proof path without a stored issuer root.
+milliseconds. A present-empty holder issuer list is refused. Generated programs
+consume canonical trust membership and the shared holder, status, validity and
+freshness relations. A raw private-evidence adapter builds their sealed observations
+inside constrained code. Each credential opens once; its converted view, issuer
+assertion and holder coverage come from that same slot. Holder signatures are checked
+once after coverage is accumulated. The native method derives public policy from the
+stored request and evaluates the same named credential graphs and default issuer
+assertions. The structural request constructor cannot satisfy the authenticated
+proof path without a stored issuer root.
 
 The cache is indexed by plan shape and invalidated by a fingerprint of the trusted
 library sources and pinned dependency declarations. It compiles from private source

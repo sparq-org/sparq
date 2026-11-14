@@ -283,11 +283,8 @@ impl Request {
         Ok(policy)
     }
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn require_envelope_consumer(
-        &self,
-        envelope: &crate::statement::EnvelopeInputs,
-    ) -> Result<(), Error> {
-        envelope.require_consumer(self.envelope_policy.is_some())
+    pub(crate) fn envelope_policy(&self) -> Option<&crate::envelope_policy::PolicyInput> {
+        self.envelope_policy.as_ref()
     }
     pub fn stored(&self) -> &StoredRequest {
         &self.stored

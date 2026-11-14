@@ -56,7 +56,7 @@ Use `prepare_with_opening_profile` and
 properties as well. Oversized lexical forms receive a capacity refusal.
 
 The current suite profile opens complete credentials, checks hidden signatures
-and issuer key membership. Source identities are key-independent; value consumers check complete active inputs, including rejected rows. Released RDF clears value-key metadata. Overflow refuses.
+and canonical trust-member membership. Source identities are key-independent; value consumers check complete active inputs, including rejected rows. Released RDF clears value-key metadata. Overflow refuses.
 The verifier reconstructs the plan and constants from its stored request, re-encodes the released RDF answer,
 and consumes the shared challenge after proof verification and a final validity check.
 Supplied-cell programs are isolated operator fixtures.
@@ -83,11 +83,11 @@ domain and presentation salt, separately from the detached evaluator's profile.
 `envelope_policy::derive` for admission and verifier reconstruction. Time values
 are Unix epoch milliseconds. Present-empty holder issuer lists are refused.
 The existing `new_authenticated_with_policy` accepts verifier-stored policy words.
-Canonical policy inputs and enabled envelope requirements retain a named native
-integration refusal until the statement lane's consumer is connected.
-The dataset helpers retain named credential copies and a default merge with
-method-generated issuer assertions. Their production wiring awaits the graph
-dispatcher and connection to the canonical issuer consumer.
+Generated programs use the canonical issuer and envelope consumers. `prove_with_envelope`
+adds private holder signatures and status paths; `prove` uses empty private evidence.
+Both reconstruct public policy from the stored request. Each credential opens once;
+its named graph and default verified-issuer assertion share one fixed slot index.
+Graph operators remain subject to their named lowering admission.
 
 The host plan, lowering, interpreter, generator, layout, request and presentation
 values build for WebAssembly. `method::Prepared`, `method::Presentation`,

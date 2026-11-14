@@ -13,7 +13,7 @@ use sparq_zk_query::{
     interp::{evaluate, CredentialCells},
     lower::lower,
     statement::{Layout, Statement},
-    witness::{prover_toml, prover_toml_authenticated},
+    witness::{prover_toml, prover_toml_suite_fixture as prover_toml_authenticated},
 };
 
 // The renderer uses only inline objects, arrays and JSON-compatible scalars.
@@ -130,7 +130,7 @@ fn suite_program_checks_authentication_membership_keys_and_credential_limits() {
     )
     .unwrap();
     let parsed = parse(&input);
-    let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+    let package = sparq_zk_query::codegen::generate_suite_fixture(&plan).unwrap();
     let workspace = fixture_support::Workspace::new(&package);
     let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
     let artifact = driver.compile().unwrap();
@@ -248,7 +248,7 @@ fn suite_constant_scan_preserves_literal_identity() {
         )
         .unwrap(),
     );
-    let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+    let package = sparq_zk_query::codegen::generate_suite_fixture(&plan).unwrap();
     let workspace = fixture_support::Workspace::new(&package);
     let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
     driver.compile().unwrap();
@@ -289,7 +289,7 @@ fn suite_constant_scan_preserves_literal_identity() {
     );
     let altered = incorrect_key_signed_witness(&plan, &data[0], &honest, &trace.result);
     assert_eq!(altered["result"], honest["result"]);
-    let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+    let package = sparq_zk_query::codegen::generate_suite_fixture(&plan).unwrap();
     let workspace = fixture_support::Workspace::new(&package);
     let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
     driver.compile().unwrap();
@@ -331,7 +331,7 @@ fn suite_constant_scan_preserves_literal_identity() {
         oxrdf::Literal::new_simple_literal("beta"),
     );
     assert_eq!(altered["result"], json!(true));
-    let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+    let package = sparq_zk_query::codegen::generate_suite_fixture(&plan).unwrap();
     let workspace = fixture_support::Workspace::new(&package);
     let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
     driver.compile().unwrap();
@@ -389,7 +389,7 @@ fn long_object_profile_executes_a_suite_multikey_opening() {
         authenticated::issuer_root(),
     )
     .unwrap();
-    let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+    let package = sparq_zk_query::codegen::generate_suite_fixture(&plan).unwrap();
     let workspace = fixture_support::Workspace::new(&package);
     let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
     let artifact = driver.compile().unwrap();
@@ -523,7 +523,7 @@ fn signed_key_witness(
             for (r, row) in trace.tables[input as usize].rows.iter().enumerate() {
                 let value = *row.iter().find(|c| c.bound && c.kind == 3).unwrap();
                 use sparq_zk_query::interp::EncodeTerm;
-                let public = (sparq_zk_query::codegen::generate(plan)
+                let public = (sparq_zk_query::codegen::generate_suite_fixture(plan)
                     .unwrap()
                     .files
                     .values()
@@ -639,7 +639,7 @@ fn read_site_keys_bind_complete_consumer_inputs_and_lexical_openings() {
             )
             .unwrap(),
         );
-        let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+        let package = sparq_zk_query::codegen::generate_suite_fixture(&plan).unwrap();
         if let Some((expected, _)) = &compiled {
             assert_eq!(&package, expected);
         } else {
@@ -755,7 +755,7 @@ fn request_values_use_exact_verifier_encoded_keys_without_private_openings() {
             authenticated::issuer_root(),
         )
         .unwrap();
-        let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+        let package = sparq_zk_query::codegen::generate_suite_fixture(&plan).unwrap();
         if let Some((expected, _)) = &compiled {
             assert_eq!(&package, expected);
         } else {
@@ -832,7 +832,7 @@ fn authenticated_temporal_ranges_use_the_checked_scalar_payload() {
             authenticated::issuer_root(),
         )
         .unwrap();
-        let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+        let package = sparq_zk_query::codegen::generate_suite_fixture(&plan).unwrap();
         let workspace = fixture_support::Workspace::new(&package);
         let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
         let artifact = driver.compile().unwrap();
@@ -888,11 +888,11 @@ fn revealed_messages_keys_and_count_are_public_and_bound_to_the_opening() {
         .unwrap()];
     let trace = evaluate(&plan, &cells, &SuiteEncoder).unwrap();
     let envelope = EnvelopeInputs::issuer_only(authenticated::issuer_root());
-    let input = sparq_zk_query::witness::prover_toml_revealed(
+    let input = sparq_zk_query::witness::prover_toml_suite_fixture_revealed(
         &plan, &data, &trace, [7; 32], [3; 32], &envelope,
     )
     .unwrap();
-    let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+    let package = sparq_zk_query::codegen::generate_suite_fixture(&plan).unwrap();
     let workspace = fixture_support::Workspace::new(&package);
     let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
     let artifact = driver.compile().unwrap();
@@ -1017,7 +1017,7 @@ fn revealed_messages_keys_and_count_are_public_and_bound_to_the_opening() {
         })
         .collect::<Vec<_>>();
     let trace = evaluate(&plan, &cells, &SuiteEncoder).unwrap();
-    let input = sparq_zk_query::witness::prover_toml_revealed(
+    let input = sparq_zk_query::witness::prover_toml_suite_fixture_revealed(
         &plan, &two, &trace, [7; 32], [3; 32], &envelope,
     )
     .unwrap();
@@ -1076,6 +1076,342 @@ fn revealed_messages_keys_and_count_are_public_and_bound_to_the_opening() {
                 .is_err(),
             "altered later revealed {label} accepted"
         );
+    }
+    support::complete(gate);
+}
+
+#[test]
+#[ignore = "requires the pinned native query toolchain"]
+fn canonical_envelope_program_keeps_raw_evidence_outside_sealed_views() {
+    let Some(gate) = support::gate(
+        "canonical_envelope_program_keeps_raw_evidence_outside_sealed_views",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
+    let plan = lower(
+        "ASK {?s <urn:p> ?x}",
+        Bounds {
+            credentials: 1,
+            quads_per_credential: 4,
+            rows_per_table: 2,
+        },
+    )
+    .unwrap();
+    let package = sparq_zk_query::codegen::generate_enveloped(&plan).unwrap();
+    assert_eq!(
+        package.files,
+        sparq_zk_query::codegen::generate_enveloped(&plan)
+            .unwrap()
+            .files
+    );
+    let workspace = fixture_support::Workspace::new(&package);
+    let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+    let artifact = driver.compile().unwrap();
+    let artifact: Value = serde_json::from_slice(&std::fs::read(artifact).unwrap()).unwrap();
+    Layout::new(&plan)
+        .audit_authenticated_artifact(&artifact)
+        .unwrap();
+    let inputs = artifact["abi"]["parameters"].as_array().unwrap();
+    assert!(inputs
+        .iter()
+        .any(|p| p["name"] == "holder_evidence" && p["visibility"] == "private"));
+    assert!(inputs
+        .iter()
+        .any(|p| p["name"] == "envelope_0" && p["visibility"] == "private"));
+    let mut missing = artifact.clone();
+    missing["abi"]["parameters"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|p| p["name"] != "revealed_messages");
+    assert!(Layout::new(&plan)
+        .audit_authenticated_artifact(&missing)
+        .is_err());
+    support::complete(gate);
+}
+
+#[test]
+#[ignore = "requires the pinned native query toolchain"]
+fn canonical_envelope_executes_complete_private_evidence_and_policy_controls() {
+    let Some(gate) = support::gate(
+        "canonical_envelope_executes_complete_private_evidence_and_policy_controls",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
+    use oxrdf::{Literal, NamedNode, Term};
+    use sparq_merkle_suite::poseidon as suite;
+    use sparq_zk::{field::field_to_be_bytes_32, sig};
+    use sparq_zk_query::{
+        capacity::OpeningProfile,
+        credential::{assemble_issuer_dataset, Credential},
+        envelope_policy::{self, AcceptedSnapshots, HolderBinding, PolicyInput, TrustMember},
+        interp::evaluate_dataset,
+        witness::{
+            prover_toml_enveloped, CredentialEvidence, EnvelopeInput, EnvelopeWitness,
+            HolderWitness, StatusWitness,
+        },
+    };
+    let key = sig::SecretKey::from_seed(19);
+    let holder = sig::SecretKey::from_seed(23);
+    let multikey = sparq_merkle_suite::metadata::multikey(&holder.public_key()).unwrap();
+    let source=format!("<urn:credential> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://www.w3.org/2018/credentials#VerifiableCredential> .\n<urn:credential> <https://www.w3.org/2018/credentials#issuer> <urn:issuer> .\n<urn:credential> <https://www.w3.org/2018/credentials#credentialSubject> <urn:s> .\n<urn:s> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:s> <https://www.w3.org/2018/credentials#confidenceMethod> <urn:key> .\n<urn:key> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/security#Multikey> .\n<urn:key> <https://w3id.org/security#publicKeyMultibase> \"{multikey}\" .\n<urn:credential> <https://www.w3.org/2018/credentials#validFrom> \"2020-01-01T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n<urn:credential> <https://www.w3.org/2018/credentials#validUntil> \"2030-01-01T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n<urn:credential> <https://www.w3.org/2018/credentials#credentialStatus> <urn:entry> .\n<urn:entry> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://www.w3.org/ns/credentials/status#BitstringStatusListEntry> .\n<urn:entry> <https://www.w3.org/ns/credentials/status#statusListCredential> <urn:list> .\n<urn:entry> <https://www.w3.org/ns/credentials/status#statusPurpose> \"revocation\" .\n<urn:entry> <https://www.w3.org/ns/credentials/status#statusListIndex> \"0\" .\n");
+    let config="<urn:proof> <https://w3id.org/security#cryptosuite> \"schnorr-poseidon2-merkle-2026\" .\n<urn:proof> <https://w3id.org/security#verificationMethod> <urn:method> .\n<urn:proof> <http://purl.org/dc/terms/created> \"2026-11-13T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n";
+    let credential = Credential {
+        credential: suite::issue(&source, config, &key, sparq_merkle_suite::Fr::from(101u64))
+            .unwrap(),
+        issuer: key.public_key(),
+        issuer_index: 0,
+        issuer_siblings: vec![],
+    };
+    let mut status_root = envelope_policy::status_leaf(false);
+    let mut empty = sparq_merkle_suite::Fr::from(0u64);
+    let mut path = vec![];
+    for _ in 0..32 {
+        path.push(field_to_be_bytes_32(&empty));
+        status_root = sparq_zk::poseidon2::hash(&[status_root, empty]);
+        empty = sparq_zk::poseidon2::hash(&[empty, empty]);
+    }
+    let list = suite::term_cell(&Term::NamedNode(NamedNode::new_unchecked("urn:list")), 0).unwrap();
+    let purpose = suite::term_cell(&Literal::new_simple_literal("revocation").into(), 0).unwrap();
+    let snapshot = envelope_policy::snapshot_digest(
+        field_to_be_bytes_32(&list.enc),
+        field_to_be_bytes_32(&purpose.enc),
+        1,
+        32,
+        field_to_be_bytes_32(&status_root),
+    )
+    .unwrap();
+    let created = Literal::new_typed_literal(
+        "2026-11-13T00:00:00Z",
+        NamedNode::new_unchecked("http://www.w3.org/2001/XMLSchema#dateTime"),
+    );
+    let key_word = sparq_merkle_suite::comparison_key(&created);
+    let now = u64::from_be_bytes(key_word[1..9].try_into().unwrap()) ^ 0x8000000000000000;
+    let policy = PolicyInput {
+        trust_members: vec![TrustMember {
+            issuer: NamedNode::new_unchecked("urn:issuer"),
+            verification_method: NamedNode::new_unchecked("urn:method"),
+            key: key.public_key(),
+        }],
+        holder_binding: Some(HolderBinding { issuers: None }),
+        accepted_snapshots: Some(AcceptedSnapshots {
+            digests: vec![snapshot],
+            allow_missing: false,
+        }),
+        validity_time: Some(now),
+        earliest_created: Some(now),
+    };
+    let quad_index = oxttl::NQuadsParser::new()
+        .for_slice(credential.credential.document.as_bytes())
+        .map(Result::unwrap)
+        .position(|q| {
+            q.predicate.as_str() == "https://www.w3.org/2018/credentials#credentialStatus"
+        })
+        .unwrap();
+    let digest = [7; 32];
+    let evidence = EnvelopeWitness {
+        holders: vec![HolderWitness {
+            key: holder.public_key(),
+            signature: sig::sign_deterministic(&holder, &envelope_policy::holder_message(&digest)),
+        }],
+        credentials: vec![CredentialEvidence {
+            holder_slot: 0,
+            statuses: vec![StatusWitness {
+                quad_index,
+                bit_len: 1,
+                depth: 32,
+                root: field_to_be_bytes_32(&status_root),
+                accepted_index: 0,
+                accepted_siblings: vec![],
+                bit: false,
+                path_index: 0,
+                path,
+            }],
+        }],
+    };
+    let plan = lower(
+        "ASK {?s <urn:p> ?x}",
+        Bounds {
+            credentials: 1,
+            quads_per_credential: 16,
+            rows_per_table: 2,
+        },
+    )
+    .unwrap()
+    .with_opening_profile(OpeningProfile::LongObjects);
+    let data = [credential];
+    let dataset = assemble_issuer_dataset(&data, &policy.trust_members, digest).unwrap();
+    let trace = evaluate_dataset(&plan, &dataset, &SuiteEncoder).unwrap();
+    let input = prover_toml_enveloped(
+        &plan,
+        &data,
+        &trace,
+        digest,
+        [3; 32],
+        EnvelopeInput {
+            policy: &policy,
+            evidence: &evidence,
+            revealed: None,
+        },
+    )
+    .unwrap();
+    let package = sparq_zk_query::codegen::generate_enveloped(&plan).unwrap();
+    let workspace = fixture_support::Workspace::new(&package);
+    let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+    driver.execute(&input, "canonical_honest").unwrap();
+    let revealed = sparq_zk_query::statement::RevealedInputs::verify(&[
+        sparq_zk_query::statement::RevealedSignature {
+            key: data[0].issuer,
+            message: field_to_be_bytes_32(&data[0].signed_message().unwrap()),
+            signature: data[0].credential.signature,
+        },
+    ])
+    .unwrap();
+    let revealed_input = prover_toml_enveloped(
+        &plan,
+        &data,
+        &trace,
+        digest,
+        [3; 32],
+        EnvelopeInput {
+            policy: &policy,
+            evidence: &evidence,
+            revealed: Some(&revealed),
+        },
+    )
+    .unwrap();
+    driver
+        .execute(&revealed_input, "canonical_revealed")
+        .unwrap();
+    let parsed = parse(&input);
+    let mut controls = vec![
+        ("holder signature", {
+            let mut p = parsed.clone();
+            p["holder_evidence"][0]["sig"]["s"] = json!("0");
+            p
+        }),
+        ("status bit", {
+            let mut p = parsed.clone();
+            p["envelope_0"]["status"][quad_index]["bit"] = json!(true);
+            p
+        }),
+        ("status coverage", {
+            let mut p = parsed.clone();
+            p["envelope_0"]["status"][quad_index]["present"] = json!(false);
+            p
+        }),
+        ("issuer path", {
+            let mut p = parsed.clone();
+            p["credential_proof_0"]["issuer_siblings"][0] = json!("1");
+            p
+        }),
+        ("validity lexical", {
+            let mut p = parsed.clone();
+            p["envelope_0"]["validity"]["from"][0] = json!(49);
+            p
+        }),
+        ("required holder absent", {
+            let mut p = parsed.clone();
+            p["holder_evidence"][0] = json!({"pk":{"x":"0","y":"0"},
+                "sig":{"present":false,"r":{"x":"0","y":"0"},"s":"0","e":"0","e_k":"0"}});
+            p
+        }),
+    ];
+    let other_holder = sig::SecretKey::from_seed(29);
+    let mut other_evidence = evidence.clone();
+    other_evidence.holders[0] = HolderWitness {
+        key: other_holder.public_key(),
+        signature: sig::sign_deterministic(
+            &other_holder,
+            &envelope_policy::holder_message(&digest),
+        ),
+    };
+    controls.push((
+        "holder key",
+        parse(
+            &prover_toml_enveloped(
+                &plan,
+                &data,
+                &trace,
+                digest,
+                [3; 32],
+                EnvelopeInput {
+                    policy: &policy,
+                    evidence: &other_evidence,
+                    revealed: None,
+                },
+            )
+            .unwrap(),
+        ),
+    ));
+    for (name, validity_time, earliest_created) in [
+        ("freshness", now, now + 1),
+        ("validity time", now + 10 * 366 * 24 * 60 * 60 * 1000, now),
+    ] {
+        let mut changed = policy.clone();
+        changed.validity_time = Some(validity_time);
+        changed.earliest_created = Some(earliest_created);
+        controls.push((
+            name,
+            parse(
+                &prover_toml_enveloped(
+                    &plan,
+                    &data,
+                    &trace,
+                    digest,
+                    [3; 32],
+                    EnvelopeInput {
+                        policy: &changed,
+                        evidence: &evidence,
+                        revealed: None,
+                    },
+                )
+                .unwrap(),
+            ),
+        ));
+    }
+    for (name, changed) in controls {
+        assert!(
+            driver
+                .execute(&render(&changed), "canonical_altered")
+                .is_err(),
+            "{name}"
+        );
+    }
+    support::complete(gate);
+}
+
+#[test]
+#[ignore = "requires the pinned native query toolchain"]
+fn converted_credential_view_cannot_be_witnessed_or_constructed() {
+    let Some(gate) = support::gate(
+        "converted_credential_view_cannot_be_witnessed_or_constructed",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
+    let plan = lower(
+        "ASK {}",
+        Bounds {
+            credentials: 1,
+            quads_per_credential: 4,
+            rows_per_table: 2,
+        },
+    )
+    .unwrap();
+    for (source, expected) in [
+        ("fn main(view:core::ops_core_suite::OpenedCredential<1>)->pub Field{view.message()}",
+            "Invalid type found in the entry point"),
+        ("fn main()->pub Field{let view=core::ops_core_suite::OpenedCredential{constructed:[],rows:[[core::table::unbound();3]],active:[false],message:0,graph:core::table::unbound()};view.message()}",
+            "constructed is private"),
+    ] {
+        let mut package = sparq_zk_query::codegen::generate(&plan).unwrap();
+        package.files.insert(format!("{}/src/main.nr",package.name), source.into());
+        let workspace = fixture_support::Workspace::new(&package);
+        let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+        let diagnostic = format!("{}",driver.compile().unwrap_err());
+        assert!(diagnostic.contains(expected),"{diagnostic}");
     }
     support::complete(gate);
 }
