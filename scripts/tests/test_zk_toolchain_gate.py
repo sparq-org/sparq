@@ -103,6 +103,8 @@ COPIED = (
     "crates/sparq-zk-compose/Cargo.toml",
     "crates/sparq-zk-query/tests",
     "crates/sparq-zk-query/Cargo.toml",
+    "crates/sparq-zk-query-wasm/tests",
+    "crates/sparq-zk-query-wasm/Cargo.toml",
 )
 # The `src` trees are 2.6 MB of Rust and the checker reads every line of them, so a
 # test that is about `tests/` copies only each crate root (enough for the src scan
