@@ -1,18 +1,15 @@
-//! Transport the suite's packed temporal keys into the expression key channel.
+//! Validate packed temporal keys before delegating to the shared expression adapter.
 //! The original cells and their authenticated encodings remain in operator tables.
 use crate::table::{TermCell,Table};
 use crate::ops_core::Boolean;
 use crate::ops_core_expr::Step;
-fn temporal(mut cell:TermCell)->TermCell {
+fn temporal(cell:TermCell)->TermCell {
     if cell.bound & (cell.kind==3) & ((cell.key_class==3)|(cell.key_class==4)|(cell.key_class==8)) {
         let bytes=cell.key.to_be_bytes::<31>();
         assert(bytes[0]==cell.key_class,"temporal key class");
-        let mut value:Field=0;
         for i in 1..31 {
-            if i<=8 {value=value*256+bytes[i] as Field;}
-            else {assert(bytes[i]==0,"non-zero temporal key tail");}
+            if i>8 {assert(bytes[i]==0,"non-zero temporal key tail");}
         }
-        cell.key=(cell.key_class as Field)*crate::ops_closed_numeric::PREFIX+value;
     }
     cell
 }
@@ -37,7 +34,9 @@ fn date<let N:u32>(text:[u8;N],days:i64)->TermCell {
     let biased=(days as u64)^0x8000000000000000;
     let key=8*crate::ops_closed_numeric::PREFIX+(biased as Field)*0x100000000000000000000000000000000000000000000;
     let mut lexical=[0;64];for i in 0..N {lexical[i]=text[i];}
-    let c=crate::ops_core_profile::open_object(crate::ops_core_profile::ObjectOpening{bound:true,kind:3,lexical,lexical_len:N,datatype:3,key:key.to_be_bytes::<31>()},0);
+    let mut datatype=[0;41];let dt="http://www.w3.org/2001/XMLSchema#date".as_bytes();
+    for i in 0..dt.len() {datatype[i]=dt[i];}
+    let c=crate::suite_entry::open_bounded_cell(crate::suite_entry::BoundedTermOpening{bound:true,kind:3,lexical,lexical_len:N,datatype,datatype_len:dt.len(),language:[0;1],language_len:0,key:key.to_be_bytes::<31>()},0);
     TermCell{bound:c.bound(),kind:c.kind(),enc:c.enc(),key_class:c.key_class(),key:c.key(),dt:c.datatype(),lang:c.language(),scope:c.credential()}
 }
 fn program()->[Step;3]{[
@@ -77,3 +76,58 @@ fn empty_input_keeps_the_expression_parameter_capacity_guard(){
         Step{op:8,a:0,b:0,parameter:0,comparison:0},
     ]);
 }
+
+fn read_date<let N:u32>(text:[u8;N],days:u64)->crate::suite_entry::BoundedTermOpening<65,41,1> {
+    let mut raw=crate::ops_core_profile::empty::<65>();raw.bound=true;raw.kind=3;
+    for i in 0..N {raw.lexical[i]=text[i];}raw.lexical_len=N;
+    let dt="http://www.w3.org/2001/XMLSchema#date".as_bytes();
+    for i in 0..dt.len() {raw.datatype[i]=dt[i];}raw.datatype_len=dt.len();
+    let key=8*crate::ops_closed_numeric::PREFIX+((days^0x8000000000000000) as Field)*0x100000000000000000000000000000000000000000000;
+    raw.key=key.to_be_bytes::<31>();raw
+}
+fn read_cell(raw:crate::suite_entry::BoundedTermOpening<65,41,1>)->TermCell {
+    let c=crate::suite_entry::open_bounded_cell(raw,0);
+    TermCell{bound:c.bound(),kind:c.kind(),enc:c.enc(),key_class:c.key_class(),key:c.key(),dt:c.datatype(),lang:c.language(),scope:c.credential()}
+}
+#[test]
+fn closed_reads_check_honest_claim_dates_before_not_exists() {
+    let raw=read_date("2026-11-13".as_bytes(),20770);
+    let input=crate::table::append(crate::table::empty::<4,1>(),[read_cell(raw)],true);
+    let mut reads=[[crate::ops_core_profile::empty::<65>()];4];reads[0]=[raw];
+    crate::ops_core_reads::check(input,reads,[0]);
+    let threshold=date("2021-11-13".as_bytes(),18944);
+    let predicates=evaluate_indexed(input,[threshold],[0],[
+        Step{op:0,a:0,b:0,parameter:0,comparison:0},Step{op:1,a:0,b:0,parameter:0,comparison:0},
+        Step{op:2,a:0,b:1,parameter:0,comparison:3}]);
+    let right=input;
+    crate::ops_core::filter(input,predicates,right);
+    let result=crate::ops_closed_negation::existence([right]);assert(result[0].value);
+}
+#[test(should_fail_with="key disagrees with lexical form")]
+fn closed_reads_refuse_forged_date_on_nonoutput_not_exists_claim() {
+    // The newer claim's forged old date would be rejected by the inner FILTER.
+    let raw=read_date("2026-11-13".as_bytes(),0);
+    let input=crate::table::append(crate::table::empty::<4,1>(),[read_cell(raw)],true);
+    let mut reads=[[crate::ops_core_profile::empty::<65>()];4];reads[0]=[raw];
+    crate::ops_core_reads::check(input,reads,[0]);
+}
+fn fraction(digit:u8,key_digit:u8)->crate::suite_entry::BoundedTermOpening<65,41,1> {
+    let mut raw=crate::ops_core_profile::empty::<65>();raw.bound=true;raw.kind=3;
+    raw.lexical[0]=48;raw.lexical[1]=46;raw.lexical[2]=digit+48;raw.lexical_len=3;
+    let dt="http://www.w3.org/2001/XMLSchema#decimal".as_bytes();
+    for i in 0..dt.len() {raw.datatype[i]=dt[i];}raw.datatype_len=dt.len();
+    raw.key=(crate::ops_closed_numeric::PREFIX+crate::ops_closed_numeric::OFFSET+key_digit as Field*100000000000000000).to_be_bytes::<31>();raw
+}
+fn minimum_reads(forged:bool) {
+    let a=fraction(3,3);let b=fraction(4,if forged {5}else{4});
+    let input=crate::table::canonicalize(crate::table::append(crate::table::append(crate::table::empty::<4,1>(),[read_cell(a)],true),[read_cell(b)],true));
+    let mut reads=[[crate::ops_core_profile::empty::<65>()];4];
+    for i in 0..2 {reads[i]=[if crate::table::same_term(input.rows[i][0],read_cell(a)) {a}else{b}];}
+    crate::ops_core_reads::check(input,reads,[0]);
+    let out=crate::table::append(crate::table::empty::<4,1>(),[read_cell(a)],true);
+    crate::ops_closed_group_plan::group(input,out,[],[crate::ops_closed_group::Aggregate{kind:3,column:0,distinct:false}]);
+}
+#[test]
+fn closed_reads_check_honest_recycled_minimum_inputs(){minimum_reads(false);}
+#[test(should_fail_with="key disagrees with lexical form")]
+fn closed_reads_refuse_forged_nonminimum_recycled_figure(){minimum_reads(true);}

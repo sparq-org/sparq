@@ -77,6 +77,21 @@ Its experimental `credential_graphs::canonical_credentials` now returns `Result`
 propagate metadata-validation failures before assigning credential ranks.
 Authenticated graph evaluation and witness rendering require that canonical
 credential order and refuse an unsorted presentation.
+For a verifier-selected per-table profile, lower a skeleton at the outer-row bound,
+then call `plan_closed::with_row_bounds(plan, request_bounds, node_row_buckets)`.
+Supply one supported bucket per node, within the public request ceiling. The plan
+hash commits every table choice; overflow refuses even below the global ceiling.
+For a refined plan, `capacity().rows_per_table` selects the public result ABI;
+read `nodes()[i].output.capacity` for each intermediate table.
+Refinement emits `ClosedOperator::Join` for wide joins. Use
+`witness_closed::operator_prover_toml` for their supplied-cell fixtures; it includes
+the private join inverse maps without an authentication claim.
+EXISTS capture slots must match their left table's bucket. These choices come from
+the receiver's stored profile, independently of private cardinalities.
+The closed authenticated witness delegates to the shared bounded opening ABI.
+It supplies lexical openings for all rows at value-read sites, including rejected
+NOT EXISTS rows and non-minimum aggregate operands. Generated aggregate values
+are checked against their constrained canonical lexical forms as well.
 `credential_graphs::evaluate_for_request(plan, credentials, request_digest)` uses
 request-scoped blank node graph names; use the same digest when rendering through
 `witness_closed::prover_toml`. The default graph adds only the reserved

@@ -54,3 +54,10 @@ pub fn combine<let R: u32>(a: [Boolean; R], b: [Boolean; R], op: u8) -> [Boolean
     }
     out
 }
+
+/// Every table has its own compiled bound; the public request adds a ceiling.
+pub fn check_bound<let R:u32,let V:u32>(input:Table<R,V>,ceiling:u32) {
+    assert(ceiling>0,"row request bound");
+    assert(input.len<=R,"table capacity");
+    assert(input.len<=ceiling,"row request count");
+}

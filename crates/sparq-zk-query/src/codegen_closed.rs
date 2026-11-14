@@ -40,39 +40,35 @@ pub(super) fn generate(
     if !out.contains("use core::ops_core_expr;") {
         *out = out.replacen("\nfn main(", "\nuse core::ops_core_expr;\nfn main(", 1);
     }
-    if !out.contains("use core::table::unbound;") {
-        *out = out.replacen("\nfn main(", "\nuse core::table::unbound;\nfn main(", 1);
-    }
+    emit_reads(i, plan, out);
     let schema = |id: NodeId| plan.nodes[id as usize].output.variables.as_slice();
     let vars = &plan.nodes[i].output.variables;
     let cols = |id: NodeId| columns(schema(id), vars);
     match op {
+        C::Join { left, right } => {
+            let declaration = format!(
+                "    closed_pairs_{i}: [[u32; 2]; {}],\n",
+                plan.nodes[i].output.capacity
+            );
+            *out = out.replacen(") {", &format!("{declaration}) {{"), 1);
+            writeln!(out,"    core::ops_closed_join::join(t{left}, t{right}, {}, {}, closed_pairs_{i}, t{i});",cols(*left),cols(*right)).unwrap();
+        }
         C::CredentialProfile {
             lexical_capacity,
             literal_capacity,
             literal_types,
             issuers,
         } => {
-            let opener = match (literal_types, literal_capacity) {
-                (1, 16) => "open_integer",
-                (6, 16) => "open_date_boolean",
-                (7, 64) => "open_request",
-                (31, 64) => "open_target",
-                _ => {
-                    return Err(Error::Unsupported(
-                        "closed credential literal profile".into(),
-                    ))
-                }
-            };
-            *out = out.replace(
-                "core::ops_core_suite::open_one(",
-                &format!("core::ops_closed_opening::{opener}("),
-            );
-            *out = out.replace(
-                "core::suite_entry::TermOpening<",
-                "core::ops_closed_opening::Opening<",
-            );
-            *out = out.replace("Opening<32>", &format!("Opening<{lexical_capacity}>"));
+            if *lexical_capacity != 64
+                || !matches!(
+                    (*literal_types, *literal_capacity),
+                    (1, 16) | (6, 16) | (7, 64) | (31, 64)
+                )
+            {
+                return Err(Error::Unsupported(
+                    "closed credential literal profile".into(),
+                ));
+            }
             if out.contains("credential_0:") {
                 if issuers.is_empty() {
                     return Err(Error::Unsupported(
@@ -84,6 +80,9 @@ pub(super) fn generate(
                         .iter()
                         .map(|(a, b)| format!("[{},{}]", term(*a, ids), term(*b, ids))),
                 );
+                for c in 0..plan.capacity().credentials {
+                    writeln!(out,"    core::ops_closed_opening::profile_literal_capacity(credential_{c}, counts[{c}], {literal_capacity});").unwrap();
+                }
                 let capacities = plan.credential_quad_capacities();
                 let mut offset = 0;
                 for (c, n) in capacities.iter().enumerate() {
@@ -107,7 +106,10 @@ pub(super) fn generate(
             )
             .unwrap();
             writeln!(out, "    ops_core::unit(t{i});").unwrap();
-            *out = out.replace("ops_core_expr::evaluate_indexed(", "core::ops_closed_expr::evaluate_indexed(");
+            *out = out.replace(
+                "ops_core_expr::evaluate_indexed(",
+                "core::ops_closed_expr::evaluate_indexed(",
+            );
         }
         C::GraphScan {
             pattern,
@@ -472,7 +474,11 @@ fn scan_source(
             capacities[c as usize]
         )
     } else if crate::credential_graphs::is_profile(plan) {
-        format!("core::ops_closed_dataset::default_graph::<{total}, {}, {}>(core::ops_closed_dataset::request_graphs({source},{offsets},{lens},request_digest), {offsets}, {lens}, credential_count)",capacities.len(),total+capacities.len() as u32)
+        ensure_graphs(plan, out);
+        if !out.contains("let closed_default_dataset =") {
+            writeln!(out,"    let closed_default_dataset = core::ops_closed_dataset::default_graph::<{total}, {}, {}>(closed_named_dataset, {offsets}, {lens}, credential_count);",capacities.len(),total+capacities.len() as u32).unwrap();
+        }
+        "closed_default_dataset".into()
     } else {
         source
     };
@@ -576,6 +582,17 @@ fn graph_scan_source(
                 _ => "core::table::unbound()".into(),
             }),
     );
+    ensure_graphs(plan, out);
+    let ctx = context
+        .map(|id| format!("t{id}"))
+        .unwrap_or_else(|| "core::ops_closed_dataset::unit_context()".into());
+    writeln!(out,"    core::ops_closed_dataset::graph_scan_bound(closed_named_dataset, {ctx}, {mapping}, {captures}, {constants}, t{i});").unwrap();
+}
+
+fn ensure_graphs(plan: &Plan, out: &mut String) {
+    if out.contains("let closed_named_dataset =") {
+        return;
+    }
     let auth = out.contains("credential_0:");
     let capacities = if auth {
         plan.credential_quad_capacities()
@@ -596,8 +613,39 @@ fn graph_scan_source(
         o.to_string()
     }));
     let lengths = array(capacities.iter().map(u32::to_string));
-    let ctx = context
-        .map(|id| format!("t{id}"))
-        .unwrap_or_else(|| "core::ops_closed_dataset::unit_context()".into());
-    writeln!(out,"    core::ops_closed_dataset::graph_scan(core::ops_closed_dataset::request_graphs({source},{offsets},{lengths},request_digest), {offsets}, {lengths}, {ctx}, {mapping}, {captures}, {constants}, t{i});").unwrap();
+    writeln!(out,"    let closed_named_dataset = core::ops_closed_dataset::request_graphs({source}, {offsets}, {lengths}, request_digest);").unwrap();
+}
+
+fn emit_reads(i: usize, plan: &Plan, out: &mut String) {
+    if !out.contains("credential_0:") {
+        return;
+    }
+    for site in crate::reads_closed::sites(plan, i) {
+        let name = site.name(i);
+        let lexical = plan.opening_profile().limits().object;
+        let declaration = format!(
+            "    {name}: [[core::suite_entry::BoundedTermOpening<{lexical}, 41, 1>; {}]; {}],\n",
+            site.columns.len(),
+            plan.nodes[site.input as usize].output.capacity
+        );
+        *out = out.replacen(") {", &format!("{declaration}) {{"), 1);
+        writeln!(
+            out,
+            "    core::ops_core_reads::check_with_parameters(t{}, {name}, {}, parameters);",
+            site.input,
+            array(site.columns.iter().map(usize::to_string))
+        )
+        .unwrap();
+    }
+}
+
+/// The shared generator's bound is a per-table limit. Closed profiles can use
+/// that public value as a ceiling above independently compiled table buckets.
+pub(super) fn finish(plan: &Plan, out: &mut String) {
+    if crate::credential_graphs::is_profile(plan) {
+        *out = out.replace(
+            "ops_core::check_bound(",
+            "core::ops_closed_common::check_bound(",
+        );
+    }
 }

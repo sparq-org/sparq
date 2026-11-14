@@ -35,11 +35,17 @@ pub fn canonical_credentials(credentials: Vec<Credential>) -> Result<Vec<Credent
 pub fn lower(query: &str, bounds: Bounds) -> Result<Plan, Error> {
     let mut plan = crate::lower::lower(query, bounds)?;
     for node in &mut plan.nodes {
-        if let Operator::Scan(pattern) = &node.operator {
-            node.operator = Operator::Closed(ClosedOperator::DatasetScan {
+        node.operator = match &node.operator {
+            Operator::Scan(pattern) => Operator::Closed(ClosedOperator::DatasetScan {
                 pattern: pattern.clone(),
-            });
-        }
+            }),
+            Operator::Filter(input, expression) => Operator::Closed(ClosedOperator::Filter {
+                input: *input,
+                predicate: crate::plan_closed::Predicate::Expression(expression.clone()),
+                context: None,
+            }),
+            other => other.clone(),
+        };
     }
     if plan.nodes.len() >= 256 {
         return Err(Error::Capacity("plan structure".into()));
@@ -59,6 +65,7 @@ pub fn lower(query: &str, bounds: Bounds) -> Result<Plan, Error> {
     });
     Ok(plan)
 }
+
 /// Pin integer (1), date/boolean (6), all three (7), or add decimal/string (31) families.
 /// The restriction covers every credential row and is included in the plan hash.
 /// The integer/date-boolean profiles bound literal lexical values at sixteen bytes.
@@ -448,7 +455,7 @@ pub fn evaluate_cells_for_request(
             quads.push([q[0], q[1], q[2], graph]);
         }
     }
-    crate::interp::evaluate_dataset(plan, &crate::interp::Dataset { quads, counts }, encoder)
+    check_trace(plan, crate::interp::evaluate_dataset(plan, &crate::interp::Dataset { quads, counts }, encoder)?)
 }
 /// Evaluate authenticated credentials under the verifier-owned graph policy.
 pub fn evaluate(plan: &Plan, credentials: &[Credential]) -> Result<crate::interp::Trace, Error> {
@@ -472,12 +479,20 @@ pub fn evaluate_for_request(
             quads.push([q[0], q[1], q[2], graph]);
         }
     }
-    crate::interp::evaluate_dataset(
+    check_trace(plan, crate::interp::evaluate_dataset(
         plan,
         &crate::interp::Dataset { quads, counts },
         &SuiteEncoder,
-    )
+    )?)
 }
+
+fn check_trace(plan: &Plan, trace: crate::interp::Trace) -> Result<crate::interp::Trace, Error> {
+    for (node, table) in plan.nodes().iter().zip(&trace.tables) {
+        crate::plan_closed::check_row_bound(node, table.rows.len())?;
+    }
+    Ok(trace)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

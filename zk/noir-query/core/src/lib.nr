@@ -64,3 +64,5 @@ pub mod expr_date;
 pub mod expr_numeric;
 pub mod expr_construct;
 mod expr_functions_tests;
+
+pub mod ops_closed_join;

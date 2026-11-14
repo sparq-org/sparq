@@ -51,10 +51,19 @@ pub fn scan<let D:u32,let CR:u32,let VC:u32,let R:u32,let V:u32>(dataset:Dataset
     assert_table(canonicalize(expected),out);
 }
 pub fn graph_scan<let D:u32,let C:u32,let CR:u32,let VC:u32,let R:u32,let V:u32>(dataset:Dataset<D>,offsets:[u32;C],lengths:[u32;C],context:Table<CR,VC>,slots:[u32;4],captures:[u32;4],constants:[TermCell;4],out:Table<R,V>){
+    let mut named=dataset;
+    for c in 0..C {
+        let name=graph_name(c);
+        for i in 0..D {if (i>=offsets[c]) & (i<offsets[c]+lengths[c]) & !named.graphs[i].bound {named.graphs[i]=name;}}
+    }
+    graph_scan_bound(named,context,slots,captures,constants,out);
+}
+/// request_graphs binds every graph cell before this scan is called.
+pub fn graph_scan_bound<let D:u32,let CR:u32,let VC:u32,let R:u32,let V:u32>(dataset:Dataset<D>,context:Table<CR,VC>,slots:[u32;4],captures:[u32;4],constants:[TermCell;4],out:Table<R,V>){
     check_table(context);assert(context.len<=1,"capture cardinality");let mut expected=empty();
     for i in 0..D {
-        let mut name=unbound();
-        for c in 0..C {if (i>=offsets[c]) & (i<offsets[c]+lengths[c]) {name=if dataset.graphs[i].bound {dataset.graphs[i]}else{graph_name(c)};}}
+        let name=dataset.graphs[i];
+        assert(!dataset.active[i] | name.bound,"named scan requires bound graph");
         let quad=[dataset.rows[i][0],dataset.rows[i][1],dataset.rows[i][2],name];
         let mut matches=dataset.active[i] & (context.len>0);let mut row=[unbound();V];
         for p in 0..4 {

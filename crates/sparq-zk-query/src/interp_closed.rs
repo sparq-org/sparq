@@ -68,6 +68,7 @@ pub(super) fn evaluate(
         (all, row)
     };
     Ok(match op {
+        C::Join {left,right} => crate::interp_closed_join::evaluate(&tables[*left as usize],schema(*left),&tables[*right as usize],schema(*right),vars,node.output.capacity as usize)?.into_iter().map(|(row,_)|row).collect(),
         C::CredentialProfile { literal_types, .. } => {
             crate::credential_graphs::check_literal_types(*literal_types, credentials)?;
             vec![vec![]]

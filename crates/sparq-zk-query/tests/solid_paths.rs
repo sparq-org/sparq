@@ -296,33 +296,56 @@ fn bounds() -> Bounds {
     }
 }
 fn prepare(target: &str, full: bool) -> Plan {
-    let p = graphs::bind_issuer_registry(
-        graphs::lower(
-            &query(target),
-            if full {
-                bounds()
+    prepare_query(target, &query(target), full)
+}
+fn prepare_query(target: &str, text: &str, full: bool) -> Plan {
+    let request = if full {
+        bounds()
+    } else {
+        Bounds {
+            credentials: if target.starts_with("insurance-") {
+                2
+            } else if target == "trial-eligibility" {
+                1
             } else {
-                Bounds {
-                    credentials: if target.starts_with("insurance-") {
-                        2
-                    } else if target == "trial-eligibility" {
-                        1
-                    } else {
-                        4
-                    },
-                    quads_per_credential: 8,
-                    rows_per_table: if target.starts_with("recycled-") {
-                        4
-                    } else {
-                        2
-                    },
-                }
+                4
             },
-        )
-        .unwrap(),
-        &registry(),
+            quads_per_credential: 8,
+            rows_per_table: 32,
+        }
+    };
+    // The receiver chooses these table buckets from the public query/profile.
+    // Lower at the outer-row bound so EXISTS emits exactly its capture slots.
+    let small = if full || target.starts_with("recycled-") {
+        4
+    } else {
+        2
+    };
+    let p = graphs::lower(
+        text,
+        Bounds {
+            rows_per_table: small,
+            ..request
+        },
     )
     .unwrap();
+    let rows =
+        p.nodes()
+            .iter()
+            .map(|node| {
+                if full
+                    && node.output.variables.iter().any(|v| {
+                        matches!(p.variable_names()[*v as usize].as_str(), "c" | "d" | "m")
+                    })
+                {
+                    32
+                } else {
+                    small
+                }
+            })
+            .collect::<Vec<_>>();
+    let p = sparq_zk_query::plan_closed::with_row_bounds(p, request, &rows).unwrap();
+    let p = graphs::bind_issuer_registry(p, &registry()).unwrap();
     if full {
         p
     } else {
@@ -336,6 +359,7 @@ fn prepare(target: &str, full: bool) -> Plan {
         p.with_credential_quad_bounds(&quad_bounds).unwrap()
     }
 }
+
 fn cases(target: &str) -> Vec<(&str, Option<bool>)> {
     let mut out = vec![("honest", Some(true))];
     let names: &[&str] = match target {
@@ -574,7 +598,7 @@ fn render(p: &Plan, data: &[Credential], trace: &Trace, auth: bool) -> String {
     if auth {
         witness_closed::prover_toml(p, data, trace, DIGEST, [3; 32], issuer_root()).unwrap()
     } else {
-        sparq_zk_query::witness::prover_toml(
+        witness_closed::operator_prover_toml(
             p,
             &graphs::cells(data).unwrap(),
             &SuiteEncoder,
@@ -798,6 +822,9 @@ fn export_solid_path_programs_when_requested() {
                 std::fs::create_dir_all(&root).unwrap();
                 write_package(&pkg, &root);
                 std::fs::write(root.join("package-name"), &pkg.name).unwrap();
+                std::fs::write(root.join("row-buckets.json"),serde_json::to_vec_pretty(&p.nodes().iter()
+                    .enumerate().map(|(i,n)| serde_json::json!({"node":i,"rows":n.output.capacity,
+                        "variables":n.output.variables.iter().map(|v| &p.variable_names()[*v as usize]).collect::<Vec<_>>()})).collect::<Vec<_>>()).unwrap()).unwrap();
                 std::fs::write(
                     root.join(&pkg.name).join("Prover.toml"),
                     render(&p, &data, &trace, auth),
@@ -831,7 +858,11 @@ fn target_capacity_and_reserved_issuer_controls() {
         let p = prepare(target, true);
         assert_eq!(p.capacity().credentials, 4);
         assert_eq!(p.credential_quad_capacities(), vec![64; 4]);
-        assert_eq!(p.capacity().rows_per_table, 32);
+        assert_eq!(p.capacity().rows_per_table, 4);
+        assert_eq!(p.bounds().rows_per_table, 32);
+        assert!(p.nodes().iter().all(|n| matches!(n.output.capacity,4|32)));
+        assert!(p.nodes().iter().filter(|n| n.output.capacity==32).all(|n|
+            n.output.variables.iter().any(|v| matches!(p.variable_names()[*v as usize].as_str(),"c"|"d"|"m"))));
     }
     let mut reversed = fixtures("recycled-sum", "honest");
     reversed.reverse();
@@ -847,8 +878,7 @@ fn target_capacity_and_reserved_issuer_controls() {
         .collect::<Vec<_>>()
         .join(",");
     let text = original.replace("\"excluded-x\", \"excluded-y\"", &members);
-    let list_plan =
-        graphs::bind_issuer_registry(graphs::lower(&text, bounds()).unwrap(), &registry()).unwrap();
+    let list_plan = prepare_query("trial-eligibility", &text, true);
     assert_eq!(list_plan.hash(), prepare("trial-eligibility", true).hash());
     let medicines = fixtures("trial-eligibility", "medicines");
     assert_eq!(
@@ -892,4 +922,108 @@ fn target_capacity_and_reserved_issuer_controls() {
         .unwrap_err()
         .to_string()
         .contains("verifiedIssuer"));
+}
+
+#[test]
+fn required_closed_value_reads_fail_at_actual_query_sites() {
+    let Some(gate) = support::gate("closed target rejected-row value reads", &["nargo"]) else {
+        return;
+    };
+    for (target, case) in [
+        ("insurance-closed", "old-claim"),
+        ("recycled-min", "honest"),
+    ] {
+        let p = prepare(target, false);
+        let data = fixtures(target, case);
+        let trace = graphs::evaluate_for_request(&p, &data, DIGEST).unwrap();
+        let package = codegen::generate(&p).unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        write_package(&package, workspace.path());
+        let honest = render(&p, &data, &trace, true);
+        execute(workspace.path(), &package.name, &honest, "reads_honest")
+            .unwrap_or_else(|e| panic!("{target}: {e}"));
+        let (node, input, cell) = if target == "insurance-closed" {
+            let d = p.variable_names().iter().position(|v| v == "d").unwrap() as u32;
+            p.nodes()
+                .iter()
+                .enumerate()
+                .find_map(|(i, n)| {
+                    let Operator::Closed(ClosedOperator::Filter { input, .. }) = &n.operator else {
+                        return None;
+                    };
+                    let col = p.nodes()[*input as usize]
+                        .output
+                        .variables
+                        .iter()
+                        .position(|v| *v == d)?;
+                    let row = trace.tables[*input as usize].rows.first()?;
+                    // This real claim is rejected by the date FILTER in NOT EXISTS.
+                    assert!(trace.tables[i].rows.is_empty());
+                    Some((i, *input, row[col]))
+                })
+                .expect("a non-output claim date read")
+        } else {
+            p.nodes()
+                .iter()
+                .enumerate()
+                .find_map(|(i, n)| {
+                    let Operator::Closed(ClosedOperator::Group {
+                        input, aggregates, ..
+                    }) = &n.operator
+                    else {
+                        return None;
+                    };
+                    let a = aggregates.iter().find(|a| {
+                        a.kind == sparq_zk_query::interp_closed_group::AggregateKind::Min
+                    })?;
+                    let col = p.nodes()[*input as usize]
+                        .output
+                        .variables
+                        .iter()
+                        .position(|v| Some(*v) == a.operand)?;
+                    let rows = &trace.tables[*input as usize].rows;
+                    let smallest = rows.iter().map(|r| r[col].key).min()?;
+                    let largest = rows.iter().map(|r| r[col]).max_by_key(|c| c.key)?;
+                    assert!(largest.key > smallest);
+                    Some((i, *input, largest))
+                })
+                .expect("a non-minimum aggregate operand read")
+        };
+        let key = cell.key[1..].to_vec();
+        let marker = format!(
+            "key=[{}]",
+            key.iter().map(u8::to_string).collect::<Vec<_>>().join(",")
+        );
+        let mut forged = key;
+        let payload = if target == "insurance-closed" { 8 } else { 30 };
+        forged[payload] ^= 1;
+        let changed_marker = format!(
+            "key=[{}]",
+            forged
+                .iter()
+                .map(u8::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let prefix = format!("closed_reads_{node}_{input} = ");
+        let line = honest
+            .lines()
+            .find(|line| line.starts_with(&prefix))
+            .unwrap();
+        assert_eq!(line.matches(&marker).count(), 1);
+        let changed_line = line.replacen(&marker, &changed_marker, 1);
+        let changed = honest.replacen(line, &changed_line, 1);
+        let error = execute(
+            workspace.path(),
+            &package.name,
+            &changed,
+            "forged_rejected_value_key",
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("key disagrees with lexical form"),
+            "{target}: {error}"
+        );
+    }
+    support::complete(gate);
 }

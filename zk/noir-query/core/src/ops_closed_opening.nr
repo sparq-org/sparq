@@ -154,3 +154,21 @@ fn nonliteral_openings_match_the_general_suite_constructor(){
 fn constant_default_opening_matches_the_general_suite_constructor(){
     let raw=bound_default();let a=open_default(raw);let b=open_cell(raw,1);assert(a.bound()&(a.kind()==0)&(a.enc()==b.enc()));
 }
+
+/// Preserve the closed profile's selected literal bound on shared profile openings.
+pub fn profile_literal_capacity<let N:u32,let R:u32,let L:u32>(raw:[crate::ops_core_profile::QuadOpening<R,L>;N],count:u32,limit:u32){
+    assert(count<=N,"closed credential count");
+    for i in 0..N {assert((i>=count)|(raw[i].object.kind!=3)|(raw[i].object.lexical_len<=limit),"closed credential literal capacity");}
+}
+#[test(should_fail_with="closed credential literal capacity")]
+fn profile_literal_capacity_covers_unused_input_objects(){
+    let object=crate::ops_core_profile::ObjectOpening{kind:3,lexical:[0;65],lexical_len:17,datatype:[0;41],datatype_len:0,language:[0;1],language_len:0,key:[0;31]};
+    let r=crate::ops_core_profile::ResourceOpening{kind:1,lexical:[0;1],lexical_len:0};
+    profile_literal_capacity([crate::ops_core_profile::QuadOpening{subject:r,predicate:r,object}],1,16);
+}
+#[test]
+fn profile_literal_capacity_does_not_limit_resource_objects(){
+    let object=crate::ops_core_profile::ObjectOpening{kind:1,lexical:[0;65],lexical_len:17,datatype:[0;41],datatype_len:0,language:[0;1],language_len:0,key:[0;31]};
+    let r=crate::ops_core_profile::ResourceOpening{kind:1,lexical:[0;1],lexical_len:0};
+    profile_literal_capacity([crate::ops_core_profile::QuadOpening{subject:r,predicate:r,object}],1,16);
+}

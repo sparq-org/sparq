@@ -25,6 +25,11 @@ pub struct GroupAggregate {
 /// New closed operators extend this enum without changing core dispatch again.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ClosedOperator {
+    /// Exact bag join with a private inverse map over canonical output rows.
+    Join {
+        left: NodeId,
+        right: NodeId,
+    },
     CredentialProfile {
         lexical_capacity: u32,
         literal_capacity: u32,
@@ -124,7 +129,9 @@ impl ClosedOperator {
                 ids.extend(context);
                 ids
             }
-            Self::Minus { left, right } | Self::Union { left, right } => vec![*left, *right],
+            Self::Join { left, right }
+            | Self::Minus { left, right }
+            | Self::Union { left, right } => vec![*left, *right],
             Self::Extend { input, context, .. } => {
                 let mut ids = vec![*input];
                 ids.extend(context);
@@ -163,6 +170,11 @@ impl ClosedOperator {
     pub(crate) fn canonical_bytes(&self) -> Vec<u8> {
         let mut w = Writer(vec![]);
         match self {
+            Self::Join { left, right } => {
+                w.byte(16);
+                w.id(*left);
+                w.id(*right);
+            }
             Self::CredentialProfile {
                 lexical_capacity,
                 literal_capacity,
@@ -449,4 +461,111 @@ impl Writer {
             }
         }
     }
+}
+
+/// Apply verifier-selected row limits to a closed graph-profile skeleton.
+/// Evaluate through credential_graphs so every intermediate row limit is checked.
+/// Every node has one limit; private row counts never choose a capacity. The
+/// resulting schema capacities already belong to the canonical plan encoding.
+pub fn with_row_bounds(
+    mut plan: crate::plan::Plan,
+    bounds: crate::capacity::Bounds,
+    rows: &[u32],
+) -> Result<crate::plan::Plan, crate::Error> {
+    use crate::{capacity::Bounds, Error};
+    if !crate::credential_graphs::is_profile(&plan) {
+        return Err(Error::Unsupported(
+            "per-table bounds require the closed graph evaluator".into(),
+        ));
+    }
+    if bounds.credentials != plan.bounds.credentials
+        || bounds.quads_per_credential != plan.bounds.quads_per_credential
+        || rows.len() != plan.nodes.len()
+        || rows.iter().any(|&r| r == 0 || r > bounds.rows_per_table)
+    {
+        return Err(Error::Capacity("per-table row bounds".into()));
+    }
+    let capacity = bounds.capacity()?;
+    for (node, &r) in plan.nodes.iter_mut().zip(rows) {
+        let rounded = Bounds {
+            rows_per_table: r,
+            ..bounds
+        }
+        .capacity()?
+        .rows_per_table;
+        // Exact limits avoid a second private/public table-length channel.
+        if r != rounded {
+            return Err(Error::Capacity("per-table row bucket".into()));
+        }
+        node.output.capacity = rounded;
+    }
+    fn predicate(p: &Predicate, bound: u32, nodes: &[crate::plan::Node]) -> Result<(), Error> {
+        match p {
+            Predicate::Exists(rights) => {
+                if rights.len() != bound as usize
+                    || rights
+                        .windows(2)
+                        .any(|ids| nodes[ids[0] as usize].output != nodes[ids[1] as usize].output)
+                {
+                    return Err(Error::Capacity(
+                        "EXISTS row bucket requires matching capture skeleton".into(),
+                    ));
+                }
+            }
+            Predicate::Not(a) => predicate(a, bound, nodes)?,
+            Predicate::And(a, b) | Predicate::Or(a, b) => {
+                predicate(a, bound, nodes)?;
+                predicate(b, bound, nodes)?;
+            }
+            _ => (),
+        }
+        Ok(())
+    }
+    for node in &plan.nodes {
+        if let crate::plan::Operator::Closed(
+            ClosedOperator::Filter {
+                input,
+                predicate: p,
+                ..
+            }
+            | ClosedOperator::BindBoolean {
+                input,
+                predicate: p,
+                ..
+            },
+        ) = &node.operator
+        {
+            predicate(p, plan.nodes[*input as usize].output.capacity, &plan.nodes)?;
+        }
+    }
+    for i in 0..plan.nodes.len() {
+        if let crate::plan::Operator::Join(left, right) = plan.nodes[i].operator {
+            if [
+                plan.nodes[left as usize].output.capacity,
+                plan.nodes[right as usize].output.capacity,
+                plan.nodes[i].output.capacity,
+            ]
+            .into_iter()
+            .any(|r| r > 4)
+            {
+                plan.nodes[i].operator =
+                    crate::plan::Operator::Closed(ClosedOperator::Join { left, right });
+            }
+        }
+    }
+    plan.bounds = bounds;
+    // The shared public result ABI uses this bucket. Other tables carry their
+    // own capacities above; the request ceiling remains in plan.bounds.
+    plan.capacity = crate::capacity::Capacity {
+        rows_per_table: plan.result_schema().capacity,
+        ..capacity
+    };
+    Ok(plan)
+}
+
+pub(crate) fn check_row_bound(node: &crate::plan::Node, len: usize) -> Result<(), crate::Error> {
+    if len > node.output.capacity as usize {
+        return Err(crate::Error::Capacity("per-table operator output".into()));
+    }
+    Ok(())
 }

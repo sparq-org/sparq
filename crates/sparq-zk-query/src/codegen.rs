@@ -306,6 +306,7 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
     if source.contains("unbound()") {
         source = source.replacen("\nfn main(", "\nuse core::table::unbound;\nfn main(", 1);
     }
+    closed::finish(plan, &mut source);
     let files=BTreeMap::from([
         ("Nargo.toml".into(),format!("[workspace]\nmembers = [\"{name}\"]\n")),
         (format!("{name}/Nargo.toml"),format!("[package]\nname = \"{name}\"\ntype = \"bin\"\nauthors = [\"sparq\"]\ncompiler_version = \">=1.0.0\"\n\n[dependencies]\ncore = {{ path = \"../zk/noir-query/core\" }}\n")),

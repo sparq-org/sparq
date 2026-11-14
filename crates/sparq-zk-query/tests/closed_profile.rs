@@ -216,17 +216,11 @@ fn compact_profile_credential_executes() {
         .lines()
         .find(|line| line.starts_with("credential_0 = "))
         .unwrap();
-    let positions = raw_line
-        .match_indices("kind=1")
-        .map(|(i, _)| i)
-        .collect::<Vec<_>>();
-    assert!(positions.len() >= 2);
-    for (position, label) in [
-        (positions[0], "subject kind"),
-        (positions[1], "predicate kind"),
-    ] {
+    for (field, label) in [("subject", "nonliteral position"),("predicate", "predicate kind")] {
+        let marker=format!("{field} = {{ kind = 1");
+        let position=raw_line.find(&marker).expect("bounded resource opening")+marker.len()-8;
         let mut raw = raw_line.to_owned();
-        raw.replace_range(position..position + 6, "kind=3");
+        raw.replace_range(position..position + 8, "kind = 3");
         let changed = witness.replace(raw_line, &raw);
         let error = execute_bounded(temp.path(), &pkg.name, &changed, "compact_wrong_position")
             .unwrap_err();
@@ -234,12 +228,12 @@ fn compact_profile_credential_executes() {
     }
     let raw_key = |n| {
         format!(
-            "key=[{}]",
+            "key = [{}]",
             sparq_merkle_suite::comparison_key(&oxrdf::Literal::from(n))
                 .iter()
                 .map(u8::to_string)
                 .collect::<Vec<_>>()
-                .join(",")
+                .join(", ")
         )
     };
     assert_eq!(witness.matches(&raw_key(1i64)).count(), 1);
@@ -263,9 +257,9 @@ fn compact_profile_credential_executes() {
         &c.credential.signature,
     )
     .unwrap();
-    let marker = format!("s=\"{}\"", sparq_zk::field::field_to_hex(&signature.s));
+    let marker = format!("s = \"{}\"", sparq_zk::field::field_to_hex(&signature.s));
     assert_eq!(witness.matches(&marker).count(), 1);
-    let changed = witness.replacen(&marker, "s=\"0\"", 1);
+    let changed = witness.replacen(&marker, "s = \"0\"", 1);
     let error =
         execute_bounded(temp.path(), &pkg.name, &changed, "compact_wrong_signature").unwrap_err();
     assert!(

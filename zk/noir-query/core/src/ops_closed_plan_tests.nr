@@ -59,3 +59,29 @@ fn graph_name_domain_is_pinned(){assert(crate::ops_closed_dataset::graph_name(0)
 fn integer_multiplication_rejects_modular_wrap(){let a=crate::ops_closed_numeric::read(OFFSET+761693500506309222409094138289133375*1000000000000000000,false);let b=crate::ops_closed_numeric::read(OFFSET+958703690306430087654759117285840627*1000000000000000000,false);let value=crate::ops_closed_arith::multiply(a,b);assert(!value.0.capacity,"numeric capacity");}
 #[test(should_fail_with="operator rows")]
 fn group_bridge_empty_group_cannot_claim_a_nonzero_sum(){crate::ops_closed_group_plan::group(empty::<4,1>(),append(empty::<4,1>(),[int(1)],true),[],[Aggregate{kind:2,column:0,distinct:false}]);}
+
+#[test(should_fail_with="named scan requires bound graph")]
+fn graph_scan_bound_requires_prepared_graph_names(){
+    crate::ops_closed_dataset::graph_scan_bound(dataset(),crate::ops_closed_dataset::unit_context(),[2,2,0,1],[1;4],[iri(1),iri(2),unbound(),unbound()],graph_out());
+}
+#[test]
+fn default_scan_duplicates_do_not_consume_the_output_bucket(){
+    let d=crate::ops_core::Dataset{rows:[[iri(1),iri(2),iri(3)];8],active:[true;8],graphs:[unbound();8]};
+    crate::ops_closed_dataset::scan(d,crate::ops_closed_dataset::unit_context(),[1,1,0],[1;3],[iri(1),iri(2),unbound()],append(empty::<1,1>(),[iri(3)],true));
+}
+#[test(should_fail_with="operator capacity")]
+fn default_scan_further_distinct_row_overflows_after_duplicates(){
+    let mut d=crate::ops_core::Dataset{rows:[[iri(1),iri(2),iri(3)];8],active:[true;8],graphs:[unbound();8]};d.rows[7][2]=iri(4);
+    crate::ops_closed_dataset::scan(d,crate::ops_closed_dataset::unit_context(),[1,1,0],[1;3],[iri(1),iri(2),unbound()],append(empty::<1,1>(),[iri(3)],true));
+}
+
+#[test]
+fn closed_row_bound_accepts_a_smaller_compiled_table(){crate::ops_closed_common::check_bound(append(empty::<4,1>(),[iri(1)],true),32);}
+#[test(should_fail_with="table capacity")]
+fn closed_row_bound_refuses_compiled_overflow(){let mut input=empty::<4,1>();input.len=5;crate::ops_closed_common::check_bound(input,32);}
+#[test(should_fail_with="row request count")]
+fn closed_row_bound_preserves_the_public_ceiling(){let input=append(append(empty::<4,1>(),[iri(1)],true),[iri(2)],true);crate::ops_closed_common::check_bound(input,1);}
+#[test(should_fail_with="row request bound")]
+fn closed_row_bound_refuses_a_zero_request_limit(){crate::ops_closed_common::check_bound(empty::<4,1>(),0);}
+#[test]
+fn closed_row_bound_preserves_rounded_request_limits(){crate::ops_closed_common::check_bound(append(empty::<4,1>(),[iri(1)],true),3);}
