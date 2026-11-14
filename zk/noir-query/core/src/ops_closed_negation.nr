@@ -56,6 +56,24 @@ pub fn minus<let A: u32, let B: u32, let R: u32, let VA: u32, let VB: u32>(
     }
     assert_table(expected, out);
 }
+/// Uncorrelated EXISTS: one flag per left row, true when a live right row is
+/// compatible with it. The right table is the complete, bound-checked body.
+pub fn semi_join<let A: u32, let B: u32, let VA: u32, let VB: u32>(
+    left: Table<A, VA>, right: Table<B, VB>, right_cols: [u32; VA],
+) -> [Boolean; A] {
+    check_table(left); check_table(right);
+    let mut ac = [0; VA]; for v in 0..VA {ac[v] = v;}
+    let mut flags = [Boolean {value: false, is_error: false}; A];
+    for i in 0..A {
+        let mut found = false;
+        for j in 0..B {
+            let (matches, _, _) = compatible(left.rows[i], right.rows[j], ac, right_cols);
+            found = found | ((j < right.len) & matches);
+        }
+        flags[i].value = found;
+    }
+    flags
+}
 pub fn existence<let A: u32, let B: u32, let V: u32>(rights: [Table<B, V>; A]) -> [Boolean; A] {
     let mut predicates = [Boolean {value: false, is_error: false}; A];
     for i in 0..A {check_table(rights[i]); predicates[i].value = rights[i].len > 0;}

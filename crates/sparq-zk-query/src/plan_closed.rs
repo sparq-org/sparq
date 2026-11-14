@@ -8,6 +8,9 @@ pub enum Predicate {
     Expression(Expr),
     Arithmetic(crate::closed_arith::Comparison),
     Exists(Vec<NodeId>),
+    /// Uncorrelated EXISTS: the body is evaluated once and a row passes when
+    /// some body row is compatible with it on their shared variables.
+    SemiJoin(NodeId),
     Not(Box<Predicate>),
     And(Box<Predicate>, Box<Predicate>),
     Or(Box<Predicate>, Box<Predicate>),
@@ -347,6 +350,7 @@ impl Predicate {
         match self {
             Self::Expression(_) | Self::Arithmetic(_) => (),
             Self::Exists(rights) => ids.extend(rights),
+            Self::SemiJoin(right) => ids.push(*right),
             Self::Not(a) => a.inputs(ids),
             Self::And(a, b) | Self::Or(a, b) => {
                 a.inputs(ids);
@@ -445,6 +449,10 @@ impl Writer {
                 for id in ids {
                     self.id(*id);
                 }
+            }
+            Predicate::SemiJoin(right) => {
+                self.byte(6);
+                self.id(*right);
             }
             Predicate::Not(a) => {
                 self.byte(2);

@@ -317,6 +317,15 @@ fn predicate_source(
             array(rights.iter().map(|id| format!("t{id}")))
         )
         .unwrap(),
+        Predicate::SemiJoin(right) => writeln!(
+            out,
+            "    let {name} = core::ops_closed_negation::semi_join(t{input}, t{right}, {});",
+            columns(
+                &plan.nodes[*right as usize].output.variables,
+                &plan.nodes[input as usize].output.variables
+            )
+        )
+        .unwrap(),
         Predicate::Arithmetic(e) => {
             let input_vars = &plan.nodes[input as usize].output.variables;
             let mut vars = input_vars.clone();
