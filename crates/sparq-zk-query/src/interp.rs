@@ -485,7 +485,7 @@ fn string_cell(cell: Cell) -> bool {
 }
 
 fn compare(op: Compare, a: Value, b: Value) -> Result<Value, Error> {
-    let (a, b) = match (a, b) {
+    let (mut a, mut b) = match (a, b) {
         (Value::Term(a), Value::Term(b)) => (a, b),
         (Value::Boolean(a, ae), Value::Boolean(b, be)) => {
             return Ok(Value::Boolean(
@@ -507,6 +507,22 @@ fn compare(op: Compare, a: Value, b: Value) -> Result<Value, Error> {
     };
     if !a.bound || !b.bound {
         return Ok(Value::Boolean(false, true));
+    }
+    if op == Compare::Equal
+        && [a, b]
+            .iter()
+            .all(|c| c.kind != 3 || c.dt == *STRING_DATATYPE)
+    {
+        return Ok(Value::Boolean(a.same_term(b), false));
+    }
+    if op == Compare::Equal {
+        for c in [&mut a, &mut b] {
+            if c.kind == 3 && c.dt == *STRING_DATATYPE {
+                c.key_class = 6;
+                c.key = [0; 32];
+                c.key[1] = 6;
+            }
+        }
     }
     for c in [a, b] {
         if c.kind == 3 && c.key_class == 1 {

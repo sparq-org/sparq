@@ -26,6 +26,10 @@ pub fn equal_cell(a: TermCell, b: TermCell) -> bool {
         & (a.dt == b.dt) & (a.lang == b.lang) & (a.scope == b.scope)
 }
 
+pub fn metadata_fields(cell:TermCell) -> [Field;4] {
+    [cell.key_class as Field,cell.key,cell.dt,cell.lang]
+}
+
 pub fn check_cell(cell: TermCell) {
     if cell.bound {
         assert((cell.kind >= 1) & (cell.kind <= 3), "term kind");
@@ -56,7 +60,6 @@ pub fn same_row<let V: u32>(a: [TermCell; V], b: [TermCell; V]) -> bool {
     same
 }
 
-// Field comparisons and bounded sorting dominate these table operations.
 pub fn row_less<let V: u32>(a: [TermCell; V], b: [TermCell; V]) -> bool {
     let mut less = false;
     let mut equal = true;
@@ -70,17 +73,90 @@ pub fn row_less<let V: u32>(a: [TermCell; V], b: [TermCell; V]) -> bool {
     less
 }
 
+fn check_storage<let R:u32,let V:u32>(table:Table<R,V>) {
+    assert(table.len<=R,"table capacity");
+    for i in 0..R {for v in 0..V {
+        check_cell(table.rows[i][v]);
+        assert((i<table.len)|equal_cell(table.rows[i][v],unbound()),"table padding");
+    }}
+}
+
 pub fn check_table<let R: u32, let V: u32>(table: Table<R, V>) {
-    assert(table.len <= R, "table capacity");
+    check_storage(table);
     for i in 0..R {
-        for v in 0..V {
-            check_cell(table.rows[i][v]);
-            assert((i < table.len) | equal_cell(table.rows[i][v], unbound()), "table padding");
-        }
         if i > 0 {
             assert((i >= table.len) | !row_less(table.rows[i], table.rows[i - 1]), "table order");
         }
     }
+}
+
+/// Verify a stable canonical permutation without constructing a sorted table.
+/// Equal identities are matched by their occurrence ordinal in each input.
+pub fn assert_canonicalized<let A:u32,let R:u32,let V:u32>(input:Table<A,V>,out:Table<R,V>) {
+    check_storage(input);check_table(out);
+    assert(input.len<=R,"operator capacity");
+    assert(input.len==out.len,"operator length");
+    let mut ordinals=[0u32;R];
+    for j in 0..R {if j>0 {
+        if (j<out.len)&same_row(out.rows[j],out.rows[j-1]) {ordinals[j]=ordinals[j-1]+1;}
+    }}
+    for i in 0..A {
+        let mut ordinal:u32=0;
+        for prior in 0..A {ordinal=ordinal+((prior<i)&same_row(input.rows[i],input.rows[prior])) as u32;}
+        let mut found=false;
+        let mut metadata=[[0 as Field;4];V];
+        for j in 0..R {
+            let hit=(j<out.len)&same_row(input.rows[i],out.rows[j])&(ordinal==ordinals[j]);
+            found=found|hit;
+            // Identity plus ordinal selects at most one output row.
+            for v in 0..V {let fields=metadata_fields(out.rows[j][v]);
+                for f in 0..4 {metadata[v][f]=metadata[v][f]+hit as Field*fields[f];}
+            }
+        }
+        assert((i>=input.len)|found,"canonical permutation");
+        for v in 0..V {assert((i>=input.len)|(metadata[v]==metadata_fields(input.rows[i][v])),"canonical payload");}
+    }
+}
+
+/// Verify an unchanged row order, including complete cell payloads and padding.
+pub fn assert_ordered<let A:u32,let R:u32,let V:u32>(input:Table<A,V>,out:Table<R,V>) {
+    check_storage(input);check_table(out);
+    assert(input.len<=R,"operator capacity");
+    assert(input.len==out.len,"operator length");
+    for i in 0..A {if i<R {
+        assert(same_row(input.rows[i],out.rows[i]),"canonical permutation");
+        for v in 0..V {assert(metadata_fields(input.rows[i][v])==metadata_fields(out.rows[i][v]),"canonical payload");}
+    }}
+}
+
+fn cell_fields(cell:TermCell) -> [Field;7] {
+    // check_cell makes the bound flag equivalent to a nonzero kind.
+    [cell.kind as Field,cell.enc,cell.key_class as Field,
+        cell.key,cell.dt,cell.lang,cell.scope as Field]
+}
+
+/// Verify the complete stable subsequence chosen by the supplied row predicates.
+/// Output positions are computed from the complete input, never supplied privately.
+pub fn assert_selection<let A:u32,let R:u32,let V:u32>(
+    input:Table<A,V>,selected:[bool;A],out:Table<R,V>) {
+    check_table(input);check_table(out);
+    let mut count:u32=0;
+    let mut fields=[[[0 as Field;7];V];R];
+    for i in 0..A {
+        let take=(i<input.len)&selected[i];
+        for r in 0..R {
+            let hit=take&(count==r);
+            for v in 0..V {let source=cell_fields(input.rows[i][v]);
+                for f in 0..7 {fields[r][v][f]=fields[r][v][f]+hit as Field*source[f];}
+            }
+        }
+        count=count+take as u32;
+    }
+    assert(count<=R,"operator capacity");
+    assert(count==out.len,"operator length");
+    for r in 0..R {for v in 0..V {
+        assert(fields[r][v]==cell_fields(out.rows[r][v]),"operator rows");
+    }}
 }
 
 pub fn append<let R: u32, let V: u32>(mut table: Table<R, V>, row: [TermCell; V], active: bool) -> Table<R, V> {

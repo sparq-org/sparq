@@ -124,3 +124,37 @@ retain their existing signatures. The public layout and external signature
 admission live in the query crate; the native Compiler currently accepts hidden
 mode. `ops_core_expr::temporal_payload` is the shared packed-time adapter for
 operator consumers, retaining the exact zero-tail constraint.
+
+## Canonical table outputs
+
+Scan validates the supplied canonical bindings directly: every matching source
+binding is present, every active output has a matching source, and bindings are
+unique. Each metadata field is selected from its first matching source position.
+`table::assert_canonicalized` checks stable canonical permutations for projection
+and SELECT. Computed occurrence ordinals preserve repeated rows and their full
+payload order. No witness-chosen permutation or source index is used; metadata
+selection is exact in each field. Padding, cardinality, canonical order and
+capacity remain constrained. The reference interpreter's order is unchanged.
+
+The class-aware temporal scalar helper constrains the bounded word that
+reconstructs its checked key and header. This also enforces the key's zero tail;
+the older byte-based extraction entry point remains available.
+
+FILTER uses `table::assert_selection` to verify a complete stable subsequence.
+Computed prefix counts fix each accepted input row’s destination, and fieldwise
+selection binds its complete payload. Inactive rows and SPARQL errors contribute
+no rows; padding and overflow still refuse. No private row index is admitted.
+
+A leading-column projection preserves the input’s canonical row order. It uses
+`table::assert_ordered` to bind each row and its complete payload directly. Other
+projections retain the stable canonical-permutation relation. Both paths check
+cardinality, padding and capacity.
+
+JOIN matches every compatible source pair to the first unused output occurrence
+of its binding, retaining source-pair order for equal identities. The full payload
+is bound at that occurrence. Complete pair coverage and complete output use
+preserve bag multiplicity; an undersized output refuses. All occurrence choices
+are computed inside the gadget.
+
+Plain-string equality classifies its operands from the authenticated datatype
+before value-key guards; identity-only comparison does not inspect unused keys.

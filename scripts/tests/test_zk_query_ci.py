@@ -63,8 +63,9 @@ class QueryProfiles(unittest.TestCase):
         names = [f"sparq_noir_query_core ops_core_tests::{op}_{case}" for op in profile.OPERATORS
                  for case in ("honest", "missing", "extra", "reordered", "padding", "overflow")]
         names += ["sparq_noir_query_core ops_core_reads::reads_check_every_active_input_row"]
+        names += [f"sparq_noir_query_core ops_core_tests::{name}" for name in profile.ROWS_CONTRACTS]
         self.assertEqual(profile.check_noir_listing("\n".join(names)), len(names))
-        for missing in (0, len(names) - 1):
+        for missing in (0, len(names) - 1, names.index("sparq_noir_query_core ops_core_reads::reads_check_every_active_input_row")):
             with self.subTest(missing=missing), self.assertRaises(ValueError):
                 profile.check_noir_listing("\n".join(names[:missing] + names[missing + 1:] ))
         with self.assertRaises(ValueError):

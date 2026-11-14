@@ -730,6 +730,49 @@ mod literal_tests {
     }
 
     #[test]
+    fn noir_temporal_scalar_layout_matches_native_suite_keys() {
+        let source = include_str!("../../../zk/noir-query/core/src/ops_core_expr.nr");
+        let scale = source
+            .split("let payload_scale:Field = ")
+            .nth(1)
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap();
+        let prefix = source
+            .split("let prefix=class as Field*")
+            .nth(1)
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap();
+        let scale = field_from_hex_str_strict(scale).unwrap();
+        let prefix = field_from_hex_str_strict(prefix).unwrap();
+        for (datatype, text) in [
+            ("date", "1970-01-01"),
+            ("date", "2024-03-01Z"),
+            ("dateTime", "2024-03-01T12:34:56Z"),
+            ("dateTime", "2024-03-01T12:34:56"),
+        ] {
+            let literal = oxrdf::Literal::new_typed_literal(
+                text,
+                oxrdf::NamedNode::new_unchecked(format!(
+                    "http://www.w3.org/2001/XMLSchema#{datatype}"
+                )),
+            );
+            let key = sparq_merkle_suite::comparison_key(&literal);
+            let word = u64::from_be_bytes(key[1..9].try_into().unwrap());
+            assert!(key[9..].iter().all(|&b| b == 0));
+            let mut packed = [0; 32];
+            packed[1..].copy_from_slice(&key);
+            assert_eq!(
+                field(packed).unwrap(),
+                Fr::from(key[0] as u64) * prefix + Fr::from(word) * scale
+            );
+        }
+    }
+
+    #[test]
     fn noir_domains_are_literals_equal_to_the_host_domains() {
         let source = include_str!("../../../zk/noir-query/core/src/ops_core_statement.nr");
         let declarations: Vec<_> = source

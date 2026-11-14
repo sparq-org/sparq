@@ -311,3 +311,35 @@ value datatypes at the consumer. An identity-only source term does not inherit a
 scalar parser bound. Unsupported private value datatypes and oversized scalar
 lexicals return named refusals before native execution; exact public parameter
 matches retain their verifier-reconstructed key shortcut.
+
+`table::assert_canonicalized(input, out)` verifies a stable canonical permutation
+with exact multiplicity and complete metadata. The occurrence ordinals are
+computed from the rows; there is no private permutation index. Scan checks its
+canonical output directly against every source match and retains the first
+matching metadata payload. Projection and SELECT use the permutation verifier.
+Padding, output order and overflow remain part of each relation.
+
+`ops_core_expr::temporal_payload_for_class(key: Field, class: u8) -> Field`
+extracts the scalar word from a checked packed temporal key and checked class.
+Its bounded reconstruction enforces the header and zero tail. The original
+`temporal_payload(key)` byte-based helper remains available. Both keep the same
+suite representation; the class-aware bridge is also pinned to native keys.
+
+`table::assert_selection(input, selected, out)` verifies a complete stable
+subsequence with computed destination ranks and full payload equality. FILTER
+derives the selected flags from true, non-error predicates; inactive input rows
+remain excluded, and an undersized output refuses.
+
+A leading-column projection preserves the input’s canonical row order. It uses
+`table::assert_ordered` to bind each row and its complete payload directly. Other
+projections retain the stable canonical-permutation relation. Both paths check
+cardinality, padding and capacity.
+
+JOIN matches every compatible source pair to the first unused output occurrence
+of its binding, retaining source-pair order for equal identities. The full payload
+is bound at that occurrence. Complete pair coverage and complete output use
+preserve bag multiplicity; an undersized output refuses. All occurrence choices
+are computed inside the gadget.
+
+Plain-string equality classifies its operands from the authenticated datatype
+before value-key guards; identity-only comparison does not inspect unused keys.
