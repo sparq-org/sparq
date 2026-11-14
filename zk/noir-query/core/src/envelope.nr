@@ -661,23 +661,23 @@ pub fn credential_dataset<let N: u32, let O: u32, let G: u32>(
     check_credential(c);
     let claimed = required_property(c, c.credential_subject(), crate::term::iri_issuer());
     assert(same_term(issuer, claimed), "dataset issuer binding");
-    assert(view.message == c.message(), "dataset message binding");
-    let graph = view.graph;
+    assert(view.message() == c.message(), "dataset message binding");
+    let graph = view.graph();
     assert(graph.bound & (graph.kind == 2), "dataset graph binding");
     let rows = c.quads();
     let mut candidates = [[unbound(); 4]; 2 * N + 1];
     for i in 0..N {
-        assert(view.active[i] == (i < c.count()), "dataset active binding");
+        assert(view.active()[i] == (i < c.count()), "dataset active binding");
         for p in 0..3 {
             assert(
-                crate::table::equal_cell(view.rows[i][p], from_suite_cell(rows[i][p])),
+                crate::table::equal_cell(view.rows()[i][p], from_suite_cell(rows[i][p])),
                 "dataset row binding",
             );
         }
-        let q = [view.rows[i][0], view.rows[i][1], view.rows[i][2], unbound()];
-        candidates[2 * i] = choose_row(view.active[i], q, [unbound(); 4]);
+        let q = [view.rows()[i][0], view.rows()[i][1], view.rows()[i][2], unbound()];
+        candidates[2 * i] = choose_row(view.active()[i], q, [unbound(); 4]);
         candidates[2 * i + 1] =
-            choose_row(view.active[i], [q[0], q[1], q[2], graph], [unbound(); 4]);
+            choose_row(view.active()[i], [q[0], q[1], q[2], graph], [unbound(); 4]);
     }
     candidates[2 * N] =
         [graph, from_suite_cell(verified_issuer_predicate()), from_suite_cell(issuer), unbound()];
