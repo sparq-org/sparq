@@ -104,6 +104,8 @@ pub fn envelope_words(
     assert(status_required | (!allow_missing_status & (snapshot_root == 0) & (snapshot_depth == 0)), "inactive status policy");
     assert(validity_required | (now == 0), "inactive validity policy");
     assert(freshness_required | (earliest_created == 0), "inactive freshness policy");
+    assert(now <= 0x7fffffffffffffff, "validity instant range");
+    assert(earliest_created <= 0x7fffffffffffffff, "freshness instant range");
     [issuer_root, issuer_depth as Field, holder_required as Field, holder_issuers_present as Field,
         holder_issuer_count as Field, holder_issuers[0], holder_issuers[1], holder_issuers[2], holder_issuers[3],
         status_required as Field, allow_missing_status as Field, snapshot_root, snapshot_depth as Field,
@@ -113,6 +115,22 @@ pub fn envelope_words(
 fn envelope_word_order_and_wide_timestamps() {
     assert(envelope_words(9, 4, true, true, 2, [3,5,0,0], true, true, 7, 3, true,
         0x100000000, true, 0x100000001) == [9,4,1,1,2,3,5,0,0,1,1,7,3,1,0x100000000,1,0x100000001]);
+}
+#[test]
+fn envelope_timestamp_upper_bound_is_inclusive() {
+    let words = envelope_words(9,4,false,false,0,[0;4],false,false,0,0,true,
+        0x7fffffffffffffff,true,0x7fffffffffffffff);
+    assert((words[14] == 0x7fffffffffffffff) & (words[16] == 0x7fffffffffffffff));
+}
+#[test(should_fail_with = "validity instant range")]
+fn envelope_validity_instant_above_range() {
+    let _ = envelope_words(9,4,false,false,0,[0;4],false,false,0,0,true,
+        0x8000000000000000,false,0);
+}
+#[test(should_fail_with = "freshness instant range")]
+fn envelope_freshness_instant_above_range() {
+    let _ = envelope_words(9,4,false,false,0,[0;4],false,false,0,0,false,0,true,
+        0x8000000000000000);
 }
 #[test]
 fn envelope_inactive_values_are_zero() {

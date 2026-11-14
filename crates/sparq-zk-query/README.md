@@ -47,7 +47,7 @@ for compatibility; proof and verification use `credential::SuiteEncoder`.
 Structural requests created with `Request::new` cannot produce an authenticated proof.
 
 The current suite profile opens complete credentials, checks hidden signatures
-and issuer key membership. Value consumers check supported literal keys.
+and issuer key membership. Source operators normalize supported literal keys.
 The verifier reconstructs the plan and constants from its stored request, re-encodes the released RDF answer,
 and consumes the shared challenge after proof verification and a final validity check.
 Supplied-cell programs are isolated operator fixtures.

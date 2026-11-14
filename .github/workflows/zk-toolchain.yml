@@ -490,7 +490,7 @@ jobs:
         run: |
           cargo test -p sparq-merkle-suite -- --test-threads=1
           cd zk/noir-query/core
-          nargo test
+          RAYON_NUM_THREADS=1 nargo test --test-threads 1
 
       # The DualLeafV2 sentinel/constants mirror (zk/dual-leaf-v2). A separate Nargo
       # package on purpose: every *.nr under zk/compose is sha256-pinned by the
@@ -778,7 +778,7 @@ jobs:
       # or workflow level, and on a non-bash `shell:` anywhere in this job. The ledger
       # proves each live body reached the call placed after its assertions; it does
       # not grade what those assertions check.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
       - name: Install the pinned query compiler agreement dependencies
@@ -790,8 +790,8 @@ jobs:
           cargo check -p sparq-zk-query --target wasm32-unknown-unknown
           cargo check -p sparq-zk-query --target wasm32-unknown-unknown --features ordered-json
           export RAYON_NUM_THREADS=1
-          (cd zk/noir-query/core && nargo check && nargo test)
-          (cd zk/noir-query/fixtures/generated_smoke && nargo check && nargo test)
+          (cd zk/noir-query/core && nargo check && nargo test --test-threads 1)
+          (cd zk/noir-query/fixtures/generated_smoke && nargo check && nargo test --test-threads 1)
           python3 scripts/check-noir-dependency-aliases.py --record-known-failures
           node zk/noir-query/compiler-agreement/check.mjs --self-test
           export SPARQ_NOIR_QUERY_PROOF_PROFILE=smoke

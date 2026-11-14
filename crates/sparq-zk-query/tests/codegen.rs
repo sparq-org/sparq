@@ -79,6 +79,22 @@ fn committed_smoke_package_is_exactly_generated_with_its_original_manifest() {
 }
 
 #[test]
+fn source_scans_and_joins_use_the_normalized_literal_profile() {
+    for query in [
+        "ASK {?s <urn:p> 1}",
+        "SELECT ?s WHERE {?s <urn:p> ?x}",
+        "ASK {?s <urn:p> ?x . ?s <urn:q> ?x}",
+    ] {
+        let package = generate(&lower(query, B).unwrap()).unwrap();
+        let source = &package.files[&format!("{}/src/main.nr", package.name)];
+        assert!(source.contains("open_bounded_one::<4, 128, 160, 1>"));
+    }
+    let package = generate(&lower("ASK {}", B).unwrap()).unwrap();
+    let source = &package.files[&format!("{}/src/main.nr", package.name)];
+    assert!(source.contains("open_bounded_one::<4, 128, 160, 0>"));
+}
+
+#[test]
 fn heterogeneous_credential_buckets_are_shape_and_their_limits_are_public_inputs() {
     let b = Bounds {
         credentials: 4,

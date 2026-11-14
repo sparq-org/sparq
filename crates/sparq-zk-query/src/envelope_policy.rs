@@ -29,8 +29,8 @@ pub struct AcceptedSnapshots {
 }
 
 /// Typed policy properties extracted from the immutable stored request.
-/// Instant values use the agreed exact unsigned seconds representation; metadata
-/// conversion to the suite's checked temporal keys belongs to its opener.
+/// Instants are exact nonnegative Unix epoch milliseconds, without rounding.
+/// The admitted range matches the suite's signed millisecond timestamps.
 #[derive(Clone, Debug, Default)]
 pub struct PolicyInput {
     pub trust_members: Vec<TrustMember>,
@@ -161,6 +161,13 @@ impl PublicPolicy {
 /// Derive roots, depths, flags and canonical zero values from stored policy input.
 /// This function does not accept roots or flags chosen by a presentation.
 pub fn derive(input: &PolicyInput) -> Result<PublicPolicy, Error> {
+    if [input.validity_time, input.earliest_created]
+        .into_iter()
+        .flatten()
+        .any(|instant| instant > i64::MAX as u64)
+    {
+        return Err(Error::Invalid("envelope instant range".into()));
+    }
     let trust = input
         .trust_members
         .iter()
@@ -249,6 +256,72 @@ mod tests {
             digests: digests.iter().copied().map(number).collect(),
             allow_missing,
         }
+    }
+
+    #[test]
+    fn issued_credential_trust_member_matches_noir_vector() {
+        let key = suite::keypair_from_seed(&[1; 32]);
+        let document = "<urn:credential> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://www.w3.org/2018/credentials#VerifiableCredential> .\n<urn:credential> <https://www.w3.org/2018/credentials#issuer> <urn:issuer:1> .\n";
+        let configuration = "<urn:proof> <https://w3id.org/security#cryptosuite> \"schnorr-poseidon2-merkle-2026\" .\n<urn:proof> <https://w3id.org/security#verificationMethod> <urn:method:1> .\n<urn:proof> <http://purl.org/dc/terms/created> \"1970-01-01T00:00:00.101Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n";
+        let credential =
+            suite::issue_deterministic(document, configuration, &key, &[31; 32]).unwrap();
+        let opened = suite::verify_and_open(&credential, &key.public_key()).unwrap();
+        assert_eq!(
+            sparq_merkle_suite::metadata::timestamp(opened.created.as_ref()),
+            Some(101)
+        );
+        let issuer = oxttl::NQuadsParser::new()
+            .for_slice(credential.document.as_bytes())
+            .map(Result::unwrap)
+            .find(|q| q.predicate.as_str() == "https://www.w3.org/2018/credentials#issuer")
+            .unwrap()
+            .object;
+        let Term::NamedNode(issuer) = issuer else {
+            panic!("issuer IRI")
+        };
+        let Some(Term::NamedNode(method)) = opened.verification_method else {
+            panic!("method IRI")
+        };
+        let member = TrustMember {
+            issuer,
+            verification_method: method,
+            key: key.public_key(),
+        };
+        let vectors: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/envelope_set_roots.json"))
+                .unwrap();
+        assert_eq!(
+            trust_member_digest(&member).unwrap(),
+            parse(vectors["issued_trust_member"].as_str().unwrap())
+        );
+        let mut changed = member.clone();
+        changed.verification_method = iri("urn:method:other");
+        assert_ne!(
+            trust_member_digest(&member).unwrap(),
+            trust_member_digest(&changed).unwrap()
+        );
+    }
+
+    #[test]
+    fn millisecond_instants_are_not_rounded() {
+        let mut input = input();
+        input.validity_time = Some(101);
+        input.earliest_created = Some(99);
+        let words = public_words(&input).unwrap();
+        assert_eq!(words[14], number(101));
+        assert_eq!(words[16], number(99));
+        assert_ne!(words[14], number(0));
+        for instant in [i64::MAX as u64 + 1, u64::MAX] {
+            input.validity_time = Some(instant);
+            assert!(
+                matches!(derive(&input), Err(Error::Invalid(reason)) if reason == "envelope instant range")
+            );
+        }
+        input.validity_time = Some(101);
+        input.earliest_created = Some(i64::MAX as u64 + 1);
+        assert!(
+            matches!(derive(&input), Err(Error::Invalid(reason)) if reason == "envelope instant range")
+        );
     }
 
     #[test]

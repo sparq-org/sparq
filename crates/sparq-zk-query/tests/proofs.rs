@@ -1042,7 +1042,9 @@ fn request_derives_canonical_policy_roots_and_exact_millisecond_words() {
 }
 
 #[test]
-fn canonical_policy_requires_its_consumer_even_when_tree_depth_matches() {
+fn require_envelope_consumer_refuses_canonical_policy_when_tree_depth_matches() {
+    // Exercise Request::require_envelope_consumer through both native entry points,
+    // with a key that would fail later checks if the early policy refusal were omitted.
     use oxrdf::NamedNode;
     use sparq_zk_query::envelope_policy::{PolicyInput, TrustMember};
     let plan = sparq_zk_query::lower::lower("ASK {}", B).unwrap();

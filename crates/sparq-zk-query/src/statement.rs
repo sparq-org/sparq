@@ -91,6 +91,9 @@ impl EnvelopeInputs {
     pub fn validate(&self) -> Result<(), Error> {
         field(self.issuer_root)?;
         field(self.snapshot_root)?;
+        if self.now > i64::MAX as u64 || self.earliest_created > i64::MAX as u64 {
+            return Err(Error::Invalid("envelope instant range".into()));
+        }
         let n = self.holder_issuer_count as usize;
         if self.holder_required && self.holder_issuers_present && n == 0 {
             return Err(Error::Invalid("empty holder issuer list".into()));

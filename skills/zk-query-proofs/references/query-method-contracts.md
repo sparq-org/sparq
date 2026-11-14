@@ -166,7 +166,8 @@ depth happens to match the issuer-only relation.
 `Request::new_authenticated_with_envelope(stored, bounds, key, policy,
 quad_bounds)` takes `envelope_policy::PolicyInput`, derives its canonical roots
 and retains it for fresh `envelope_inputs()` derivation during verification.
-Validity and freshness times are Unix epoch milliseconds. A present-empty
+Validity and freshness times are exact nonnegative Unix epoch milliseconds within
+the suite's signed timestamp range. A present-empty
 holder issuer list is refused; omit holder binding to require no holder keys.
 
 Expression evaluation uses the shared typed gadgets, with a separate capacity
@@ -197,6 +198,13 @@ copies for the graph dispatcher. The method-generated issuer assertions occur
 only in the default view. These helpers await production wiring to the envelope
 consumer and graph dispatcher.
 
+`credential::assemble_issuer_dataset` accepts complete signed credentials, typed
+trust members and the request digest. It derives each assertion's issuer from
+the credential's unique root and issuer property, authenticated verification
+method and signing key. Trust roots use `envelope_policy`'s canonical set
+construction. This host helper prepares the issuer dataset; the generated
+consumer remains required to enforce its relation within a proof.
+
 The Noir seam is `ops_core_suite::authenticate` followed by the envelope checks
 and `from_authenticated`; inactive slots use `inactive_credential`. This reuses
 the authenticated suite object and its metadata getters. `Dataset` retains
@@ -213,7 +221,7 @@ resource normalization only. Generated credential openings call
 `ops_core_suite::open_bounded_one`, delegating the complete signed opening to
 `suite::open_bounded_credential_hidden` once per credential. Resource datatype,
 language and key bytes are zero; the default graph and active flags are derived.
-Object value consumers call `term::open_key_checked` with fixed datatype
+Source scans, joins and value consumers call `term::open_key_checked` with fixed datatype
 identifiers. Raw lexical backing is separately bounded for resources, objects
 and scalars. Shape encoding includes all these capacities.
 The additive envelope seam is `authenticate_bounded` followed by its consumer

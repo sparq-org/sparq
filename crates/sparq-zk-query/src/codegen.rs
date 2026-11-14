@@ -73,8 +73,6 @@ fn generate_inner(plan: &Plan, authenticated: bool) -> Result<Package, Error> {
         !matches!(
             n.operator,
             Operator::Unit
-                | Operator::Scan(_)
-                | Operator::Join(..)
                 | Operator::Project(_)
                 | Operator::Distinct(_)
                 | Operator::Slice { .. }

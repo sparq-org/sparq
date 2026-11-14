@@ -210,6 +210,29 @@ fn explicit_empty_holder_scope_is_refused_while_an_absent_scope_selects_all() {
 }
 
 #[test]
+fn envelope_instants_use_the_authenticated_timestamp_range() {
+    use sparq_zk_query::{statement::EnvelopeInputs, Error};
+    let mut policy = EnvelopeInputs::issuer_only([7; 32]);
+    policy.validity_required = true;
+    policy.freshness_required = true;
+    policy.now = i64::MAX as u64;
+    policy.earliest_created = i64::MAX as u64;
+    assert!(policy.words().is_ok());
+    for freshness in [false, true] {
+        let mut invalid = policy.clone();
+        if freshness {
+            invalid.earliest_created += 1;
+        } else {
+            invalid.now += 1;
+        }
+        assert_eq!(
+            invalid.words().unwrap_err(),
+            Error::Invalid("envelope instant range".into())
+        );
+    }
+}
+
+#[test]
 fn computed_boolean_answers_do_not_require_a_source_vocabulary_entry() {
     use sparq_zk_query::{answer::Answer, credential::SuiteEncoder, interp::EncodeTerm};
     let plan = lower("SELECT ?result WHERE {VALUES ?result {}}", B).unwrap();

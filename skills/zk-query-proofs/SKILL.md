@@ -67,8 +67,9 @@ original challenge once. It has no backend, interoperable wire encoding, transpo
 hash or other cryptography, ships no production challenge store, proves no cryptographic claim,
 and registers no method. See [query-method contracts](references/query-method-contracts.md).
 The research Noir query compiler additionally exposes portable host reconstruction
-and `Request::new_authenticated_with_envelope` policy derivation there, including dataset assembly for the graph lane
-and parameterized membership lists; its subprocess method driver remains native.
+and `Request::new_authenticated_with_envelope` policy derivation there, including
+exact millisecond instants, issuer-authenticated dataset preparation and
+parameterized membership lists; its subprocess method driver remains native.
 
 The detached exact-evaluator host crate's optional `vcq` feature (off by default) adds
 the first `QueryMethod` adapter, `sparq_proved_evaluator::vcq::Risc0ExactV3`, over the V3 relation:
