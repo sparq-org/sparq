@@ -103,13 +103,27 @@ impl Compiler {
         profile: OpeningProfile,
         features: EnvelopeFeatures,
     ) -> Result<Prepared, Error> {
-        let mut plan = lower(query, bounds)?
-            .with_opening_profile(profile)
-            .with_envelope_features(features);
-        if let Some(quad_bounds) = quad_bounds {
-            plan = plan.with_credential_quad_bounds(quad_bounds)?;
-        }
-        self.prepare_plan(plan)
+        self.prepare_with_table_rows(query, bounds, quad_bounds, profile, features, None)
+    }
+    /// Prepare with per-table row capacities (one per plan node); the request must store
+    /// the same vector so the verifier rebuilds the same plan.
+    pub fn prepare_with_table_rows(
+        &self,
+        query: &str,
+        bounds: Bounds,
+        quad_bounds: Option<&[u32]>,
+        profile: OpeningProfile,
+        features: EnvelopeFeatures,
+        table_rows: Option<&[u32]>,
+    ) -> Result<Prepared, Error> {
+        self.prepare_plan(crate::request::shaped_plan(
+            query,
+            bounds,
+            profile,
+            features,
+            quad_bounds,
+            table_rows,
+        )?)
     }
     fn prepare_plan(&self, plan: Plan) -> Result<Prepared, Error> {
         let compiled = self.compiled(&plan)?;

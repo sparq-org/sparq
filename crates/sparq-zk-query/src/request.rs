@@ -33,8 +33,30 @@ pub struct Request {
     envelope: Option<crate::statement::EnvelopeInputs>,
     envelope_policy: Option<crate::envelope_policy::PolicyInput>,
     credential_quad_bounds: Vec<u32>,
+    table_row_bounds: Option<Vec<u32>>,
     opening_profile: OpeningProfile,
     envelope_features: EnvelopeFeatures,
+}
+
+/// The one trusted plan reconstruction shared by request construction and `Request::plan`.
+pub(crate) fn shaped_plan(
+    query: &str,
+    bounds: Bounds,
+    profile: OpeningProfile,
+    features: EnvelopeFeatures,
+    quad_bounds: Option<&[u32]>,
+    table_rows: Option<&[u32]>,
+) -> Result<Plan, Error> {
+    let mut plan = lower(query, bounds)?
+        .with_opening_profile(profile)
+        .with_envelope_features(features);
+    if let Some(rows) = table_rows {
+        plan = crate::plan_closed::with_row_bounds(plan, bounds, rows)?;
+    }
+    if let Some(quad_bounds) = quad_bounds {
+        plan = plan.with_credential_quad_bounds(quad_bounds)?;
+    }
+    Ok(plan)
 }
 
 pub fn descriptor(plan: &Plan, key: &[u8]) -> Result<MethodDescriptor, Error> {
@@ -138,6 +160,7 @@ impl Request {
             Some(crate::statement::EnvelopeInputs::issuer_only(issuer_root)),
             quad_bounds,
             profile,
+            None,
         )
     }
     /// Store typed envelope properties together with verifier-selected opening bounds.
@@ -149,6 +172,27 @@ impl Request {
         quad_bounds: Option<&[u32]>,
         profile: OpeningProfile,
     ) -> Result<Self, Error> {
+        Self::new_authenticated_with_envelope_profile_and_table_rows(
+            stored,
+            bounds,
+            key,
+            policy,
+            quad_bounds,
+            profile,
+            None,
+        )
+    }
+    /// As `new_authenticated_with_envelope_and_profile`, with per-table row capacities
+    /// (one per plan node, see `plan_closed::with_row_bounds`) committed in the plan hash.
+    pub fn new_authenticated_with_envelope_profile_and_table_rows(
+        stored: StoredRequest,
+        bounds: Bounds,
+        key: Vec<u8>,
+        policy: crate::envelope_policy::PolicyInput,
+        quad_bounds: Option<&[u32]>,
+        profile: OpeningProfile,
+        table_rows: Option<&[u32]>,
+    ) -> Result<Self, Error> {
         let envelope = crate::envelope_policy::derive(&policy)?.into();
         let mut request = Self::new_inner_with_profile(
             stored,
@@ -157,6 +201,7 @@ impl Request {
             Some(envelope),
             quad_bounds,
             profile,
+            table_rows,
         )?;
         request.envelope_policy = Some(policy);
         Ok(request)
@@ -175,6 +220,7 @@ impl Request {
             envelope,
             quad_bounds,
             OpeningProfile::default(),
+            None,
         )
     }
     fn new_inner_with_profile(
@@ -184,6 +230,7 @@ impl Request {
         envelope: Option<crate::statement::EnvelopeInputs>,
         quad_bounds: Option<&[u32]>,
         opening_profile: OpeningProfile,
+        table_rows: Option<&[u32]>,
     ) -> Result<Self, Error> {
         if key.is_empty() {
             return Err(Error::Invalid("verification key".into()));
@@ -192,12 +239,14 @@ impl Request {
             .as_ref()
             .map(EnvelopeFeatures::from_policy)
             .unwrap_or_default();
-        let mut plan = lower(stored.query(), bounds)?
-            .with_opening_profile(opening_profile)
-            .with_envelope_features(envelope_features);
-        if let Some(quad_bounds) = quad_bounds {
-            plan = plan.with_credential_quad_bounds(quad_bounds)?;
-        }
+        let plan = shaped_plan(
+            stored.query(),
+            bounds,
+            opening_profile,
+            envelope_features,
+            quad_bounds,
+            table_rows,
+        )?;
         let credential_quad_bounds = plan.credential_quad_bounds();
         let requirements = stored.requirements();
         if stored.base_iri().is_some() {
@@ -260,7 +309,8 @@ impl Request {
         if requirements.methods() != [descriptor(&plan, &key)?] {
             return Err(Error::Invalid("method descriptor".into()));
         }
-        let canonical_rdf = canonical_request(&stored, bounds, &plan, &key, envelope.as_ref())?;
+        let canonical_rdf =
+            canonical_request(&stored, bounds, &plan, &key, envelope.as_ref(), table_rows)?;
         let digest = Sha256::digest(canonical_rdf.as_bytes()).into();
         Ok(Self {
             stored,
@@ -271,6 +321,7 @@ impl Request {
             envelope,
             envelope_policy: None,
             credential_quad_bounds,
+            table_row_bounds: table_rows.map(<[u32]>::to_vec),
             opening_profile,
             envelope_features,
         })
@@ -318,10 +369,18 @@ impl Request {
     }
     /// Rebuild the trusted plan and credential limits from this stored request.
     pub fn plan(&self) -> Result<Plan, Error> {
-        lower(self.stored.query(), self.bounds)?
-            .with_opening_profile(self.opening_profile)
-            .with_envelope_features(self.envelope_features)
-            .with_credential_quad_bounds(&self.credential_quad_bounds)
+        shaped_plan(
+            self.stored.query(),
+            self.bounds,
+            self.opening_profile,
+            self.envelope_features,
+            Some(&self.credential_quad_bounds),
+            self.table_row_bounds.as_deref(),
+        )
+    }
+    /// Per-table row capacities stored with the request, if any.
+    pub fn table_row_bounds(&self) -> Option<&[u32]> {
+        self.table_row_bounds.as_deref()
     }
 }
 
@@ -331,6 +390,7 @@ fn canonical_request(
     plan: &Plan,
     key: &[u8],
     envelope: Option<&crate::statement::EnvelopeInputs>,
+    table_rows: Option<&[u32]>,
 ) -> Result<String, Error> {
     let mut rdf = String::new();
     let mut triple = |subject: &str, predicate: &str, object: String| {
@@ -371,6 +431,9 @@ fn canonical_request(
         "storedRequestEncoding":sparq_query_protocol::LOCAL_ENCODING_PROFILE,
         "storedRequest":URL_SAFE_NO_PAD.encode(sparq_query_protocol::encode_stored_request(stored)),
     });
+    if let Some(rows) = table_rows {
+        parameters["tableRowBounds"] = serde_json::json!(rows);
+    }
     if let Some(policy) = envelope {
         parameters["issuerRoot"] = serde_json::json!(URL_SAFE_NO_PAD.encode(policy.issuer_root));
         parameters["envelope"] = serde_json::json!(policy
