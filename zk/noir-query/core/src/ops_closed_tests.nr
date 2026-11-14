@@ -468,7 +468,7 @@ fn capture_padding() {
 
 #[test]
 fn graph_seed_honest() {
-    let mut out = append(empty::<4,1>(), [cell(1)], true);
+    let out = append(empty::<4,1>(), [cell(1)], true);
     graph_seed(out);
 }
 
@@ -502,7 +502,7 @@ fn graph_seed_padding() {
 
 #[test]
 fn context_unit_honest() {
-    let mut out = append(empty::<4,1>(), [unbound()], true);
+    let out = append(empty::<4,1>(), [unbound()], true);
     context_unit(out);
 }
 

@@ -316,5 +316,6 @@ pub(crate) fn render_canonical(
             )?)
         ));
     }
+    crate::witness_closed::append_authenticated(plan, credentials, trace, &mut out)?;
     Ok(out)
 }

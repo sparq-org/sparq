@@ -2,13 +2,12 @@
 use crate::table::{TermCell,Table,check_table};
 use crate::ops_closed_group::{Aggregate, NumericTypes, Having};
 use crate::ops_closed_numeric::{PREFIX,encode};
-use crate::suite_constants::{DT_INTEGER, DT_DECIMAL, LANGUAGE_DOMAIN};
-use std::collections::bounded_vec::BoundedVec;
+use crate::suite_constants::{DT_INTEGER, DT_DECIMAL, LANG_EMPTY};
 fn normalize(mut c: TermCell) -> TermCell {
     if c.bound & (c.kind == 3) & (c.key_class == 1) {
         let bytes=c.key.to_be_bytes::<32>();
         assert((bytes[0] == 0) & (bytes[1] == 1), "suite numeric key prefix");
-        let lang=crate::term::hash_bytes(LANGUAGE_DOMAIN,BoundedVec::<u8,0>::new());
+        let lang=LANG_EMPTY;
         assert(c.lang == lang, "numeric language");
         c.key=c.key-PREFIX;c.lang=0;
     }
