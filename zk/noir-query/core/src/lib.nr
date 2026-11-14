@@ -13,3 +13,5 @@ mod term_ids;
 pub mod suite_metadata;
 mod suite_metadata_tests;
 mod suite_entry_tests;
+
+mod term_identity_tests;

@@ -79,6 +79,10 @@ fn constructor_cells_authenticate_in_both_modes() {
     let revealed=crate::suite::open_credential_revealed_from_quads(cells,[crate::suite::leaf_salt(7,0)],7,1,
         [0x09090909090909090909090909090909;2],created(),method(),pk(),0);
     same_opening(hidden,fixture(created(),pk()));same_opening(revealed,hidden);
+    for p in 0..4 {
+        assert(hidden.quads()[0][p].identity() == cells[0][p].identity());
+        assert(revealed.quads()[0][p].identity() == cells[0][p].identity());
+    }
 }
 #[test(should_fail_with="credential blank-node scope")]
 fn constructor_cells_refuse_another_credential_scope() {
