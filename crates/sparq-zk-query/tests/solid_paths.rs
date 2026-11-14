@@ -564,16 +564,20 @@ fn write_package(package: &codegen::Package, root: &Path) {
     )
     .unwrap();
 }
-fn execute(root: &Path, name: &str, input: &str, tag: &str) -> Result<(), String> {
+fn execute(
+    gate: &support::LiveToolchain,
+    root: &Path,
+    name: &str,
+    input: &str,
+    tag: &str,
+) -> Result<(), String> {
     std::fs::write(root.join(name).join(format!("Prover_{tag}.toml")), input).unwrap();
     let witness = root.join("target").join(format!("{tag}.gz"));
     if witness.exists() {
         std::fs::remove_file(&witness).unwrap();
     }
-    let output = std::process::Command::new("timeout")
+    let output = support::live_tool(gate, "nargo")
         .args([
-            "600",
-            "nargo",
             "execute",
             "--inliner-aggressiveness",
             "0",
@@ -586,6 +590,14 @@ fn execute(root: &Path, name: &str, input: &str, tag: &str) -> Result<(), String
         .current_dir(root)
         .output()
         .unwrap();
+    if !output.status.success() {
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("Assertion failed:"),
+            "unexpected native failure: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
     if output.status.success() && witness.is_file() {
         Ok(())
     } else {
@@ -623,10 +635,7 @@ fn rights(p: &Predicate, ids: &mut Vec<u32>) {
         _ => (),
     }
 }
-fn exercise(target: &str, auth: bool) {
-    let Some(gate) = support::gate("Solid target query execution", &["nargo"]) else {
-        return;
-    };
+fn exercise(gate: &support::LiveToolchain, target: &str, auth: bool) {
     let p = prepare(target, false);
     let package = if auth {
         codegen::generate(&p)
@@ -645,10 +654,8 @@ fn exercise(target: &str, auth: bool) {
         .unwrap_or_else(|| scratch.path().to_path_buf());
     std::fs::create_dir_all(&root).unwrap();
     write_package(&package, &root);
-    let compiled = std::process::Command::new("timeout")
+    let compiled = support::live_tool(gate, "nargo")
         .args([
-            "600",
-            "nargo",
             "compile",
             "--inliner-aggressiveness",
             "0",
@@ -676,6 +683,7 @@ fn exercise(target: &str, auth: bool) {
         assert_eq!(engine(target, &data), expected);
         eprintln!("executing {target}/{case} (authenticated={auth})");
         execute(
+            gate,
             &root,
             &package.name,
             &render(&p, &data, &trace, auth),
@@ -688,6 +696,7 @@ fn exercise(target: &str, auth: bool) {
             assert_ne!(altered.result, trace.result, "{target}/{case}");
             assert!(
                 execute(
+                    gate,
                     &root,
                     &package.name,
                     &render(&p, &data, &altered, auth),
@@ -712,6 +721,7 @@ fn exercise(target: &str, auth: bool) {
             let mut hidden = trace.clone();
             hidden.tables[source].rows.pop();
             let error = execute(
+                gate,
                 &root,
                 &package.name,
                 &render(&p, &data, &hidden, auth),
@@ -739,6 +749,7 @@ fn exercise(target: &str, auth: bool) {
                 let mut hidden = trace.clone();
                 hidden.tables[id as usize].rows.pop();
                 let error = execute(
+                    gate,
                     &root,
                     &package.name,
                     &render(&p, &data, &hidden, auth),
@@ -752,55 +763,102 @@ fn exercise(target: &str, auth: bool) {
             }
         }
     }
-    support::complete(gate);
 }
 #[test]
 fn insurance_count_operator() {
-    exercise("insurance-count", false);
+    let Some(gate) = support::gate("insurance_count_operator", &["nargo"]) else {
+        return;
+    };
+    exercise(&gate, "insurance-count", false);
+    support::complete(gate);
 }
 #[test]
 fn insurance_closed_operator() {
-    exercise("insurance-closed", false);
+    let Some(gate) = support::gate("insurance_closed_operator", &["nargo"]) else {
+        return;
+    };
+    exercise(&gate, "insurance-closed", false);
+    support::complete(gate);
 }
 #[test]
 fn trial_eligibility_operator() {
-    exercise("trial-eligibility", false);
+    let Some(gate) = support::gate("trial_eligibility_operator", &["nargo"]) else {
+        return;
+    };
+    exercise(&gate, "trial-eligibility", false);
+    support::complete(gate);
 }
 #[test]
 fn recycled_min_operator() {
-    exercise("recycled-min", false);
+    let Some(gate) = support::gate("recycled_min_operator", &["nargo"]) else {
+        return;
+    };
+    exercise(&gate, "recycled-min", false);
+    support::complete(gate);
 }
 #[test]
 fn insurance_count_authenticated() {
-    exercise("insurance-count", true);
+    let Some(gate) = support::gate("insurance_count_authenticated", &["nargo"]) else {
+        return;
+    };
+    exercise(&gate, "insurance-count", true);
+    support::complete(gate);
 }
 #[test]
 fn insurance_closed_authenticated() {
-    exercise("insurance-closed", true);
+    let Some(gate) = support::gate("insurance_closed_authenticated", &["nargo"]) else {
+        return;
+    };
+    exercise(&gate, "insurance-closed", true);
+    support::complete(gate);
 }
 #[test]
 fn trial_eligibility_authenticated() {
-    exercise("trial-eligibility", true);
+    let Some(gate) = support::gate("trial_eligibility_authenticated", &["nargo"]) else {
+        return;
+    };
+    exercise(&gate, "trial-eligibility", true);
+    support::complete(gate);
 }
 #[test]
 fn recycled_min_authenticated() {
-    exercise("recycled-min", true);
+    let Some(gate) = support::gate("recycled_min_authenticated", &["nargo"]) else {
+        return;
+    };
+    exercise(&gate, "recycled-min", true);
+    support::complete(gate);
 }
 #[test]
 fn recycled_sum_operator() {
-    exercise("recycled-sum", false);
+    let Some(gate) = support::gate("recycled_sum_operator", &["nargo"]) else {
+        return;
+    };
+    exercise(&gate, "recycled-sum", false);
+    support::complete(gate);
 }
 #[test]
 fn recycled_having_operator() {
-    exercise("recycled-having", false);
+    let Some(gate) = support::gate("recycled_having_operator", &["nargo"]) else {
+        return;
+    };
+    exercise(&gate, "recycled-having", false);
+    support::complete(gate);
 }
 #[test]
 fn recycled_sum_authenticated() {
-    exercise("recycled-sum", true);
+    let Some(gate) = support::gate("recycled_sum_authenticated", &["nargo"]) else {
+        return;
+    };
+    exercise(&gate, "recycled-sum", true);
+    support::complete(gate);
 }
 #[test]
 fn recycled_having_authenticated() {
-    exercise("recycled-having", true);
+    let Some(gate) = support::gate("recycled_having_authenticated", &["nargo"]) else {
+        return;
+    };
+    exercise(&gate, "recycled-having", true);
+    support::complete(gate);
 }
 #[test]
 fn export_solid_path_programs_when_requested() {
@@ -928,6 +986,60 @@ fn target_capacity_and_reserved_issuer_controls() {
         .contains("verifiedIssuer"));
 }
 
+fn required_value_read(
+    target: &str,
+    p: &Plan,
+    trace: &Trace,
+) -> (usize, u32, sparq_zk_query::interp::Cell) {
+    if target == "insurance-closed" {
+        let d = p.variable_names().iter().position(|v| v == "d").unwrap() as u32;
+        p.nodes()
+            .iter()
+            .enumerate()
+            .find_map(|(i, n)| {
+                let Operator::Closed(ClosedOperator::Filter { input, .. }) = &n.operator else {
+                    return None;
+                };
+                let col = p.nodes()[*input as usize]
+                    .output
+                    .variables
+                    .iter()
+                    .position(|v| *v == d)?;
+                let row = trace.tables[*input as usize].rows.first()?;
+                // This real claim is rejected by the date FILTER in NOT EXISTS.
+                assert!(trace.tables[i].rows.is_empty());
+                Some((i, *input, row[col]))
+            })
+            .expect("a non-output claim date read")
+    } else {
+        p.nodes()
+            .iter()
+            .enumerate()
+            .find_map(|(i, n)| {
+                let Operator::Closed(ClosedOperator::Group {
+                    input, aggregates, ..
+                }) = &n.operator
+                else {
+                    return None;
+                };
+                let a = aggregates
+                    .iter()
+                    .find(|a| a.kind == sparq_zk_query::interp_closed_group::AggregateKind::Min)?;
+                let col = p.nodes()[*input as usize]
+                    .output
+                    .variables
+                    .iter()
+                    .position(|v| Some(*v) == a.operand)?;
+                let rows = &trace.tables[*input as usize].rows;
+                let smallest = rows.iter().map(|r| r[col].key).min()?;
+                let largest = rows.iter().map(|r| r[col]).max_by_key(|c| c.key)?;
+                assert!(largest.key > smallest);
+                Some((i, *input, largest))
+            })
+            .expect("a non-minimum aggregate operand read")
+    }
+}
+
 #[test]
 fn required_closed_value_reads_fail_at_actual_query_sites() {
     let Some(gate) = support::gate("closed target rejected-row value reads", &["nargo"]) else {
@@ -944,55 +1056,9 @@ fn required_closed_value_reads_fail_at_actual_query_sites() {
         let workspace = tempfile::tempdir().unwrap();
         write_package(&package, workspace.path());
         let honest = render(&p, &data, &trace, true);
-        execute(workspace.path(), &package.name, &honest, "reads_honest")
+        execute(&gate, workspace.path(), &package.name, &honest, "reads_honest")
             .unwrap_or_else(|e| panic!("{target}: {e}"));
-        let (node, input, cell) = if target == "insurance-closed" {
-            let d = p.variable_names().iter().position(|v| v == "d").unwrap() as u32;
-            p.nodes()
-                .iter()
-                .enumerate()
-                .find_map(|(i, n)| {
-                    let Operator::Closed(ClosedOperator::Filter { input, .. }) = &n.operator else {
-                        return None;
-                    };
-                    let col = p.nodes()[*input as usize]
-                        .output
-                        .variables
-                        .iter()
-                        .position(|v| *v == d)?;
-                    let row = trace.tables[*input as usize].rows.first()?;
-                    // This real claim is rejected by the date FILTER in NOT EXISTS.
-                    assert!(trace.tables[i].rows.is_empty());
-                    Some((i, *input, row[col]))
-                })
-                .expect("a non-output claim date read")
-        } else {
-            p.nodes()
-                .iter()
-                .enumerate()
-                .find_map(|(i, n)| {
-                    let Operator::Closed(ClosedOperator::Group {
-                        input, aggregates, ..
-                    }) = &n.operator
-                    else {
-                        return None;
-                    };
-                    let a = aggregates.iter().find(|a| {
-                        a.kind == sparq_zk_query::interp_closed_group::AggregateKind::Min
-                    })?;
-                    let col = p.nodes()[*input as usize]
-                        .output
-                        .variables
-                        .iter()
-                        .position(|v| Some(*v) == a.operand)?;
-                    let rows = &trace.tables[*input as usize].rows;
-                    let smallest = rows.iter().map(|r| r[col].key).min()?;
-                    let largest = rows.iter().map(|r| r[col]).max_by_key(|c| c.key)?;
-                    assert!(largest.key > smallest);
-                    Some((i, *input, largest))
-                })
-                .expect("a non-minimum aggregate operand read")
-        };
+        let (node, input, cell) = required_value_read(target, &p, &trace);
         let key = cell.key[1..].to_vec();
         let marker = format!(
             "key=[{}]",
@@ -1018,6 +1084,7 @@ fn required_closed_value_reads_fail_at_actual_query_sites() {
         let changed_line = line.replacen(&marker, &changed_marker, 1);
         let changed = honest.replacen(line, &changed_line, 1);
         let error = execute(
+            &gate,
             workspace.path(),
             &package.name,
             &changed,

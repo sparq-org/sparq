@@ -183,10 +183,8 @@ fn wide_join_executes_and_rejects_a_consistent_missing_pair() {
             text,
         )
         .unwrap();
-        std::process::Command::new("timeout")
+        let output = support::live_tool(&gate, "nargo")
             .args([
-                "600",
-                "nargo",
                 "execute",
                 "--inliner-aggressiveness",
                 "0",
@@ -198,7 +196,16 @@ fn wide_join_executes_and_rejects_a_consistent_missing_pair() {
             ])
             .current_dir(workspace.0.path())
             .output()
-            .unwrap()
+            .unwrap();
+        if !output.status.success() {
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains("Assertion failed:"),
+                "unexpected native failure: {}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        output
     };
     let honest = execute(&render(&trace), "wide_honest");
     assert!(

@@ -1,6 +1,7 @@
 //! Credential profile and generated-runner contract controls.
 
 mod closed_native;
+mod support;
 #[path = "support/fixture.rs"]
 mod fixtures;
 use sparq_zk_query::credential_graphs::evaluate_cells as evaluate;
@@ -103,6 +104,12 @@ fn bounds(_path: &str) -> Bounds {
 }
 #[test]
 fn nested_exists_corpus_results_and_hidden_matches_are_bound() {
+    let Some(gate) = support::gate(
+        "nested_exists_corpus_results_and_hidden_matches_are_bound",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
     use sparq_zk_query::{
         lower::lower, plan::Operator, plan_closed::ClosedOperator, witness::prover_toml,
     };
@@ -149,6 +156,7 @@ fn nested_exists_corpus_results_and_hidden_matches_are_bound() {
             prover_toml(&plan, &data, &SuiteEncoder, trace, [7; 32], [3; 32]).unwrap()
         };
         execute_bounded(
+            &gate,
             workspace.0.path(),
             &package.name,
             &render(&trace),
@@ -170,6 +178,7 @@ fn nested_exists_corpus_results_and_hidden_matches_are_bound() {
         let mut hidden = trace.clone();
         hidden.tables[inner].rows.pop();
         let error = execute_bounded(
+            &gate,
             workspace.0.path(),
             &package.name,
             &render(&hidden),
@@ -190,6 +199,7 @@ fn nested_exists_corpus_results_and_hidden_matches_are_bound() {
             rows.pop();
         }
         let error = execute_bounded(
+            &gate,
             workspace.0.path(),
             &package.name,
             &render(&altered),
@@ -201,6 +211,7 @@ fn nested_exists_corpus_results_and_hidden_matches_are_bound() {
             "{id}: {error}"
         );
     }
+    support::complete(gate);
 }
 #[test]
 fn closed_string_reads_follow_the_shared_equality_contract() {
@@ -373,6 +384,9 @@ fn signed_blank_node_cannot_alias_the_credential_graph() {
 }
 #[test]
 fn compact_profile_credential_executes() {
+    let Some(gate) = support::gate("compact_profile_credential_executes", &["nargo", "bb"]) else {
+        return;
+    };
     let p = graphs::bind_issuer_registry(
         graphs::lower(
             "ASK {}",
@@ -410,7 +424,7 @@ fn compact_profile_credential_executes() {
     let witness =
         witness_closed::prover_toml(&p, &credentials, &trace, [7; 32], [3; 32], issuer_root())
             .unwrap();
-    execute_bounded(temp.path(), &pkg.name, &witness, "compact_authenticated").unwrap();
+    execute_bounded(&gate, temp.path(), &pkg.name, &witness, "compact_authenticated").unwrap();
     let raw_line = witness
         .lines()
         .find(|line| line.starts_with("credential_0 = "))
@@ -421,7 +435,7 @@ fn compact_profile_credential_executes() {
         let mut raw = raw_line.to_owned();
         raw.replace_range(position..position + 8, "kind = 3");
         let changed = witness.replace(raw_line, &raw);
-        let error = execute_bounded(temp.path(), &pkg.name, &changed, "compact_wrong_position")
+        let error = execute_bounded(&gate, temp.path(), &pkg.name, &changed, "compact_wrong_position")
             .unwrap_err();
         assert!(error.contains(label), "{error}");
     }
@@ -438,6 +452,7 @@ fn compact_profile_credential_executes() {
     assert_eq!(witness.matches(&raw_key(1i64)).count(), 1);
     let changed = witness.replacen(&raw_key(1i64), &raw_key(2i64), 1);
     let error = execute_bounded(
+        &gate,
         temp.path(),
         &pkg.name,
         &changed,
@@ -459,37 +474,47 @@ fn compact_profile_credential_executes() {
     let marker = format!("s = \"{}\"", sparq_zk::field::field_to_hex(&signature.s));
     assert_eq!(witness.matches(&marker).count(), 1);
     let changed = witness.replacen(&marker, "s = \"0\"", 1);
-    let error =
-        execute_bounded(temp.path(), &pkg.name, &changed, "compact_wrong_signature").unwrap_err();
+    let error = execute_bounded(
+        &gate,
+        temp.path(),
+        &pkg.name,
+        &changed,
+        "compact_wrong_signature",
+    )
+    .unwrap_err();
     assert!(
         error.contains("schnorr verification equation failed"),
         "{error}"
     );
+    support::complete(gate);
 }
 
-fn execute_bounded(root: &Path, package: &str, input: &str, tag: &str) -> Result<(), String> {
+fn execute_bounded(
+    gate: &support::LiveToolchain,
+    root: &Path,
+    package: &str,
+    input: &str,
+    tag: &str,
+) -> Result<(), String> {
     for (tool, _) in pins::PINNED_TOOLS {
-        let output = std::process::Command::new(tool)
+        let output = support::live_tool(gate, tool)
             .arg("--version")
             .output()
-            .map_err(|e| e.to_string())?;
-        if !output.status.success() || !pins::pinned_version_output(tool, &output.stdout) {
-            return Err("query method requires the pinned toolchain".into());
-        }
+            .expect("pinned tool version probe starts");
+        assert!(output.status.success(), "{tool} version probe failed");
+        assert!(
+            pins::pinned_version_output(tool, &output.stdout),
+            "query method requires the pinned toolchain: {tool}"
+        );
     }
     std::fs::write(root.join(package).join(format!("Prover_{tag}.toml")), input)
         .map_err(|e| e.to_string())?;
     let witness = root.join("target").join(format!("{tag}.gz"));
-    match std::fs::remove_file(&witness) {
-        Ok(()) => (),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
-        Err(error) => return Err(error.to_string()),
+    if witness.exists() {
+        std::fs::remove_file(&witness).map_err(|e| e.to_string())?;
     }
-    // Bound each native command by the permitted execution-step budget.
-    let output = std::process::Command::new("timeout")
+    let output = support::live_tool(gate, "nargo")
         .args([
-            "600",
-            "nargo",
             "execute",
             "--inliner-aggressiveness",
             "0",
@@ -501,7 +526,15 @@ fn execute_bounded(root: &Path, package: &str, input: &str, tag: &str) -> Result
         ])
         .current_dir(root)
         .output()
-        .map_err(|e| e.to_string())?;
+        .expect("nargo execute starts");
+    if !output.status.success() {
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("Assertion failed:"),
+            "unexpected native failure: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
     if output.status.success() && witness.is_file() {
         Ok(())
     } else {
@@ -518,6 +551,12 @@ mod pins;
 
 #[test]
 fn bounded_runner_requires_a_fresh_witness_for_the_generated_relation() {
+    let Some(gate) = support::gate(
+        "bounded_runner_requires_a_fresh_witness_for_the_generated_relation",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
     let p = sparq_zk_query::lower::lower(
         "ASK {}",
         Bounds {
@@ -546,7 +585,7 @@ fn bounded_runner_requires_a_fresh_witness_for_the_generated_relation() {
     let input =
         sparq_zk_query::witness::prover_toml(&p, &[], &SuiteEncoder, &trace, [7; 32], [3; 32])
             .unwrap();
-    execute_bounded(temp.path(), &package.name, &input, "runner_guard").unwrap();
+    execute_bounded(&gate, temp.path(), &package.name, &input, "runner_guard").unwrap();
     assert!(temp.path().join("target/runner_guard.gz").exists());
     let mut false_result = trace;
     false_result.result = ResultValue::Ask(false);
@@ -559,12 +598,19 @@ fn bounded_runner_requires_a_fresh_witness_for_the_generated_relation() {
         [3; 32],
     )
     .unwrap();
-    assert!(execute_bounded(temp.path(), &package.name, &input, "runner_guard").is_err());
+    assert!(execute_bounded(&gate, temp.path(), &package.name, &input, "runner_guard").is_err());
     assert!(!temp.path().join("target/runner_guard.gz").exists());
+    support::complete(gate);
 }
 
 #[test]
 fn literal_families_are_plan_bound_and_cover_unused_rows() {
+    let Some(gate) = support::gate(
+        "literal_families_are_plan_bound_and_cover_unused_rows",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
     let all = graphs::bind_issuer_registry(
         graphs::lower("ASK {}", bounds("recycled-content")).unwrap(),
         &issuer_registry(),
@@ -637,8 +683,9 @@ fn literal_families_are_plan_bound_and_cover_unused_rows() {
         )
         .unwrap()
     };
-    execute_bounded(temp.path(), &package.name, &render(&valid), "types_honest").unwrap();
+    execute_bounded(&gate, temp.path(), &package.name, &render(&valid), "types_honest").unwrap();
     let error = execute_bounded(
+        &gate,
         temp.path(),
         &package.name,
         &render(&credentials),
@@ -649,4 +696,5 @@ fn literal_families_are_plan_bound_and_cover_unused_rows() {
         error.contains("closed credential literal profile"),
         "{error}"
     );
+    support::complete(gate);
 }
