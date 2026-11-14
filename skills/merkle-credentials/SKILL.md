@@ -77,8 +77,10 @@ Timezone-free `xsd:date` uses the calendar-day class. Valid timezoned dates get
 engine's mixed-timezone comparison is a partial order. This member adds no
 separate zoned-date key class. Invalid literals get `NONE`. Neither class
 can establish an order. Prefix keys establish an order only when prefixes differ.
-Term identity always uses the full encoding; blank-node identity also uses its
-credential scope.
+RDF term identity is key-independent: use `TermCell::identity()` in Noir and
+`poseidon::term_identity(&term)` in Rust. Scan, join, DISTINCT, sameTerm,
+parameters and released terms use identity; blank nodes also compare credential
+scope. `enc` stays for commitments; value consumers keep full key checks.
 
 ## Noir constructors and openings
 
@@ -89,7 +91,11 @@ and an explicit blank-node scope. It computes every cell component. Never accept
 opening first. Access components through the cell's methods. `term::padding()`
 is the only canonical unbound cell; the bound default graph is distinct.
 
-`open_lexical` binds bounded bytes and metadata to a cell's `enc`.
+`open_lexical` binds bounded bytes and metadata to both the keyed `enc` and
+key-independent `identity()`. Identity hashes the kind and the existing complete
+term frame, which includes lexical, datatype and language bytes for literals.
+The default graph reuses its fixed encoding; padding has zero identity. Synthetic
+credential graph names reuse their dedicated key-free encoding.
 `recompute_key` performs that opening and checks both class and payload. The
 datatype-specialized `recompute_key_for` also
 binds the opened datatype to its expected identifier, so fixed query shapes
@@ -116,7 +122,7 @@ key recomputation. Absent and nonliteral openings refuse.
 private tree salt and count. It checks RDF positions, strict ordering, padding,
 leaf-salt derivation and the minimal tree. Credential scope must be fixed by the
 caller from the credential's dataset position. A blank-node join compares both
-`enc` and credential scope.
+`identity()` and credential scope.
 
 `suite::{open_credential_hidden, open_credential_revealed}` accept raw quads,
 leaf-salt witnesses, salt/count/configuration, raw creation and verification-method
@@ -125,6 +131,26 @@ accepts signature/reduction witnesses and checks Schnorr. Both return an opaque
 `OpenedCredential`; revealed mode requires external signature verification over
 its exact `message()` using the same public key. Never witness that opaque object
 or a `TermCell` directly.
+
+`suite::{open_credential_hidden_from_quads, open_credential_revealed_from_quads}`
+authenticate an internal `[[TermCell; 4]; N]` produced by constrained constructors.
+Their remaining arguments follow the existing credential entry points. They share
+the full tree/count/order/padding/salt and metadata relation, check blank-node scope
+against the fixed dataset position, and preserve each signature mode's contract.
+Opaque cells have a private empty-storage marker that prohibits ABI witnessing;
+do not produce them through unconstrained hints. This seam avoids reopening quad term
+bytes after construction and key checking for a profile.
+
+For caller-selected backing bounds, use
+`suite::{open_bounded_credential_hidden, open_bounded_credential_revealed}`.
+Their quad cells are `BoundedTermOpening<L, D, G>`; creation and method openings
+are `BoundedTermOpening<C, D, G>` and `BoundedTermOpening<V, D, G>`.
+All other arguments and authenticated getters follow the existing entry points.
+Runtime lengths and every padding byte remain constrained. Choose capacities
+from the credential profile and emit separate credential calls directly in the
+generated program. The complete opener specializes subject, predicate and graph
+construction to their RDF roles; general cell/table constructors remain available
+with their existing signatures and behavior.
 
 Both fixture entry points expose the issuer-key coordinates and verifier-agreed
 configuration digest halves. Hidden mode returns nothing; revealed mode releases
@@ -181,3 +207,8 @@ emits both-mode witness material with independently varied salts and configurati
 digest halves. The live tests use the existing
 fail-closed gate and execute witnesses without proving. Gate measurements are
 external evidence, never constants or acceptance thresholds in this library.
+
+Resource-only openings may use empty datatype and language backing capacities
+when assembled from ABI-safe raw witnesses inside constrained code. Empty
+datatype capacity excludes literals; the constructor still checks metadata and
+canonical backing padding. Term identifiers and the byte encoding remain pinned.

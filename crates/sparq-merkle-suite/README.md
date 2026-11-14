@@ -44,6 +44,11 @@ Target-specific backend features select JavaScript entropy support required by
 the existing RDF/curve dependencies. The seeded functions never call those
 backends, a clock or file APIs. No dependency primitive is copied or changed.
 
+`poseidon::term_identity(&term)` returns the key-independent RDF identity also
+exposed by Noir's sealed `TermCell::identity()`. Scan, join, DISTINCT, sameTerm,
+parameters and released terms use identity, with credential scope for blank nodes.
+`enc` stays for commitments; value consumers keep full key checks.
+
 ## ✨ Features
 
 The shared `comparison_key` validates built-in integer subtypes, preserves the

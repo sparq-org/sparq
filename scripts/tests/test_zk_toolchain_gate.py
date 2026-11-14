@@ -95,12 +95,15 @@ HELPERS = (
     "crates/sparq-zk-query/tests/support/mod.rs",
 )
 COPIED = (
+    "crates/sparq-merkle-suite/tests",
+    "crates/sparq-merkle-suite/Cargo.toml",
     "crates/sparq-zk/tests",
     "crates/sparq-zk/Cargo.toml",
     "crates/sparq-zk-compose/tests",
     "crates/sparq-zk-compose/Cargo.toml",
     "crates/sparq-zk-query/tests",
     "crates/sparq-zk-query/Cargo.toml",
+    "scripts/zk_query_ci.py",
 )
 # The `src` trees are 2.6 MB of Rust and the checker reads every line of them, so a
 # test that is about `tests/` copies only each crate root (enough for the src scan
@@ -993,7 +996,7 @@ class LaneWiring(unittest.TestCase):
             r"(?m)^      - name: Verify every live ZK test ran\n"
             r"        run: python3 scripts/check-zk-toolchain-gate\.py --verify-ledger "
             r'"\$\{\{ github\.workspace \}\}/\.zk-live-ledger-'
-            r'\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}\.txt"\s*$',
+            r'\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}\.txt" --profile estate\s*$',
             "the verify step must be exactly that one command, with the path as a "
             "literal rather than $SPARQ_ZK_LIVE_LEDGER, which a test could rewrite",
         )
@@ -1036,7 +1039,7 @@ class LaneWiring(unittest.TestCase):
 
     def test_the_verify_step_is_last_and_unconditional(self):
         self.assertTrue(
-            self.text.rstrip().endswith('"${{ github.workspace }}/.zk-live-ledger-${{ github.run_id }}-${{ github.run_attempt }}.txt"'),
+            self.text.rstrip().endswith('"${{ github.workspace }}/.zk-live-ledger-${{ github.run_id }}-${{ github.run_attempt }}.txt" --profile estate'),
             "the verify step must be the job's last step",
         )
         tail = self.text[self.text.index("- name: Verify every live ZK test ran") :]
@@ -1048,7 +1051,7 @@ class LaneWiring(unittest.TestCase):
         rest = self.text[start + len("- name: Run the default-run live ZK tests (real nargo/bb)") :]
         block = rest.split("- name:", 1)[0]
         self.assertNotIn("if:", block)
-        self.assertIn("cargo test -p sparq-zk-compose -p sparq-zk -p sparq-zk-query -- --test-threads=1",
+        self.assertIn("cargo test -p sparq-zk-compose -p sparq-zk -- --test-threads=1",
                       block)
 
     def test_pyyaml_is_installed_with_python3_dash_m_pip(self):
@@ -1075,7 +1078,7 @@ class LaneWiring(unittest.TestCase):
     def test_each_weakening_of_the_verify_step_turns_the_check_red(self):
         run_line = (
             "        run: python3 scripts/check-zk-toolchain-gate.py --verify-ledger "
-            '"${{ github.workspace }}/.zk-live-ledger-${{ github.run_id }}-${{ github.run_attempt }}.txt"'
+            '"${{ github.workspace }}/.zk-live-ledger-${{ github.run_id }}-${{ github.run_attempt }}.txt" --profile estate'
         )
         for label, old, new in (
             ("an if:", run_line, "        if: always()\n" + run_line),

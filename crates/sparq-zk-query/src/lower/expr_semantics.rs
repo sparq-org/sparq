@@ -67,7 +67,7 @@ fn decimal(s: &str, integer: bool) -> std::result::Result<BigInt, Error> {
     }
     Ok(value)
 }
-fn integer_facets(value: &BigInt, dt: &str) -> bool {
+pub(super) fn integer_facets(value: &BigInt, dt: &str) -> bool {
     let n = value / SCALE;
     match dt {
         "byte" => n >= (-128).into() && n <= 127.into(),
@@ -151,7 +151,7 @@ pub(super) fn typed(value: impl Into<String>, dt: &str) -> Term {
 pub(super) fn bool_term(value: bool) -> Term {
     typed(if value { "true" } else { "false" }, "boolean")
 }
-fn number_term(n: Number) -> Term {
+pub(super) fn number_term(n: Number) -> Term {
     match n {
         Number::Exact(n, ty) => typed(
             exact_text(&n, ty == LaneType::Decimal),
@@ -249,6 +249,9 @@ fn is_numeric(ty: LaneType) -> bool {
 fn compare(a: &Term, b: &Term, op: &ExprOp) -> std::result::Result<bool, Error> {
     let at = constant_type(a);
     let bt = constant_type(b);
+    if matches!(at, LaneType::Date | LaneType::DateTime) && at == bt {
+        return super::expr_functions_semantics::compare_dates(a, b, op);
+    }
     if is_numeric(at) && is_numeric(bt) {
         let x = number(a)?;
         let y = number(b)?;
@@ -359,6 +362,15 @@ fn logical(
 }
 pub(super) fn eval(expr: &Expr, vars: &BTreeMap<u32, Term>) -> Result {
     match expr {
+        Expr::BooleanInput { slot } => {
+            let Some(Term::Literal(value)) = vars.get(slot) else {
+                return Err(Error::Sparql);
+            };
+            if value.datatype().as_str() != format!("{XSD}boolean") {
+                return Err(Error::Sparql);
+            }
+            boolean(value).map(bool_term)
+        }
         Expr::Constant(t) => Ok(t.clone()),
         Expr::Variable { slot, .. } => vars.get(slot).cloned().ok_or(Error::Sparql),
         Expr::Bound { slot } => Ok(bool_term(vars.contains_key(slot))),
@@ -416,6 +428,10 @@ pub(super) fn eval(expr: &Expr, vars: &BTreeMap<u32, Term>) -> Result {
                     Ok(number_term(n))
                 }
                 ExprOp::Unsupported(_) => Err(Error::Sparql),
+                _ => super::expr_functions_semantics::function(
+                    op,
+                    &args.iter().map(|a| eval(a, vars)).collect::<Vec<_>>(),
+                ),
             }
         }
     }

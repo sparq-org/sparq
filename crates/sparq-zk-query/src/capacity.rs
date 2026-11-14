@@ -2,6 +2,53 @@
 
 use crate::Error;
 
+/// Verifier-selected opening bounds, compiled into the query program.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OpeningProfile {
+    #[default]
+    Solid,
+    LongObjects,
+    Extended,
+}
+
+/// Lexical backing limits for one opening profile.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OpeningLimits {
+    pub resource: u32,
+    pub object: u32,
+    pub scalar: u32,
+    pub datatype: u32,
+    pub language: u32,
+    pub created: u32,
+    pub method: u32,
+}
+
+impl OpeningProfile {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Solid => "solid",
+            Self::LongObjects => "long-objects",
+            Self::Extended => "extended",
+        }
+    }
+    pub const fn limits(self) -> OpeningLimits {
+        let (resource, object, method) = match self {
+            Self::Solid => (64, 65, 32),
+            Self::LongObjects => (64, 137, 32),
+            Self::Extended => (128, 160, 128),
+        };
+        OpeningLimits {
+            resource,
+            object,
+            scalar: 32,
+            datatype: 41,
+            language: 1,
+            created: 32,
+            method,
+        }
+    }
+}
+
 /// Request limits. They apply before rounding to a compiled capacity.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Bounds {

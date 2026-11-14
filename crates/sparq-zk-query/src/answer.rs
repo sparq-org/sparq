@@ -50,7 +50,9 @@ impl Answer {
                                         ..Cell::default()
                                     })
                                 }
-                                Some(term) => encoder.encode(term),
+                                Some(term) => {
+                                    encoder.encode(term).map(crate::interp::released_cell)
+                                }
                             })
                             .collect()
                     })
@@ -66,6 +68,7 @@ impl Answer {
         encoder: &impl EncodeTerm,
     ) -> Result<Self, Error> {
         let mut catalog = vocabulary.to_vec();
+        catalog.extend([true, false].map(|value| Term::Literal(oxrdf::Literal::from(value))));
         catalog.extend(plan.parameters().iter().filter_map(|p| {
             if let crate::plan::Parameter::Term(t) = p {
                 Some(t.clone())
@@ -75,7 +78,11 @@ impl Answer {
         }));
         let catalog: Vec<_> = catalog
             .into_iter()
-            .map(|term| encoder.encode(&term).map(|cell| (cell, term)))
+            .map(|term| {
+                encoder
+                    .encode(&term)
+                    .map(|cell| (crate::interp::released_cell(cell), term))
+            })
             .collect::<Result<_, _>>()?;
         Ok(match value {
             ResultValue::Ask(value) => Self::Ask(*value),

@@ -1,4 +1,8 @@
-use sparq_zk_query::{capacity::Bounds, codegen::generate, lower::lower};
+use sparq_zk_query::{
+    capacity::{Bounds, OpeningProfile},
+    codegen::generate,
+    lower::lower,
+};
 const B: Bounds = Bounds {
     credentials: 2,
     quads_per_credential: 4,
@@ -28,8 +32,8 @@ fn generation_is_byte_identical_and_constants_are_inputs() {
             "{op}"
         );
     }
-    assert!(source.contains("ops_core_statement::bind_select_authenticated("));
-    assert!(source.contains("core::ops_core_suite::open_one"));
+    assert!(source.contains("ops_core_statement::bind_select_authenticated_modes("));
+    assert!(source.contains("core::ops_core_suite::open_profile_mode_one"));
     assert!(!source.contains("urn:p"));
     assert!(!source.contains("assert("));
     assert!(!source.contains("for "));
@@ -79,6 +83,73 @@ fn committed_smoke_package_is_exactly_generated_with_its_original_manifest() {
 }
 
 #[test]
+fn source_identity_binding_uses_authenticated_identity_and_consumer_checks() {
+    for query in [
+        "ASK {?s <urn:p> 1}",
+        "SELECT ?s WHERE {?s <urn:p> ?x}",
+        "ASK {?s <urn:p> ?x . ?s <urn:q> ?x}",
+    ] {
+        let package = generate(&lower(query, B).unwrap()).unwrap();
+        let source = &package.files[&format!("{}/src/main.nr", package.name)];
+        assert!(source.contains("open_profile_mode_one::<4, 64, 65, 0, 32>"));
+        assert!(!source.contains("ops_core_reads::check_with_parameters("));
+    }
+    let package = generate(&lower("ASK {}", B).unwrap()).unwrap();
+    let source = &package.files[&format!("{}/src/main.nr", package.name)];
+    assert!(source.contains("open_profile_mode_one::<4, 64, 65, 0, 32>"));
+}
+
+#[test]
+fn expression_reads_cover_the_entire_consumer_input_before_filtering() {
+    let plan = lower(
+        "SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x >= 1 && ?x <= 9)}",
+        Bounds {
+            credentials: 1,
+            quads_per_credential: 64,
+            rows_per_table: 32,
+        },
+    )
+    .unwrap();
+    let package = generate(&plan).unwrap();
+    let source = &package.files[&format!("{}/src/main.nr", package.name)];
+    let (i, input) = plan
+        .nodes()
+        .iter()
+        .enumerate()
+        .find_map(|(i, node)| {
+            if let sparq_zk_query::plan::Operator::Filter(input, _) = node.operator {
+                Some((i, input))
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert!(source.contains(&format!(
+        "reads_{i}: [[core::suite_entry::BoundedTermOpening<65, 41, 1>; 1]; 32]"
+    )));
+    let check = source
+        .find(&format!(
+            "core::ops_core_reads::check_with_parameters(t{input}, reads_{i}, [1], parameters);"
+        ))
+        .unwrap();
+    let eval = source.find(&format!("let predicate_{i} =")).unwrap();
+    let filter = source.find(&format!("ops_core::filter(t{input},")).unwrap();
+    assert!(check < eval && eval < filter);
+    assert!(source.contains("open_profile_mode_one::<64, 64, 65, 0, 32>"));
+    assert!(!source.contains("source_index"));
+}
+
+#[test]
+fn absent_expression_variables_stay_unbound_without_read_witnesses() {
+    let plan = lower("ASK { FILTER(?absent > 1) }", B).unwrap();
+    let package = generate(&plan).unwrap();
+    let source = &package.files[&format!("{}/src/main.nr", package.name)];
+    assert!(!source.contains("ops_core_reads::check_with_parameters("));
+    assert!(!source.contains("reads_"));
+    assert!(source.contains("ops_core_expr::evaluate_indexed("));
+}
+
+#[test]
 fn heterogeneous_credential_buckets_are_shape_and_their_limits_are_public_inputs() {
     let b = Bounds {
         credentials: 4,
@@ -103,9 +174,9 @@ fn heterogeneous_credential_buckets_are_shape_and_their_limits_are_public_inputs
     assert_eq!(a.credential_quad_capacities(), vec![8, 16, 64, 8]);
     let p = generate(&a).unwrap();
     let source = &p.files[&format!("{}/src/main.nr", p.name)];
-    assert!(source.contains("TermOpening<32>; 4]; 8]"));
-    assert!(source.contains("CredentialProof<16>"));
-    assert!(source.contains("CredentialProof<64>"));
+    assert!(source.contains("QuadOpening<64, 65>; 8]"));
+    assert!(source.contains("BoundedCredentialProof<16>"));
+    assert!(source.contains("BoundedCredentialProof<64>"));
     for token in ["assert(", "for ", "if "] {
         assert!(!source.contains(token));
     }
@@ -142,4 +213,40 @@ fn public_constant_lists_and_rule_values_do_not_change_the_program_shape() {
         .unwrap_err(),
         sparq_zk_query::Error::Capacity("IN list".into())
     );
+}
+
+#[test]
+fn verifier_selects_opening_profile_and_one_index_binding_per_slot() {
+    let compact = lower("ASK {}", B).unwrap();
+    let long = compact
+        .clone()
+        .with_opening_profile(OpeningProfile::LongObjects);
+    assert_ne!(compact.hash(), long.hash());
+    let p = generate(&long).unwrap();
+    assert!(p.files[&format!("{}/src/main.nr", p.name)]
+        .contains("open_profile_mode_one::<4, 64, 137, 0, 32>"));
+    let wide = compact
+        .clone()
+        .with_opening_profile(OpeningProfile::Extended);
+    assert_ne!(compact.hash(), wide.hash());
+    let package = generate(&wide).unwrap();
+    let source = &package.files[&format!("{}/src/main.nr", package.name)];
+    assert!(source.contains("open_profile_mode_one::<4, 128, 160, 0, 128>"));
+    for i in 0..2 {
+        assert_eq!(
+            source
+                .matches(&format!("let credential_index_{i}: u32 = {i};"))
+                .count(),
+            1
+        );
+        assert_eq!(source.matches(&format!("let opened_{i} =")).count(), 1);
+        assert!(source.contains(&format!(
+            "credential_quad_bounds[{i}], credential_index_{i}, issuer_root, request_digest"
+        )));
+    }
+    let changed = lower("ASK {}", B)
+        .unwrap()
+        .with_opening_profile(OpeningProfile::Extended);
+    assert_eq!(wide.hash(), changed.hash());
+    assert_eq!(generate(&wide).unwrap(), generate(&changed).unwrap());
 }

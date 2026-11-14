@@ -147,7 +147,7 @@ fn suite_program_checks_authentication_membership_keys_and_credential_limits() {
             driver
                 .execute(&render(&changed), "altered_authentication")
                 .is_err(),
-            "{field}"
+            "altered authentication field accepted: {field}"
         );
     }
     for field in ["salts", "issuer_siblings", "config"] {
@@ -157,7 +157,7 @@ fn suite_program_checks_authentication_membership_keys_and_credential_limits() {
             driver
                 .execute(&render(&changed), "altered_membership")
                 .is_err(),
-            "{field}"
+            "altered membership field accepted: {field}"
         );
     }
     for field in ["pk", "r"] {
@@ -171,13 +171,13 @@ fn suite_program_checks_authentication_membership_keys_and_credential_limits() {
         );
     }
     let mut changed = parsed.clone();
-    changed["credential_0"][0][0]["lexical"][0] = json!(1);
+    changed["credential_0"][0]["subject"]["lexical"][0] = json!(1);
     assert!(driver
         .execute(&render(&changed), "altered_lexical")
         .is_err());
     let mut changed = parsed.clone();
     let padding = data[0].credential.count as usize;
-    changed["credential_0"][padding][0]["lexical"][0] = json!(1);
+    changed["credential_0"][padding]["subject"]["lexical"][0] = json!(1);
     assert!(driver
         .execute(&render(&changed), "altered_opening_padding")
         .is_err());
@@ -199,21 +199,237 @@ fn suite_program_checks_authentication_membership_keys_and_credential_limits() {
     let mut changed = parsed.clone();
     changed["credential_quad_bounds"] = json!([1]);
     changed["statement_binding"] = json!(sparq_zk_query::statement::hex(*words.last().unwrap()));
-    assert!(driver
-        .execute(&render(&changed), "credential_limit_exceeded")
-        .is_err());
+    assert!(
+        driver
+            .execute(&render(&changed), "credential_limit_exceeded")
+            .is_err(),
+        "altered credential limit accepted"
+    );
     let forged = incorrect_key_signed_witness(&plan, &data[0], &parsed, &trace.result);
-    assert!(driver
-        .execute(&render(&forged), "issuer_key_disagrees_with_lexical_form")
-        .is_err());
+    assert!(
+        driver
+            .execute(&render(&forged), "issuer_key_disagrees_with_lexical_form")
+            .is_err(),
+        "altered signed value key accepted"
+    );
     support::complete(gate);
+}
+
+#[test]
+#[ignore = "requires the pinned native query toolchain"]
+fn suite_constant_scan_preserves_literal_identity() {
+    let Some(gate) = support::gate(
+        "suite_constant_scan_preserves_literal_identity",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
+    let plan = lower(
+        "ASK {?s <urn:p> 1}",
+        Bounds {
+            credentials: 1,
+            quads_per_credential: 4,
+            rows_per_table: 2,
+        },
+    )
+    .unwrap();
+    let data = authenticated::fixture();
+    let cells = vec![data[0].cells(0).unwrap()];
+    let trace = evaluate(&plan, &cells, &SuiteEncoder).unwrap();
+    assert_eq!(trace.result, sparq_zk_query::interp::ResultValue::Ask(true));
+    let honest = parse(
+        &prover_toml_authenticated(
+            &plan,
+            &data,
+            &trace,
+            [7; 32],
+            [3; 32],
+            authenticated::issuer_root(),
+        )
+        .unwrap(),
+    );
+    let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+    let workspace = fixture_support::Workspace::new(&package);
+    let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+    driver.compile().unwrap();
+    driver
+        .execute(&render(&honest), "constant_scan_honest")
+        .unwrap();
+    let altered = incorrect_key_signed_witness(&plan, &data[0], &honest, &trace.result);
+    fixture_support::assert_engine(
+        "ASK {?s <urn:p> 1}",
+        &data[0].credential.document,
+        &sparq_zk_query::interp::ResultValue::Ask(true),
+    );
+    assert_eq!(altered["result"], json!(true));
+    driver
+        .execute(&render(&altered), "constant_scan_identity_statement")
+        .unwrap();
+    // A released literal is RDF identity, without an unused value-key claim.
+    let plan = lower(
+        "SELECT ?x WHERE {?s <urn:p> ?x}",
+        Bounds {
+            credentials: 1,
+            quads_per_credential: 4,
+            rows_per_table: 2,
+        },
+    )
+    .unwrap();
+    let trace = evaluate(&plan, &cells, &SuiteEncoder).unwrap();
+    let honest = parse(
+        &prover_toml_authenticated(
+            &plan,
+            &data,
+            &trace,
+            [7; 32],
+            [3; 32],
+            authenticated::issuer_root(),
+        )
+        .unwrap(),
+    );
+    let altered = incorrect_key_signed_witness(&plan, &data[0], &honest, &trace.result);
+    assert_eq!(altered["result"], honest["result"]);
+    let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+    let workspace = fixture_support::Workspace::new(&package);
+    let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+    driver.compile().unwrap();
+    driver
+        .execute(&render(&honest), "released_literal_honest")
+        .unwrap();
+    driver
+        .execute(&render(&altered), "released_literal_identity")
+        .unwrap();
+    let plan = lower(
+        "ASK {?s <urn:p> ?x FILTER(?x IN (\"alpha\",\"other\"))}",
+        Bounds {
+            credentials: 1,
+            quads_per_credential: 4,
+            rows_per_table: 2,
+        },
+    )
+    .unwrap();
+    let data = vec![authenticated::sign("<urn:s> <urn:p> \"alpha\" .", 0)];
+    let cells = vec![data[0].cells(0).unwrap()];
+    let trace = evaluate(&plan, &cells, &SuiteEncoder).unwrap();
+    assert_eq!(trace.result, sparq_zk_query::interp::ResultValue::Ask(true));
+    let honest = parse(
+        &prover_toml_authenticated(
+            &plan,
+            &data,
+            &trace,
+            [7; 32],
+            [3; 32],
+            authenticated::issuer_root(),
+        )
+        .unwrap(),
+    );
+    let altered = signed_key_witness(
+        &plan,
+        &data[0],
+        &honest,
+        "alpha",
+        oxrdf::Literal::new_simple_literal("beta"),
+    );
+    assert_eq!(altered["result"], json!(true));
+    let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+    let workspace = fixture_support::Workspace::new(&package);
+    let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+    driver.compile().unwrap();
+    driver
+        .execute(&render(&honest), "plain_string_membership_honest")
+        .unwrap();
+    driver
+        .execute(&render(&altered), "plain_string_membership_identity")
+        .unwrap();
+    long_object_profile_executes_a_suite_multikey_opening();
+    support::complete(gate);
+}
+
+fn long_object_profile_executes_a_suite_multikey_opening() {
+    use sparq_zk_query::capacity::OpeningProfile;
+    let lexical = sparq_merkle_suite::metadata::multikey(
+        &sparq_zk::sig::SecretKey::from_seed(23).public_key(),
+    )
+    .unwrap();
+    let data = vec![authenticated::sign(
+        &format!("<urn:s> <urn:key> \"{lexical}\" ."),
+        0,
+    )];
+    let compact = lower(
+        "ASK {?s <urn:key> ?key}",
+        Bounds {
+            credentials: 1,
+            quads_per_credential: 4,
+            rows_per_table: 2,
+        },
+    )
+    .unwrap();
+    let plan = compact
+        .clone()
+        .with_opening_profile(OpeningProfile::LongObjects);
+    let cells = vec![data[0]
+        .cells_with_profile(0, OpeningProfile::LongObjects)
+        .unwrap()];
+    let trace = evaluate(&plan, &cells, &SuiteEncoder).unwrap();
+    assert!(prover_toml_authenticated(
+        &compact,
+        &data,
+        &trace,
+        [7; 32],
+        [3; 32],
+        authenticated::issuer_root()
+    )
+    .is_err());
+    let input = prover_toml_authenticated(
+        &plan,
+        &data,
+        &trace,
+        [7; 32],
+        [3; 32],
+        authenticated::issuer_root(),
+    )
+    .unwrap();
+    let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+    let workspace = fixture_support::Workspace::new(&package);
+    let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+    let artifact = driver.compile().unwrap();
+    Layout::new(&plan)
+        .audit_authenticated_artifact(
+            &serde_json::from_slice(&std::fs::read(artifact).unwrap()).unwrap(),
+        )
+        .unwrap();
+    driver
+        .execute(&input, "long_object_multikey_honest")
+        .unwrap();
+    let mut altered = parse(&input);
+    altered["credential_0"][0]["object"]["lexical"][0] = json!(98);
+    assert!(
+        driver
+            .execute(&render(&altered), "long_object_multikey_changed")
+            .is_err(),
+        "altered suite Multikey lexical accepted"
+    );
 }
 
 fn incorrect_key_signed_witness(
     plan: &sparq_zk_query::plan::Plan,
     credential: &sparq_zk_query::credential::Credential,
     honest: &serde_json::Map<String, Value>,
-    original: &sparq_zk_query::interp::ResultValue,
+    _original: &sparq_zk_query::interp::ResultValue,
+) -> serde_json::Map<String, Value> {
+    let replacement = oxrdf::Literal::new_typed_literal(
+        "0",
+        oxrdf::NamedNode::new_unchecked("http://www.w3.org/2001/XMLSchema#integer"),
+    );
+    signed_key_witness(plan, credential, honest, "1", replacement)
+}
+
+fn signed_key_witness(
+    plan: &sparq_zk_query::plan::Plan,
+    credential: &sparq_zk_query::credential::Credential,
+    honest: &serde_json::Map<String, Value>,
+    target: &str,
+    replacement: oxrdf::Literal,
 ) -> serde_json::Map<String, Value> {
     use sha2::{Digest, Sha256};
     use sparq_merkle_suite::poseidon as suite;
@@ -230,12 +446,8 @@ fn incorrect_key_signed_witness(
         let quad = quad.unwrap();
         let mut cells = suite::quad_cells(&quad, 1).unwrap();
         let mut raw = changed["credential_0"][i].clone();
-        if matches!(&quad.object,oxrdf::Term::Literal(l) if l.value()=="1") {
-            let literal = oxrdf::Literal::new_typed_literal(
-                "0",
-                oxrdf::NamedNode::new_unchecked("http://www.w3.org/2001/XMLSchema#integer"),
-            );
-            let key = sparq_merkle_suite::comparison_key(&literal);
+        if matches!(&quad.object,oxrdf::Term::Literal(l) if l.value()==target) {
+            let key = sparq_merkle_suite::comparison_key(&replacement);
             let key_hex = key.iter().map(|b| format!("{b:02x}")).collect::<String>();
             cells[2].key = field_from_hex_str_strict(&key_hex).unwrap();
             cells[2].enc = poseidon2::hash(&[
@@ -243,7 +455,7 @@ fn incorrect_key_signed_witness(
                 suite::hash_bytes(suite::TERM_DOMAIN, &cells[2].bytes),
                 cells[2].key,
             ]);
-            raw[2]["key"] = json!(key.as_slice());
+            raw["object"]["key"] = json!(key.as_slice());
         }
         let hash = suite::hash_quad(cells.clone().map(|c| c.enc));
         rows.push((suite::field_bytes(hash), hash, cells, raw));
@@ -271,18 +483,23 @@ fn incorrect_key_signed_witness(
     }
     changed["credential_proof_0"]["r"] = json!({"x":field_to_hex(&w.r_x),"y":field_to_hex(&w.r_y)});
     let mut operator_rows = vec![];
+    let mut read_sources = vec![];
     for (i, (_, _, cells, raw)) in rows.into_iter().enumerate() {
-        changed["credential_0"][i] = raw;
+        changed["credential_0"][i] = raw.clone();
         let convert = |c: suite::TermCell| sparq_zk_query::interp::Cell {
             bound: c.bound,
             kind: c.kind,
-            enc: suite::field_bytes(c.enc),
+            enc: suite::field_bytes(c.identity),
             key_class: c.key_class,
             key: suite::field_bytes(c.key),
             dt: suite::field_bytes(c.dt),
             lang: suite::field_bytes(c.lang),
             scope: c.credential,
         };
+        let object = convert(cells[2].clone());
+        let mut opening = raw["object"].clone();
+        opening["bound"] = json!(true);
+        read_sources.push((object, opening));
         operator_rows.push([
             convert(cells[0].clone()),
             convert(cells[1].clone()),
@@ -294,7 +511,56 @@ fn incorrect_key_signed_witness(
         quads: operator_rows,
     }];
     let trace = evaluate(plan, &bad_cells, &SuiteEncoder).unwrap();
-    assert_ne!(&trace.result, original);
+    for (i, node) in plan.nodes().iter().enumerate() {
+        if let sparq_zk_query::plan::Operator::Filter(input, _) = node.operator {
+            let reads = changed
+                .get_mut(&format!("reads_{i}"))
+                .unwrap()
+                .as_array_mut()
+                .unwrap();
+            // These fixtures have one value variable; preserve padding beyond its complete input.
+            assert!(reads.iter().all(|r| r.as_array().unwrap().len() == 1));
+            for (r, row) in trace.tables[input as usize].rows.iter().enumerate() {
+                let value = *row.iter().find(|c| c.bound && c.kind == 3).unwrap();
+                use sparq_zk_query::interp::EncodeTerm;
+                let public = (sparq_zk_query::codegen::generate(plan)
+                    .unwrap()
+                    .files
+                    .values()
+                    .any(|source| source.contains("ops_core_reads::check_identity_equalities("))
+                    && value.dt
+                        == SuiteEncoder
+                            .encode(&oxrdf::Literal::new_simple_literal("").into())
+                            .unwrap()
+                            .dt)
+                    || plan.parameters().iter().any(|p| {
+                        if let sparq_zk_query::plan::Parameter::Term(t) = p {
+                            SuiteEncoder.encode(t).unwrap() == value
+                        } else {
+                            false
+                        }
+                    });
+                let mut opening = read_sources
+                    .iter()
+                    .find(|(c, _)| *c == value)
+                    .unwrap()
+                    .1
+                    .clone();
+                if public {
+                    opening["bound"] = json!(false);
+                    for key in ["kind", "lexical_len", "datatype_len", "language_len"] {
+                        opening[key] = json!(0);
+                    }
+                    for key in ["lexical", "datatype", "language", "key"] {
+                        for byte in opening[key].as_array_mut().unwrap() {
+                            *byte = json!(0);
+                        }
+                    }
+                }
+                reads[r][0] = opening;
+            }
+        }
+    }
     let raw =
         parse(&prover_toml(plan, &bad_cells, &SuiteEncoder, &trace, [7; 32], [3; 32]).unwrap());
     for (key, value) in raw {
@@ -322,4 +588,494 @@ fn incorrect_key_signed_witness(
     changed["input_commitment"] = json!(commitment);
     changed["statement_binding"] = json!(sparq_zk_query::statement::hex(*words.last().unwrap()));
     changed
+}
+
+#[test]
+#[ignore = "requires the pinned native query toolchain"]
+fn read_site_keys_bind_complete_consumer_inputs_and_lexical_openings() {
+    let Some(gate) = support::gate(
+        "read_site_keys_bind_complete_consumer_inputs_and_lexical_openings",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
+    let bounds = Bounds {
+        credentials: 1,
+        quads_per_credential: 4,
+        rows_per_table: 4,
+    };
+    let cases = [
+        // Closest N0 form for the claims subquery: the old claim is rejected by FILTER.
+        (
+            "date",
+            "2010-01-01",
+            "2024-01-01",
+            "2000-01-01",
+            "2020-01-01",
+        ),
+        // Closest N0 form for MIN inputs: the larger figure still enters the consumer.
+        ("integer", "2", "1", "3", "0"),
+    ];
+    let mut compiled = None;
+    for (datatype, target, other, replacement, threshold) in cases {
+        let dt = format!("http://www.w3.org/2001/XMLSchema#{datatype}");
+        let source = format!(
+            "<urn:a> <urn:p> \"{target}\"^^<{dt}> .\n<urn:b> <urn:p> \"{other}\"^^<{dt}> ."
+        );
+        let query =
+            format!("SELECT ?s WHERE {{?s <urn:p> ?x FILTER(?x >= \"{threshold}\"^^<{dt}>)}}");
+        let plan = lower(&query, bounds).unwrap();
+        let data = vec![authenticated::sign(&source, 0)];
+        let cells = vec![data[0].cells(0).unwrap()];
+        let trace = evaluate(&plan, &cells, &SuiteEncoder).unwrap();
+        let honest = parse(
+            &prover_toml_authenticated(
+                &plan,
+                &data,
+                &trace,
+                [7; 32],
+                [3; 32],
+                authenticated::issuer_root(),
+            )
+            .unwrap(),
+        );
+        let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+        if let Some((expected, _)) = &compiled {
+            assert_eq!(&package, expected);
+        } else {
+            let workspace = fixture_support::Workspace::new(&package);
+            ProgramProver::new(&workspace.0, &package.name)
+                .unwrap()
+                .compile()
+                .unwrap();
+            compiled = Some((package.clone(), workspace));
+        }
+        let driver = ProgramProver::new(&compiled.as_ref().unwrap().1 .0, &package.name).unwrap();
+        driver
+            .execute(&render(&honest), "complete_read_input")
+            .unwrap();
+        let (filter, input) = plan
+            .nodes()
+            .iter()
+            .enumerate()
+            .find_map(|(i, n)| {
+                if let sparq_zk_query::plan::Operator::Filter(input, _) = n.operator {
+                    Some((i, input as usize))
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        let reads = format!("reads_{filter}");
+        for field in ["lexical", "datatype"] {
+            let mut altered = honest.clone();
+            altered[&reads][0][0][field][0] = json!(88);
+            assert!(
+                driver
+                    .execute(&render(&altered), "swapped_read_bytes")
+                    .is_err(),
+                "swapped read bytes accepted: {field}"
+            );
+        }
+        let mut altered = honest.clone();
+        altered[&reads][0][0] = honest[&reads][1][0].clone();
+        assert!(driver
+            .execute(&render(&altered), "different_quad_read")
+            .is_err());
+        let forged = signed_key_witness(
+            &plan,
+            &data[0],
+            &honest,
+            target,
+            oxrdf::Literal::new_typed_literal(replacement, oxrdf::NamedNode::new_unchecked(&dt)),
+        );
+        // The hidden claim remains rejected; this is not a check on final output alone.
+        if datatype == "date" {
+            assert_eq!(forged["result"], honest["result"]);
+        }
+        let error = driver
+            .execute(&render(&forged), "forged_key_in_complete_input")
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("key disagrees with lexical form"),
+            "{error}"
+        );
+        let mut incomplete = cells.clone();
+        incomplete[0].quads.remove(0);
+        let incomplete_trace = evaluate(&plan, &incomplete, &SuiteEncoder).unwrap();
+        assert!(incomplete_trace.tables[input].rows.len() < trace.tables[input].rows.len());
+        let incomplete_input = prover_toml_authenticated(
+            &plan,
+            &data,
+            &incomplete_trace,
+            [7; 32],
+            [3; 32],
+            authenticated::issuer_root(),
+        )
+        .unwrap();
+        assert!(driver
+            .execute(&incomplete_input, "omitted_matching_scan_row")
+            .is_err());
+    }
+    support::complete(gate);
+}
+
+#[test]
+#[ignore = "requires the pinned native query toolchain"]
+fn request_values_use_exact_verifier_encoded_keys_without_private_openings() {
+    let Some(gate) = support::gate(
+        "request_values_use_exact_verifier_encoded_keys_without_private_openings",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
+    let data = vec![authenticated::sign("<urn:s> <urn:p> <urn:o> .", 0)];
+    let cells = vec![data[0].cells(0).unwrap()];
+    let mut compiled = None;
+    for literal in [format!("\"{}\"", "a".repeat(100)), "\"hello\"@en".into()] {
+        let query = format!("SELECT ?x WHERE {{VALUES ?x {{{literal}}} FILTER(?x = {literal})}}");
+        let plan = lower(
+            &query,
+            Bounds {
+                credentials: 1,
+                quads_per_credential: 4,
+                rows_per_table: 2,
+            },
+        )
+        .unwrap();
+        let trace = evaluate(&plan, &cells, &SuiteEncoder).unwrap();
+        let input = prover_toml_authenticated(
+            &plan,
+            &data,
+            &trace,
+            [7; 32],
+            [3; 32],
+            authenticated::issuer_root(),
+        )
+        .unwrap();
+        let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+        if let Some((expected, _)) = &compiled {
+            assert_eq!(&package, expected);
+        } else {
+            let workspace = fixture_support::Workspace::new(&package);
+            ProgramProver::new(&workspace.0, &package.name)
+                .unwrap()
+                .compile()
+                .unwrap();
+            compiled = Some((package.clone(), workspace));
+        }
+        let driver = ProgramProver::new(&compiled.as_ref().unwrap().1 .0, &package.name).unwrap();
+        driver.execute(&input, "verifier_values_honest").unwrap();
+        let mut changed = parse(&input);
+        let reads = changed
+            .keys()
+            .find(|k| k.starts_with("reads_"))
+            .unwrap()
+            .clone();
+        assert_eq!(changed[&reads][0][0]["bound"], json!(false));
+        changed[&reads][0][0]["lexical"][0] = json!(1);
+        assert!(driver
+            .execute(&render(&changed), "verifier_values_unused_opening")
+            .is_err());
+    }
+    support::complete(gate);
+}
+
+#[test]
+#[ignore = "requires the pinned native query toolchain"]
+fn authenticated_temporal_ranges_use_the_checked_scalar_payload() {
+    let Some(gate) = support::gate(
+        "authenticated_temporal_ranges_use_the_checked_scalar_payload",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
+    for (datatype, lo, hi) in [
+        ("date", "2024-01-01", "2024-02-01"),
+        ("date", "1969-12-31", "1970-01-01"),
+        (
+            "dateTime",
+            "1969-12-31T23:59:59.999Z",
+            "1970-01-01T00:00:00.000Z",
+        ),
+        (
+            "dateTime",
+            "1969-12-31T23:59:59.999",
+            "1970-01-01T00:00:00.000",
+        ),
+    ] {
+        let query=format!("PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE {{?s <urn:p> ?d FILTER(?d >= \"{lo}\"^^xsd:{datatype} && ?d < \"{hi}\"^^xsd:{datatype})}}");
+        let source=format!("<urn:a> <urn:p> \"{lo}\"^^<http://www.w3.org/2001/XMLSchema#{datatype}> .\n<urn:b> <urn:p> \"{hi}\"^^<http://www.w3.org/2001/XMLSchema#{datatype}> .\n");
+        let plan = lower(
+            &query,
+            Bounds {
+                credentials: 1,
+                quads_per_credential: 4,
+                rows_per_table: 2,
+            },
+        )
+        .unwrap();
+        let data = vec![authenticated::sign(&source, 0)];
+        let cells = vec![data[0]
+            .cells_with_profile(0, plan.opening_profile())
+            .unwrap()];
+        let trace = evaluate(&plan, &cells, &SuiteEncoder).unwrap();
+        fixture_support::assert_engine_with_encoder(&query, &source, &trace.result, &SuiteEncoder);
+        let input = prover_toml_authenticated(
+            &plan,
+            &data,
+            &trace,
+            [7; 32],
+            [3; 32],
+            authenticated::issuer_root(),
+        )
+        .unwrap();
+        let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+        let workspace = fixture_support::Workspace::new(&package);
+        let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+        let artifact = driver.compile().unwrap();
+        Layout::new(&plan)
+            .audit_authenticated_artifact(
+                &serde_json::from_slice(&std::fs::read(artifact).unwrap()).unwrap(),
+            )
+            .unwrap();
+        driver
+            .execute(&input, "temporal_range_honest")
+            .unwrap_or_else(|e| panic!("{datatype} {lo}: {e}"));
+        let mut changed = trace.clone();
+        changed.tables[plan.result_node() as usize].rows.clear();
+        let input = prover_toml_authenticated(
+            &plan,
+            &data,
+            &changed,
+            [7; 32],
+            [3; 32],
+            authenticated::issuer_root(),
+        )
+        .unwrap();
+        assert!(driver
+            .execute(&input, "temporal_range_missing_row")
+            .is_err());
+    }
+    support::complete(gate);
+}
+
+#[test]
+#[ignore = "requires the pinned native query toolchain"]
+fn revealed_messages_keys_and_count_are_public_and_bound_to_the_opening() {
+    use sparq_zk::{field::field_to_be_bytes_32, sig};
+    use sparq_zk_query::statement::{EnvelopeInputs, RevealedInputs, RevealedSignature};
+    let Some(gate) = support::gate(
+        "revealed_messages_keys_and_count_are_public_and_bound_to_the_opening",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
+    let plan = lower(
+        "ASK {?s <urn:p> ?o}",
+        Bounds {
+            credentials: 2,
+            quads_per_credential: 4,
+            rows_per_table: 2,
+        },
+    )
+    .unwrap();
+    let data = vec![authenticated::sign("<urn:a> <urn:p> <urn:o> .", 0)];
+    let cells = vec![data[0]
+        .cells_with_profile(0, plan.opening_profile())
+        .unwrap()];
+    let trace = evaluate(&plan, &cells, &SuiteEncoder).unwrap();
+    let envelope = EnvelopeInputs::issuer_only(authenticated::issuer_root());
+    let input = sparq_zk_query::witness::prover_toml_revealed(
+        &plan, &data, &trace, [7; 32], [3; 32], &envelope,
+    )
+    .unwrap();
+    let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+    let workspace = fixture_support::Workspace::new(&package);
+    let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+    let artifact = driver.compile().unwrap();
+    let artifact: Value = serde_json::from_slice(&std::fs::read(artifact).unwrap()).unwrap();
+    let layout = Layout::new(&plan);
+    layout.audit_authenticated_artifact(&artifact).unwrap();
+    for name in ["revealed_messages", "revealed_keys", "revealed_count"] {
+        let mut changed = artifact.clone();
+        changed["abi"]["parameters"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|p| p["name"] != name);
+        assert!(
+            layout.audit_authenticated_artifact(&changed).is_err(),
+            "missing {name}"
+        );
+    }
+    let mut changed = artifact.clone();
+    let messages = changed["abi"]["parameters"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|p| p["name"] == "revealed_messages")
+        .unwrap();
+    messages["type"]["length"] = json!(1);
+    assert!(
+        layout.audit_authenticated_artifact(&changed).is_err(),
+        "missing one credential message"
+    );
+    driver.execute(&input, "revealed_honest").unwrap();
+    let message = data[0].signed_message().unwrap();
+    let statement = Statement {
+        request_digest: [7; 32],
+        input_commitment: sparq_zk_query::credential::dataset_commitment(&data, [3; 32]).unwrap(),
+        signature_mode: 0,
+        result: trace.result,
+    };
+    for (label, key, message) in [
+        (
+            "message",
+            sig::SecretKey::from_seed(19),
+            message + sparq_merkle_suite::Fr::from(1u64),
+        ),
+        ("key", sig::SecretKey::from_seed(20), message),
+    ] {
+        let evidence = RevealedInputs::verify(&[RevealedSignature {
+            key: key.public_key(),
+            message: field_to_be_bytes_32(&message),
+            signature: sig::sign_deterministic(&key, &message),
+        }])
+        .unwrap();
+        let words = layout
+            .reconstruct_revealed(&plan, &statement, &envelope, &evidence)
+            .unwrap();
+        let mut changed = parse(&input);
+        if label == "message" {
+            changed["revealed_messages"][0] = json!(sparq_zk::field::field_to_hex(&message));
+        } else {
+            changed["revealed_keys"][0] = json!(sparq_zk::field::field_to_hex(
+                &sparq_merkle_suite::metadata::key_cell(&key.public_key())
+                    .unwrap()
+                    .enc
+            ));
+        }
+        changed["statement_binding"] =
+            json!(sparq_zk_query::statement::hex(*words.last().unwrap()));
+        assert!(
+            driver
+                .execute(&render(&changed), "revealed_changed")
+                .is_err(),
+            "altered revealed {label} accepted"
+        );
+    }
+    // Keep the valid public message/key while changing only the evidence count.
+    let key = sig::SecretKey::from_seed(19);
+    let admitted = RevealedInputs::verify(&[RevealedSignature {
+        key: key.public_key(),
+        message: field_to_be_bytes_32(&message),
+        signature: sig::sign_deterministic(&key, &message),
+    }])
+    .unwrap();
+    let mut words = layout
+        .reconstruct_revealed(&plan, &statement, &envelope, &admitted)
+        .unwrap();
+    let count_word = words.len() - 6;
+    words[count_word] = [0; 32];
+    let rebound = sparq_zk_query::statement::binding(&words[..words.len() - 1]).unwrap();
+    let mut changed = parse(&input);
+    changed["revealed_count"] = json!(0);
+    changed["statement_binding"] = json!(sparq_zk_query::statement::hex(rebound));
+    assert!(
+        driver
+            .execute(&render(&changed), "revealed_changed_count")
+            .is_err(),
+        "altered revealed count accepted"
+    );
+    for field in ["r.x", "r.y", "s", "e", "e_k"] {
+        let mut changed = parse(&input);
+        let proof = &mut changed["credential_proof_0"];
+        if let Some(coordinate) = field.strip_prefix("r.") {
+            proof["r"][coordinate] = json!("1");
+        } else {
+            proof[field] = json!("1");
+        }
+        assert!(
+            driver
+                .execute(&render(&changed), "revealed_signature_padding")
+                .is_err(),
+            "altered revealed signature padding accepted: {field}"
+        );
+    }
+    let two = vec![
+        data[0].clone(),
+        authenticated::sign("<urn:b> <urn:p> <urn:o> .", 1),
+    ];
+    let cells = two
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            c.cells_with_profile(i as u32, plan.opening_profile())
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let trace = evaluate(&plan, &cells, &SuiteEncoder).unwrap();
+    let input = sparq_zk_query::witness::prover_toml_revealed(
+        &plan, &two, &trace, [7; 32], [3; 32], &envelope,
+    )
+    .unwrap();
+    driver.execute(&input, "revealed_two_honest").unwrap();
+    let evidence = two
+        .iter()
+        .map(|c| RevealedSignature {
+            key: c.issuer,
+            message: field_to_be_bytes_32(&c.signed_message().unwrap()),
+            signature: c.credential.signature,
+        })
+        .collect::<Vec<_>>();
+    let statement = Statement {
+        request_digest: [7; 32],
+        input_commitment: sparq_zk_query::credential::dataset_commitment(&two, [3; 32]).unwrap(),
+        signature_mode: 0,
+        result: trace.result,
+    };
+    for label in ["message", "key", "order"] {
+        let mut signatures = evidence.clone();
+        match label {
+            "message" => {
+                let key = sig::SecretKey::from_seed(19);
+                let message = two[1].signed_message().unwrap() + sparq_merkle_suite::Fr::from(1u64);
+                signatures[1].message = field_to_be_bytes_32(&message);
+                signatures[1].signature = sig::sign_deterministic(&key, &message);
+            }
+            "key" => {
+                let key = sig::SecretKey::from_seed(20);
+                signatures[1].key = key.public_key();
+                signatures[1].signature =
+                    sig::sign_deterministic(&key, &two[1].signed_message().unwrap());
+            }
+            _ => signatures.swap(0, 1),
+        }
+        let admitted = RevealedInputs::verify(&signatures).unwrap();
+        let words = layout
+            .reconstruct_revealed(&plan, &statement, &envelope, &admitted)
+            .unwrap();
+        let mut changed = parse(&input);
+        changed["revealed_messages"] = json!(signatures
+            .iter()
+            .map(|s| sparq_zk_query::statement::hex(s.message))
+            .collect::<Vec<_>>());
+        changed["revealed_keys"] = json!(signatures
+            .iter()
+            .map(|s| sparq_zk::field::field_to_hex(
+                &sparq_merkle_suite::metadata::key_cell(&s.key).unwrap().enc
+            ))
+            .collect::<Vec<_>>());
+        changed["statement_binding"] =
+            json!(sparq_zk_query::statement::hex(*words.last().unwrap()));
+        assert!(
+            driver
+                .execute(&render(&changed), "revealed_later_slot")
+                .is_err(),
+            "altered later revealed {label} accepted"
+        );
+    }
+    support::complete(gate);
 }

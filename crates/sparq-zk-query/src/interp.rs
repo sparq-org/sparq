@@ -15,6 +15,7 @@ pub type Word = [u8; 32];
 pub struct Cell {
     pub bound: bool,
     pub kind: u8,
+    /// Authenticated key-independent RDF identity, or a result-local blank label.
     pub enc: Word,
     pub key_class: u8,
     pub key: Word,
@@ -26,10 +27,11 @@ pub struct Cell {
 impl Cell {
     pub fn same_term(self, other: Self) -> bool {
         self.bound == other.bound
-            && (!self.bound || (self.enc == other.enc && self.scope == other.scope))
+            && (!self.bound
+                || (self.kind == other.kind && self.enc == other.enc && self.scope == other.scope))
     }
-    fn identity(self) -> (bool, Word, u32) {
-        (self.bound, self.enc, self.scope)
+    fn identity(self) -> (bool, Word, u8, u32) {
+        (self.bound, self.enc, self.kind, self.scope)
     }
     pub fn validate(self) -> Result<(), Error> {
         if !self.bound {
@@ -356,6 +358,8 @@ fn release_rows(mut rows: Vec<Row>) -> Vec<Row> {
                     enc,
                     ..Cell::default()
                 };
+            } else {
+                *c = released_cell(*c);
             }
         }
     }
@@ -363,7 +367,14 @@ fn release_rows(mut rows: Vec<Row>) -> Vec<Row> {
     rows
 }
 
-pub(crate) fn row_key(row: &[Cell]) -> Vec<(bool, Word, u32)> {
+// A released RDF term carries identity and RDF metadata, with no value-key claim.
+pub(crate) fn released_cell(mut cell: Cell) -> Cell {
+    cell.key_class = 0;
+    cell.key = [0; 32];
+    cell
+}
+
+pub(crate) fn row_key(row: &[Cell]) -> Vec<(bool, Word, u8, u32)> {
     row.iter().map(|c| c.identity()).collect()
 }
 fn lookup(schema: &[Var], row: &[Cell], v: Var) -> Cell {
@@ -384,18 +395,12 @@ impl Value {
             Self::Boolean(v, e) => (v, e),
             Self::Term(c) if !c.bound || c.kind != 3 => (false, true),
             Self::Term(c) => match c.key_class {
-                0 if c.dt
-                    == sparq_merkle_suite::poseidon::field_bytes(
-                        sparq_merkle_suite::poseidon::hash_bytes(
-                            sparq_merkle_suite::poseidon::DATATYPE_DOMAIN,
-                            b"http://www.w3.org/1999/02/22-rdf-syntax-ns#langString",
-                        ),
-                    ) =>
-                {
+                0 if c.dt == *LANGUAGE_STRING_DATATYPE => {
                     return Err(Error::Unsupported(
                         "language-tagged effective boolean value".into(),
                     ));
                 }
+                0 if NUMERIC_BOOLEAN_DATATYPES.contains(&c.dt) => (false, false),
                 1 => {
                     check_exact_magnitude(c)?;
                     let mut zero = [0; 32];
@@ -437,13 +442,46 @@ fn check_exact_magnitude(c: Cell) -> Result<(), Error> {
     Ok(())
 }
 
+fn datatype_id(iri: &[u8]) -> Word {
+    sparq_merkle_suite::poseidon::field_bytes(sparq_merkle_suite::poseidon::hash_bytes(
+        sparq_merkle_suite::poseidon::DATATYPE_DOMAIN,
+        iri,
+    ))
+}
+static STRING_DATATYPE: std::sync::LazyLock<Word> =
+    std::sync::LazyLock::new(|| datatype_id(b"http://www.w3.org/2001/XMLSchema#string"));
+static LANGUAGE_STRING_DATATYPE: std::sync::LazyLock<Word> = std::sync::LazyLock::new(|| {
+    datatype_id(b"http://www.w3.org/1999/02/22-rdf-syntax-ns#langString")
+});
 fn plain_string(c: Cell) -> bool {
-    c.lang == [0; 32]
-        || c.dt
-            == sparq_merkle_suite::poseidon::field_bytes(sparq_merkle_suite::poseidon::hash_bytes(
-                sparq_merkle_suite::poseidon::DATATYPE_DOMAIN,
-                b"http://www.w3.org/2001/XMLSchema#string",
-            ))
+    c.lang == [0; 32] || c.dt == *STRING_DATATYPE
+}
+static NUMERIC_BOOLEAN_DATATYPES: std::sync::LazyLock<Vec<Word>> = std::sync::LazyLock::new(|| {
+    [
+        "integer",
+        "decimal",
+        "double",
+        "float",
+        "boolean",
+        "nonPositiveInteger",
+        "negativeInteger",
+        "long",
+        "int",
+        "short",
+        "byte",
+        "nonNegativeInteger",
+        "unsignedLong",
+        "unsignedInt",
+        "unsignedShort",
+        "unsignedByte",
+        "positiveInteger",
+    ]
+    .iter()
+    .map(|name| datatype_id(format!("http://www.w3.org/2001/XMLSchema#{name}").as_bytes()))
+    .collect()
+});
+fn string_cell(cell: Cell) -> bool {
+    cell.kind == 3 && matches!(cell.key_class, 6 | 7)
 }
 
 fn compare(op: Compare, a: Value, b: Value) -> Result<Value, Error> {
@@ -486,8 +524,8 @@ fn compare(op: Compare, a: Value, b: Value) -> Result<Value, Error> {
             return Err(Error::Unsupported("mixed temporal datatypes".into()));
         }
         if op != Compare::Equal
-            && matches!(a.key_class, 6 | 7)
-            && matches!(b.key_class, 6 | 7)
+            && string_cell(a)
+            && string_cell(b)
             && ((!plain_string(a)) || (!plain_string(b)))
         {
             return Err(Error::Unsupported("language-tagged string ordering".into()));
@@ -498,10 +536,18 @@ fn compare(op: Compare, a: Value, b: Value) -> Result<Value, Error> {
         {
             return Err(Error::Unsupported("mixed timezone comparison".into()));
         }
-        if op == Compare::Equal && matches!(a.key_class, 6 | 7) && matches!(b.key_class, 6 | 7) {
+        if op == Compare::Equal && string_cell(a) && string_cell(b) {
             return Ok(Value::Boolean(a.same_term(b), false));
         }
-        if a.key_class == 7 || b.key_class == 7 {
+        if op == Compare::Equal
+            && (a.dt == *LANGUAGE_STRING_DATATYPE || b.dt == *LANGUAGE_STRING_DATATYPE)
+        {
+            return Ok(Value::Boolean(a.same_term(b), !a.same_term(b)));
+        }
+        if op == Compare::Equal && (string_cell(a) || string_cell(b)) {
+            return Ok(Value::Boolean(false, true));
+        }
+        if string_cell(a) && string_cell(b) && (a.key_class == 7 || b.key_class == 7) {
             return Err(Error::Unsupported("string comparison capacity".into()));
         }
         if op == Compare::Equal && (a.key_class == 0 || b.key_class == 0) {

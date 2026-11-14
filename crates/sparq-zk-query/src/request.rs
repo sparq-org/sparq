@@ -9,7 +9,7 @@ use sparq_query_protocol::{
 };
 
 use crate::{
-    capacity::Bounds,
+    capacity::{Bounds, OpeningProfile},
     lower::lower,
     plan::{Plan, ResultForm},
     Error,
@@ -31,7 +31,9 @@ pub struct Request {
     digest: [u8; 32],
     canonical_rdf: String,
     envelope: Option<crate::statement::EnvelopeInputs>,
+    envelope_policy: Option<crate::envelope_policy::PolicyInput>,
     credential_quad_bounds: Vec<u32>,
+    opening_profile: OpeningProfile,
 }
 
 pub fn descriptor(plan: &Plan, key: &[u8]) -> Result<MethodDescriptor, Error> {
@@ -104,6 +106,60 @@ impl Request {
         envelope.validate()?;
         Self::new_inner(stored, bounds, key, Some(envelope), quad_bounds)
     }
+    /// Derive policy roots and public words from verifier-stored typed properties.
+    /// Validity and freshness instants are Unix epoch milliseconds.
+    pub fn new_authenticated_with_envelope(
+        stored: StoredRequest,
+        bounds: Bounds,
+        key: Vec<u8>,
+        policy: crate::envelope_policy::PolicyInput,
+        quad_bounds: Option<&[u32]>,
+    ) -> Result<Self, Error> {
+        let envelope = crate::envelope_policy::derive(&policy)?.into();
+        let mut request = Self::new_inner(stored, bounds, key, Some(envelope), quad_bounds)?;
+        request.envelope_policy = Some(policy);
+        Ok(request)
+    }
+    /// Store the same opening profile used to prepare the verification key.
+    pub fn new_authenticated_with_opening_profile(
+        stored: StoredRequest,
+        bounds: Bounds,
+        key: Vec<u8>,
+        issuer_root: [u8; 32],
+        quad_bounds: Option<&[u32]>,
+        profile: OpeningProfile,
+    ) -> Result<Self, Error> {
+        crate::credential::field(issuer_root)?;
+        Self::new_inner_with_profile(
+            stored,
+            bounds,
+            key,
+            Some(crate::statement::EnvelopeInputs::issuer_only(issuer_root)),
+            quad_bounds,
+            profile,
+        )
+    }
+    /// Store typed envelope properties together with verifier-selected opening bounds.
+    pub fn new_authenticated_with_envelope_and_profile(
+        stored: StoredRequest,
+        bounds: Bounds,
+        key: Vec<u8>,
+        policy: crate::envelope_policy::PolicyInput,
+        quad_bounds: Option<&[u32]>,
+        profile: OpeningProfile,
+    ) -> Result<Self, Error> {
+        let envelope = crate::envelope_policy::derive(&policy)?.into();
+        let mut request = Self::new_inner_with_profile(
+            stored,
+            bounds,
+            key,
+            Some(envelope),
+            quad_bounds,
+            profile,
+        )?;
+        request.envelope_policy = Some(policy);
+        Ok(request)
+    }
     fn new_inner(
         stored: StoredRequest,
         bounds: Bounds,
@@ -111,10 +167,27 @@ impl Request {
         envelope: Option<crate::statement::EnvelopeInputs>,
         quad_bounds: Option<&[u32]>,
     ) -> Result<Self, Error> {
+        Self::new_inner_with_profile(
+            stored,
+            bounds,
+            key,
+            envelope,
+            quad_bounds,
+            OpeningProfile::default(),
+        )
+    }
+    fn new_inner_with_profile(
+        stored: StoredRequest,
+        bounds: Bounds,
+        key: Vec<u8>,
+        envelope: Option<crate::statement::EnvelopeInputs>,
+        quad_bounds: Option<&[u32]>,
+        opening_profile: OpeningProfile,
+    ) -> Result<Self, Error> {
         if key.is_empty() {
             return Err(Error::Invalid("verification key".into()));
         }
-        let mut plan = lower(stored.query(), bounds)?;
+        let mut plan = lower(stored.query(), bounds)?.with_opening_profile(opening_profile);
         if let Some(quad_bounds) = quad_bounds {
             plan = plan.with_credential_quad_bounds(quad_bounds)?;
         }
@@ -189,7 +262,9 @@ impl Request {
             digest,
             canonical_rdf,
             envelope,
+            envelope_policy: None,
             credential_quad_bounds,
+            opening_profile,
         })
     }
     pub fn issuer_root(&self) -> Result<[u8; 32], Error> {
@@ -197,18 +272,31 @@ impl Request {
     }
     /// Single trusted seam for envelope public-input derivation.
     pub fn envelope_inputs(&self) -> Result<crate::statement::EnvelopeInputs, Error> {
-        let policy = self
-            .envelope
-            .clone()
-            .ok_or_else(|| Error::Unsupported("authenticated issuer policy required".into()))?;
+        let policy = if let Some(input) = &self.envelope_policy {
+            crate::envelope_policy::derive(input)?.into()
+        } else {
+            self.envelope
+                .clone()
+                .ok_or_else(|| Error::Unsupported("authenticated issuer policy required".into()))?
+        };
         policy.validate()?;
         Ok(policy)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn require_envelope_consumer(
+        &self,
+        envelope: &crate::statement::EnvelopeInputs,
+    ) -> Result<(), Error> {
+        envelope.require_consumer(self.envelope_policy.is_some())
     }
     pub fn stored(&self) -> &StoredRequest {
         &self.stored
     }
     pub fn bounds(&self) -> Bounds {
         self.bounds
+    }
+    pub fn opening_profile(&self) -> OpeningProfile {
+        self.opening_profile
     }
     pub fn key(&self) -> &[u8] {
         &self.key
@@ -223,6 +311,7 @@ impl Request {
     /// Rebuild the trusted plan and credential limits from this stored request.
     pub fn plan(&self) -> Result<Plan, Error> {
         lower(self.stored.query(), self.bounds)?
+            .with_opening_profile(self.opening_profile)
             .with_credential_quad_bounds(&self.credential_quad_bounds)
     }
 }
@@ -268,6 +357,7 @@ fn canonical_request(
         "bounds": {"credentials":b.credentials, "quadsPerCredential":b.quads_per_credential,"rowsPerTable":b.rows_per_table},
         "planHash": URL_SAFE_NO_PAD.encode(plan.hash()), "profile":PROFILE,
         "credentialQuadBounds":plan.credential_quad_bounds(),
+        "openingProfile":plan.opening_profile().name(),
         "storedRequestEncoding":sparq_query_protocol::LOCAL_ENCODING_PROFILE,
         "storedRequest":URL_SAFE_NO_PAD.encode(sparq_query_protocol::encode_stored_request(stored)),
     });

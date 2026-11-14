@@ -6,7 +6,7 @@ use std::collections::bounded_vec::BoundedVec;
 pub use crate::suite_metadata::OpenedCredential;
 pub use compose::issuer::Point;
 use crate::suite_entry::TermOpening;
-use crate::suite_metadata::{open_multikey, open_status_index, open_status_purpose, open_time};
+use crate::suite_metadata::{multikey_cell, open_status_index, open_status_purpose, open_time};
 use crate::table::{empty, Table, unbound};
 use crate::term::{same_term, TermCell};
 
@@ -85,7 +85,7 @@ pub fn from_suite_cell(cell: TermCell) -> crate::table::TermCell {
         crate::table::TermCell {
             bound: cell.bound(),
             kind: cell.kind(),
-            enc: cell.enc(),
+            enc: cell.identity(),
             key_class: cell.key_class(),
             key: cell.key(),
             dt: cell.datatype(),
@@ -105,16 +105,10 @@ pub fn iri_bytes<let L: u32>(bytes: [u8; L]) -> TermCell {
     )
 }
 pub fn confidence_predicate() -> TermCell {
-    comptime {
-        iri_bytes(
-            "https://www.w3.org/2018/credentials#confidenceMethod".as_bytes(),
-        )
-    }
+    crate::term::iri_confidence_method()
 }
 pub fn verified_issuer_predicate() -> TermCell {
-    comptime {
-        iri_bytes("https://w3id.org/sparq/vcq#verifiedIssuer".as_bytes())
-    }
+    crate::term::iri_verified_issuer()
 }
 pub fn required_property<let N: u32>(c: OpenedCredential<N>, s: TermCell, p: TermCell) -> TermCell {
     let value = c.property(s, p);
@@ -173,7 +167,7 @@ pub fn check_issuer<let N: u32, let K: u32>(
     let issuer = required_property(c, c.credential_subject(), crate::term::iri_issuer());
     let method = c.verification_method();
     assert((issuer.kind() == 1) & method.bound() & (method.kind() == 1), "issuer identity kind");
-    open_multikey(c.verification_key(), pk);
+    checked_multikey(c.verification_key(), pk);
     assert(
         set_merkle_root(
             trusted_key_leaf(issuer, method, pk),
@@ -196,6 +190,15 @@ pub fn holder_message(request_digest: [u8; 32]) -> Field {
     let limbs = digest_halves(request_digest);
     h3(HOLDER_REQUEST, limbs[0] as Field, limbs[1] as Field)
 }
+// Key-independent RDF equality does not check the signed value key. The
+// canonical constructor supplies both identity and the complete keyed encoding.
+fn checked_multikey(cell: TermCell, pk: Point) {
+    let expected = multikey_cell(pk);
+    assert(
+        same_term(cell, expected) & (cell.enc() == expected.enc()),
+        "verification key opening differs",
+    );
+}
 pub fn check_holder_key<let N: u32>(c: OpenedCredential<N>, pk: Point) {
     check_credential(c);
     let subject = required_property(c, c.credential_subject(), crate::term::iri_subject());
@@ -212,7 +215,7 @@ pub fn check_holder_key<let N: u32>(c: OpenedCredential<N>, pk: Point) {
         "holder key type",
     );
     let key = required_property(c, node, crate::term::iri_public_key());
-    open_multikey(key, pk);
+    checked_multikey(key, pk);
 }
 pub fn check_holder<let N: u32>(
     c: OpenedCredential<N>,
@@ -237,6 +240,15 @@ pub fn snapshot_digest<let D: u32>(s: Snapshot) -> Field {
 }
 pub fn status_leaf(bit: bool) -> Field {
     h3(STATUS_LEAF, bit as Field, 0)
+}
+// Protocol digests use keyed encodings even when RDF equality uses identity.
+// The credential purpose has already passed its checked lexical constructor.
+fn check_snapshot_identity(snapshot: Snapshot, list: TermCell, purpose: TermCell) {
+    assert(
+        same_term(snapshot.list, list) & same_term(snapshot.purpose, purpose)
+            & (snapshot.list.enc() == list.enc()) & (snapshot.purpose.enc() == purpose.enc()),
+        "snapshot identity",
+    );
 }
 pub struct StatusEvidence<let D: u32, let A: u32> {
     pub present: bool,
@@ -308,10 +320,7 @@ pub fn check_status<let N: u32, let D: u32, let A: u32>(
                 );
                 assert(checked.key() == one, "status size");
             }
-            assert(
-                same_term(e.snapshot.list, list) & same_term(e.snapshot.purpose, purpose),
-                "snapshot identity",
-            );
+            check_snapshot_identity(e.snapshot, list, purpose);
             assert(index < e.snapshot.bit_len as u64, "status index length");
             assert((e.snapshot.bit_len as Field).lt(capacity + 1), "snapshot capacity");
             assert(
@@ -640,33 +649,35 @@ fn sort_dataset<let M: u32, let O: u32, let G: u32>(
     }
     out
 }
-/// STAND-IN (lane B): replaced in step 2. Generated wiring must pass the public
-/// request digest here and check_issuer's result, then evaluate the resulting table.
+/// Consume B's conversion made with the opener's generated index binding.
+/// Its graph already binds that index to the public request digest. Callers must
+/// obtain this view from from_authenticated_bounded, never from a witness.
+/// No independent index or graph-name computation enters this consumer.
 pub fn credential_dataset<let N: u32, let O: u32, let G: u32>(
     c: OpenedCredential<N>,
     issuer: TermCell,
-    request_digest: [u8; 32],
-    credential_index: u32,
+    view: crate::ops_core_suite::OpenedCredential<N>,
 ) -> Table<O, 4> {
     check_credential(c);
     let claimed = required_property(c, c.credential_subject(), crate::term::iri_issuer());
     assert(same_term(issuer, claimed), "dataset issuer binding");
-    let graph = from_suite_cell(crate::term::credential_graph(
-        digest_halves(request_digest),
-        credential_index,
-    ));
+    assert(view.message == c.message(), "dataset message binding");
+    let graph = view.graph;
+    assert(graph.bound & (graph.kind == 2), "dataset graph binding");
     let rows = c.quads();
     let mut candidates = [[unbound(); 4]; 2 * N + 1];
     for i in 0..N {
-        let q = [
-            from_suite_cell(rows[i][0]),
-            from_suite_cell(rows[i][1]),
-            from_suite_cell(rows[i][2]),
-            unbound(),
-        ];
-        candidates[2 * i] = choose_row(i < c.count(), q, [unbound(); 4]);
+        assert(view.active[i] == (i < c.count()), "dataset active binding");
+        for p in 0..3 {
+            assert(
+                crate::table::equal_cell(view.rows[i][p], from_suite_cell(rows[i][p])),
+                "dataset row binding",
+            );
+        }
+        let q = [view.rows[i][0], view.rows[i][1], view.rows[i][2], unbound()];
+        candidates[2 * i] = choose_row(view.active[i], q, [unbound(); 4]);
         candidates[2 * i + 1] =
-            choose_row(i < c.count(), [q[0], q[1], q[2], graph], [unbound(); 4]);
+            choose_row(view.active[i], [q[0], q[1], q[2], graph], [unbound(); 4]);
     }
     candidates[2 * N] =
         [graph, from_suite_cell(verified_issuer_predicate()), from_suite_cell(issuer), unbound()];
@@ -773,4 +784,81 @@ fn dataset_merge_refuses_an_output_below_the_distinct_count() {
         Table { rows: [row_a], len: 1 },
         Table { rows: [row_b], len: 1 },
     ]);
+}
+
+fn checked_key_test_point() -> Point {
+    Point {
+        x: 0x09110e7c3e843e302bee8946301ca5755dd78b330d56b8799f147bb81e01046f,
+        y: 0x0de711eb49a82d54b6ddd2a10e277e118e7bc4b716a6783973db6b6fb912d7ca,
+    }
+}
+#[test]
+fn multikey_read_accepts_the_canonical_checked_constructor() {
+    let pk = checked_key_test_point();
+    checked_multikey(multikey_cell(pk), pk);
+}
+#[test(should_fail_with = "verification key opening differs")]
+fn multikey_read_refuses_a_different_signed_value_key() {
+    let pk = checked_key_test_point();
+    let expected = multikey_cell(pk);
+    let bytes = expected.key().to_be_bytes::<32>();
+    let mut key = [0; 31];
+    for i in 0..31 { key[i] = bytes[i + 1]; }
+    key[30] = key[30] ^ 1;
+    let cell = crate::term::open_term(
+        3,
+        BoundedVec::<u8, 137>::from_array("f8180c00109110e7c3e843e302bee8946301ca5755dd78b330d56b8799f147bb81e01046f0de711eb49a82d54b6ddd2a10e277e118e7bc4b716a6783973db6b6fb912d7ca".as_bytes()),
+        BoundedVec::<u8, 64>::from_array("http://www.w3.org/2001/XMLSchema#string".as_bytes()),
+        BoundedVec::<u8, 0>::new(),
+        key,
+        0,
+    );
+    assert(same_term(cell, expected));
+    assert(cell.enc() != expected.enc());
+    checked_multikey(cell, pk);
+}
+#[test]
+fn table_conversion_keeps_identity_and_authenticated_value_metadata() {
+    let cell = multikey_cell(checked_key_test_point());
+    let converted = from_suite_cell(cell);
+    assert(converted.enc == cell.identity());
+    assert(converted.enc != cell.enc());
+    assert((converted.key_class == cell.key_class()) & (converted.key == cell.key()));
+    assert((converted.dt == cell.datatype()) & (converted.lang == cell.language()));
+}
+#[test]
+fn fixed_iri_helpers_match_the_native_suite_encodings() {
+    assert(confidence_predicate().enc() == 0x1f303d9c55335e92efbec3b7bbb23da4290305eaf6a61e041b25cc5cf65a1ac0);
+    assert(verified_issuer_predicate().enc() == 0x09eec572ceda200a642295e68e09118d7e1d26ea1a082cc560e303164907f5e9);
+}
+
+fn snapshot_test_purpose(change_key: bool) -> TermCell {
+    let lexical = BoundedVec::<u8, 16>::from_array("revocation".as_bytes());
+    let (_, value) = crate::term_key::recompute(lexical, crate::suite_constants::DT_STRING);
+    let bytes = value.to_be_bytes::<32>();
+    let mut key = [0; 31];
+    for i in 0..31 { key[i] = bytes[i + 1]; }
+    if change_key { key[1] = key[1] ^ 1; }
+    crate::term::open_term(
+        3, lexical,
+        BoundedVec::<u8, 64>::from_array("http://www.w3.org/2001/XMLSchema#string".as_bytes()),
+        BoundedVec::<u8, 0>::new(), key, 0,
+    )
+}
+#[test]
+fn snapshot_metadata_matches_checked_protocol_encodings() {
+    let list = iri_bytes("urn:snapshot".as_bytes());
+    let purpose = snapshot_test_purpose(false);
+    check_snapshot_identity(Snapshot { list, purpose, bit_len: 1, root: 1 }, list, purpose);
+}
+#[test(should_fail_with = "snapshot identity")]
+fn snapshot_metadata_refuses_a_different_key_with_the_same_identity() {
+    let list = iri_bytes("urn:snapshot".as_bytes());
+    let purpose = snapshot_test_purpose(false);
+    let changed = snapshot_test_purpose(true);
+    assert(same_term(purpose, changed));
+    assert(purpose.enc() != changed.enc());
+    check_snapshot_identity(
+        Snapshot { list, purpose: changed, bit_len: 1, root: 1 }, list, purpose,
+    );
 }

@@ -2,7 +2,18 @@
 
 pub mod expr;
 #[cfg(test)]
+mod expr_functions_semantics;
+#[cfg(test)]
+mod expr_functions_tests;
+#[cfg(test)]
+mod expr_live_targets;
+pub mod expr_plan;
+#[cfg(test)]
 mod expr_semantics;
+#[cfg(test)]
+mod expr_target_tests;
+#[cfg(test)]
+mod expr_test_support;
 #[cfg(test)]
 mod expr_tests;
 mod n0;
@@ -38,6 +49,7 @@ pub fn lower(query: &str, bounds: Bounds) -> Result<Plan, Error> {
         plan: Plan {
             bounds,
             capacity,
+            opening_profile: crate::capacity::OpeningProfile::default(),
             credential_quad_bounds: vec![],
             nodes: vec![],
             parameters: vec![],

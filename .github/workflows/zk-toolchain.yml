@@ -58,6 +58,11 @@ on:
     # the two heavy nightly lanes don't contend for the same runner window).
     - cron: "23 4 * * *"
   workflow_dispatch:
+    inputs:
+      full_query_proofs:
+        description: Run the complete query compiler and proof sweep
+        type: boolean
+        default: false
   pull_request:
     # + ready_for_review so the un-draft moment re-runs this lane.
     types: [opened, synchronize, reopened, ready_for_review]
@@ -81,6 +86,11 @@ on:
       - "crates/sparq-conformance/examples/proof_corpus.rs"
       - "zk/sparql-evaluator/model/**"
       - ".github/workflows/zk-toolchain.yml"
+      - ".github/actions/noir-toolchain/**"
+      - "scripts/zk_query_ci.py"
+      - "scripts/check-zk-toolchain-gate.py"
+      - "scripts/tests/test_zk_query_ci.py"
+      - "scripts/tests/test_zk_toolchain_gate.py"
   # (2026-07-18 maintainer directive, merge-queue subset) merge_group
   # REMOVED: the forge suite already ran + gated on any zk-touching PR (paths filter
   # above), re-runs on zk-touching push-to-main below (post-merge detection), and
@@ -106,6 +116,11 @@ on:
       - "crates/sparq-conformance/examples/proof_corpus.rs"
       - "zk/sparql-evaluator/model/**"
       - ".github/workflows/zk-toolchain.yml"
+      - ".github/actions/noir-toolchain/**"
+      - "scripts/zk_query_ci.py"
+      - "scripts/check-zk-toolchain-gate.py"
+      - "scripts/tests/test_zk_query_ci.py"
+      - "scripts/tests/test_zk_toolchain_gate.py"
 
 # Least-privilege: this lane only reads the repo + runs tests.
 permissions:
@@ -148,6 +163,76 @@ env:
   BBUP_REF: "e80a3ada0bdc5501ff74fb2df7c9c99a19167049" # AztecProtocol/aztec-packages @ next (the bbup script is pinned to this SHA)
 
 jobs:
+  query-hosted:
+    name: Noir query hosted contracts
+    needs: forge-suite
+    if: needs.forge-suite.outputs.zk == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+      SPARQ_ZK_LIVE_LEDGER: ${{ github.workspace }}/.zk-query-hosted-${{ github.run_id }}-${{ github.run_attempt }}.txt
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Install query gate dependencies
+        run: python3 -m pip install --require-hashes -r .github/requirements/docs-quality.txt
+      - name: Restore query build cache
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: zk-query-hosted
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: ./.github/actions/noir-toolchain
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - name: Install query compiler dependencies
+        run: npm ci --ignore-scripts --prefix zk/noir-query/compiler-agreement
+      - name: Add portable host target
+        run: rustup target add wasm32-unknown-unknown
+      - name: Check query execution profiles
+        run: python3 scripts/tests/test_zk_query_ci.py
+      - name: Run hosted query profile
+        run: python3 scripts/zk_query_ci.py hosted
+      - name: Verify hosted query ledger
+        run: python3 scripts/check-zk-toolchain-gate.py --verify-ledger "${{ github.workspace }}/.zk-query-hosted-${{ github.run_id }}-${{ github.run_attempt }}.txt" --profile query-hosted
+
+  query-full:
+    name: Noir query full contracts
+    needs: forge-suite
+    if: needs.forge-suite.outputs.zk == 'true' && github.event_name == 'workflow_dispatch' && inputs.full_query_proofs
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+      SPARQ_ZK_LIVE_LEDGER: ${{ github.workspace }}/.zk-query-full-${{ github.run_id }}-${{ github.run_attempt }}.txt
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Install query gate dependencies
+        run: python3 -m pip install --require-hashes -r .github/requirements/docs-quality.txt
+      - name: Restore query build cache
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: zk-query-full
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: ./.github/actions/noir-toolchain
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - name: Install query compiler dependencies
+        run: npm ci --ignore-scripts --prefix zk/noir-query/compiler-agreement
+      - name: Add portable host target
+        run: rustup target add wasm32-unknown-unknown
+      - name: Check query execution profiles
+        run: python3 scripts/tests/test_zk_query_ci.py
+      - name: Run full query profile
+        run: python3 scripts/zk_query_ci.py full
+      - name: Verify full query ledger
+        run: python3 scripts/check-zk-toolchain-gate.py --verify-ledger "${{ github.workspace }}/.zk-query-full-${{ github.run_id }}-${{ github.run_attempt }}.txt" --profile query-full
+
   forge-suite:
     # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
@@ -155,6 +240,8 @@ jobs:
     runs-on: ubuntu-latest
     # Toolchain install + real bb proving is the long pole; generous headroom.
     timeout-minutes: 60
+    outputs:
+      zk: ${{ steps.changes.outputs.zk }}
     env:
       # The RUNTIME LEDGER. The shared gate in crates/sparq-zk*/tests/support/mod.rs
       # writes `enter <file>:<line>` when it admits a body, then `complete <file>:<line>`
@@ -217,7 +304,7 @@ jobs:
               # ZK-relevant paths — SAME set as the pull_request/push paths filter.
               # sq-5reoy: zk/ narrowed to zk/compose/ (ieee754/xpath externalized, #1599).
               if printf '%s\n' "${changed}" | grep -Eq \
-                '^(crates/sparq-merkle-suite/|zk/noir-query/|crates/sparq-zk/|crates/sparq-zk-compose/|zk/compose/|zk/dual-leaf-v2/|bench/zk-compose/campaigns/|bench/zk-bindings/|crates/sparq-conformance/examples/proof_corpus\.rs$|zk/sparql-evaluator/model/|\.github/workflows/zk-toolchain\.yml$|crates/sparq-zk-query/)'; then
+                '^(crates/sparq-merkle-suite/|zk/noir-query/|crates/sparq-zk/|crates/sparq-zk-compose/|zk/compose/|zk/dual-leaf-v2/|bench/zk-compose/campaigns/|bench/zk-bindings/|crates/sparq-conformance/examples/proof_corpus\.rs$|zk/sparql-evaluator/model/|\.github/workflows/zk-toolchain\.yml$|\.github/actions/noir-toolchain/|scripts/(zk_query_ci\.py|check-zk-toolchain-gate\.py|tests/test_zk_query_ci\.py|tests/test_zk_toolchain_gate\.py)$|crates/sparq-zk-query/)'; then
                 zk=true
               else
                 zk=false
@@ -288,17 +375,9 @@ jobs:
       # installs the EXACT nargo. Two-level pinning: pinned noirup release + pinned nargo.
       - name: Install nargo (Noir) — pinned
         if: steps.changes.outputs.zk == 'true'
-        run: |
-          set -euo pipefail
-          mkdir -p "$HOME/.nargo/bin"
-          curl -fsSL --proto '=https' --tlsv1.2 \
-            "${NOIRUP_BIN_URL}" \
-            -o "$HOME/.nargo/bin/noirup"
-          chmod +x "$HOME/.nargo/bin/noirup"
-          echo "$HOME/.nargo/bin" >> "$GITHUB_PATH"
-          export PATH="$HOME/.nargo/bin:$PATH"
-          noirup --version "${NARGO_VERSION}"
-          nargo --version
+        uses: ./.github/actions/noir-toolchain
+        with:
+          tool: nargo
 
       # Install Barretenberg (bb) via bbup, pinned to BB_VERSION. We fetch the `bbup` SCRIPT
       # DIRECTLY from the SHA-pinned ref (BBUP_REF) rather than running upstream's `install`
@@ -310,17 +389,9 @@ jobs:
       # binds `<ver>` as its argument.)
       - name: Install bb (Barretenberg) — pinned
         if: steps.changes.outputs.zk == 'true'
-        run: |
-          set -euo pipefail
-          mkdir -p "$HOME/.bb"
-          curl -fsSL --proto '=https' --tlsv1.2 \
-            "https://raw.githubusercontent.com/AztecProtocol/aztec-packages/${BBUP_REF}/barretenberg/bbup/bbup" \
-            -o "$HOME/.bb/bbup"
-          chmod +x "$HOME/.bb/bbup"
-          echo "$HOME/.bb" >> "$GITHUB_PATH"
-          export PATH="$HOME/.bb:$PATH"
-          bbup --version "${BB_VERSION}"
-          bb --version
+        uses: ./.github/actions/noir-toolchain
+        with:
+          tool: bb
 
       - name: Toolchain versions (record for the run log)
         if: steps.changes.outputs.zk == 'true'
@@ -484,8 +555,6 @@ jobs:
         if: steps.changes.outputs.zk == 'true'
         run: |
           cargo test -p sparq-merkle-suite -- --test-threads=1
-          cd zk/noir-query/core
-          nargo test
 
       # The DualLeafV2 sentinel/constants mirror (zk/dual-leaf-v2). A separate Nargo
       # package on purpose: every *.nr under zk/compose is sha256-pinned by the
@@ -702,7 +771,7 @@ jobs:
       # the end of the job is what proves these tests ran.
       - name: Run the default-run live ZK tests (real nargo/bb)
         run: |
-          cargo test -p sparq-zk-compose -p sparq-zk -p sparq-zk-query -- --test-threads=1
+          cargo test -p sparq-zk-compose -p sparq-zk -- --test-threads=1
 
       # Rebuild the immutable foundation separately from the PR candidate.
       # This independently checks the provenance of all four legacy key goldens.
@@ -773,22 +842,5 @@ jobs:
       # or workflow level, and on a non-bash `shell:` anywhere in this job. The ledger
       # proves each live body reached the call placed after its assertions; it does
       # not grade what those assertions check.
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      - name: Install the pinned query compiler agreement dependencies
-        run: npm ci --ignore-scripts --prefix zk/noir-query/compiler-agreement
-      - name: Run the exact Noir query compiler contracts and corpus ratchet
-        run: |
-          set -euo pipefail
-          rustup target add wasm32-unknown-unknown
-          cargo check -p sparq-zk-query --target wasm32-unknown-unknown
-          cargo check -p sparq-zk-query --target wasm32-unknown-unknown --features ordered-json
-          (cd zk/noir-query/core && nargo check && nargo test)
-          (cd zk/noir-query/fixtures/generated_smoke && nargo check && nargo test)
-          python3 scripts/check-noir-dependency-aliases.py
-          node zk/noir-query/compiler-agreement/check.mjs --self-test
-          cargo test -p sparq-zk-query -- --include-ignored --test-threads=1
-
       - name: Verify every live ZK test ran
-        run: python3 scripts/check-zk-toolchain-gate.py --verify-ledger "${{ github.workspace }}/.zk-live-ledger-${{ github.run_id }}-${{ github.run_attempt }}.txt"
+        run: python3 scripts/check-zk-toolchain-gate.py --verify-ledger "${{ github.workspace }}/.zk-live-ledger-${{ github.run_id }}-${{ github.run_attempt }}.txt" --profile estate
