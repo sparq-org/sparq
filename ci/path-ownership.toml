@@ -498,6 +498,12 @@ crates = ["sparq-zk-query", "sparq-merkle-suite"]
 pattern = "zk/sparql-evaluator/fixtures/conformance/cases.json"
 crates = ["sparq-zk-query"]
 
+# The closed operators also execute the corpus's core dataset
+# (tests/closed_operators.rs, tests/closed_plan_group.rs).
+[[map]]
+pattern = "zk/sparql-evaluator/fixtures/conformance/core.nt"
+crates = ["sparq-zk-query"]
+
 # sparq-zk-query's native tests copy the Noir library roots they compile against
 # (zk/noir-query/core, zk/compose/compose_core, zk/dual-leaf-v2) from the zk root.
 [[map]]

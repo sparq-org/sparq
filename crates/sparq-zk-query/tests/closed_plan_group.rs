@@ -57,10 +57,9 @@ fn groups_having_subquery_and_empty_sum_execute() {
 #[test]
 fn aggregate_corpus_executes_with_engine_expected_and_altered_controls() {
     use sparq_zk_query::interp::ResultValue;
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../zk/sparql-evaluator/fixtures/conformance");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let corpus: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(root.join("cases.json")).unwrap()).unwrap();
+        serde_json::from_str(&std::fs::read_to_string(root.join("../../zk/sparql-evaluator/fixtures/conformance/cases.json")).unwrap()).unwrap();
     for fixture in corpus["cases"].as_array().unwrap().iter().filter(|c| {
         c["id"].as_str().unwrap().starts_with("aggregate-")
             && c["id"] != "aggregate-group-concat-unambiguous"
@@ -70,7 +69,7 @@ fn aggregate_corpus_executes_with_engine_expected_and_altered_controls() {
         let rdf = fixture["dataset"]
             .as_str()
             .map(str::to_owned)
-            .unwrap_or_else(|| std::fs::read_to_string(root.join("core.nt")).unwrap());
+            .unwrap_or_else(|| std::fs::read_to_string(root.join("../../zk/sparql-evaluator/fixtures/conformance/core.nt")).unwrap());
         let (data, _) = fixture_support::dataset(&rdf);
         let p = lower(
             query,

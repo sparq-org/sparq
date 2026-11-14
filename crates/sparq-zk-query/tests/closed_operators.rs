@@ -222,9 +222,9 @@ fn credential_graphs_are_separate_and_default_merge_deduplicates() {
 
 #[test]
 fn closed_corpus_admission_inventory() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let corpus: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(root.join("zk/sparql-evaluator/fixtures/conformance/cases.json")).unwrap(),
+        &std::fs::read(root.join("../../zk/sparql-evaluator/fixtures/conformance/cases.json")).unwrap(),
     )
     .unwrap();
     let bounds = Bounds {
@@ -316,13 +316,13 @@ fn seeded_generated_closed_circuits_agree_and_reject_hidden_right_rows() {
 
 #[test]
 fn closed_positive_corpus_executes_with_expected_engine_result_and_controls() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let corpus: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(root.join("zk/sparql-evaluator/fixtures/conformance/cases.json")).unwrap(),
+        &std::fs::read(root.join("../../zk/sparql-evaluator/fixtures/conformance/cases.json")).unwrap(),
     )
     .unwrap();
     let rdf =
-        std::fs::read_to_string(root.join("zk/sparql-evaluator/fixtures/conformance/core.nt"))
+        std::fs::read_to_string(root.join("../../zk/sparql-evaluator/fixtures/conformance/core.nt"))
             .unwrap();
     let admitted = [
         "union-keeps-duplicates",
