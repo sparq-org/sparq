@@ -178,7 +178,9 @@ fn envelope_policy_has_canonical_optional_values_and_binds_wide_times() {
     let mut invalid = policy.clone();
     invalid.holder_required = false;
     assert!(invalid.words().is_err());
-    let plan = lower("ASK {}", B).unwrap();
+    let plan = lower("ASK {}", B)
+        .unwrap()
+        .with_envelope_features(sparq_zk_query::plan::EnvelopeFeatures::ALL);
     let statement = Statement {
         request_digest: [0; 32],
         input_commitment: [0; 32],
@@ -346,4 +348,38 @@ fn revealed_inputs_verify_signatures_and_reconstruct_ordered_padded_words() {
         .reconstruct_authenticated_with_envelope(&plan, &statement, &envelope)
         .unwrap();
     assert_eq!(&hidden[hidden.len() - 6..hidden.len() - 1], &[[0; 32]; 5]);
+}
+
+#[test]
+fn authenticated_layout_refuses_a_policy_for_different_compiled_consumers() {
+    use sparq_zk_query::{plan::EnvelopeFeatures, statement::EnvelopeInputs, Error};
+    let base = lower("ASK {}", B).unwrap();
+    let statement = Statement {
+        request_digest: [7; 32],
+        input_commitment: [0; 32],
+        signature_mode: 1,
+        result: ResultValue::Ask(true),
+    };
+    let off = EnvelopeInputs::issuer_only([7; 32]);
+    let mut required = off.clone();
+    required.holder_required = true;
+    required.status_required = true;
+    required.snapshot_root[31] = 1;
+    required.validity_required = true;
+    required.freshness_required = true;
+    let all = base.clone().with_envelope_features(EnvelopeFeatures::ALL);
+    for (plan, policy) in [(&base, &required), (&all, &off)] {
+        assert_eq!(
+            Layout::new(plan)
+                .reconstruct_authenticated_with_envelope(plan, &statement, policy)
+                .unwrap_err(),
+            Error::Invalid("compiled envelope features".into())
+        );
+    }
+    assert!(Layout::new(&base)
+        .reconstruct_authenticated_with_envelope(&base, &statement, &off)
+        .is_ok());
+    assert!(Layout::new(&all)
+        .reconstruct_authenticated_with_envelope(&all, &statement, &required)
+        .is_ok());
 }

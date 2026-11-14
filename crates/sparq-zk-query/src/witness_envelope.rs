@@ -4,7 +4,7 @@ use crate::{
     credential::{field, Credential},
     envelope_policy::{self, PolicyInput},
     interp::{Trace, Word},
-    plan::Plan,
+    plan::{EnvelopeFeatures, Plan},
     statement::EnvelopeInputs,
     Error,
 };
@@ -80,8 +80,29 @@ fn membership(index: u64, path: &[Word], capacity: usize) -> Result<Value, Error
     siblings.resize(capacity, "0".into());
     Ok(json!({"index":index.to_string(),"siblings":siblings}))
 }
+fn property_row(
+    quads: &[oxrdf::Quad],
+    subject: &NamedOrBlankNode,
+    predicate: &str,
+) -> Result<usize, Error> {
+    let rows: Vec<_> = quads
+        .iter()
+        .enumerate()
+        .filter(|(_, q)| {
+            &q.subject == subject
+                && q.predicate.as_str() == predicate
+                && q.graph_name.is_default_graph()
+        })
+        .map(|(i, _)| i)
+        .collect();
+    let [row] = rows.as_slice() else {
+        return Err(Error::Invalid("status property cardinality".into()));
+    };
+    Ok(*row)
+}
+
 fn empty_status() -> Value {
-    json!({"depth":0,"present":false,"bit_len":0,"root":"0","accepted":{"index":"0","siblings":vec!["0";4]},"bit":false,
+    json!({"list_row":0,"purpose_row":0,"depth":0,"present":false,"bit_len":0,"root":"0","accepted":{"index":"0","siblings":vec!["0";4]},"bit":false,
         "path":{"index":"0","siblings":vec!["0";32]},"purpose":vec![0;16],"purpose_len":0,
         "index":vec![0;20],"index_len":0,"size":vec![0;20],"size_len":0})
 }
@@ -89,14 +110,17 @@ fn raw_credential(
     c: Option<&Credential>,
     e: Option<&CredentialEvidence>,
     capacity: usize,
+    features: EnvelopeFeatures,
 ) -> Result<Value, Error> {
     let mut status = vec![empty_status(); capacity];
     let mut from = String::new();
     let mut until = String::new();
     if let Some(c) = c {
         let root = c.vc_subject()?;
-        from = lexical(c, &root, "https://www.w3.org/2018/credentials#validFrom")?;
-        until = lexical(c, &root, "https://www.w3.org/2018/credentials#validUntil")?;
+        if features.validity {
+            from = lexical(c, &root, "https://www.w3.org/2018/credentials#validFrom")?;
+            until = lexical(c, &root, "https://www.w3.org/2018/credentials#validUntil")?;
+        }
         let quads = c.quads()?;
         for proof in e.into_iter().flat_map(|e| &e.statuses) {
             if proof.depth > 32 || proof.path.len() != proof.depth as usize {
@@ -110,6 +134,16 @@ fn raw_credential(
             }
             let entry = NamedOrBlankNode::try_from(quads[proof.quad_index].object.clone())
                 .map_err(|_| Error::Invalid("status entry kind".into()))?;
+            let list_row = property_row(
+                &quads,
+                &entry,
+                "https://www.w3.org/ns/credentials/status#statusListCredential",
+            )?;
+            let purpose_row = property_row(
+                &quads,
+                &entry,
+                "https://www.w3.org/ns/credentials/status#statusPurpose",
+            )?;
             let (purpose, purpose_len) = bytes(
                 &lexical(
                     c,
@@ -134,7 +168,7 @@ fn raw_credential(
                 )?,
                 20,
             )?;
-            status[proof.quad_index] = json!({"depth":proof.depth,"present":true,"bit_len":proof.bit_len,"root":field_to_hex(&field(proof.root)?),
+            status[proof.quad_index] = json!({"list_row":list_row,"purpose_row":purpose_row,"depth":proof.depth,"present":true,"bit_len":proof.bit_len,"root":field_to_hex(&field(proof.root)?),
                 "accepted":membership(proof.accepted_index as u64,&proof.accepted_siblings,4)?,"bit":proof.bit,
                 "path":membership(proof.path_index,&proof.path,32)?,"purpose":purpose,"purpose_len":purpose_len,
                 "index":index,"index_len":index_len,"size":size,"size_len":size_len});
@@ -220,7 +254,7 @@ pub(crate) fn render_canonical(
         evidence,
         revealed,
     } = input;
-    envelope.validate()?;
+    plan.envelope_features().check(envelope)?;
     for credential in credentials {
         if credential.canonical_issuer_root(envelope.issuer_depth)? != envelope.issuer_root {
             return Err(Error::Invalid("issuer membership root".into()));
@@ -264,7 +298,8 @@ pub(crate) fn render_canonical(
             json_toml(&raw_credential(
                 credentials.get(i),
                 evidence.credentials.get(i),
-                n as usize
+                n as usize,
+                plan.envelope_features(),
             )?)
         ));
     }

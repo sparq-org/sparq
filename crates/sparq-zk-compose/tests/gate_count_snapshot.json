@@ -25,7 +25,7 @@
     "envelope_tests": "draft credential-statement envelope harness (zk/noir-query/envelope_tests): native tests and private measurement circuits run by run.py; not a deployed proving member",
     "envelope_validity": "draft credential-statement envelope harness (zk/noir-query/envelope_tests): native tests and private measurement circuits run by run.py; not a deployed proving member",
     "envelope_total": "draft credential-statement envelope harness (zk/noir-query/envelope_tests): native tests and private measurement circuits run by run.py; not a deployed proving member",
-    "query_3ef37537cbebab7dacff42a2246a046abf73637e6cb9880a0c9d565d653885d6": "generated query-compiler smoke fixture (zk/noir-query/fixtures/generated_smoke); not a deployed proving member"
+    "query_27e521d950174bd4fae262ec24439b6c8b8aea8009d2b8a3f2e0c57190bf7520": "generated query-compiler smoke fixture (zk/noir-query/fixtures/generated_smoke); not a deployed proving member"
   },
   "members": {
     "scan_k1_n16_r4": 5991,

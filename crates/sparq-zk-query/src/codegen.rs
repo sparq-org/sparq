@@ -95,6 +95,13 @@ fn generate_inner(
     let resource = opening.resource;
     let method = opening.method;
     let check_keys = u8::from(source_key_checks());
+    let features = plan.envelope_features();
+    let (holder, status, validity, freshness) = (
+        u8::from(features.holder),
+        u8::from(features.status),
+        u8::from(features.validity),
+        u8::from(features.freshness),
+    );
     let layout = crate::statement::Layout::new(plan);
     source.push_str(&if authenticated {
         layout.declarations_authenticated()
@@ -167,7 +174,8 @@ fn generate_inner(
                 0
             };
         if canonical_envelope {
-            source.push_str("    let policy=core::envelope::PublicPolicy {issuer_root,issuer_depth,holder_required,holder_issuers_present,holder_issuer_count,holder_issuers,status_required,allow_missing_status,snapshot_root,snapshot_depth,validity_required,now,freshness_required,earliest_created};\n    core::envelope::check_policy::<4,4>(policy);\n");
+            source.push_str("    let policy_inputs=core::envelope::PublicPolicy {issuer_root,issuer_depth,holder_required,holder_issuers_present,holder_issuer_count,holder_issuers,status_required,allow_missing_status,snapshot_root,snapshot_depth,validity_required,now,freshness_required,earliest_created};\n");
+            writeln!(source,"    let policy=core::ops_core_envelope::select_policy::<{holder},{status},{validity},{freshness}>(policy_inputs);").unwrap();
             writeln!(
                 source,
                 "    let holder_used_start=[false;{}];",
@@ -185,7 +193,7 @@ fn generate_inner(
         for (c, n) in capacities.iter().enumerate() {
             writeln!(source, "    let credential_index_{c}: u32 = {c};").unwrap();
             if canonical_envelope {
-                writeln!(source,"    let (opened_{c}, issuer_{c}, used_{c})=core::ops_core_envelope::open_slot::<{n},{resource},{lexical},{method},{}>(credential_{c},credential_proof_{c},counts[{c}],credential_flags[{c}],credential_quad_bounds[{c}],credential_index_{c},request_digest,signature_mode,revealed_messages[{c}],revealed_keys[{c}],policy,envelope_{c},holder_evidence);",cap.credentials).unwrap();
+                writeln!(source,"    let (opened_{c}, issuer_{c}, used_{c})=core::ops_core_envelope::open_slot_selected::<{n},{resource},{lexical},{method},{},{holder},{status},{validity},{freshness}>(credential_{c},credential_proof_{c},counts[{c}],credential_flags[{c}],credential_quad_bounds[{c}],credential_index_{c},request_digest,signature_mode,revealed_messages[{c}],revealed_keys[{c}],policy,envelope_{c},holder_evidence);",cap.credentials).unwrap();
                 let previous = if c == 0 {
                     "holder_used_start".into()
                 } else {
@@ -215,7 +223,7 @@ fn generate_inner(
         )
         .unwrap();
         if canonical_envelope {
-            writeln!(source,"    core::envelope::check_holder_signatures(request_digest,holder_used_{},holder_evidence);",capacities.len()-1).unwrap();
+            writeln!(source,"    core::ops_core_envelope::check_selected_holders::<{holder},{}>(request_digest,holder_used_{},holder_evidence);",cap.credentials,capacities.len()-1).unwrap();
             if plan.nodes.iter().any(|n| {
                 matches!(
                     n.operator,

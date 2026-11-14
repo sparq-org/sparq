@@ -178,12 +178,12 @@ fn source_identity_binding_uses_authenticated_identity_and_consumer_checks() {
     ] {
         let package = generate(&lower(query, B).unwrap()).unwrap();
         let source = &package.files[&format!("{}/src/main.nr", package.name)];
-        assert!(source.contains("open_slot::<4,64,65,32,2>"));
+        assert!(source.contains("open_slot_selected::<4,64,65,32,2,0,0,0,0>"));
         assert!(!source.contains("ops_core_reads::check_with_parameters("));
     }
     let package = generate(&lower("ASK {}", B).unwrap()).unwrap();
     let source = &package.files[&format!("{}/src/main.nr", package.name)];
-    assert!(source.contains("open_slot::<4,64,65,32,2>"));
+    assert!(source.contains("open_slot_selected::<4,64,65,32,2,0,0,0,0>"));
 }
 
 #[test]
@@ -222,7 +222,7 @@ fn expression_reads_cover_the_entire_consumer_input_before_filtering() {
     let eval = source.find(&format!("let predicate_{i} =")).unwrap();
     let filter = source.find(&format!("ops_core::filter(t{input},")).unwrap();
     assert!(check < eval && eval < filter);
-    assert!(source.contains("open_slot::<64,64,65,32,1>"));
+    assert!(source.contains("open_slot_selected::<64,64,65,32,1,0,0,0,0>"));
     assert!(!source.contains("source_index"));
 }
 
@@ -310,14 +310,15 @@ fn verifier_selects_opening_profile_and_one_index_binding_per_slot() {
         .with_opening_profile(OpeningProfile::LongObjects);
     assert_ne!(compact.hash(), long.hash());
     let p = generate(&long).unwrap();
-    assert!(p.files[&format!("{}/src/main.nr", p.name)].contains("open_slot::<4,64,137,32,2>"));
+    assert!(p.files[&format!("{}/src/main.nr", p.name)]
+        .contains("open_slot_selected::<4,64,137,32,2,0,0,0,0>"));
     let wide = compact
         .clone()
         .with_opening_profile(OpeningProfile::Extended);
     assert_ne!(compact.hash(), wide.hash());
     let package = generate(&wide).unwrap();
     let source = &package.files[&format!("{}/src/main.nr", package.name)];
-    assert!(source.contains("open_slot::<4,128,160,128,2>"));
+    assert!(source.contains("open_slot_selected::<4,128,160,128,2,0,0,0,0>"));
     for i in 0..2 {
         assert_eq!(
             source
@@ -340,4 +341,35 @@ fn verifier_selects_opening_profile_and_one_index_binding_per_slot() {
         .with_opening_profile(OpeningProfile::Extended);
     assert_eq!(wide.hash(), changed.hash());
     assert_eq!(generate(&wide).unwrap(), generate(&changed).unwrap());
+}
+
+#[test]
+fn optional_consumers_select_gadgets_without_changing_public_layout() {
+    use sparq_zk_query::{plan::EnvelopeFeatures, statement::Layout};
+    let base = lower("ASK {}", B).unwrap();
+    let layout = Layout::new(&base).declarations_authenticated();
+    for mask in 0..16 {
+        let features = EnvelopeFeatures {
+            holder: mask & 1 != 0,
+            status: mask & 2 != 0,
+            validity: mask & 4 != 0,
+            freshness: mask & 8 != 0,
+        };
+        let plan = base.clone().with_envelope_features(features);
+        let package = generate(&plan).unwrap();
+        let source = &package.files[&format!("{}/src/main.nr", package.name)];
+        let flags = format!(
+            "{},{},{},{}",
+            u8::from(features.holder),
+            u8::from(features.status),
+            u8::from(features.validity),
+            u8::from(features.freshness)
+        );
+        assert!(source.contains(&format!("select_policy::<{flags}>")));
+        assert_eq!(source.matches("open_slot_selected::<").count(), 2);
+        assert_eq!(source.matches("check_selected_holders::<").count(), 1);
+        assert_eq!(Layout::new(&plan).declarations_authenticated(), layout);
+        assert!(!source.contains("assert("));
+        assert!(!source.contains("for "));
+    }
 }

@@ -246,6 +246,22 @@ issuer_root, quad_bounds, profile)`; typed envelope policies use
 quad_bounds, profile)`. Existing constructors select `Solid`.
 `Request::plan()` restores the selected profile and `opening_profile()` exposes
 it. Different profiles produce different plan hashes and keys.
+Optional consumers are selected before compilation with
+`Plan::with_envelope_features(plan::EnvelopeFeatures { holder, status,
+validity, freshness })`. Issuer authorization is always enabled. The default
+selects no optional consumers. Native callers use
+`Compiler::prepare_with_envelope_features(query, bounds, quad_bounds, profile,
+features)`. The request's typed policy must select exactly those consumers;
+request admission derives the selection and checks its method descriptor.
+`Request::plan()` restores it and `envelope_features()` exposes it. Feature
+selection changes the plan hash and cached key. Policy values remain public
+parameters, so changing a time or accepted root preserves the shape.
+
+The public layout stays the same for every selection. Generated circuits bind
+public flags to the compiled selection and require disabled policy values to be
+zero. The holder signature consumer runs once over distinct required keys.
+Fixture entry points retain their explicit contracts.
+
 The additive envelope seam is `authenticate_bounded` followed by its consumer
 and `from_authenticated_bounded`. Existing unbounded fixture entry points remain
 available, with the same suite authentication relation.

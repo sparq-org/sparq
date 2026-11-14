@@ -275,3 +275,26 @@ fn closed_optional_and_subqueries_are_admitted() {
         lower(query, BOUNDS).unwrap();
     }
 }
+
+#[test]
+fn optional_envelope_consumers_are_part_of_circuit_identity() {
+    use sparq_zk_query::plan::EnvelopeFeatures;
+    let base = lower("ASK {}", BOUNDS).unwrap();
+    assert_eq!(base.envelope_features(), EnvelopeFeatures::default());
+    let mut hashes = std::collections::BTreeSet::new();
+    for mask in 0..16 {
+        let features = EnvelopeFeatures {
+            holder: mask & 1 != 0,
+            status: mask & 2 != 0,
+            validity: mask & 4 != 0,
+            freshness: mask & 8 != 0,
+        };
+        assert_eq!(features.mask(), mask);
+        let plan = base.clone().with_envelope_features(features);
+        assert!(
+            hashes.insert(plan.hash()),
+            "consumer selection reused another key"
+        );
+        assert_eq!(plan.canonical_bytes(), plan.clone().canonical_bytes());
+    }
+}

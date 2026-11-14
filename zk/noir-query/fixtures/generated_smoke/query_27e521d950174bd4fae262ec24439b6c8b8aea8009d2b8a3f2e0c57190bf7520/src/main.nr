@@ -41,18 +41,18 @@ fn main(
 ) {
     ops_core::check_parameters(parameters, 0);
     ops_core::check_indices(indices, 0);
-    let policy=core::envelope::PublicPolicy {issuer_root,issuer_depth,holder_required,holder_issuers_present,holder_issuer_count,holder_issuers,status_required,allow_missing_status,snapshot_root,snapshot_depth,validity_required,now,freshness_required,earliest_created};
-    core::envelope::check_policy::<4,4>(policy);
+    let policy_inputs=core::envelope::PublicPolicy {issuer_root,issuer_depth,holder_required,holder_issuers_present,holder_issuer_count,holder_issuers,status_required,allow_missing_status,snapshot_root,snapshot_depth,validity_required,now,freshness_required,earliest_created};
+    let policy=core::ops_core_envelope::select_policy::<0,0,0,0>(policy_inputs);
     let holder_used_start=[false;1];
     let credential_flags = core::ops_core_suite::credential_mode_flags::<1>(credential_count, bounds[0], signature_mode, revealed_count, revealed_messages, revealed_keys);
     let dataset_start = core::ops_core_suite::empty_dataset::<5>();
     let credential_index_0: u32 = 0;
-    let (opened_0, issuer_0, used_0)=core::ops_core_envelope::open_slot::<4,64,65,32,1>(credential_0,credential_proof_0,counts[0],credential_flags[0],credential_quad_bounds[0],credential_index_0,request_digest,signature_mode,revealed_messages[0],revealed_keys[0],policy,envelope_0,holder_evidence);
+    let (opened_0, issuer_0, used_0)=core::ops_core_envelope::open_slot_selected::<4,64,65,32,1,0,0,0,0>(credential_0,credential_proof_0,counts[0],credential_flags[0],credential_quad_bounds[0],credential_index_0,request_digest,signature_mode,revealed_messages[0],revealed_keys[0],policy,envelope_0,holder_evidence);
     let holder_used_0=core::ops_core_envelope::merge_coverage(holder_used_start,used_0);
     let facts_0=core::ops_core_suite::append_credential(dataset_start,opened_0,0);
     let dataset_0=core::ops_core_suite::append_verified_issuer(facts_0,opened_0,issuer_0,credential_flags[0],4);
     let _dataset = dataset_0;
-    core::envelope::check_holder_signatures(request_digest,holder_used_0,holder_evidence);
+    core::ops_core_envelope::check_selected_holders::<0,1>(request_digest,holder_used_0,holder_evidence);
     core::ops_core_statement::check_suite_dataset([opened_0.message()], credential_count, presentation_salt, input_commitment);
     ops_core::unit(t0);
     ops_core::check_bound(t0, bounds[2]);
