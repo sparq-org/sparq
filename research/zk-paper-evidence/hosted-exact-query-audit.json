@@ -1,0 +1,546 @@
+{
+  "schema": "sparq.independent-hosted-campaign-audit.v1",
+  "verified_at": "2026-09-26T18:22:12.476965+00:00",
+  "pr": 6590,
+  "run": 36251326910,
+  "job": 108437121648,
+  "job_url": "https://github.com/sparq-org/sparq/actions/runs/36251326910/job/108437121648",
+  "conclusion": "success",
+  "completed_at": "2026-09-26T18:08:41Z",
+  "identity": {
+    "event": "pull_request",
+    "github_sha": "2ddb99f4980bedded0a8d693c20cb2612450d6d3",
+    "checkout_sha": "2ddb99f4980bedded0a8d693c20cb2612450d6d3",
+    "pr_head_sha": "4bb63258eee2d446b2ae22f3f334bb8ff6592715",
+    "pr_base_sha": "92a623d5c5ddc40611e412b8f44683d76ca7623a",
+    "merge_group_head_sha": null,
+    "merge_group_base_sha": null,
+    "run_id": "36251326910",
+    "run_attempt": "1",
+    "repository": "sparq-org/sparq",
+    "pr_number": 6590
+  },
+  "source_verification": {
+    "source_head": "4bb63258eee2d446b2ae22f3f334bb8ff6592715",
+    "paths_checked": 7067,
+    "bytes_read": 93348216,
+    "lockfiles_checked": 29,
+    "mismatches": [],
+    "all_match": true
+  },
+  "artifact": {
+    "id": 10912331786,
+    "name": "exact-evaluator-2ddb99f4980bedded0a8d693c20cb2612450d6d3-1",
+    "zip_bytes": 12064004,
+    "zip_sha256": "99cc0bf03779d2f85b9a99fc3b5e47226b01c4cbde8d510d9df69c4ebf5342cd",
+    "api_digest_equal": true,
+    "entries": 9605,
+    "uncompressed_bytes": 32433335
+  },
+  "commands": [
+    {
+      "name": "fetch-host-locked-graph",
+      "argv": [
+        "cargo",
+        "fetch",
+        "--locked",
+        "--manifest-path",
+        "zk/sparql-evaluator/Cargo.toml"
+      ],
+      "status": 0,
+      "elapsed_seconds": 0.40356097400012914
+    },
+    {
+      "name": "rebuild-host-local-packages",
+      "argv": [
+        "cargo",
+        "clean",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "zk/sparql-evaluator/Cargo.toml",
+        "--target-dir",
+        "/home/runner/work/sparq/sparq/zk/sparql-evaluator/target",
+        "-p",
+        "ark-crypto-primitives",
+        "-p",
+        "ark-relations",
+        "-p",
+        "risc0-build",
+        "-p",
+        "risc0-zkos-v1compat",
+        "-p",
+        "risc0-zkvm",
+        "-p",
+        "rzup",
+        "-p",
+        "spargebra",
+        "-p",
+        "sparq-canon",
+        "-p",
+        "sparq-core",
+        "-p",
+        "sparq-engine",
+        "-p",
+        "sparq-proved-evaluator",
+        "-p",
+        "sparq-proved-evaluator-methods",
+        "-p",
+        "sparq-proved-evaluator-model",
+        "-p",
+        "sparq-substrate"
+      ],
+      "status": 0,
+      "elapsed_seconds": 0.11351306899996416
+    },
+    {
+      "name": "fetch-guest-locked-graph",
+      "argv": [
+        "cargo",
+        "fetch",
+        "--locked",
+        "--manifest-path",
+        "zk/sparql-evaluator/methods/guest/Cargo.toml"
+      ],
+      "status": 0,
+      "elapsed_seconds": 0.08927674899996418
+    },
+    {
+      "name": "rebuild-guest-local-packages",
+      "argv": [
+        "cargo",
+        "clean",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "zk/sparql-evaluator/methods/guest/Cargo.toml",
+        "--target-dir",
+        "/home/runner/work/sparq/sparq/zk/sparql-evaluator/target/sparq-exact-guest",
+        "--release",
+        "--target",
+        "riscv32im-risc0-zkvm-elf",
+        "-p",
+        "ark-crypto-primitives",
+        "-p",
+        "ark-relations",
+        "-p",
+        "risc0-zkos-v1compat",
+        "-p",
+        "risc0-zkvm",
+        "-p",
+        "spargebra",
+        "-p",
+        "sparq-canon",
+        "-p",
+        "sparq-core",
+        "-p",
+        "sparq-engine",
+        "-p",
+        "sparq-exact-guest",
+        "-p",
+        "sparq-proved-evaluator-model",
+        "-p",
+        "sparq-substrate"
+      ],
+      "status": 0,
+      "elapsed_seconds": 0.09779720200003794
+    },
+    {
+      "name": "export-guest",
+      "argv": [
+        "cargo",
+        "run",
+        "--locked",
+        "--manifest-path",
+        "zk/sparql-evaluator/Cargo.toml",
+        "-p",
+        "sparq-proved-evaluator",
+        "--example",
+        "export_guest",
+        "--",
+        "/home/runner/work/_temp/sparq-exact-evidence/artifact"
+      ],
+      "status": 0,
+      "elapsed_seconds": 51.7155894120001
+    },
+    {
+      "name": "native",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "zk/sparql-evaluator/Cargo.toml",
+        "-p",
+        "sparq-proved-evaluator-model",
+        "--features",
+        "graph-results"
+      ],
+      "status": 0,
+      "elapsed_seconds": 13.478445385999976
+    },
+    {
+      "name": "actual-guest-and-proofs",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "zk/sparql-evaluator/Cargo.toml",
+        "-p",
+        "sparq-proved-evaluator",
+        "--",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "status": 0,
+      "elapsed_seconds": 5853.057541664
+    },
+    {
+      "name": "lint",
+      "argv": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--manifest-path",
+        "zk/sparql-evaluator/Cargo.toml",
+        "--workspace",
+        "--all-targets",
+        "--features",
+        "sparq-proved-evaluator-model/graph-results",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "status": 0,
+      "elapsed_seconds": 23.117178378000062
+    },
+    {
+      "name": "confirm-guest",
+      "argv": [
+        "cargo",
+        "run",
+        "--locked",
+        "--manifest-path",
+        "zk/sparql-evaluator/Cargo.toml",
+        "-p",
+        "sparq-proved-evaluator",
+        "--example",
+        "export_guest",
+        "--",
+        "/home/runner/work/_temp/sparq-exact-evidence/artifact-after"
+      ],
+      "status": 0,
+      "elapsed_seconds": 0.33125600299990765
+    }
+  ],
+  "tests": {
+    "native_model": {
+      "passed": 100,
+      "failed": 0,
+      "ignored": 0
+    },
+    "host_actual_guest_and_proofs": {
+      "passed": 49,
+      "failed": 0,
+      "ignored": 2
+    },
+    "genuine_proof_function_names": [
+      "real_v2_catalog_and_nested_graph_result_bind_every_public_expectation",
+      "real_v2_holder_declared_absence_respects_from_named_scope",
+      "real_v3_holder_describe_binds_the_explicit_blank_closure_policy",
+      "real_v3_holder_table_retains_duplicate_unbound_and_cross_row_identity",
+      "real_v3_verifier_construct_proves_fresh_nodes_and_graph_set_semantics",
+      "real_exact_result_rejects_all_public_binding_tampering_and_replay",
+      "real_false_ask_proves_absence_from_the_accepted_complete_graph",
+      "real_holder_declared_bag_preserves_duplicates_unbound_and_provenance"
+    ],
+    "explicitly_ignored": [
+      "real_engine_replay_cell_proves_both_authorities_and_rejects_substitutions",
+      "real_engine_replay_omission_is_an_observed_guest_abort"
+    ]
+  },
+  "genuine_receipts": {
+    "guest_sha256": "fadf751d8cb91396abd7047a4a138736465e463415e40e7423130c01c5b5bd2a",
+    "guest_bytes": 5277180,
+    "pin": {
+      "sha256": [
+        250,
+        223,
+        117,
+        29,
+        140,
+        185,
+        19,
+        150,
+        171,
+        215,
+        4,
+        122,
+        74,
+        19,
+        135,
+        54,
+        70,
+        94,
+        70,
+        52,
+        21,
+        228,
+        14,
+        116,
+        35,
+        19,
+        12,
+        1,
+        197,
+        181,
+        189,
+        42
+      ],
+      "image_id": [
+        4194659102,
+        4071703700,
+        1996754120,
+        3432096220,
+        2038009768,
+        3730967108,
+        3468773622,
+        1025862938
+      ]
+    },
+    "before_after_guest_equal": true,
+    "receipts": [
+      {
+        "name": "v1-holder-bag",
+        "sha256": "c35745710e10be15af30a94e2b205cef1f1060d5adc655841769d31e070b66cb",
+        "bytes": 585715,
+        "kind": "Succinct",
+        "exit_code": {
+          "Halted": 0
+        },
+        "assumptions_empty": true,
+        "pin_matches": true,
+        "request_version": 1,
+        "authority": "HolderDeclared"
+      },
+      {
+        "name": "v1-verifier-false-ask",
+        "sha256": "cc6652d61fdf276970ce800d5a65b92bb95ce7d5111d0999aff45212cf042e0a",
+        "bytes": 586794,
+        "kind": "Succinct",
+        "exit_code": {
+          "Halted": 0
+        },
+        "assumptions_empty": true,
+        "pin_matches": true,
+        "request_version": 1,
+        "authority": "VerifierAgreed"
+      },
+      {
+        "name": "v1-verifier-select",
+        "sha256": "cb10aad587876308a7e66b9ff035c63bf63a6588c6da2b36cdca81cf5fbd2e05",
+        "bytes": 586041,
+        "kind": "Succinct",
+        "exit_code": {
+          "Halted": 0
+        },
+        "assumptions_empty": true,
+        "pin_matches": true,
+        "request_version": 1,
+        "authority": "VerifierAgreed"
+      },
+      {
+        "name": "v2-holder-false-ask",
+        "sha256": "62469e86810c8a58165c26b4ddfedfb3178a54254e18d6e2d0a3e3884ee6e07a",
+        "bytes": 584820,
+        "kind": "Succinct",
+        "exit_code": {
+          "Halted": 0
+        },
+        "assumptions_empty": true,
+        "pin_matches": true,
+        "request_version": 2,
+        "authority": "HolderDeclared"
+      },
+      {
+        "name": "v2-verifier-catalog",
+        "sha256": "ed181b17049144108f1bc260a86addca8f7098c8e899d6866f0ec209c64a70bc",
+        "bytes": 586350,
+        "kind": "Succinct",
+        "exit_code": {
+          "Halted": 0
+        },
+        "assumptions_empty": true,
+        "pin_matches": true,
+        "request_version": 2,
+        "authority": "VerifierAgreed"
+      },
+      {
+        "name": "v3-holder-bag",
+        "sha256": "0e14b516be8c8bd9bccc69902ebc4b845f2a772c7981eeb0e61c3e2b72fcf11a",
+        "bytes": 586626,
+        "kind": "Succinct",
+        "exit_code": {
+          "Halted": 0
+        },
+        "assumptions_empty": true,
+        "pin_matches": true,
+        "request_version": 3,
+        "authority": "HolderDeclared"
+      },
+      {
+        "name": "v3-holder-describe",
+        "sha256": "6a831568e0425380ee7b962b69ef384cd0dd3f2a6cabedafc35ab2f9c67a52e8",
+        "bytes": 585680,
+        "kind": "Succinct",
+        "exit_code": {
+          "Halted": 0
+        },
+        "assumptions_empty": true,
+        "pin_matches": true,
+        "request_version": 3,
+        "authority": "HolderDeclared"
+      },
+      {
+        "name": "v3-verifier-construct",
+        "sha256": "3acfbb7cb4373ca54f00c5ec1280cd861c2d4d05da7bc0d645550428f236e88e",
+        "bytes": 586037,
+        "kind": "Succinct",
+        "exit_code": {
+          "Halted": 0
+        },
+        "assumptions_empty": true,
+        "pin_matches": true,
+        "request_version": 3,
+        "authority": "VerifierAgreed"
+      }
+    ]
+  },
+  "proof_count": 8,
+  "receipt_verification": "Retained Succinct objects/Halted0/empty assumptions/journal bytes and image pins independently inspected. Actual SDK verification and dev-mode refusal are exercised by the successful source-bound CI tests; auditor did not locally re-execute SDK verification.",
+  "original_native_replay": {
+    "cases": 319,
+    "jobs": 1914,
+    "versions": [
+      1,
+      2,
+      3
+    ],
+    "authorities": 2,
+    "expected_positive": 1528,
+    "expected_negative": 386,
+    "all_records_passed": true,
+    "job_input_outcome_hashes_checked": true,
+    "coverage_gaps": [],
+    "all_backend_profiles_complete": false,
+    "proofs": 0,
+    "distributions": [
+      {
+        "backend": "exact_v1",
+        "authority": "holder_declared",
+        "observed": "accepted",
+        "count": 251
+      },
+      {
+        "backend": "exact_v1",
+        "authority": "holder_declared",
+        "observed": "rejected",
+        "count": 68
+      },
+      {
+        "backend": "exact_v1",
+        "authority": "verifier_agreed",
+        "observed": "accepted",
+        "count": 251
+      },
+      {
+        "backend": "exact_v1",
+        "authority": "verifier_agreed",
+        "observed": "rejected",
+        "count": 68
+      },
+      {
+        "backend": "exact_v2",
+        "authority": "holder_declared",
+        "observed": "accepted",
+        "count": 254
+      },
+      {
+        "backend": "exact_v2",
+        "authority": "holder_declared",
+        "observed": "rejected",
+        "count": 65
+      },
+      {
+        "backend": "exact_v2",
+        "authority": "verifier_agreed",
+        "observed": "accepted",
+        "count": 254
+      },
+      {
+        "backend": "exact_v2",
+        "authority": "verifier_agreed",
+        "observed": "rejected",
+        "count": 65
+      },
+      {
+        "backend": "exact_v3",
+        "authority": "holder_declared",
+        "observed": "accepted",
+        "count": 259
+      },
+      {
+        "backend": "exact_v3",
+        "authority": "holder_declared",
+        "observed": "rejected",
+        "count": 60
+      },
+      {
+        "backend": "exact_v3",
+        "authority": "verifier_agreed",
+        "observed": "accepted",
+        "count": 259
+      },
+      {
+        "backend": "exact_v3",
+        "authority": "verifier_agreed",
+        "observed": "rejected",
+        "count": 60
+      }
+    ]
+  },
+  "toolchains": {
+    "host_rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.97.1\nLLVM version: 22.1.6",
+    "host_cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+    "guest_rustc": "rustc 1.97.0-dev (e638c6cfe 2026-07-15)\nbinary: rustc\ncommit-hash: e638c6cfea1eff5fbbb24a27e60538e3760d21b8\ncommit-date: 2026-07-15\nhost: x86_64-unknown-linux-gnu\nrelease: 1.97.0-dev\nLLVM version: 22.1.6",
+    "r0vm_version": "risc0-r0vm 3.0.6",
+    "r0vm_sha256": "751b9b188d341e8bec5e02060086b7b1dc3f7289e90f726c38589bb6735dd6d7",
+    "guest_rustc_sha256": "288ee1994dd8ec08184686e7a52b779c9b075498ffe73003884fefe60389c351"
+  },
+  "historical_ec2_distinction": {
+    "source": "872c219ca18c6cc978d2f5c705f020e8c69748a6",
+    "guest_sha256": "d3dc41e9691093b8ec1566dcace6c213d335d5bde903ac414f6733f956aa9415",
+    "same_guest_bytes": false,
+    "source_compatible_functions": true,
+    "scope": "New hosted artifact completes formerly unfinished legacy function obligations at equivalent relevant source. The two historical EC2 receipts remain attributed to their own different ELF; they are not relabeled."
+  },
+  "limitations": [
+    "No performance or supply-chain closure claim.",
+    "No universal SPARQL/VC authentication claim; this candidate retains its documented proof profiles.",
+    "No local cryptographic verification/build/proof performed by auditor.",
+    "No aggregate cross-receipt tamper-control total inferred; passing source-specific assertions retained.",
+    "Merge/remaining repository landing gates remain separate."
+  ],
+  "evidence_files": {
+    "job.log": "ad719986f492777d42b21a2688145cf8bc70059189f926ba3f8c709577745d4a",
+    "job.json": "ddbe89174adf3c9967e2c5f946a404463205362c0adbf6196698c781b2dd94ce",
+    "run.json": "de5ea8968ec95aad9eb94a84fc09947ef72fa3b0a8adb872fc07499b69380ef7",
+    "artifacts.json": "c6b1221c3884e0db9a32ff2823737fdc96d9f4ed04e0f4da55c86847d3b4d0dc",
+    "git-source-verification.json": "bbb2e491a208aeede2888e35cb927fe6861dd4ae1836855be571f4b67474201f",
+    "native-replay-verification.json": "ceb058cf45669cd9c1f6d364cfedd02c37c34e2397861270828f85f3bfc59377",
+    "verified-receipts.json": "8d923c12e1606bdbcf491010a4ac8343e0b152eb89565ef9e337f1d0601376a3",
+    "retained/sparq-exact-evidence/source.json": "01688f3f2c830e91fdc20ead78142aebe409cc26ba5aea912ce76e5c4eeaf281",
+    "retained/sparq-exact-evidence/evidence.json": "d074087c64114e4675f798834d0447b1b0b0023be811f74e4394c0f2689d3112"
+  }
+}

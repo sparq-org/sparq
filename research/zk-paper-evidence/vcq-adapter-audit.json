@@ -1,0 +1,259 @@
+{
+  "schema": "sparq.independent-terminal-audit.v1",
+  "observed_at": "2026-09-26T14:13:24.403052+00:00",
+  "source_checks": {
+    "integration": {
+      "head": "5c0779ee24f5faf9a6fcbfcfbb83e6988819a55e",
+      "tree": "a970d0f8ed511a0df903e4ced99561193d00fa4f",
+      "files": 678,
+      "locks": 29,
+      "all_git_before_after_hashes_equal": true,
+      "clean_status": true,
+      "source_after_sha256": "7556090c95ba5416fb0bf656a4ee76b4a6aa0248810dc82fa812691328f385c3",
+      "invocation_sha256": "d6cb3d9c1c90be4fc8c9f78d1d0a109047680b58ee0a06d723a7124d18c3f094",
+      "job_sha256": "a52836370c0dfa2d8d144c1bb890a2702adf5e1dd2f9f1ad3a4325625572cc15",
+      "steps_log_hashes_match": true
+    },
+    "vcq": {
+      "head": "872c219ca18c6cc978d2f5c705f020e8c69748a6",
+      "tree": "4cc26ba883c33f2efc1ccea9707fdd5b091e839d",
+      "files": 506,
+      "locks": 29,
+      "all_git_before_after_hashes_equal": true,
+      "clean_status": true,
+      "source_after_sha256": "87d2ccfdae4a7e6d879de0f932cc3e8268dd4a27129e232af54cf1d8250c56ce",
+      "invocation_sha256": "509175c9804a67eeb0904d90bf6b86545a02ebc97e5d7fc526c5dab4afae198d",
+      "job_sha256": "f5bff2eadd03ee0f960adf964fb9be3e9ad5eb1ca15d86ba837c20a4b059f07e",
+      "steps_log_hashes_match": true,
+      "restored_v3_rs_sha256": "ec469f6736a9cb9aea2ed33a9af916bd0045c4da7e9d4774a02cbba56cdb0e01"
+    }
+  },
+  "integrated_v4": {
+    "all_11_steps_passed": true,
+    "library_tests": 213,
+    "library_ignored": 16,
+    "matrix_default_tests": 9,
+    "matrix_dual_leaf_tests": 10,
+    "gate_count_tests": 4,
+    "result_compatibility_tests": 1,
+    "sparql_catalog_tests": 8,
+    "python_harness_tests": 22,
+    "python_ci_tests": 4,
+    "evidence_corruption_controls": 33,
+    "all_target_clippy_passed": true,
+    "static_gate_member_count": 69,
+    "all_69_current_compiled_artifacts_hashed": true,
+    "tool_hashes": {
+      "nargo": {
+        "sha256": "0852cd5631ac5ca25f744f25c931e3cff16351d9bcdbfb03cebb48a4494a0fe3",
+        "bytes": 50238760
+      },
+      "bb": {
+        "sha256": "d7621dfb151f55c23fb04bf274f366a6a1e0516b85a3cf0ae9165a9952509793",
+        "bytes": 34415696
+      }
+    },
+    "gate_count_scope": "Passed real gate_count_regression checks all 69 members against committed baselines with configured tolerance; individual successful bb outputs were captured by Rust and are not retained. Compiled artifacts have current 14:11:39\u201314:12:30 timestamps. No exact per-member measurement upgrade beyond separate 14d evidence.",
+    "new_proofs": 0,
+    "summary_sha256": "c787d196b3701c31adc2a93b5f8296defda3a6fdc9c4bc3b92648e99635b380f"
+  },
+  "vcq": {
+    "wrapper_success": false,
+    "failure": "Expected contiguous test-name ... FAILED substring was absent because --nocapture panic output split the result across lines. Intended runtime assertion mutant was killed, not a compile error.",
+    "genuine_receipts": 7,
+    "protocol_accepted": 6,
+    "protocol_row_capacity_rejected": 1,
+    "receipt_records": [
+      {
+        "case": "select-bag-verifier-agreed",
+        "protocol_accepted": true,
+        "receipt_sha256": "0b55864199288e1b3a9823a83183ca74f97202fa66109603bf6e672a3d029878",
+        "presentation_sha256": "e35488ff099c19e9999774e734155ae7c03413c21ded996db9ac060023d0f874",
+        "journal_sha256": "61b1518f9005fc1de209bce164082c7039be091f7612b9a343571b9f1355ff11",
+        "inner": "Succinct",
+        "exit_code": "Halted(0)",
+        "seal_words": 55667,
+        "controls": 14
+      },
+      {
+        "case": "select-bag-holder-declared",
+        "protocol_accepted": true,
+        "receipt_sha256": "c6cca0e596642beea42457512b9ebffe92aaa10f2880eeb0c2ea35f00c764da8",
+        "presentation_sha256": "a0793d82e1a8a64a3b87af96acd2c9449dd74806fa0a7c14b431368773cf901a",
+        "journal_sha256": "ba56c2b967f64d567831768d3db2aee9cbc232418ae2adf878b948deea342604",
+        "inner": "Succinct",
+        "exit_code": "Halted(0)",
+        "seal_words": 55667,
+        "controls": 13
+      },
+      {
+        "case": "ask-true-verifier-agreed",
+        "protocol_accepted": true,
+        "receipt_sha256": "f78161773e9e5de260c204ab460e2e1bdbe7c31626007286a7beb7ba4cb87534",
+        "presentation_sha256": "2c70433ec305e2555b1f663617ce9d7174a8f5237fcb5fbb2251768b82756f59",
+        "journal_sha256": "91622e53527b356db01a3ed006846fcb54d25bb0a2400f87f76ae71c1615a466",
+        "inner": "Succinct",
+        "exit_code": "Halted(0)",
+        "seal_words": 55667,
+        "controls": 14
+      },
+      {
+        "case": "ask-false-holder-declared",
+        "protocol_accepted": true,
+        "receipt_sha256": "f4ccec6d2d03e39f32d5922339a6396217cdfcb88be244314b3ba02801e88caa",
+        "presentation_sha256": "d3d35e42c1b0bc7cc40700a656cf41ae7d1c5df4ec9e489bfea768fef9977ca4",
+        "journal_sha256": "a9e89484ed2d48c6542bece8370be5e35455245326e46ebc18119a117203325b",
+        "inner": "Succinct",
+        "exit_code": "Halted(0)",
+        "seal_words": 55667,
+        "controls": 13
+      },
+      {
+        "case": "construct-verifier-agreed",
+        "protocol_accepted": true,
+        "receipt_sha256": "cb72effffc4edbe62b4d3939bc11495a529ff9c84db115c297b13f05585ccdc0",
+        "presentation_sha256": "933bec5c7ae674d90bc6d069a29183778db5218e7f143a15163e940be75406d4",
+        "journal_sha256": "b104cc94f03da4eefb4e8138157181e1a8285af4188f7452f0f5057f2841f982",
+        "inner": "Succinct",
+        "exit_code": "Halted(0)",
+        "seal_words": 55667,
+        "controls": 14
+      },
+      {
+        "case": "construct-holder-declared",
+        "protocol_accepted": true,
+        "receipt_sha256": "03943cd8bb379a0711ffe1a8fb89d25220feff677ccce94db59a5779bc20ba2c",
+        "presentation_sha256": "02705af44585d066d01ebfbe8673ac52fa0177f335bb4f94221ea263466a03bc",
+        "journal_sha256": "73f1befc55452d8a038a32c9f5689902e6feeda0690757ff62997c999e277be0",
+        "inner": "Succinct",
+        "exit_code": "Halted(0)",
+        "seal_words": 55667,
+        "controls": 13
+      },
+      {
+        "case": "select-bag-row-bound",
+        "protocol_accepted": false,
+        "receipt_sha256": "77582a8c4ef5b81320a9a53b8e9ef51b2d01eed7010fb846c18e8a69eed0fed8",
+        "presentation_sha256": "2f95e3255c001b9f29d4a8f00641b3a2e5d7fc32d64d2669d0b52778ab28eaf1",
+        "journal_sha256": "9bc604e1a3e4827f513ef748468953aab78c6547506b5593ac056460c7278c3b",
+        "inner": "Succinct",
+        "exit_code": "Halted(0)",
+        "seal_words": 55667,
+        "controls": 0
+      }
+    ],
+    "control_records": 81,
+    "control_inventory": {
+      "changed_query_same_form": 6,
+      "wrong_challenge": 6,
+      "changed_stored_audience_matching_supplied": 6,
+      "changed_window_containing_now": 6,
+      "wrong_verifier_audience": 6,
+      "expired": 6,
+      "not_yet_valid": 6,
+      "wrong_descriptor_digest": 6,
+      "altered_journal_result": 6,
+      "scope_substitution_agreed_to_holder": 3,
+      "wrong_agreed_anchor": 3,
+      "replay_same_store": 6,
+      "broken_store": 6,
+      "concurrent_verifications": 6,
+      "scope_substitution_holder_to_agreed": 3
+    },
+    "stores": "In-memory test doubles only; not durable production stores.",
+    "metadata_sha256": "a02e60d8ef09c520e9b4f36d7b84ce94d5e53ae150fa82feb8f63b67d95e7a7a",
+    "summary_sha256": "2c070ec4c3005ce8cc46c5ef169492a1d442654f09e07f81a2423fd929bfbeb9",
+    "accepted_guest": {
+      "image_id": [
+        2020601996,
+        593421056,
+        4250348984,
+        3677874436,
+        2762184257,
+        4273580276,
+        1767906101,
+        4006410818
+      ],
+      "pin": {
+        "image_id": [
+          2020601996,
+          593421056,
+          4250348984,
+          3677874436,
+          2762184257,
+          4273580276,
+          1767906101,
+          4006410818
+        ],
+        "sha256": [
+          97,
+          170,
+          217,
+          214,
+          152,
+          83,
+          4,
+          217,
+          156,
+          52,
+          196,
+          98,
+          74,
+          171,
+          7,
+          138,
+          47,
+          166,
+          30,
+          48,
+          249,
+          119,
+          117,
+          190,
+          35,
+          60,
+          77,
+          89,
+          51,
+          164,
+          230,
+          116
+        ]
+      }
+    },
+    "remote_rehashed_guest_pin_prover": {
+      "r0vm": {
+        "path": "/home/ubuntu/sparq-zk-tools/risc0-3.0.6/bin/r0vm",
+        "sha256": "751b9b188d341e8bec5e02060086b7b1dc3f7289e90f726c38589bb6735dd6d7",
+        "bytes": 108165720
+      },
+      "guest": {
+        "path": "/home/ubuntu/sparq-zk-runs/host-ee23a415aad7/artifact/guest.bin",
+        "sha256": "61aad9d6985304d99c34c4624aab078a2fa61e30f97775be233c4d5933a4e674",
+        "bytes": 5277564
+      },
+      "pin": {
+        "path": "/home/ubuntu/sparq-zk-runs/vcq-genuine-872c219ca18c-serial/accepted-pin.json",
+        "sha256": "9462244d9d1924093a76331174fcd8f2e70755f257f3a4cb32cc2a6a61e5eb95",
+        "bytes": 438
+      }
+    },
+    "retained_files": 75,
+    "source_restored_after_mutant": true,
+    "post_restore_verify_and_clippy": "not reached in this wrapper; separate continuation required",
+    "pre_mutant_retained_verification": "passed; zero new proof",
+    "guest_omission": "Exact Guest panicked: bounded exact-dataset relation rejected preserved; original false nested metadata limitation remains documented in earlier audit.",
+    "legacy_six_unfinished_proof_functions": "not completed by this seven-case campaign"
+  },
+  "limitations": [
+    "Auditor independently compared files/source/hashes and traced recorded SDK verification; no cryptographic verification rerun.",
+    "No canonical performance claim or full-programme completion claim.",
+    "Prior failures and source-specific evidence remain separate."
+  ],
+  "evidence_hashes": {
+    "snapshot.json": "2a309db4f9c15c1398800284c6a4807479bc492ff88a04c75c978af602718ddc",
+    "retained-proofs.json": "cf15c24033f1682ef1a2436670bfbc17e7720ba4c39a85812566076b6a357fd9",
+    "integration-artifact-hashes.json": "cd893ea4080fd35ec01616ada04d81b6aeb738583db7ef586485fe5333dbd42e",
+    "post-restore-handoff.json": "165808ce65f01c6341b94445d6da5fa2b301dd5ad4dd67cef04f834ba8b6653f"
+  }
+}

@@ -239,6 +239,132 @@ braun26:
     - Wright, Jesse
     - Käfer, Tobias
   date: 2026
+  url: "https://publikationen.bibliothek.kit.edu/1000193675"
   parent:
     type: proceedings
     title: "The Semantic Web (ESWC 2026)"
+
+# [OPUS-5.5] zkp-19 additions. Metadata for braunkaefer25, zkgraph25, veridkg23, yamamoto22,
+# openid4vp and wright25dc is taken from the reference list of the ESWC 2026 postprint
+# (research/zk-paper-2026-09/sources/braun-wright-kaefer-eswc2026.txt) and the supplied
+# research context; W3C/tool entries carry only title, publisher and URL where no further
+# metadata was verified.
+braunkaefer25:
+  type: article
+  title: "RDF-Based Semantics for Selective Disclosure and Zero-Knowledge Proofs on Verifiable Credentials"
+  author:
+    - Braun, Christoph H.-J.
+    - Käfer, Tobias
+  date: 2025
+  page-range: 383-402
+  serial-number:
+    doi: "10.1007/978-3-031-94575-5_21"
+  parent:
+    type: proceedings
+    title: "The Semantic Web — 22nd European Semantic Web Conference, ESWC 2025, Proceedings, Part I (LNCS 15718)"
+
+wright25dc:
+  type: article
+  title: "Towards Provable Provenance and Privacy-Preserving Queries in Decentralised Data Architectures"
+  author:
+    - Wright, Jesse
+  date: 2025
+  url: "https://ceur-ws.org/Vol-4085/paper19.pdf"
+  parent:
+    type: proceedings
+    title: "ISWC 2025 Companion Volume (Doctoral Consortium), CEUR-WS Vol. 4085"
+
+zkgraph25:
+  type: article
+  title: "Zero-Knowledge Verifiable Graph Query Evaluation via Expansion-Centric Operator Decomposition"
+  author:
+    - Wu, H.
+    - Wei, C.
+    - Wang, Y.
+    - Lin, L.
+    - Leng, Y.
+    - He, S.
+    - Zhao, M.
+    - Wu, H.
+    - Yan, Y.
+    - Zhou, A.
+  date: 2025
+  serial-number:
+    arxiv: "2507.00427"
+  parent:
+    type: repository
+    title: "CoRR abs/2507.00427"
+
+veridkg23:
+  type: article
+  title: "VeriDKG: A Verifiable SPARQL Query Engine for Decentralized Knowledge Graphs"
+  author:
+    - Zhou, E.
+    - Guo, S.
+    - Hong, Z.
+    - Jensen, C. S.
+    - Xiao, Y.
+    - Zhang, D.
+    - Liang, J.
+    - Pei, Q.
+  date: 2023
+  page-range: 912-925
+  parent:
+    type: periodical
+    title: "Proceedings of the VLDB Endowment"
+    volume: 17
+    issue: 4
+
+yamamoto22:
+  type: article
+  title: "Formalising Linked-Data Based Verifiable Credentials for Selective Disclosure"
+  author:
+    - Yamamoto, Dan
+    - Suga, Yuji
+    - Sako, Kazue
+  date: 2022
+  page-range: 52-65
+  serial-number:
+    doi: "10.1109/EuroSPW55150.2022.00013"
+  parent:
+    type: proceedings
+    title: "IEEE European Symposium on Security and Privacy Workshops (EuroS&PW 2022)"
+
+openid4vp:
+  type: reference
+  title: "OpenID for Verifiable Presentations 1.0"
+  author:
+    - Terbu, O.
+    - Lodderstedt, T.
+    - Yasuda, K.
+    - Fett, D.
+    - Heenan, J.
+  date: 2025
+  publisher: "OpenID Foundation, Digital Credentials Protocols Working Group"
+
+vcdieddsa:
+  type: reference
+  title: "Data Integrity EdDSA Cryptosuites v1.0"
+  publisher: W3C
+  url: "https://www.w3.org/TR/vc-di-eddsa/"
+
+sparql12:
+  type: reference
+  title: "SPARQL 1.2 Query Language"
+  publisher: W3C
+  url: "https://www.w3.org/TR/sparql12-query/"
+
+risc0:
+  type: reference
+  title: "RISC Zero zkVM Developer Documentation"
+  author: "RISC Zero"
+  url: "https://dev.risczero.com/"
+
+crescent:
+  type: repository
+  title: "Crescent: credential presentations over existing credentials (project repository)"
+  author:
+    - Paquin
+    - Policharla
+    - Zaverucha
+  url: "https://github.com/microsoft/crescent-credentials"

@@ -1,0 +1,40 @@
+{
+  "schema": "sparq.independent-post-restore-audit.v1",
+  "observed_at": "2026-09-26T14:22:11.391524+00:00",
+  "completed_at": "2026-09-26T14:17:26.867989+00:00",
+  "head": "872c219ca18c6cc978d2f5c705f020e8c69748a6",
+  "source_files": 506,
+  "locks": 29,
+  "source_before_after_matches_prior_independently_git_checked_source": true,
+  "clean_status": true,
+  "actual_gates": {
+    "retained_row_bound_verify_only": {
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "filtered": 3,
+      "presentation_sha256": "2f95e3255c001b9f29d4a8f00641b3a2e5d7fc32d64d2669d0b52778ab28eaf1"
+    },
+    "vcq_all_target_clippy": "passed -D warnings"
+  },
+  "new_proofs": 0,
+  "original_mutant_wrapper_failure_preserved": true,
+  "prior_evidence_sha256": "d523b5405540c127c529749b5d0a571d308d348ed25d17ee27066c4457e9331b",
+  "file_hashes": {
+    "service.log": "7a96b62d4fc916f80d9ab8d58c5fbc335432b8a4d2117c12db237097c39b9c3b",
+    "invocation.json": "ccd01173c616f01c3de09aaf60049f255ac13308191704a42992ddfc381c8e1f",
+    "job.py": "2bc27172c3ebadf9d92fca75973ee0e8a9984eb2303bd9b8c8ee25fdd0da7991",
+    "source-before.json": "a1c75a98946c66c920780279d77b9e039dc7035f759668ce36e44ee444fd78ba",
+    "row-bound-restored-verification.log": "f379b3ed549a7565eb21b584eabc5f2b6d6d5a3fb3ef6d921a5c18fa1b61b626",
+    "restored-vcq-host-clippy.log": "482d7b1f30fa74ff5feb897501dbdf64abb495c698b7f184704f3522fe289241",
+    "steps.json": "07221257d7f8fbd755e6231689d775f5bebe01b70b168b60d23980ea43378970",
+    "source-after.json": "8e97ee72bff541556a816a3a32e448210fbf436854cfca68152f73b7bac5c779",
+    "summary.json": "b0a1b290b34118184241212b44218f049d0fae5813d8962212979aecae66461b"
+  },
+  "snapshot_sha256": "ae5bf511263a9e0ebab78de89795d0ebc4e37e8003a0759aebd3c3f38f7e8801",
+  "limitations": [
+    "No rerun by auditor; only retained records inspected.",
+    "This continuation closes two skipped post-restore gates without changing the original failed wrapper result.",
+    "Does not finish the separate six old V1/V3 genuine proof functions."
+  ]
+}
