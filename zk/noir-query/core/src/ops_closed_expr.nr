@@ -37,7 +37,7 @@ fn date<let N:u32>(text:[u8;N],days:i64)->TermCell {
     let mut datatype=[0;41];let dt="http://www.w3.org/2001/XMLSchema#date".as_bytes();
     for i in 0..dt.len() {datatype[i]=dt[i];}
     let c=crate::suite_entry::open_bounded_cell(crate::suite_entry::BoundedTermOpening{bound:true,kind:3,lexical,lexical_len:N,datatype,datatype_len:dt.len(),language:[0;1],language_len:0,key:key.to_be_bytes::<31>()},0);
-    TermCell{bound:c.bound(),kind:c.kind(),enc:c.enc(),key_class:c.key_class(),key:c.key(),dt:c.datatype(),lang:c.language(),scope:c.credential()}
+    TermCell{bound:c.bound(),kind:c.kind(),enc:c.identity(),key_class:c.key_class(),key:c.key(),dt:c.datatype(),lang:c.language(),scope:c.credential()}
 }
 fn program()->[Step;3]{[
     Step{op:0,a:0,b:0,parameter:0,comparison:0},
@@ -87,7 +87,7 @@ fn read_date<let N:u32>(text:[u8;N],days:u64)->crate::suite_entry::BoundedTermOp
 }
 fn read_cell(raw:crate::suite_entry::BoundedTermOpening<65,41,1>)->TermCell {
     let c=crate::suite_entry::open_bounded_cell(raw,0);
-    TermCell{bound:c.bound(),kind:c.kind(),enc:c.enc(),key_class:c.key_class(),key:c.key(),dt:c.datatype(),lang:c.language(),scope:c.credential()}
+    TermCell{bound:c.bound(),kind:c.kind(),enc:c.identity(),key_class:c.key_class(),key:c.key(),dt:c.datatype(),lang:c.language(),scope:c.credential()}
 }
 #[test]
 fn closed_reads_check_honest_claim_dates_before_not_exists() {

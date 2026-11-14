@@ -10,7 +10,7 @@ fn boolean(v:bool)->TermCell{
     let mut dt:BoundedVec<u8,40> = BoundedVec::new();for b in "http://www.w3.org/2001/XMLSchema#boolean".as_bytes(){dt.push(b);}
     let key:Field=0x5000000000000000000000000000000000000000000000000000000000000+if v{0x10000000000000000000000000000000000000000000000000000000000}else{0};
     let c=crate::term::open_term(3,lexical,dt,BoundedVec::<u8,0>::new(),key.to_be_bytes::<31>(),0);
-    TermCell{bound:c.bound(),kind:c.kind(),enc:c.enc(),key_class:c.key_class(),key:c.key(),dt:c.datatype(),lang:c.language(),scope:0}
+    TermCell{bound:c.bound(),kind:c.kind(),enc:c.identity(),key_class:c.key_class(),key:c.key(),dt:c.datatype(),lang:c.language(),scope:0}
 }
 fn output()->Table<2,2>{append(append(empty(),[iri(1),boolean(true)],true),[iri(2),boolean(false)],true)}
 fn run(out:Table<2,2>){crate::ops_closed_extend::boolean(input(),[0,1],1,[Boolean{value:true,is_error:false},Boolean{value:false,is_error:false}],out);}

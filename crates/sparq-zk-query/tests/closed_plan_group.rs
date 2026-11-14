@@ -35,7 +35,7 @@ fn suite_constants_for_closed_profile_match() {
     let issuer=SuiteEncoder.encode(&fixture_support::iri(ISSUER)).unwrap();
     let suite_source=std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../zk/noir-query/core/src/suite_constants.nr")).unwrap();
     assert!(suite_source.contains(&format!("0x{}",issuer.enc.iter().map(|b|format!("{b:02x}")).collect::<String>())));
-    assert!(source.contains("crate::suite_constants::IRI_ISSUER"));
+    assert!(source.contains("crate::term::iri_issuer().identity()"));
 }
 #[test]
 fn groups_having_subquery_and_empty_sum_execute() {

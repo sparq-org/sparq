@@ -390,11 +390,12 @@ fn released(result: &ResultValue) -> Option<bool> {
     }
     assert_eq!(rows.len(), 1);
     for value in [false, true] {
-        if rows[0][0]
-            == SuiteEncoder
-                .encode(&oxrdf::Literal::from(value).into())
-                .unwrap()
-        {
+        let mut expected = SuiteEncoder
+            .encode(&oxrdf::Literal::from(value).into())
+            .unwrap();
+        expected.key_class = 0;
+        expected.key = [0; 32];
+        if rows[0][0] == expected {
             return Some(value);
         }
     }

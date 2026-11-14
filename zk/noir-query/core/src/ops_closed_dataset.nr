@@ -5,12 +5,12 @@ use crate::ops_core::Dataset;
 use crate::ops_closed_common::get;
 pub fn graph_name(credential:u32)->TermCell {
     let c=crate::term::credential_graph([0;2],credential);
-    TermCell{bound:c.bound(),kind:c.kind(),enc:c.enc(),key_class:c.key_class(),key:c.key(),dt:c.datatype(),lang:c.language(),scope:c.credential()}
+    TermCell{bound:c.bound(),kind:c.kind(),enc:c.identity(),key_class:c.key_class(),key:c.key(),dt:c.datatype(),lang:c.language(),scope:c.credential()}
 }
 pub fn graph_name_request(credential:u32,digest:[u8;32])->TermCell{
     let mut request:[u128;2]=[0;2];for i in 0..32 {request[i/16]=request[i/16]*256+digest[i] as u128;}
     let c=crate::term::credential_graph(request,credential);
-    TermCell{bound:c.bound(),kind:c.kind(),enc:c.enc(),key_class:c.key_class(),key:c.key(),dt:c.datatype(),lang:c.language(),scope:c.credential()}
+    TermCell{bound:c.bound(),kind:c.kind(),enc:c.identity(),key_class:c.key_class(),key:c.key(),dt:c.datatype(),lang:c.language(),scope:c.credential()}
 }
 pub fn unit_context()->Table<1,1>{append(empty(),[unbound()],true)}
 pub fn named<let D:u32>(mut dataset:Dataset<D>,offset:u32,length:u32)->Dataset<D>{
@@ -25,7 +25,7 @@ pub fn default_graph<let D:u32,let C:u32,let O:u32>(dataset:Dataset<D>,offsets:[
     for c in 0..C {
         let mut issuer=unbound();
         for i in 0..D {
-            if dataset.active[i] & (i>=offsets[c]) & (i<offsets[c]+lengths[c]) & (dataset.rows[i][1].enc==crate::suite_constants::IRI_ISSUER) {
+            if dataset.active[i] & (i>=offsets[c]) & (i<offsets[c]+lengths[c]) & (dataset.rows[i][1].enc==crate::term::iri_issuer().identity()) {
                 let value=dataset.rows[i][2];
                 assert((value.kind==1) & (!issuer.bound | same_term(issuer,value)),"credential issuer field");issuer=value;
             }
@@ -86,7 +86,7 @@ pub fn canonical_credentials<let C:u32>(messages:[Field;C],count:u32){
 /// authenticated datasets. Existing authenticated names must agree exactly.
 pub fn request_graphs<let D:u32,let C:u32>(mut dataset:Dataset<D>,offsets:[u32;C],lengths:[u32;C],digest:[u8;32])->Dataset<D>{
     let mut request:[u128;2]=[0;2];for i in 0..32 {request[i/16]=request[i/16]*256+digest[i] as u128;}
-    for c in 0..C {let a=crate::term::credential_graph(request,c);let name=TermCell{bound:a.bound(),kind:a.kind(),enc:a.enc(),key_class:a.key_class(),key:a.key(),dt:a.datatype(),lang:a.language(),scope:a.credential()};
+    for c in 0..C {let a=crate::term::credential_graph(request,c);let name=TermCell{bound:a.bound(),kind:a.kind(),enc:a.identity(),key_class:a.key_class(),key:a.key(),dt:a.datatype(),lang:a.language(),scope:a.credential()};
         for i in 0..D {if (i>=offsets[c]) & (i<offsets[c]+lengths[c]) {
             assert(!dataset.graphs[i].bound | same_term(dataset.graphs[i],name),"credential graph identity");dataset.graphs[i]=name;
         }}

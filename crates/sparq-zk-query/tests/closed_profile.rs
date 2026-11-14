@@ -99,6 +99,101 @@ fn bounds(_path: &str) -> Bounds {
     }
 }
 #[test]
+fn closed_string_reads_follow_the_shared_equality_contract() {
+    for (body, value, identities, lexical_len) in [
+        (
+            "FILTER(?x = \"other\")",
+            "\"a plain string longer than the scalar key bucket\"",
+            true,
+            0,
+        ),
+        (
+            "FILTER(?x IN (\"other\", \"missing\"))",
+            "\"a plain string longer than the scalar key bucket\"",
+            true,
+            0,
+        ),
+        ("BIND(?x = \"other\" AS ?ok)", "\"short\"", true, 0),
+        (
+            "OPTIONAL {?s <urn:q> ?y FILTER(?x = ?y)}",
+            "\"short\"",
+            true,
+            0,
+        ),
+        ("FILTER(?x < \"z\")", "\"short\"", false, 5),
+        (
+            "FILTER(?x = \"other\" && ?x < \"z\")",
+            "\"short\"",
+            false,
+            5,
+        ),
+        (
+            "FILTER(?x = 2)",
+            "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+            true,
+            1,
+        ),
+    ] {
+        let plan = graphs::bind_issuer_registry(
+            graphs::lower(
+                &format!("SELECT * {{?s <urn:p> ?x {body}}}"),
+                Bounds {
+                    credentials: 1,
+                    quads_per_credential: 4,
+                    rows_per_table: 4,
+                },
+            )
+            .unwrap(),
+            &issuer_registry(),
+        )
+        .unwrap();
+        let credentials = vec![signed(triple("<urn:s>", "<urn:p>", value), "urn:issuer", 3)];
+        let trace = graphs::evaluate(&plan, &credentials).unwrap();
+        let package = codegen::generate(&plan).unwrap();
+        let source = &package.files[&format!("{}/src/main.nr", package.name)];
+        let checker = if identities {
+            "check_identity_equalities"
+        } else {
+            "check_with_parameters"
+        };
+        assert!(
+            source.contains(&format!("core::ops_core_reads::{checker}(")),
+            "{body}"
+        );
+        let witness = witness_closed::prover_toml(
+            &plan,
+            &credentials,
+            &trace,
+            [7; 32],
+            [3; 32],
+            issuer_root(),
+        )
+        .unwrap();
+        let reads: Vec<_> = witness
+            .lines()
+            .filter(|line| line.starts_with("closed_reads_"))
+            .collect();
+        assert!(!reads.is_empty(), "{body}");
+        let lengths: Vec<usize> = reads
+            .iter()
+            .flat_map(|line| line.split("lexical_len=").skip(1))
+            .map(|value| value.split([',', '}']).next().unwrap().parse().unwrap())
+            .collect();
+        assert!(lengths.contains(&lexical_len), "{body}: {reads:?}");
+        if lexical_len == 0 {
+            assert!(
+                reads.iter().all(|line| !line.contains("bound=true")),
+                "{body}"
+            );
+        } else {
+            assert!(
+                reads.iter().any(|line| line.contains("bound=true")),
+                "{body}"
+            );
+        }
+    }
+}
+#[test]
 fn duplicate_credentials_have_distinct_graphs_and_position_is_not_queryable() {
     let credential = signed(
         triple("<urn:s>", &ex("massGrams"), &int(1)),

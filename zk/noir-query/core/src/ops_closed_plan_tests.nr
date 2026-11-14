@@ -48,12 +48,15 @@ fn graph(out:Table<4,2>){crate::ops_closed_dataset::graph_scan(dataset(),[0,2],[
 #[test(should_fail_with="canonical credential order")] fn credential_order_is_constrained(){crate::ops_closed_dataset::canonical_credentials([2,1],2);}
 #[test]
 fn signed_blank_node_cannot_alias_a_credential_graph(){
-    let raw=TermCell{bound:true,kind:2,enc:0x09db4003a33bf2be14a433948944754a19c4f505bfdcc56fdbbf8d9402cf35c1,key_class:0,key:0,dt:0,lang:0,scope:1};
+    let mut lexical=std::collections::bounded_vec::BoundedVec::<u8,8>::new();
+    for b in "vcqGraph".as_bytes() {lexical.push(b);}
+    let cell=crate::term::open_term(2,lexical,std::collections::bounded_vec::BoundedVec::<u8,0>::new(),std::collections::bounded_vec::BoundedVec::<u8,0>::new(),[0;31],1);
+    let raw=TermCell{bound:true,kind:2,enc:cell.identity(),key_class:0,key:0,dt:0,lang:0,scope:1};
     let dataset=crate::ops_core::Dataset{rows:[[raw,iri(2),iri(3)]],active:[true],graphs:[unbound();1]};
     crate::ops_closed_dataset::graph_scan(dataset,[0],[1],crate::ops_closed_dataset::unit_context(),[0,1,1,0],[1;4],[unbound(),iri(2),iri(3),unbound()],empty::<2,1>());
 }
 #[test]
-fn graph_name_domain_is_pinned(){assert(crate::ops_closed_dataset::graph_name(0).enc==crate::term::credential_graph([0;2],0).enc());}
+fn graph_name_domain_is_pinned(){assert(crate::ops_closed_dataset::graph_name(0).enc==crate::term::credential_graph([0;2],0).identity());}
 
 #[test(should_fail)]
 fn integer_multiplication_rejects_modular_wrap(){let a=crate::ops_closed_numeric::read(OFFSET+761693500506309222409094138289133375*1000000000000000000,false);let b=crate::ops_closed_numeric::read(OFFSET+958703690306430087654759117285840627*1000000000000000000,false);let value=crate::ops_closed_arith::multiply(a,b);assert(!value.0.capacity,"numeric capacity");}

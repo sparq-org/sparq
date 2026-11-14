@@ -26,11 +26,12 @@ pub fn extend_context<let A: u32, let R: u32, let VA: u32, let V: u32, let C: u3
 }
 
 // Result encoding is delegated to the shared expression library and suite.
+// Like ops_core_expr's adapter, the expression carrier uses table identity.
 pub struct SuiteEncoder {}
 impl crate::expr_to_term::ComputedTermEncoder for SuiteEncoder {
     fn literal(lexical:std::collections::bounded_vec::BoundedVec<u8,64>,datatype:std::collections::bounded_vec::BoundedVec<u8,64>,key:[u8;31])->crate::expr_term_contract::TermCell {
         let c=crate::term::open_term(3,lexical,datatype,std::collections::bounded_vec::BoundedVec::<u8,0>::new(),key,0);
-        crate::expr_term_contract::TermCell{bound:c.bound(),kind:c.kind(),enc:c.enc(),key_class:c.key_class(),key:c.key(),dt:c.datatype(),lang:c.language(),credential:c.credential()}
+        crate::expr_term_contract::TermCell{bound:c.bound(),kind:c.kind(),enc:c.identity(),key_class:c.key_class(),key:c.key(),dt:c.datatype(),lang:c.language(),credential:c.credential()}
     }
 }
 pub fn table_cell(c:crate::expr_term_contract::TermCell)->TermCell {

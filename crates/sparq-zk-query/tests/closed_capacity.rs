@@ -152,8 +152,22 @@ fn wide_join_executes_and_rejects_a_consistent_missing_pair() {
         panic!("SELECT")
     };
     assert_eq!(rows.len(), 2);
-    assert!(rows.contains(&vec![iri("urn:s1"), number(1), number(2)]));
-    assert!(rows.contains(&vec![iri("urn:s2"), number(3), number(4)]));
+    let released_number = |n| {
+        let mut cell = number(n);
+        cell.key_class = 0;
+        cell.key = [0; 32];
+        cell
+    };
+    assert!(rows.contains(&vec![
+        iri("urn:s1"),
+        released_number(1),
+        released_number(2),
+    ]));
+    assert!(rows.contains(&vec![
+        iri("urn:s2"),
+        released_number(3),
+        released_number(4),
+    ]));
     let package = codegen::generate_operator_fixture(&p).unwrap();
     let workspace = closed_native::Workspace::new(&package);
     let render = |t: &Trace| {

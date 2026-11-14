@@ -108,6 +108,9 @@ pub fn prover_toml(
             _ => None,
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let string_datatype = SuiteEncoder
+        .encode(&Literal::new_simple_literal("").into())?
+        .dt;
     for i in 0..plan.nodes().len() {
         for site in crate::reads_closed::sites(plan, i) {
             let mut rows = vec![];
@@ -118,9 +121,12 @@ pub fn prover_toml(
                         .rows
                         .get(r)
                         .map(|row| row[column]);
-                    let term = if let Some(cell) =
-                        cell.filter(|c| c.bound && c.kind == 3 && !parameters.contains(c))
-                    {
+                    let term = if let Some(cell) = cell.filter(|c| {
+                        c.bound
+                            && c.kind == 3
+                            && !parameters.contains(c)
+                            && !(site.identity_strings && c.dt == string_datatype)
+                    }) {
                         Some(match literals.iter().find(|(c, _)| *c == cell) {
                             Some((_, t)) => t.clone(),
                             None => computed(cell)?,

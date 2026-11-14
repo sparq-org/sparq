@@ -629,9 +629,14 @@ fn emit_reads(i: usize, plan: &Plan, out: &mut String) {
             plan.nodes[site.input as usize].output.capacity
         );
         *out = out.replacen(") {", &format!("{declaration}) {{"), 1);
+        let checker = if site.identity_strings {
+            "check_identity_equalities"
+        } else {
+            "check_with_parameters"
+        };
         writeln!(
             out,
-            "    core::ops_core_reads::check_with_parameters(t{}, {name}, {}, parameters);",
+            "    core::ops_core_reads::{checker}(t{}, {name}, {}, parameters);",
             site.input,
             array(site.columns.iter().map(usize::to_string))
         )

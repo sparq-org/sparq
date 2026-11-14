@@ -9,6 +9,7 @@ use std::collections::BTreeSet;
 pub(crate) struct ReadSite {
     pub input: NodeId,
     pub columns: Vec<usize>,
+    pub identity_strings: bool,
 }
 impl ReadSite {
     pub fn name(&self, node: usize) -> String {
@@ -52,9 +53,19 @@ fn predicate(p: &Predicate, plan: &Plan, vars: &mut BTreeSet<Var>) {
         Predicate::Exists(_) => (),
     }
 }
+fn identity_strings(p: &Predicate) -> bool {
+    match p {
+        Predicate::Expression(e) => crate::codegen::identity_string_reads(e),
+        Predicate::Arithmetic(_) => false,
+        Predicate::Not(a) => identity_strings(a),
+        Predicate::And(a, b) | Predicate::Or(a, b) => identity_strings(a) && identity_strings(b),
+        Predicate::Exists(_) => true,
+    }
+}
 pub(crate) fn sites(plan: &Plan, node: usize) -> Vec<ReadSite> {
     let mut vars = BTreeSet::new();
     let mut inputs = vec![];
+    let mut identities = false;
     match &plan.nodes()[node].operator {
         Operator::Closed(
             C::Filter {
@@ -70,6 +81,7 @@ pub(crate) fn sites(plan: &Plan, node: usize) -> Vec<ReadSite> {
             },
         ) => {
             predicate(p, plan, &mut vars);
+            identities = identity_strings(p);
             inputs.push(*input);
             inputs.extend(context);
         }
@@ -80,6 +92,7 @@ pub(crate) fn sites(plan: &Plan, node: usize) -> Vec<ReadSite> {
             context,
         }) => {
             expression(e, plan, &mut vars);
+            identities = crate::codegen::identity_string_reads(e);
             inputs.extend([*left, *right]);
             inputs.extend(context);
         }
@@ -109,7 +122,11 @@ pub(crate) fn sites(plan: &Plan, node: usize) -> Vec<ReadSite> {
                 .enumerate()
                 .filter_map(|(i, v)| vars.contains(v).then_some(i))
                 .collect::<Vec<_>>();
-            (!columns.is_empty()).then_some(ReadSite { input, columns })
+            (!columns.is_empty()).then_some(ReadSite {
+                input,
+                columns,
+                identity_strings: identities,
+            })
         })
         .collect()
 }
