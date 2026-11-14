@@ -15,6 +15,8 @@ See [suite usage](../../../skills/merkle-credentials/SKILL.md) for constructors,
 key-checked cells and the public-value contract. Raw term openings are entry-point
 witnesses; `TermCell` and `KeyCheckedCell` are internal validated values produced
 by the constructors, not ABI witness types.
+Their private empty-storage marker makes opaque cells invalid as ABI witnesses.
+Construct them in constrained code; do not obtain them from hints.
 
 For caller-selected backing bounds use
 `suite_entry::BoundedTermOpening<L, D, G>`, `open_bounded_cell(raw, scope)` and
@@ -45,6 +47,13 @@ verified table, root, message, creation, verification method/key and complete
 singleton property reads. `credential_subject`, `valid_from` and `valid_until`
 read the authenticated table. `open_time` yields exact UTC milliseconds or an
 explicit unknown value. The envelope refuses a required check on unknown time.
+
+For tables already built by constrained term constructors, use
+`suite::{open_credential_hidden_from_quads, open_credential_revealed_from_quads}`.
+They take internal quad cells followed by the original salts, count, configuration,
+raw metadata, key and dataset-position arguments. The shared authentication
+relation checks the complete tree and every bound blank node's credential scope.
+Hidden mode additionally checks the signature. Quad lexical bytes are not reopened.
 
 For compact generated witnesses, call
 `suite::{open_bounded_credential_hidden, open_bounded_credential_revealed}`.
@@ -92,3 +101,8 @@ object and convert it through `from_authenticated_bounded` after policy checks.
 Packing combines short checked chunks into the unchanged field-word encoding.
 Its private split hint is checked by an exact quotient/remainder relation and
 short ranges; padding is enforced by exact division with a bounded quotient.
+
+Resource-only openings may use empty datatype and language backing capacities
+when assembled from ABI-safe raw witnesses inside constrained code. Empty
+datatype capacity excludes literals; the constructor still checks metadata and
+canonical backing padding. Term identifiers and the byte encoding remain pinned.
