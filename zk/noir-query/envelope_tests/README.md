@@ -11,7 +11,8 @@ python3 zk/noir-query/envelope_tests/run.py --include-combined
 python3 zk/noir-query/envelope_tests/run.py --measure --output /tmp/envelope-gates.json
 ```
 
-The packages depend directly on the registered core library. The runner requires the exact
+The packages depend directly on the registered core library. The shared support library
+adapts raw signed fixtures to the compiler consumer API and supplies raw status evidence types. The runner requires the exact
 programme toolchain and denies warnings. The runner discovers every native case and accounts
 for its complete schedule. The combined case requires a larger machine and is skipped by
 default; `--include-combined` explicitly enables it. All other four-credential cases run
@@ -29,7 +30,11 @@ nargo fmt --program-dir zk/noir-query/envelope_tests/tests
 
 The generator uses the suite's seeded key and deterministic issuance functions, verifies every
 issued credential, and emits raw signed openings plus Schnorr evidence. Tests call the actual
-hidden suite opener. They do not supply a separate metadata transport. Creation, verification
+hidden suite opener. Dataset cases and measurement probes use the compiler bounded opener;
+`open_and_convert` passes the same credential index to authentication and
+`from_authenticated_bounded`. The resulting converted view goes directly to
+`credential_dataset(c, issuer, view)` and is never an independent witness.
+They do not supply a separate metadata transport. Creation, verification
 method and key come from the signed proof metadata; status purpose/index and validity lexical
 openings are checked against signed cells. Instants use exact Unix epoch milliseconds with no
 rounding. The tests include millisecond endpoints and unknown creation.
@@ -46,7 +51,8 @@ set members; named copies remain in each credential graph. The graph builder use
 network and a merge with indexed writes. Its compiled sorting depth is determined by the quad
 bucket; it is checked against the candidate-row capacity and is not a public input. Graph names use the public request
 digest and credential index. Different request scopes change them; a private scope is absent
-from the entry ABI.
+from the entry ABI. Status probes take raw list and purpose openings; checked constructors
+create their sealed cells inside the circuit. The public ABI is unchanged.
 
 An absent holder issuer list selects all trusted issuers when holder binding is enabled. A
 present list must be non-empty. The host and circuit refuse empty lists. Omit holderBinding to

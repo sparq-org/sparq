@@ -1,4 +1,5 @@
-use envelope_core::envelope::{check_policy, CredentialOpening, open_suite_credential, PublicPolicy};
+use envelope_core::envelope::{check_policy, CredentialOpening, PublicPolicy};
+use envelope_support::open as open_suite_credential;
 // Public scope is the stored request digest. All instants use exact epoch milliseconds.
 // Roots, depths, flags and lists are verifier-derived public policy values.
 fn main(

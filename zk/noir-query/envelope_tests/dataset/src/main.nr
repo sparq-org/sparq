@@ -1,4 +1,4 @@
-use envelope_core::envelope::{check_policy, CredentialOpening, open_suite_credential, PublicPolicy};
+use envelope_core::envelope::{check_policy, CredentialOpening, PublicPolicy};
 // Public scope is the stored request digest. All instants use exact epoch milliseconds.
 // Roots, depths, flags and lists are verifier-derived public policy values.
 fn main(
@@ -38,13 +38,14 @@ fn main(
     };
     check_policy::<4, 4>(policy);
     for i in 0..4 {
-        let c = open_suite_credential(proofs[i], i);
+        let credential_index = i;
+        let (c, view) =
+            envelope_support::open_and_convert(proofs[i], credential_index, request_digest);
         let issuer = envelope_core::envelope::required_property(
             c,
             c.credential_subject(),
             envelope_core::term::iri_issuer(),
         );
-        let _dataset =
-            envelope_core::envelope::credential_dataset::<64, 129, 8>(c, issuer, request_digest, i);
+        let _dataset = envelope_core::envelope::credential_dataset::<64, 129, 8>(c, issuer, view);
     }
 }

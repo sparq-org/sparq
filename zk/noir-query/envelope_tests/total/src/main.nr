@@ -1,4 +1,5 @@
-use envelope_core::envelope::{check_policy, CredentialOpening, open_suite_credential, PublicPolicy};
+use envelope_core::envelope::{check_policy, CredentialOpening, PublicPolicy};
+use envelope_support::open as open_suite_credential;
 // Public scope is the stored request digest. All instants use exact epoch milliseconds.
 // Roots, depths, flags and lists are verifier-derived public policy values.
 fn main(
@@ -21,7 +22,7 @@ fn main(
     members: [envelope_core::envelope::Membership<4>; 4],
     holders: [envelope_core::envelope::HolderEvidence; 4],
     slots: [u32; 4],
-    status: [[envelope_core::envelope::StatusEvidence<17, 4>; 64]; 4],
+    status: [[envelope_support::StatusOpening<17, 4>; 64]; 4],
     validity: [envelope_core::envelope::ValidityOpening; 4],
 ) {
     let _scope = request_digest;
@@ -57,7 +58,12 @@ fn main(
         members,
         holders,
         slots,
-        status,
+        [
+            envelope_support::open_status_rows(status[0]),
+            envelope_support::open_status_rows(status[1]),
+            envelope_support::open_status_rows(status[2]),
+            envelope_support::open_status_rows(status[3]),
+        ],
         validity,
     );
 }

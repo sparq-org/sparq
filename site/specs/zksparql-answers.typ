@@ -690,6 +690,8 @@ node. The graph name is the suite-domain hash of the two unsigned big-endian hal
 public request digest and the credential index; its blank-node scope is that index plus one.
 The request digest MUST supply this scope; a private presentation value MUST NOT replace it.
 Different request digests change graph names. Reusing a request repeats its graph names.
+Authentication and dataset conversion MUST use the same credential-index binding. The envelope
+consumes the resulting internal view; an independent witnessed view MUST NOT replace it.
 The method makes no additional graph-to-issuer inference. The trust set binds issuer, verification method, cryptosuite,
 assertion authorization and key together. The issuer IRI comes from the opened credential
 subject’s unique `issuer` property; the verification-method IRI and Multikey come from the

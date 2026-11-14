@@ -343,8 +343,9 @@ The trust leaf hashes the trust domain, issuer encoding, verification-method enc
 `Poseidon2(suite ID, key x, key y)` and the exact `assertionMethod` IRI encoding, in that order.
 The key coordinates must open the authenticated Multikey before membership is checked.
 
-Holder keys open the credential subject's confidence-method Multikey using the suite's
-`open_multikey`; one signature covers the public request digest per distinct required key.
+Holder keys open the credential subject's confidence-method Multikey against the suite's
+canonical checked constructor, including its keyed encoding; one signature covers the public
+request digest per distinct required key.
 Status purposes and decimal-string indices open the actual entry cells with
 `open_status_purpose` and `open_status_index`. Snapshot digests and tagged leaves retain the
 encodings above: snapshot domain, list, purpose, bit length, status-bit tree depth and root;
@@ -368,8 +369,12 @@ exactly are refused. The host policy helper emits these millisecond values uncha
 Graph names use `term::credential_graph` with the public request digest's exact unsigned
 big-endian halves and the credential index. No private graph scope is accepted by the envelope
 entry. The same request and index repeat the graph name; changing either changes it. Generated
-wiring must pass that public digest to the dataset builder and the verified issuer result to its
-assertion. This is the remaining lane B stand-in. Request and policy derivation stay on the host.
+wiring MUST pass the same credential-index binding to the bounded opener and
+`from_authenticated_bounded`, which also takes the public request digest.
+`credential_dataset(credential, issuer, view)` consumes that direct converted view and the
+verified issuer result; it accepts no second index or private graph scope. The converted view
+MUST NOT be supplied as independent witness data. Value and metadata reads keep their own
+checked constructors. Request and policy derivation stay on the host.
 
 The accepted-snapshot and trust roots follow the amendment exactly: sort unique canonical
 unsigned field values as thirty-two big-endian bytes, refuse zero members and empty enabled

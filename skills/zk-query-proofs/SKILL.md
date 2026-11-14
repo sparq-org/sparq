@@ -216,8 +216,11 @@ request digest. Generated policy enforcement remains an integration item; the me
 externally audited. `check_holder_key` binds each active credential's key, and
 `check_holder_signatures` checks the accumulated required slots once across the batch;
 generated callers must derive those slots from active credentials and the public policy.
-`credential_dataset<N, O, G>` uses the operator order and fixes its sorting depth `G`
-so the smallest tree covers the default/named copies plus the issuer assertion.
+`credential_dataset<N, O, G>(credential, issuer, view)` consumes the direct result of
+`from_authenticated_bounded`, with the same credential index bound at authentication and
+conversion and the public request digest supplied to conversion. The view is internal data,
+never an independent witness. The builder uses the operator order and fixes its sorting depth
+`G` so the smallest tree covers the default/named copies plus the issuer assertion.
 
 ## Prerequisites
 

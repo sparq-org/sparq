@@ -202,8 +202,30 @@ fn scoped_policy(who: TermCell) -> PublicPolicy {
     p.holder_issuers = [who.enc(), 0, 0, 0];
     p
 }
-fn dataset<let O: u32>(c: OpenedCredential<16>, index: u32) -> Table<O, 4> {
-    credential_dataset::<16, O, 6>(c, issuer(c), digest(), index)
+fn converted_dataset<let N: u32, let O: u32, let G: u32>(
+    proof: CredentialOpening<N, 160>,
+    who: TermCell,
+    request: [u8; 32],
+    index: u32,
+) -> Table<O, 4> {
+    let (c, view) = envelope_support::open_and_convert(proof, index, request);
+    credential_dataset::<N, O, G>(c, who, view)
+}
+fn dataset<let O: u32>(proof: CredentialOpening<16, 160>, index: u32) -> Table<O, 4> {
+    let (c, view) = envelope_support::open_and_convert(proof, index, digest());
+    credential_dataset::<16, O, 6>(c, issuer(c), view)
+}
+fn four_proof(index: u32) -> CredentialOpening<64, 160> {
+    if index == 0 {
+        fixtures::complete::<64>()
+    } else if index == 1 {
+        fixtures::complete_shared::<64>()
+    } else if index == 2 {
+        fixtures::complete_distinct::<64>()
+    } else {
+        assert(index == 3);
+        fixtures::complete_unlisted::<64>()
+    }
 }
 fn check_all<let N: u32>(
     c: OpenedCredential<N>,
@@ -437,7 +459,14 @@ fn count_quad<let R: u32>(d: Table<R, 4>, row: [envelope_core::table::TermCell; 
     }
     count
 }
-fn four_dataset_view(cs: [OpenedCredential<64>; 4], index: u32) {
+fn four_dataset_view(index: u32) {
+    let inputs = [
+        envelope_support::open_and_convert(four_proof(0), 0, digest()),
+        envelope_support::open_and_convert(four_proof(1), 1, digest()),
+        envelope_support::open_and_convert(four_proof(2), 2, digest()),
+        envelope_support::open_and_convert(four_proof(3), 3, digest()),
+    ];
+    let cs = [inputs[0].0, inputs[1].0, inputs[2].0, inputs[3].0];
     let (p, paths) = four_policy(cs);
     let keys = [key(1), key(2), key(1), key(3)];
     let actual = check_issuer(
@@ -447,7 +476,7 @@ fn four_dataset_view(cs: [OpenedCredential<64>; 4], index: u32) {
         keys[index],
         paths[index],
     );
-    let d = credential_dataset::<64, 129, 8>(cs[index], actual, digest(), index);
+    let d = credential_dataset::<64, 129, 8>(cs[index], actual, inputs[index].1);
     envelope_core::table::check_table(d);
     assert(d.len == 2 * cs[index].count() + 1);
     let graph = from_suite_cell(envelope_core::term::credential_graph(
@@ -519,13 +548,16 @@ fn four_shared_merge(cs: [OpenedCredential<64>; 4]) {
     assert(merged.len == 9);
     assert(copies(merged, s, pred, ir("urn:value".as_bytes())) == 5);
 }
-fn run_four(last: OpenedCredential<64>) {
+fn run_four(last: CredentialOpening<64, 160>) {
     run_four_with_validity(last, period());
 }
-fn run_four_with_validity(last: OpenedCredential<64>, last_period: ValidityOpening) {
-    let a = open_suite_credential(fixtures::complete::<64>(), 0);
-    let b = open_suite_credential(fixtures::complete_shared::<64>(), 1);
-    let c = open_suite_credential(fixtures::complete_distinct::<64>(), 2);
+fn run_four_with_validity(last_proof: CredentialOpening<64, 160>, last_period: ValidityOpening) {
+    let (a, av) = envelope_support::open_and_convert(fixtures::complete::<64>(), 0, digest());
+    let (b, bv) =
+        envelope_support::open_and_convert(fixtures::complete_shared::<64>(), 1, digest());
+    let (c, cv) =
+        envelope_support::open_and_convert(fixtures::complete_distinct::<64>(), 2, digest());
+    let (last, last_view) = envelope_support::open_and_convert(last_proof, 3, digest());
     let cs = [a, b, c, last];
     let keys = [key(1), key(2), key(1), key(3)];
     let leaves = [
@@ -647,10 +679,10 @@ fn run_four_with_validity(last: OpenedCredential<64>, last_period: ValidityOpeni
         [period(), period(), period(), last_period],
     );
     let ds = [
-        credential_dataset::<64, 129, 8>(a, verified[0], digest(), 0),
-        credential_dataset::<64, 129, 8>(b, verified[1], digest(), 1),
-        credential_dataset::<64, 129, 8>(c, verified[2], digest(), 2),
-        credential_dataset::<64, 129, 8>(last, verified[3], digest(), 3),
+        credential_dataset::<64, 129, 8>(a, verified[0], av),
+        credential_dataset::<64, 129, 8>(b, verified[1], bv),
+        credential_dataset::<64, 129, 8>(c, verified[2], cv),
+        credential_dataset::<64, 129, 8>(last, verified[3], last_view),
     ];
     let merged = merge_datasets::<4, 129, 516>(ds);
     assert(merged.len > 0);
@@ -1620,8 +1652,8 @@ fn duplicate_holder_issuer_words_refused() {
 
 #[test]
 fn two_issuer_fact_pins_and_swapped_pins() {
-    let a = base();
-    let b = open_suite_credential(fixtures::issuer_two::<16>(), 1);
+    let (a, av) = envelope_support::open_and_convert(fixtures::base::<16>(), 0, digest());
+    let (b, bv) = envelope_support::open_and_convert(fixtures::issuer_two::<16>(), 1, digest());
     let la = trusted_key_leaf(issuer(a), a.verification_method(), key(1));
     let lb = trusted_key_leaf(issuer(b), b.verification_method(), key(2));
     let first = envelope_core::term::field_lt(la, lb);
@@ -1641,8 +1673,8 @@ fn two_issuer_fact_pins_and_swapped_pins() {
         Membership { index: if first { 1 } else { 0 }, siblings: [la, 0] },
     );
     let d = merge_datasets::<2, 9, 32>([
-        credential_dataset::<16, 9, 6>(a, va, digest(), 0),
-        credential_dataset::<16, 9, 6>(b, vb, digest(), 1),
+        credential_dataset::<16, 9, 6>(a, va, av),
+        credential_dataset::<16, 9, 6>(b, vb, bv),
     ]);
     let f1 = ir("urn:fact:1".as_bytes());
     let f2 = ir("urn:fact:2".as_bytes());
@@ -1654,21 +1686,26 @@ fn two_issuer_fact_pins_and_swapped_pins() {
 
 #[test(should_fail_with = "dataset issuer binding")]
 fn dataset_swapped_issuer_refused() {
-    let _ = credential_dataset::<16, 9, 6>(base(), ir("urn:issuer:2".as_bytes()), digest(), 0);
+    let _ = converted_dataset::<16, 9, 6>(
+        fixtures::base::<16>(),
+        ir("urn:issuer:2".as_bytes()),
+        digest(),
+        0,
+    );
 }
 
 #[test(should_fail_with = "operator capacity")]
 fn dataset_capacity_refused() {
-    let _ = dataset::<1>(base(), 0);
+    let _ = dataset::<1>(fixtures::base::<16>(), 0);
 }
 
 #[test]
 fn dataset_graph_names_are_presentation_local() {
     let c = base();
-    let d = dataset::<9>(c, 0);
+    let d = dataset::<9>(fixtures::base::<16>(), 0);
     let mut other = digest();
     other[0] = 8;
-    let e = credential_dataset::<16, 9, 6>(c, issuer(c), other, 0);
+    let e = converted_dataset::<16, 9, 6>(fixtures::base::<16>(), issuer(c), other, 0);
     let mut different = false;
     for i in 0..9 {
         different = different | !envelope_core::table::same_row(d.rows[i], e.rows[i]);
@@ -1683,7 +1720,7 @@ fn graph_scope_public_digest_changes_graph_names() {
         0,
     );
     let expected = from_suite_cell(a);
-    let ds = dataset::<9>(base(), 0);
+    let ds = dataset::<9>(fixtures::base::<16>(), 0);
     let mut found = false;
     for i in 0..9 {
         found = found | ((i < ds.len) & equal_cell(ds.rows[i][0], expected));
@@ -1696,8 +1733,8 @@ fn other_public_graph_scope_refused() {
     let opened_base = base();
     let mut other = digest();
     other[31] = 8;
-    let a = credential_dataset::<16, 9, 6>(opened_base, issuer(opened_base), digest(), 0);
-    let b = credential_dataset::<16, 9, 6>(opened_base, issuer(opened_base), other, 0);
+    let a = converted_dataset::<16, 9, 6>(fixtures::base::<16>(), issuer(opened_base), digest(), 0);
+    let b = converted_dataset::<16, 9, 6>(fixtures::base::<16>(), issuer(opened_base), other, 0);
     for i in 0..9 {
         assert(envelope_core::table::same_row(a.rows[i], b.rows[i]), "public graph scope");
     }
@@ -1705,9 +1742,10 @@ fn other_public_graph_scope_refused() {
 
 #[test]
 fn same_triple_has_one_default_copy_and_each_named_copy() {
-    let a = base();
-    let b = open_suite_credential(fixtures::base::<16>(), 1);
-    let d = merge_datasets::<2, 9, 20>([dataset::<9>(a, 0), dataset::<9>(b, 1)]);
+    let d = merge_datasets::<2, 9, 20>([
+        dataset::<9>(fixtures::base::<16>(), 0),
+        dataset::<9>(fixtures::base::<16>(), 1),
+    ]);
     assert(
         copies(
             d,
@@ -1722,9 +1760,7 @@ fn same_triple_has_one_default_copy_and_each_named_copy() {
 
 #[test]
 fn four_credentials_enforce_all_conditions_and_merge() {
-    run_four(
-        open_suite_credential(fixtures::complete_unlisted::<64>(), 3),
-    );
+    run_four(fixtures::complete_unlisted::<64>());
 }
 
 #[test(should_fail_with = "issuer authorization set")]
@@ -1806,19 +1842,19 @@ fn four_credentials_freshness_component() {
 }
 #[test]
 fn four_credentials_dataset_first_view() {
-    four_dataset_view(four_normal(), 0);
+    four_dataset_view(0);
 }
 #[test]
 fn four_credentials_dataset_second_view() {
-    four_dataset_view(four_normal(), 1);
+    four_dataset_view(1);
 }
 #[test]
 fn four_credentials_dataset_third_view() {
-    four_dataset_view(four_normal(), 2);
+    four_dataset_view(2);
 }
 #[test]
 fn four_credentials_dataset_fourth_view() {
-    four_dataset_view(four_normal(), 3);
+    four_dataset_view(3);
 }
 #[test]
 fn four_credentials_shared_merge_component() {
@@ -1973,4 +2009,66 @@ fn native_policy_root_vectors() {
 #[test(should_fail_with = "creation time unavailable")]
 fn submillisecond_creation_is_not_rounded() {
     check_freshness(open(fixtures::created_submillis::<16>()), true, 100);
+}
+
+fn raw_status_evidence() -> envelope_support::StatusOpening<2, 2> {
+    let proof = fixtures::status::<16>();
+    let c = open(proof);
+    let rows = c.quads();
+    let mut list = proof.raw[0][2];
+    let mut purpose = proof.raw[0][2];
+    for i in 0..16 {
+        if i < c.count() {
+            if same_term(rows[i][1], envelope_core::term::iri_status_list()) {
+                list = proof.raw[i][2];
+            }
+            if same_term(rows[i][1], envelope_core::term::iri_status_purpose()) {
+                purpose = proof.raw[i][2];
+            }
+        }
+    }
+    let mut lexical = [0; 16];
+    for i in 0..16 {
+        lexical[i] = purpose.lexical[i];
+    }
+    let purpose = envelope_core::suite_entry::TermOpening {
+        bound: purpose.bound,
+        kind: purpose.kind,
+        lexical,
+        lexical_len: purpose.lexical_len,
+        datatype: purpose.datatype,
+        datatype_len: purpose.datatype_len,
+        language: purpose.language,
+        language_len: purpose.language_len,
+        key: purpose.key,
+    };
+    envelope_support::StatusOpening {
+        present: true,
+        list,
+        snapshot_purpose: purpose,
+        bit_len: 4,
+        root: snapshot(false).root,
+        accepted: acceptance(),
+        bit: false,
+        path: path(),
+        purpose: BoundedVec::from_array("revocation".as_bytes()),
+        index: BoundedVec::from_array("0001".as_bytes()),
+        size: BoundedVec::from_array("1".as_bytes()),
+    }
+}
+#[test]
+fn raw_status_entry_evidence_reaches_the_checked_consumer() {
+    let c = status();
+    let mut es = no_status();
+    es[status_row(c)] = envelope_support::open_status(raw_status_evidence());
+    check_status(c, policy_root(), 1, false, es);
+}
+#[test(should_fail_with = "snapshot identity")]
+fn raw_status_snapshot_list_change_is_refused() {
+    let c = status();
+    let mut raw = raw_status_evidence();
+    raw.list.lexical[0] = 120;
+    let mut es = no_status();
+    es[status_row(c)] = envelope_support::open_status(raw);
+    check_status(c, policy_root(), 1, false, es);
 }

@@ -1,4 +1,5 @@
-use envelope_core::envelope::{check_policy, CredentialOpening, open_suite_credential, PublicPolicy};
+use envelope_core::envelope::{check_policy, CredentialOpening, PublicPolicy};
+use envelope_support::open as open_suite_credential;
 // Public scope is the stored request digest. All instants use exact epoch milliseconds.
 // Roots, depths, flags and lists are verifier-derived public policy values.
 fn main(
@@ -18,7 +19,7 @@ fn main(
     freshness_required: pub bool,
     earliest_created: pub u64,
     proofs: [CredentialOpening<64, 160>; 4],
-    status: [[envelope_core::envelope::StatusEvidence<17, 4>; 64]; 4],
+    status: [[envelope_support::StatusOpening<17, 4>; 64]; 4],
 ) {
     let _scope = request_digest;
     let policy = PublicPolicy {
@@ -46,7 +47,7 @@ fn main(
                 snapshot_root,
                 snapshot_depth,
                 allow_missing_status,
-                status[i],
+                envelope_support::open_status_rows(status[i]),
             );
         }
     }
