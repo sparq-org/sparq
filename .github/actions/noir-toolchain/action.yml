@@ -1,0 +1,35 @@
+name: Pinned Noir tools
+description: Install the Noir tools using the workflow's existing version and bootstrap pins.
+inputs:
+  tool:
+    description: Select nargo, bb, or both.
+    default: both
+runs:
+  using: composite
+  steps:
+    - name: Install nargo
+      if: inputs.tool == 'both' || inputs.tool == 'nargo'
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "$HOME/.nargo/bin"
+        curl -fsSL --proto '=https' --tlsv1.2 "$NOIRUP_BIN_URL" -o "$HOME/.nargo/bin/noirup"
+        chmod +x "$HOME/.nargo/bin/noirup"
+        echo "$HOME/.nargo/bin" >> "$GITHUB_PATH"
+        export PATH="$HOME/.nargo/bin:$PATH"
+        noirup --version "$NARGO_VERSION"
+        nargo --version
+    - name: Install bb
+      if: inputs.tool == 'both' || inputs.tool == 'bb'
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "$HOME/.bb"
+        curl -fsSL --proto '=https' --tlsv1.2 \
+          "https://raw.githubusercontent.com/AztecProtocol/aztec-packages/${BBUP_REF}/barretenberg/bbup/bbup" \
+          -o "$HOME/.bb/bbup"
+        chmod +x "$HOME/.bb/bbup"
+        echo "$HOME/.bb" >> "$GITHUB_PATH"
+        export PATH="$HOME/.bb:$PATH"
+        bbup --version "$BB_VERSION"
+        bb --version

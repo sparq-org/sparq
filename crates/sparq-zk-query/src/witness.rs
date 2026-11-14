@@ -475,6 +475,9 @@ fn prover_toml_authenticated_mode(
             public_literals.push(SuiteEncoder.encode(term)?);
         }
     }
+    let string_datatype = SuiteEncoder
+        .encode(&oxrdf::Literal::new_simple_literal("").into())?
+        .dt;
     for (i, node) in plan.nodes().iter().enumerate() {
         if let Operator::Filter(input, expr) = &node.operator {
             let input = *input as usize;
@@ -487,9 +490,13 @@ fn prover_toml_authenticated_mode(
                 let mut row = Vec::new();
                 for &column in &columns {
                     let cell = trace.tables[input].rows.get(r).map(|row| row[column]);
-                    let term = if let Some(cell) =
-                        cell.filter(|c| c.bound && c.kind == 3 && !public_literals.contains(c))
-                    {
+                    let term = if let Some(cell) = cell.filter(|c| {
+                        c.bound
+                            && c.kind == 3
+                            && !public_literals.contains(c)
+                            && !(crate::codegen::identity_string_reads(expr)
+                                && c.dt == string_datatype)
+                    }) {
                         Some(
                             &literals
                                 .iter()
@@ -500,7 +507,7 @@ fn prover_toml_authenticated_mode(
                     } else {
                         None
                     };
-                    row.push(term_opening_with_capacity(term, opening.object as usize)?);
+                    row.push(value_read_opening(term, opening.object as usize)?);
                 }
                 reads.push(serde_json::Value::Array(row));
             }
@@ -513,6 +520,30 @@ fn prover_toml_authenticated_mode(
         }
     }
     Ok(out)
+}
+
+// Identity-only source terms do not need the narrower scalar parser profile.
+// Admit those bounds only when a private lexical opening is consumed as a value.
+fn value_read_opening(
+    term: Option<&oxrdf::Term>,
+    capacity: usize,
+) -> Result<serde_json::Value, Error> {
+    if let Some(oxrdf::Term::Literal(literal)) = term {
+        match literal.datatype().as_str() {
+            "http://www.w3.org/2001/XMLSchema#string" => {}
+            "http://www.w3.org/2001/XMLSchema#integer"
+            | "http://www.w3.org/2001/XMLSchema#decimal"
+            | "http://www.w3.org/2001/XMLSchema#date"
+            | "http://www.w3.org/2001/XMLSchema#dateTime"
+            | "http://www.w3.org/2001/XMLSchema#boolean" => {
+                if literal.value().len() > crate::credential::SCALAR_CAPACITY {
+                    return Err(Error::Capacity("read scalar lexical bytes".into()));
+                }
+            }
+            _ => return Err(Error::Unsupported("N0 credential value datatype".into())),
+        }
+    }
+    term_opening_with_capacity(term, capacity)
 }
 
 fn resource_opening(

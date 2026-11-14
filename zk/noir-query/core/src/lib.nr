@@ -66,3 +66,5 @@ pub mod expr_construct;
 mod expr_functions_tests;
 
 pub mod ops_closed_join;
+mod term_identity_tests;
+pub mod envelope;

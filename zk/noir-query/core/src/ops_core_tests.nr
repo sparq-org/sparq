@@ -699,3 +699,23 @@ fn expression_string_prefix_with_zero_payload_is_nonempty() {
     let result=crate::ops_core_expr::evaluate(Table {rows:[[cell]],len:1},[unbound()],[expr_step(0,0,0,0,0)]);
     assert(result[0].value & !result[0].is_error);
 }
+
+#[test]
+fn select_releases_literal_identity_without_value_metadata() {
+    let mut source=iri(7);source.kind=3;source.dt=11;source.lang=13;source.key_class=1;source.key=17;
+    let mut released=source;released.key_class=0;released.key=0;
+    ops_core::select(Table{rows:[[source]],len:1},Table{rows:[[released]],len:1});
+}
+#[test(should_fail_with="operator rows")]
+fn select_rejects_unreleased_value_metadata() {
+    let mut source=iri(7);source.kind=3;source.key_class=1;source.key=17;
+    ops_core::select(Table{rows:[[source]],len:1},Table{rows:[[source]],len:1});
+}
+
+#[test]
+fn identity_keeps_kind_and_credential_scope() {
+    let iri=iri(7);let mut blank=iri;blank.kind=2;
+    assert(!crate::table::same_term(iri,blank));
+    blank.scope=1;let mut other=blank;other.scope=2;assert(!crate::table::same_term(blank,other));
+    other=blank;other.key=123;assert(crate::table::same_term(blank,other));
+}

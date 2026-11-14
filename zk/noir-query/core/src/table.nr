@@ -17,7 +17,7 @@ pub fn unbound() -> TermCell {
 }
 
 pub fn same_term(a: TermCell, b: TermCell) -> bool {
-    (a.bound == b.bound) & (!a.bound | ((a.enc == b.enc) & (a.scope == b.scope)))
+    (a.bound == b.bound) & (!a.bound | ((a.kind == b.kind) & (a.enc == b.enc) & (a.scope == b.scope)))
 }
 
 pub fn equal_cell(a: TermCell, b: TermCell) -> bool {
@@ -63,7 +63,7 @@ pub fn row_less<let V: u32>(a: [TermCell; V], b: [TermCell; V]) -> bool {
     for v in 0..V {
         let cell_less = (!a[v].bound & b[v].bound)
             | ((a[v].bound == b[v].bound) & a[v].bound
-                & (a[v].enc.lt(b[v].enc) | ((a[v].enc == b[v].enc) & (a[v].scope < b[v].scope))));
+                & (a[v].enc.lt(b[v].enc) | ((a[v].enc == b[v].enc) & ((a[v].kind < b[v].kind) | ((a[v].kind == b[v].kind) & (a[v].scope < b[v].scope))))));
         less = less | (equal & cell_less);
         equal = equal & same_term(a[v], b[v]);
     }

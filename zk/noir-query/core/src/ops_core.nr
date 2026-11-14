@@ -192,6 +192,9 @@ pub fn select<let R: u32, let V: u32>(input: Table<R, V>, result: Table<R, V>) {
             released.rows[r][v] = TermCell {
                 bound: true, kind: 2, enc: label, key_class: 0, key: 0, dt: 0, lang: 0, scope: 0,
             };
+        } else {
+            released.rows[r][v].key_class = 0;
+            released.rows[r][v].key = 0;
         }
     } }
     assert_table(canonicalize(released), result);

@@ -127,6 +127,8 @@ pub fn graph_name(request: [u128; 2], index: u32) -> Result<p::TermCell, Error> 
         Fr::from(request[1]),
         Fr::from(index),
     ]);
+    // Synthetic graph names already have a dedicated, key-free encoding.
+    cell.identity = cell.enc;
     cell.credential = scope;
     cell.bytes.clear();
     Ok(cell)
@@ -185,6 +187,11 @@ pub const VOCABULARY: &[(&str, &str)] = &[
         "ASSERTION_METHOD",
         "https://w3id.org/security#assertionMethod",
     ),
+    (
+        "CONFIDENCE_METHOD",
+        "https://www.w3.org/2018/credentials#confidenceMethod",
+    ),
+    ("VERIFIED_ISSUER", "https://w3id.org/sparq/vcq#verifiedIssuer"),
 ];
 
 /// Exact UTC milliseconds of a representable zoned date-time; otherwise unknown.

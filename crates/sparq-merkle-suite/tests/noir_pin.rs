@@ -184,6 +184,11 @@ fn every_noir_constant_equals_its_rust_source() {
         expected.insert(name.to_owned(), value);
     }
     for (name, iri) in sparq_merkle_suite::metadata::VOCABULARY {
+        let term = oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(*iri));
+        expected.insert(
+            format!("IRI_{name}_IDENTITY"),
+            p::term_identity(&term).unwrap(),
+        );
         expected.insert(
             format!("IRI_{name}"),
             p::term_cell(
@@ -219,5 +224,43 @@ fn every_noir_constant_equals_its_rust_source() {
         for b in &tags[i + 1..] {
             assert_ne!(a, b);
         }
+    }
+}
+
+#[test]
+fn noir_identity_vectors_equal_native() {
+    use oxrdf::{BlankNode, Literal, NamedNode, Term};
+    let vectors = include_str!("../../../zk/noir-query/core/src/term_identity_tests.nr");
+    let terms = [
+        ("iri", Term::NamedNode(NamedNode::new_unchecked("urn:identity"))),
+        ("blank", Term::BlankNode(BlankNode::new_unchecked("urn:identity"))),
+        ("plain", Term::Literal(Literal::new_simple_literal("example"))),
+        (
+            "typed",
+            Term::Literal(Literal::new_typed_literal(
+                "7",
+                NamedNode::new_unchecked("http://www.w3.org/2001/XMLSchema#decimal"),
+            )),
+        ),
+        (
+            "lang",
+            Term::Literal(Literal::new_language_tagged_literal("example", "en").unwrap()),
+        ),
+    ];
+    let mut expected: Vec<_> = terms
+        .iter()
+        .map(|(name, term)| (*name, p::term_identity(term).unwrap()))
+        .collect();
+    expected.push(("default", p::default_graph().identity));
+    for (name, native) in expected {
+        let marker = format!("assert({name}.identity() == ");
+        let literal = vectors
+            .split_once(&marker)
+            .unwrap()
+            .1
+            .split_once(')')
+            .unwrap()
+            .0;
+        assert_eq!(field_from_hex_str_strict(literal).unwrap(), native, "{name}");
     }
 }

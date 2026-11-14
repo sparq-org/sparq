@@ -6,6 +6,47 @@ use oxrdf::{NamedNode, Term};
 use sparq_merkle_suite::{poseidon as suite, Fr};
 use sparq_zk::{field::field_to_be_bytes_32, poseidon2, sig};
 
+const KEY_SET_LEAF: u64 = 0x5643515f454b4559;
+const SNAPSHOT: u64 = 0x5643515f45534e50;
+const STATUS_LEAF: u64 = 0x5643515f45534c46;
+const HOLDER_REQUEST: u64 = 0x5643515f45484f4c;
+
+/// Message signed by each required holder over the complete request digest.
+pub fn holder_message(digest: &[u8; 32]) -> Fr {
+    let high = u128::from_be_bytes(digest[..16].try_into().unwrap());
+    let low = u128::from_be_bytes(digest[16..].try_into().unwrap());
+    poseidon2::hash(&[Fr::from(HOLDER_REQUEST), high.into(), low.into()])
+}
+
+/// Tagged status bit, before ordered status-tree hashing.
+pub fn status_leaf(bit: bool) -> Fr {
+    poseidon2::hash(&[
+        Fr::from(STATUS_LEAF),
+        Fr::from(u64::from(bit)),
+        Fr::from(0u64),
+    ])
+}
+
+/// Match the envelope snapshot encoding after snapshot authentication.
+/// List and purpose are suite term encodings; depth is the status-bit tree depth.
+/// This encoding alone does not authenticate or admit a status list.
+pub fn snapshot_digest(
+    list: Word,
+    purpose: Word,
+    bit_len: u32,
+    depth: u32,
+    root: Word,
+) -> Result<Word, Error> {
+    Ok(suite::field_bytes(poseidon2::hash(&[
+        Fr::from(SNAPSHOT),
+        field(list)?,
+        field(purpose)?,
+        Fr::from(bit_len),
+        Fr::from(depth),
+        field(root)?,
+    ])))
+}
+
 /// An issuer, its assertion verification method and the authorized suite key.
 #[derive(Clone, Debug)]
 pub struct TrustMember {
@@ -51,6 +92,23 @@ pub struct CanonicalSet {
 /// Sort canonical unsigned field bytes, collapse duplicates and build the least
 /// binary tree with zero padding. Empty sets and zero members are refused.
 pub fn canonical_set_root(members: &[Word]) -> Result<CanonicalSet, Error> {
+    Ok(build_canonical_set(members, None)?.0)
+}
+
+/// Return the canonical set, selected leaf index and siblings from leaf to root.
+/// The same builder fixes validation, ordering, deduplication, padding and depth
+/// for roots and membership paths. A member absent from the set is refused.
+pub fn canonical_set_membership(
+    members: &[Word],
+    member: Word,
+) -> Result<(CanonicalSet, u32, Vec<Word>), Error> {
+    build_canonical_set(members, Some(member))
+}
+
+fn build_canonical_set(
+    members: &[Word],
+    member: Option<Word>,
+) -> Result<(CanonicalSet, u32, Vec<Word>), Error> {
     if members.is_empty() {
         return Err(Error::Invalid("empty policy set".into()));
     }
@@ -67,6 +125,18 @@ pub fn canonical_set_root(members: &[Word]) -> Result<CanonicalSet, Error> {
         .len()
         .checked_next_power_of_two()
         .ok_or_else(|| Error::Capacity("policy set tree".into()))?;
+    let selected = if let Some(member) = member {
+        field(member)?;
+        members
+            .binary_search(&member)
+            .map_err(|_| Error::Invalid("policy set member absent".into()))?
+    } else {
+        0
+    };
+    let index =
+        u32::try_from(selected).map_err(|_| Error::Capacity("policy set member index".into()))?;
+    let mut position = selected;
+    let mut siblings = Vec::new();
     let depth = width.trailing_zeros();
     let mut row = members
         .iter()
@@ -75,6 +145,10 @@ pub fn canonical_set_root(members: &[Word]) -> Result<CanonicalSet, Error> {
         .collect::<Result<Vec<_>, _>>()?;
     row.resize(width, Fr::from(0u64));
     while row.len() > 1 {
+        if member.is_some() {
+            siblings.push(field_to_be_bytes_32(&row[position ^ 1]));
+            position >>= 1;
+        }
         row = row
             .chunks_exact(2)
             .map(|p| poseidon2::hash(&[p[0], p[1]]))
@@ -84,11 +158,15 @@ pub fn canonical_set_root(members: &[Word]) -> Result<CanonicalSet, Error> {
     if root == [0; 32] {
         return Err(Error::Invalid("zero policy root".into()));
     }
-    Ok(CanonicalSet {
-        root,
-        depth,
-        members,
-    })
+    Ok((
+        CanonicalSet {
+            root,
+            depth,
+            members,
+        },
+        index,
+        siblings,
+    ))
 }
 
 /// Use the suite IRI encoding without spelling changes.
@@ -106,7 +184,7 @@ pub fn trust_member_digest(member: &TrustMember) -> Result<Word, Error> {
     let assertion = NamedNode::new_unchecked("https://w3id.org/security#assertionMethod");
     let key = poseidon2::hash(&[suite::suite_id(), member.key.0.x, member.key.0.y]);
     Ok(suite::field_bytes(poseidon2::hash(&[
-        Fr::from(0x5643515f454b4559u64),
+        Fr::from(KEY_SET_LEAF),
         field(issuer_encoding(&member.issuer)?)?,
         field(issuer_encoding(&member.verification_method)?)?,
         key,
@@ -231,6 +309,147 @@ pub fn public_words(input: &PolicyInput) -> Result<[Word; 17], Error> {
 mod tests {
     use super::*;
     use sparq_zk::field::field_from_hex_str_strict;
+
+    #[test]
+    fn envelope_protocol_constants_equal_their_rust_sources() {
+        let source = include_str!("../../../zk/noir-query/core/src/envelope.nr");
+        let mut actual = std::collections::BTreeMap::new();
+        for line in source.lines() {
+            let code = line.split("//").next().unwrap().trim();
+            if let Some(declaration) = code.strip_prefix("global ") {
+                let (name, rest) = declaration.split_once(':').unwrap();
+                let (kind, rest) = rest.split_once('=').unwrap();
+                assert_eq!(kind.trim(), "Field");
+                let value = rest.trim().strip_suffix(';').unwrap().trim();
+                let value = u64::from_str_radix(value.strip_prefix("0x").unwrap(), 16).unwrap();
+                assert!(actual.insert(name.trim(), value).is_none());
+            }
+        }
+        let expected = std::collections::BTreeMap::from([
+            ("KEY_SET_LEAF", KEY_SET_LEAF),
+            ("SNAPSHOT", SNAPSHOT),
+            ("STATUS_LEAF", STATUS_LEAF),
+            ("HOLDER_REQUEST", HOLDER_REQUEST),
+        ]);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn envelope_encodings_bind_each_input() {
+        let digest = std::array::from_fn(|i| i as u8);
+        let message = holder_message(&digest);
+        for i in 0..digest.len() {
+            let mut changed = digest;
+            changed[i] ^= 1;
+            assert_ne!(message, holder_message(&changed));
+        }
+        assert_ne!(status_leaf(false), status_leaf(true));
+        let snapshot = snapshot_digest(number(11), number(13), 4, 2, number(17)).unwrap();
+        for changed in [
+            snapshot_digest(number(19), number(13), 4, 2, number(17)),
+            snapshot_digest(number(11), number(23), 4, 2, number(17)),
+            snapshot_digest(number(11), number(13), 8, 2, number(17)),
+            snapshot_digest(number(11), number(13), 4, 3, number(17)),
+            snapshot_digest(number(11), number(13), 4, 2, number(29)),
+        ] {
+            assert_ne!(snapshot, changed.unwrap());
+        }
+        for (list, purpose, root) in [
+            ([255; 32], number(13), number(17)),
+            (number(11), [255; 32], number(17)),
+            (number(11), number(13), [255; 32]),
+        ] {
+            assert!(snapshot_digest(list, purpose, 4, 2, root).is_err());
+        }
+    }
+
+    fn root_from_path(leaf: Word, index: u32, siblings: &[Word], depth: u32) -> Word {
+        assert_eq!(siblings.len(), depth as usize);
+        assert_eq!((index as u64) >> depth, 0);
+        let mut node = field(leaf).unwrap();
+        for (level, sibling) in siblings.iter().enumerate() {
+            let sibling = field(*sibling).unwrap();
+            let pair = if (index >> level) & 1 == 0 {
+                [node, sibling]
+            } else {
+                [sibling, node]
+            };
+            node = poseidon2::hash(&pair);
+        }
+        field_to_be_bytes_32(&node)
+    }
+
+    #[test]
+    fn canonical_membership_matches_roots_for_every_small_set_member() {
+        for size in 1..=9 {
+            let members = (1..=size).map(|n| number(3 * n + 1)).collect::<Vec<_>>();
+            let expected = canonical_set_root(&members).unwrap();
+            let mut reordered = members.clone();
+            reordered.reverse();
+            reordered.extend_from_slice(&members);
+            for (position, &member) in expected.members.iter().enumerate() {
+                let (set, index, siblings) = canonical_set_membership(&members, member).unwrap();
+                assert_eq!(set, expected);
+                assert_eq!(index as usize, position);
+                assert_eq!(siblings.len(), set.depth as usize);
+                assert_eq!(
+                    root_from_path(member, index, &siblings, set.depth),
+                    set.root
+                );
+                assert_eq!(
+                    canonical_set_membership(&reordered, member).unwrap(),
+                    (set.clone(), index, siblings.clone())
+                );
+                if !siblings.is_empty() {
+                    let mut changed = siblings;
+                    changed[0] = number(999);
+                    assert_ne!(root_from_path(member, index, &changed, set.depth), set.root);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn canonical_membership_uses_the_existing_noir_golden_roots() {
+        let vectors: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/envelope_set_roots.json"))
+                .unwrap();
+        for vector in vectors["sets"].as_array().unwrap() {
+            let members = vector["members"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| parse(v.as_str().unwrap()))
+                .collect::<Vec<_>>();
+            for member in &members {
+                let (set, index, siblings) = canonical_set_membership(&members, *member).unwrap();
+                assert_eq!(set.root, parse(vector["root"].as_str().unwrap()));
+                assert_eq!(set.depth, vector["depth"].as_u64().unwrap() as u32);
+                assert_eq!(
+                    root_from_path(*member, index, &siblings, set.depth),
+                    set.root
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn canonical_membership_refuses_absent_members_and_invalid_sets() {
+        assert!(
+            matches!(canonical_set_membership(&[number(1), number(2)], number(3)), Err(Error::Invalid(reason)) if reason == "policy set member absent")
+        );
+        for members in [vec![], vec![[0; 32]], vec![[255; 32]]] {
+            assert!(canonical_set_root(&members).is_err());
+            assert!(canonical_set_membership(&members, number(1)).is_err());
+        }
+        assert!(canonical_set_membership(&[number(1)], [255; 32]).is_err());
+        let (set, index, siblings) =
+            canonical_set_membership(&[number(7), number(7)], number(7)).unwrap();
+        assert_eq!(
+            (set.root, set.depth, index, siblings),
+            (number(7), 0, 0, vec![])
+        );
+    }
 
     fn iri(text: &str) -> NamedNode {
         NamedNode::new(text).unwrap()

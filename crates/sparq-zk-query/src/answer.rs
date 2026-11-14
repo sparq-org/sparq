@@ -50,7 +50,9 @@ impl Answer {
                                         ..Cell::default()
                                     })
                                 }
-                                Some(term) => encoder.encode(term),
+                                Some(term) => {
+                                    encoder.encode(term).map(crate::interp::released_cell)
+                                }
                             })
                             .collect()
                     })
@@ -76,7 +78,11 @@ impl Answer {
         }));
         let catalog: Vec<_> = catalog
             .into_iter()
-            .map(|term| encoder.encode(&term).map(|cell| (cell, term)))
+            .map(|term| {
+                encoder
+                    .encode(&term)
+                    .map(|cell| (crate::interp::released_cell(cell), term))
+            })
             .collect::<Result<_, _>>()?;
         Ok(match value {
             ResultValue::Ask(value) => Self::Ask(*value),

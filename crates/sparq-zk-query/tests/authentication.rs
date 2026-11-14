@@ -261,13 +261,86 @@ fn suite_constant_scan_preserves_literal_identity() {
         &data[0].credential.document,
         &sparq_zk_query::interp::ResultValue::Ask(true),
     );
-    assert_eq!(altered["result"], json!(false));
-    assert!(
-        driver
-            .execute(&render(&altered), "constant_scan_identity_statement")
-            .is_err(),
-        "literal identity statement"
+    assert_eq!(altered["result"], json!(true));
+    driver
+        .execute(&render(&altered), "constant_scan_identity_statement")
+        .unwrap();
+    // A released literal is RDF identity, without an unused value-key claim.
+    let plan = lower(
+        "SELECT ?x WHERE {?s <urn:p> ?x}",
+        Bounds {
+            credentials: 1,
+            quads_per_credential: 4,
+            rows_per_table: 2,
+        },
+    )
+    .unwrap();
+    let trace = evaluate(&plan, &cells, &SuiteEncoder).unwrap();
+    let honest = parse(
+        &prover_toml_authenticated(
+            &plan,
+            &data,
+            &trace,
+            [7; 32],
+            [3; 32],
+            authenticated::issuer_root(),
+        )
+        .unwrap(),
     );
+    let altered = incorrect_key_signed_witness(&plan, &data[0], &honest, &trace.result);
+    assert_eq!(altered["result"], honest["result"]);
+    let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+    let workspace = fixture_support::Workspace::new(&package);
+    let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+    driver.compile().unwrap();
+    driver
+        .execute(&render(&honest), "released_literal_honest")
+        .unwrap();
+    driver
+        .execute(&render(&altered), "released_literal_identity")
+        .unwrap();
+    let plan = lower(
+        "ASK {?s <urn:p> ?x FILTER(?x IN (\"alpha\",\"other\"))}",
+        Bounds {
+            credentials: 1,
+            quads_per_credential: 4,
+            rows_per_table: 2,
+        },
+    )
+    .unwrap();
+    let data = vec![authenticated::sign("<urn:s> <urn:p> \"alpha\" .", 0)];
+    let cells = vec![data[0].cells(0).unwrap()];
+    let trace = evaluate(&plan, &cells, &SuiteEncoder).unwrap();
+    assert_eq!(trace.result, sparq_zk_query::interp::ResultValue::Ask(true));
+    let honest = parse(
+        &prover_toml_authenticated(
+            &plan,
+            &data,
+            &trace,
+            [7; 32],
+            [3; 32],
+            authenticated::issuer_root(),
+        )
+        .unwrap(),
+    );
+    let altered = signed_key_witness(
+        &plan,
+        &data[0],
+        &honest,
+        "alpha",
+        oxrdf::Literal::new_simple_literal("beta"),
+    );
+    assert_eq!(altered["result"], json!(true));
+    let package = sparq_zk_query::codegen::generate(&plan).unwrap();
+    let workspace = fixture_support::Workspace::new(&package);
+    let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+    driver.compile().unwrap();
+    driver
+        .execute(&render(&honest), "plain_string_membership_honest")
+        .unwrap();
+    driver
+        .execute(&render(&altered), "plain_string_membership_identity")
+        .unwrap();
     long_object_profile_executes_a_suite_multikey_opening();
     support::complete(gate);
 }
@@ -342,26 +415,13 @@ fn incorrect_key_signed_witness(
     plan: &sparq_zk_query::plan::Plan,
     credential: &sparq_zk_query::credential::Credential,
     honest: &serde_json::Map<String, Value>,
-    original: &sparq_zk_query::interp::ResultValue,
+    _original: &sparq_zk_query::interp::ResultValue,
 ) -> serde_json::Map<String, Value> {
     let replacement = oxrdf::Literal::new_typed_literal(
         "0",
         oxrdf::NamedNode::new_unchecked("http://www.w3.org/2001/XMLSchema#integer"),
     );
-    let changed = signed_key_witness(plan, credential, honest, "1", replacement);
-    assert_ne!(&parse_result(plan, &changed), original);
-    changed
-}
-
-fn parse_result(
-    plan: &sparq_zk_query::plan::Plan,
-    input: &serde_json::Map<String, Value>,
-) -> sparq_zk_query::interp::ResultValue {
-    if plan.form() == sparq_zk_query::plan::ResultForm::Ask {
-        sparq_zk_query::interp::ResultValue::Ask(input["result"].as_bool().unwrap())
-    } else {
-        panic!("ASK fixture required")
-    }
+    signed_key_witness(plan, credential, honest, "1", replacement)
 }
 
 fn signed_key_witness(
@@ -429,7 +489,7 @@ fn signed_key_witness(
         let convert = |c: suite::TermCell| sparq_zk_query::interp::Cell {
             bound: c.bound,
             kind: c.kind,
-            enc: suite::field_bytes(c.enc),
+            enc: suite::field_bytes(c.identity),
             key_class: c.key_class,
             key: suite::field_bytes(c.key),
             dt: suite::field_bytes(c.dt),
@@ -463,13 +523,23 @@ fn signed_key_witness(
             for (r, row) in trace.tables[input as usize].rows.iter().enumerate() {
                 let value = *row.iter().find(|c| c.bound && c.kind == 3).unwrap();
                 use sparq_zk_query::interp::EncodeTerm;
-                let public = plan.parameters().iter().any(|p| {
-                    if let sparq_zk_query::plan::Parameter::Term(t) = p {
-                        SuiteEncoder.encode(t).unwrap() == value
-                    } else {
-                        false
-                    }
-                });
+                let public = (sparq_zk_query::codegen::generate(plan)
+                    .unwrap()
+                    .files
+                    .values()
+                    .any(|source| source.contains("ops_core_reads::check_identity_equalities("))
+                    && value.dt
+                        == SuiteEncoder
+                            .encode(&oxrdf::Literal::new_simple_literal("").into())
+                            .unwrap()
+                            .dt)
+                    || plan.parameters().iter().any(|p| {
+                        if let sparq_zk_query::plan::Parameter::Term(t) = p {
+                            SuiteEncoder.encode(t).unwrap() == value
+                        } else {
+                            false
+                        }
+                    });
                 let mut opening = read_sources
                     .iter()
                     .find(|(c, _)| *c == value)

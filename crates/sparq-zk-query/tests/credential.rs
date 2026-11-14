@@ -237,9 +237,20 @@ fn suite_signature_opening_and_named_admission_guards_are_observable() {
         "<urn:a> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#double> .",
         0,
     );
+    let cells = vec![floating.cells(0).unwrap()];
     assert_eq!(
-        floating.cells(0).unwrap_err(),
-        Error::Unsupported("N0 credential literal datatype".into())
+        evaluate(
+            &lower("ASK {?s <urn:p> ?x}", B).unwrap(),
+            &cells,
+            &SuiteEncoder
+        )
+        .unwrap()
+        .result,
+        ResultValue::Ask(true)
+    );
+    assert!(
+        matches!(evaluate(&lower("ASK {?s <urn:p> ?x FILTER(?x = 1)}", B).unwrap(), &cells, &SuiteEncoder),
+        Err(Error::Unsupported(reason)) if reason == "floating-point comparison")
     );
     let plan=lower("ASK {?s <urn:p> ?x FILTER(?x >= \"2024-01-01Z\"^^<http://www.w3.org/2001/XMLSchema#date>)}",B).unwrap();
     let zoned = authenticated::sign(
@@ -520,7 +531,10 @@ fn method_dataset_keeps_named_copies_and_a_deduplicated_default_merge() {
         panic!()
     };
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0][0], cell[2]);
+    let mut released = cell[2];
+    released.key_class = 0;
+    released.key = [0; 32];
+    assert_eq!(rows[0][0], released);
     let plan = lower(
         &format!("SELECT ?issuer WHERE {{?g <{VERIFIED_ISSUER}> ?issuer}}"),
         bounds,
@@ -545,4 +559,160 @@ fn method_dataset_keeps_named_copies_and_a_deduplicated_default_merge() {
     let mut invalid = issuers;
     invalid[0] = sparq_zk_query::interp::Cell::default();
     assert!(assemble_dataset(&credentials, &invalid, [7; 32]).is_err());
+}
+
+#[test]
+fn suite_identity_is_shared_by_sources_parameters_and_released_terms() {
+    use oxrdf::{Literal, NamedNode, Term};
+    use sparq_zk_query::{answer::Answer, interp::EncodeTerm};
+    let terms: Vec<Term> = vec![
+        NamedNode::new_unchecked("urn:identity").into(),
+        Literal::new_simple_literal("one").into(),
+        Literal::new_typed_literal(
+            "1",
+            NamedNode::new_unchecked("http://www.w3.org/2001/XMLSchema#integer"),
+        )
+        .into(),
+        Literal::new_typed_literal(
+            "01",
+            NamedNode::new_unchecked("http://www.w3.org/2001/XMLSchema#integer"),
+        )
+        .into(),
+        Literal::new_language_tagged_literal("one", "en")
+            .unwrap()
+            .into(),
+    ];
+    let mut identities = std::collections::BTreeSet::new();
+    for term in terms {
+        let encoded = SuiteEncoder.encode(&term).unwrap();
+        assert_eq!(
+            encoded.enc,
+            sparq_merkle_suite::poseidon::field_bytes(
+                sparq_merkle_suite::poseidon::term_identity(&term).unwrap()
+            )
+        );
+        assert!(identities.insert(encoded.enc));
+        let source = format!("<urn:s> <urn:p> {term} .");
+        let credential = authenticated::sign(&source, 0);
+        let cells = vec![credential.cells(0).unwrap()];
+        assert_eq!(cells[0].quads[0][2], encoded);
+        let plan = lower("SELECT ?x WHERE {?s <urn:p> ?x}", B).unwrap();
+        let trace = evaluate(&plan, &cells, &SuiteEncoder).unwrap();
+        let answer = Answer::release(
+            &trace.result,
+            &plan,
+            std::slice::from_ref(&term),
+            &SuiteEncoder,
+        )
+        .unwrap();
+        assert_eq!(
+            answer,
+            Answer::Select {
+                variables: vec!["x".into()],
+                rows: vec![vec![Some(term)]]
+            }
+        );
+        assert_eq!(answer.encode(&SuiteEncoder).unwrap(), trace.result);
+        let mut statement = Statement {
+            request_digest: [7; 32],
+            input_commitment: [3; 32],
+            signature_mode: 0,
+            result: trace.result,
+        };
+        assert!(Layout::new(&plan)
+            .reconstruct(&plan, &statement, &SuiteEncoder)
+            .is_ok());
+        let mut class_statement = statement.clone();
+        if let ResultValue::Select { rows, .. } = &mut class_statement.result {
+            rows[0][0].key_class = 1;
+        }
+        assert_eq!(
+            Layout::new(&plan)
+                .reconstruct(&plan, &class_statement, &SuiteEncoder)
+                .unwrap_err(),
+            Error::Invalid("released value metadata".into())
+        );
+        if let ResultValue::Select { rows, .. } = &mut statement.result {
+            assert_eq!(rows[0][0].key_class, 0);
+            assert_eq!(rows[0][0].key, [0; 32]);
+            rows[0][0].key = encoded.enc;
+        }
+        assert_eq!(
+            Layout::new(&plan)
+                .reconstruct(&plan, &statement, &SuiteEncoder)
+                .unwrap_err(),
+            Error::Invalid("released value metadata".into())
+        );
+    }
+}
+
+#[test]
+fn table_identity_keeps_kind_scope_and_excludes_value_metadata() {
+    use sparq_zk_query::interp::Cell;
+    let mut a = Cell {
+        bound: true,
+        kind: 1,
+        enc: [7; 32],
+        ..Cell::default()
+    };
+    let mut b = a;
+    b.kind = 2;
+    assert!(!a.same_term(b));
+    a.kind = 2;
+    a.scope = 1;
+    b.scope = 2;
+    assert!(!a.same_term(b));
+    b.scope = 1;
+    b.key_class = 1;
+    b.key = [9; 32];
+    assert!(a.same_term(b));
+}
+
+#[test]
+fn private_value_read_bounds_do_not_restrict_unrelated_source_identity() {
+    for (literal, error) in [
+        (
+            format!(
+                "\"{}1\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+                "0".repeat(32)
+            ),
+            Error::Capacity("read scalar lexical bytes".into()),
+        ),
+        (
+            "\"1\"^^<http://www.w3.org/2001/XMLSchema#long>".into(),
+            Error::Unsupported("N0 credential value datatype".into()),
+        ),
+    ] {
+        let data = vec![authenticated::sign(
+            &format!("<urn:s> <urn:p> {literal} ."),
+            0,
+        )];
+        let cells = vec![data[0].cells(0).unwrap()];
+        let identity = lower("ASK {?s <urn:p> ?x}", B).unwrap();
+        let trace = evaluate(&identity, &cells, &SuiteEncoder).unwrap();
+        assert_eq!(trace.result, ResultValue::Ask(true));
+        assert!(prover_toml_authenticated(
+            &identity,
+            &data,
+            &trace,
+            [7; 32],
+            [3; 32],
+            authenticated::issuer_root()
+        )
+        .is_ok());
+        let value = lower("ASK {?s <urn:p> ?x FILTER(?x >= 1)}", B).unwrap();
+        let trace = evaluate(&value, &cells, &SuiteEncoder).unwrap();
+        assert_eq!(
+            prover_toml_authenticated(
+                &value,
+                &data,
+                &trace,
+                [7; 32],
+                [3; 32],
+                authenticated::issuer_root()
+            )
+            .unwrap_err(),
+            error
+        );
+    }
 }
