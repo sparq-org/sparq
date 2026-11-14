@@ -1,6 +1,6 @@
 # sparq's answer to the Solid App Suite (second request: 15 paths)
 
-Version 3. Updated 14 Nov 2026 at 00:30 UTC, from sparq main at `2a1c2d90`. The next section says where things stand now and wins over the version 2 text below it, which is kept for the detail.
+Version 3. Updated 14 Nov 2026 at 00:30 UTC, from sparq main at `23d2f3db`. The next section says where things stand now and wins over the version 2 text below it, which is kept for the detail.
 
 The work is tracked under sparq issue #7375. In the version 2 text below, a section marked **BEING BUILT** described an interface that was still being built; the table in the next section says which of them have landed.
 
@@ -20,7 +20,7 @@ gh api -H "Accept: application/vnd.github.raw" "repos/sparq-org/sparq/contents/<
 | # | Need | Status | File | SHA-256 |
 |---|---|---|---|---|
 | 1 | Joint count, sum and threshold | **Built and merged** (#7389, fixes #7400). Only parties that commit inputs count toward `min_contributors`. A missing or malformed signature reports the attestation error. ESM and CommonJS entries. | `sparq-verifiable-aggregate-c832012a.tgz` | `cabd1495e2b797b86d9fd0b5b2967c4a521314dedb85752b793ea6f296e03376` |
-| 2 | Result proofs from Node | **Built and merged** (#7392, #7396, #7397, #7399, #7401). Offline install; 51 installed-package tests pass on Node 24. | `sparq-zk-result-2a1c2d90.tgz` | `1467633b0ae49cc3b386a59cc281f9778da1ac878c77bd34f60980ba751c02aa` |
+| 2 | Result proofs from Node | **Built and merged** (#7392, #7396, #7397, #7399, #7401, #7403). Offline install; 57 installed-package tests pass on Node 24. Accepts the query package's `trustMembers` policy shape. | `sparq-zk-result-23d2f3db.tgz` | `79c77ad11312f0a225fb89763530f893835df62e95ff87ae0e764a8a27e2d852` |
 | 3 | General evaluator (RISC Zero) | **Dropped** at your request. insurance-quote, trial-eligibility and recycled-content move to the Noir query method (target 23 Nov for proofs, 4 Dec for the Node package; plan dates). | none | |
 | 4 | `xsd:date` comparison | **In item 2's package**: one hidden date comparison per proof, `xsd:date` without a timezone. | as item 2 | |
 | 5 | Issuer per fact, holder binding | Result package: one issuer per proof (below). Per-fact binding across issuers, holder binding and absence: the Noir query method. | | |

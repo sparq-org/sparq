@@ -7,7 +7,8 @@ Each file name carries the sparq commit it was built from. Check every download 
 |---|---|---|
 | sparq-verifiable-aggregate-c832012a.tgz | proof-methods/aggregate from main at c832012a (PR #7400, merged) | current |
 | sparq-verifiable-aggregate-61989f5.tgz | proof-methods/aggregate (PR #7389, merged) | superseded |
-| sparq-zk-result-2a1c2d90.tgz | js/zk-result from main at 2a1c2d90 (adds PR #7401, merged) | current |
+| sparq-zk-result-23d2f3db.tgz | js/zk-result from main at 23d2f3db (adds PR #7403, merged) | current |
+| sparq-zk-result-2a1c2d90.tgz | js/zk-result from main at 2a1c2d90 (adds PR #7401, merged) | superseded |
 | sparq-zk-result-271502ae.tgz | js/zk-result from main at 271502ae (PRs #7396, #7397, #7399 merged) | superseded |
 | sparq-zk-result-7a56f943.tgz | js/zk-result from main at 7a56f943 (PR #7392, merged) | superseded |
 | sparq-zk-result-fb601bc16e1e4a92c3693558ca9367fa9405449f.tgz | js/zk-result, pre-merge build | superseded |
@@ -21,5 +22,8 @@ public issuer slot holds that key. Different issuers per graph variable are refu
 sparq-verifiable-aggregate-c832012a.tgz: only parties that commit inputs count toward `min_contributors` (compute-only roles never count);
 a missing or malformed signature field reports the attestation error; adds an ESM entry (`import` and `require` both work).
 It was built from the PR head 7ce9843, whose package sources, Cargo.lock and LICENSE are identical to main at c832012a.
+
+sparq-zk-result-23d2f3db.tgz also accepts the query package's `trustMembers: [{ issuer, verificationMethod, publicKey }]` policy
+entries, so one policy object serves both packages; `report.trustMembers` echoes the roster.
 
 Install: `npm install --offline ./<file>.tgz`
