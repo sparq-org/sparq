@@ -42,3 +42,4 @@ pub mod expr_numeric;
 pub mod expr_construct;
 mod expr_functions_tests;
 mod term_identity_tests;
+pub mod envelope;
