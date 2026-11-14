@@ -1,5 +1,8 @@
 //! Byte-deterministic gadget wiring. No constraint expressions are emitted here.
 
+#[path = "codegen_closed.rs"]
+mod closed;
+
 use crate::{plan::*, Error};
 use std::collections::BTreeMap;
 use std::fmt::Write;
@@ -231,6 +234,7 @@ fn generate_inner(
             }))
         };
         match &node.operator {
+            Operator::Closed(op) => closed::generate(op, i, plan, &term_ids, &mut source)?,
             Operator::Unit => writeln!(source, "    ops_core::unit(t{i});").unwrap(),
             Operator::Scan(slots) => {
                 let mapping = array(slots.iter().map(|slot| {
@@ -361,6 +365,7 @@ fn generate_inner(
     if source.contains("unbound()") {
         source = source.replacen("\nfn main(", "\nuse core::table::unbound;\nfn main(", 1);
     }
+    closed::finish(plan, &mut source);
     let files=BTreeMap::from([
         ("Nargo.toml".into(),format!("[workspace]\nmembers = [\"{name}\"]\n")),
         (format!("{name}/Nargo.toml"),format!("[package]\nname = \"{name}\"\ntype = \"bin\"\nauthors = [\"sparq\"]\ncompiler_version = \">=1.0.0\"\n\n[dependencies]\ncore = {{ path = \"../zk/noir-query/core\" }}\n")),

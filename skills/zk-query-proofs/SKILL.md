@@ -74,6 +74,43 @@ reconstruction and `Request::new_authenticated_with_envelope` policy derivation.
 Generated programs consume canonical trust and envelope policy; the native
 `Compiler::prove_with_envelope` adds private holder/status evidence, while `prove`
 uses empty evidence. Both derive public policy from the stored request.
+Host reconstruction also covers exact millisecond instants, issuer-authenticated dataset preparation and
+parameterized membership lists; its subprocess method driver remains native.
+Its experimental `credential_graphs::canonical_credentials` now returns `Result`:
+propagate metadata-validation failures before assigning credential ranks.
+Authenticated graph evaluation and witness rendering require that canonical
+credential order and refuse an unsorted presentation.
+For a verifier-selected per-table profile, lower a skeleton at the outer-row bound,
+then call `plan_closed::with_row_bounds(plan, request_bounds, node_row_buckets)`.
+Supply one supported bucket per node, within the public request ceiling. The plan
+hash commits every table choice; overflow refuses even below the global ceiling.
+For a refined plan, `capacity().rows_per_table` selects the public result ABI;
+read `nodes()[i].output.capacity` for each intermediate table.
+Refinement emits `ClosedOperator::Join` for wide joins. Use
+`witness_closed::operator_prover_toml` for their supplied-cell fixtures; it includes
+the private join inverse maps without an authentication claim.
+EXISTS capture slots must match their left table's bucket. These choices come from
+the receiver's stored profile, independently of private cardinalities.
+The closed authenticated witness delegates to the shared bounded opening ABI.
+It supplies lexical openings for all rows at value-read sites, including rejected
+NOT EXISTS rows and non-minimum aggregate operands. Generated aggregate values
+are checked against their constrained canonical lexical forms as well.
+`credential_graphs::evaluate_for_request(plan, credentials, request_digest)` uses
+request-scoped blank node graph names; use the same digest when rendering through
+`witness_closed::prover_toml`. The default graph adds only the reserved
+`https://w3id.org/sparq/vcq#verifiedIssuer` assertions; signed credentials using
+that predicate are refused. The local issuer adapter reads the suite vocabulary
+`https://www.w3.org/2018/credentials#issuer` from signed content. Boolean expression
+BIND retains an unbound variable on a SPARQL error. The closed profile admits
+correlated EXISTS in boolean FILTER/BIND, implicit-group MIN/COUNT expressions,
+and exact integer/decimal SUM subqueries and grouped HAVING. Its document lexical
+openings admit at most 64 bytes; longer terms receive a capacity refusal. Supplied-cell operator fixtures use
+`credential_graphs::evaluate_cells` to preserve credential graph boundaries; that
+entry point authenticates no cells. Use `evaluate_cells_for_request` with the
+fixture witness digest when testing request-scoped graph results. Exact aggregate
+arithmetic uses the shared expression numeric capacity and refuses overflow. These operator interfaces remain research grade,
+not externally audited; envelope integration and full target-capacity evidence
+are required before making a whole-method claim.
 
 The detached exact-evaluator host crate's optional `vcq` feature (off by default) adds
 the first `QueryMethod` adapter, `sparq_proved_evaluator::vcq::Risc0ExactV3`, over the V3 relation:

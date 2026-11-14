@@ -3,6 +3,9 @@
 //! The credential adapter authenticates complete inputs before this reference
 //! evaluator runs; the generated program checks them independently.
 
+#[path = "interp_closed.rs"]
+mod closed;
+
 use crate::{plan::*, Error};
 use oxrdf::Term;
 use std::collections::BTreeSet;
@@ -206,6 +209,7 @@ pub fn evaluate_dataset(
         let input = |id: NodeId| &tables[id as usize].rows;
         let schema = |id: NodeId| &plan.nodes[id as usize].output.variables;
         let mut rows = match &node.operator {
+            Operator::Closed(op) => closed::evaluate(op, node, plan, &tables, &dataset, input_dataset, &params)?,
             Operator::Unit => vec![vec![]],
             Operator::Scan(pattern) => {
                 let mut rows = vec![];

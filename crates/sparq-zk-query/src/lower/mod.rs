@@ -17,6 +17,11 @@ mod expr_test_support;
 #[cfg(test)]
 mod expr_tests;
 mod n0;
+mod closed;
+mod closed_group;
+mod closed_graph;
+mod closed_join;
+mod closed_arith;
 
 use crate::{capacity::Bounds, plan::*, Error};
 use spargebra::{algebra::GraphPattern, SparqlParser};
@@ -109,6 +114,7 @@ impl Builder {
     fn pattern(&mut self, pattern: &GraphPattern, outer: bool) -> Result<NodeId, Error> {
         use GraphPattern as G;
         match pattern {
+            _ if closed::handles(pattern, outer) => self.closed_pattern(pattern, None),
             G::Bgp { patterns } => {
                 let mut input = None;
                 for pattern in patterns {
