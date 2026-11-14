@@ -217,7 +217,7 @@ jobs:
               # ZK-relevant paths — SAME set as the pull_request/push paths filter.
               # sq-5reoy: zk/ narrowed to zk/compose/ (ieee754/xpath externalized, #1599).
               if printf '%s\n' "${changed}" | grep -Eq \
-                '^(crates/sparq-merkle-suite/|zk/noir-query/|crates/sparq-zk/|crates/sparq-zk-compose/|zk/compose/|zk/dual-leaf-v2/|bench/zk-compose/campaigns/|bench/zk-bindings/|crates/sparq-conformance/examples/proof_corpus\.rs$|zk/sparql-evaluator/model/|\.github/workflows/zk-toolchain\.yml$|crates/sparq-zk-query/)'; then
+                '^(crates/sparq-merkle-suite/|zk/noir-query/|crates/sparq-zk/|crates/sparq-zk-compose/|zk/compose/|zk/dual-leaf-v2/|bench/zk-compose/campaigns/|bench/zk-bindings/|crates/sparq-conformance/examples/proof_corpus\.rs$|zk/sparql-evaluator/model/|\.github/workflows/zk-toolchain\.yml$|crates/sparq-zk-query/|crates/sparq-zk-query-wasm/|js/zk-query/|js/zk-shared/)'; then
                 zk=true
               else
                 zk=false
@@ -790,5 +790,20 @@ jobs:
           node zk/noir-query/compiler-agreement/check.mjs --self-test
           cargo test -p sparq-zk-query -- --include-ignored --test-threads=1
 
+      - name: Build and exercise the split query prover package offline
+        env:
+          SPARQ_NARGO: /usr/local/bin/nargo
+          SPARQ_BB: /usr/local/bin/bb
+        run: |
+          export SPARQ_NARGO="$(command -v nargo)"
+          export SPARQ_BB="$(command -v bb)"
+          bindgen_version="$(python3 -c 'import tomllib; print(next(p["version"] for p in tomllib.load(open("Cargo.lock", "rb"))["package"] if p["name"] == "wasm-bindgen"))')"
+          cargo install wasm-bindgen-cli --version "=$bindgen_version" --locked -j 2
+          npm ci --prefix js/zk-query --ignore-scripts
+          node js/zk-query/scripts/build.mjs
+          node js/zk-query/scripts/build-circuits.mjs
+          cargo build -p sparq-zk-query-wasm --example issuance_reference
+          export SPARQ_ISSUANCE_REFERENCE="$GITHUB_WORKSPACE/target/debug/examples/issuance_reference"
+          python3 js/zk-query/scripts/offline.py cargo test -p sparq-zk-query-wasm --test live -- --test-threads=1
       - name: Verify every live ZK test ran
         run: python3 scripts/check-zk-toolchain-gate.py --verify-ledger "${{ github.workspace }}/.zk-live-ledger-${{ github.run_id }}-${{ github.run_attempt }}.txt"

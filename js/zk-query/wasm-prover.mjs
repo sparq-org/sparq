@@ -2,10 +2,16 @@
 import { Noir } from '@noir-lang/noir_js';
 import { UltraHonkBackend } from '@aztec/bb.js';
 import { createBackend, proofOptions } from './internal/runtime.mjs';
+export function proverFailure(error) {
+  if (error instanceof WebAssembly.RuntimeError || error instanceof RangeError || /alloc|memory|unreachable/i.test(String(error))) {
+    return new Error('WebAssembly prover allocation refused');
+  }
+  return error;
+}
 export async function prove(artifact, inputs, options) {
   let api;
   try {
-    api = await createBackend(options.crsDirectory, options.crsPins);
+    api = await (options.createBackend ?? createBackend)(options.crsDirectory, options.crsPins);
     const prover = new UltraHonkBackend(artifact.program.bytecode, api);
     const key = await prover.getVerificationKey(proofOptions);
     if (!Buffer.from(key).equals(options.expectedKey)) throw new Error('WebAssembly prover key mismatch');
@@ -16,9 +22,6 @@ export async function prove(artifact, inputs, options) {
     }
     return result;
   } catch (error) {
-    if (error instanceof WebAssembly.RuntimeError || error instanceof RangeError || /alloc|memory|unreachable/i.test(String(error))) {
-      throw new Error('WebAssembly prover allocation refused');
-    }
-    throw error;
+    throw proverFailure(error);
   } finally { api?.destroy(); }
 }

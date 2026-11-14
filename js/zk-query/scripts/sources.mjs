@@ -44,6 +44,9 @@ export function snapshotSources() {
     source = realpathSync(source);
     if (seen.has(source)) return seen.get(source);
     const target = targetFor(source); seen.set(source, target);
+    for (const name of ['LICENSE', 'LICENSE-MIT', 'LICENSE-APACHE', 'COPYING', 'VENDOR-PROVENANCE.md']) {
+      if (existsSync(join(source, name))) files[`${target}/${name}`] = readFileSync(join(source, name), 'utf8');
+    }
     const original = readFileSync(join(source, 'Nargo.toml'), 'utf8');
     const lines = original.split('\n').map(line => {
       const match = /^(\s*[\w-]+\s*=\s*)\{([^}]+)\}(.*)$/.exec(line);

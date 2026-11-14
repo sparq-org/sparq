@@ -1,3 +1,4 @@
+/** Research grade and not externally audited. */
 export interface ProductionIssuer { secretKeyHex: string; publicKey: string }
 export interface TestIssuer { seedHex: string; publicKey: string }
 export interface ProofConfiguration { proofConfigNQuads: string }
@@ -29,7 +30,7 @@ export type Verification =
   | { verified: true; released: QueryResult; report: VerificationReport }
   | { verified: false; released: []; reason: string; report?: never };
 export interface ChallengeStore { consume(nonce: string): 'fresh' | 'alreadyConsumed' }
-export type Backend = 'native' | 'wasm' | { type: 'native'; nargoPath?: string; bbPath?: string } | { type: 'wasm' };
+export type Backend = 'native' | 'wasm' | { type: 'native'; nargoPath?: string; bbPath?: string; presentationSaltHex?: string } | { type: 'wasm'; presentationSaltHex?: string };
 export function issuerKeygen(): ProductionIssuer;
 export function testIssuerKeygen(seedHex: string): TestIssuer;
 export function issue(input: { issuer: ProductionIssuer | TestIssuer; graphNQuads: string; status?: ProofConfiguration }): Credential;

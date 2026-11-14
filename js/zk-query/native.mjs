@@ -5,6 +5,8 @@ import { createReadStream } from 'node:fs';
 import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { checkPinnedFiles } from './internal/runtime.mjs';
 import pins from './assets/toolchain.pins.json' with { type: 'json' };
 
 const outputLimit = 1 << 20;
@@ -19,7 +21,7 @@ async function digest(path) {
 function run(binary, args, { cwd, signal } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(binary, args, {
-      cwd, env: { ...process.env, HARDWARE_CONCURRENCY: '1' },
+      cwd, env: { ...process.env, HARDWARE_CONCURRENCY: '1', RAYON_NUM_THREADS: '1' },
       stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32',
       shell: false, windowsHide: true,
     });
@@ -68,9 +70,12 @@ export async function copyPinnedBinary(name, source, destination, options = {}) 
   } catch {
     throw new ProverRefusal(`missing or unreadable binary: ${requirement}`);
   }
+  await chmod(destination, 0o400);
   if (await digest(destination) !== expected.sha256) throw new ProverRefusal(`binary pin mismatch: ${requirement}`);
   await chmod(destination, 0o500);
-  const version = await run(destination, ['--version'], options);
+  let version;
+  try { version = await run(destination, ['--version'], options); }
+  catch { throw new ProverRefusal(`could not execute pinned binary: ${requirement}`); }
   if (version.trim().split('\n')[0] !== expected.version) throw new ProverRefusal(`binary version mismatch: ${requirement}`);
   return destination;
 }
@@ -124,10 +129,18 @@ export async function prove(acirArtifact, witnessInputs, options) {
     if (after.bytecode !== acirArtifact.program.bytecode || JSON.stringify(after.abi) !== JSON.stringify(acirArtifact.program.abi)) {
       throw new ProverRefusal('native execution changed the catalogue program');
     }
+    const privateCrs = join(work, 'crs');
+    await mkdir(privateCrs, { mode: 0o700 });
+    for (const name of ['bn254_g1.dat', 'bn254_g2.dat']) {
+      const target = join(privateCrs, name);
+      await copyFile(join(options.crsPath, name), target);
+      await chmod(target, 0o400);
+    }
+    await checkPinnedFiles(options.crsPins, pathToFileURL(privateCrs + '/'));
     const out = join(work, 'proof');
     await mkdir(out, { mode: 0o700 });
     try {
-      await run(bb, ['prove', '-b', artifactPath, '-w', witness, '-o', out, '--write_vk', '-t', 'noir-recursive', '--crs_path', options.crsPath], { cwd: work, signal: options.signal });
+      await run(bb, ['prove', '-b', artifactPath, '-w', witness, '-o', out, '--write_vk', '-t', 'noir-recursive', '--crs_path', privateCrs], { cwd: work, signal: options.signal });
     } catch {
       throw new ProverRefusal('native proof generation failed');
     }

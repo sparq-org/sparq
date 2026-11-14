@@ -7,7 +7,7 @@ repository.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
 publish = false
-description = "Research-grade JSON adapter for bounded authenticated query proofs"
+description = "Research-grade JSON adapter for bounded query proofs; not externally audited"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -32,3 +32,9 @@ getrandom_latest = { package = "getrandom", version = "0.4", features = ["wasm_j
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 getrandom_latest = { package = "getrandom", version = "0.4" }
+
+# The native package contract is selected explicitly by the live-toolchain lane.
+[[test]]
+name = "live"
+path = "tests/live.rs"
+test = false

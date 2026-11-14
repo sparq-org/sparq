@@ -1,4 +1,7 @@
-"""Run the package check through its bundled offline wrapper."""
+"""Run checks offline from a source checkout or a built package."""
 from pathlib import Path
 import runpy
-runpy.run_path(str(Path(__file__).resolve().parent.parent / 'internal' / 'offline.py'), run_name='__main__')
+package = Path(__file__).resolve().parent.parent
+source = package.parent / 'zk-shared' / 'offline.py'
+bundled = package / 'internal' / 'offline.py'
+runpy.run_path(str(bundled if bundled.is_file() else source), run_name='__main__')

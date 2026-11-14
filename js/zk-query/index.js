@@ -74,12 +74,12 @@ export async function prove({ request, credentials, backend = 'native' }) {
   const checked = call('holder', { request, clock: clock() });
   const entry = member(checked.planHash, known);
   const options = typeof backend === 'string' ? { type: backend } : snapshot(backend);
-  if (!options || !['native', 'wasm'].includes(options.type) || Object.keys(options).some(k => !['type', 'nargoPath', 'bbPath'].includes(k))) throw new Error('prover backend rejected');
+  if (!options || !['native', 'wasm'].includes(options.type) || Object.keys(options).some(k => !['type', 'nargoPath', 'bbPath', 'presentationSaltHex'].includes(k))) throw new Error('prover backend rejected');
   if (options.type === 'wasm' && !entry.wasmProving) throw new Error('catalogue plan requires the native prover backend');
   if (options.type === 'native') { const native = await import('./native.mjs'); await native.preflight(options); }
   const program = artifact(entry, request);
   const plan = call('plan', { query: request.query, policy: request.policy });
-  const prepared = call('prepareProof', { request, credentials, clock: clock() });
+  const prepared = call('prepareProof', { request, credentials, clock: clock(), ...(options.presentationSaltHex === undefined ? {} : { presentationSaltHex: options.presentationSaltHex }) });
   const pins = crsPins(known.table), crsDirectory = new URL('crs/', assets);
   const common = { expectedKey: entry.key, publicInputs: prepared.publicInputs, crsDirectory, crsPins: pins };
   let result;

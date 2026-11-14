@@ -63,6 +63,12 @@ share a challenge namespace across methods. A `Set` is supported for in-memory
 tests. Consumption follows statement, key, proof and final validity checks.
 Missing stores fail closed.
 
+For a verifier-agreed `inputCommitment`, the holder passes the existing commitment's
+salt as `backend: { type: 'native', presentationSaltHex }` (or the corresponding
+WebAssembly option). The salt is a full hexadecimal byte string, goes only into
+private witness inputs, and is checked against the stored commitment in Rust.
+Omitting this prover option draws a fresh random presentation salt.
+
 ## Prover backends and catalogue
 
 The default `native` backend executes pinned native binaries on the holder's
@@ -73,6 +79,10 @@ to a private temporary directory and checked against the version and digest in
 [the binary pin file](assets/toolchain.pins.json) before execution. The available
 binary pins select the supported native platform. Secret inputs use private files,
 child output is bounded and untrusted, and temporary files are removed afterwards.
+
+Authenticated catalogue entries currently require the native backend. The
+WebAssembly implementation stays opt-in until the authenticated consumer profile
+fits its gate budget. Consumer-limit profiles are not yet catalogued and refuse.
 
 `backend: 'wasm'` selects the in-process witness and prover implementation for
 catalogue entries that admit it. Other entries return a refusal before witness
@@ -85,26 +95,88 @@ Keys, artifacts, library sources and CRS are pinned and checked before use.
 Unknown plans and keys differing from the catalogue refuse. Native compilation
 and key creation belong to the separate maintainer `scripts/build-circuits.mjs`
 step; authenticated compilation follows the catalogue's compiler-agreement policy.
-Operator compiler agreement is a live-toolchain ratchet. The maintainer source
+Operator compiler agreement is a live-toolchain ratchet. Dependency graphs that
+pull in the XPath library have a named known compiler failure, recorded in the
+catalogue; they do not count as agreement. Other operator programs remain required. The maintainer source
 snapshot carries the query core and tagged dependencies as local files, so native
 witness execution needs no network or warmed user dependency cache.
 
+The maintainer prepack check refuses missing or mismatched assets and dependencies.
 Consumer tarballs include bindings, dependencies, sources, catalogue artifacts
 and CRS. Installation has no build hook. A source checkout runs
 `node scripts/build.mjs` after installing locked dependencies; that maintainer
 step uses Cargo and the matching binding generator and fetches pinned CRS.
 The proof packages share generated support files copied from
-[`js/zk-shared`](../zk-shared/README.md); drift checks keep their runtime settings,
+the repository's `js/zk-shared` sources; drift checks keep their runtime settings,
 pins and offline wrapper aligned.
+
+## Maintainer checks
+
+Install locked dependencies with `npm ci --ignore-scripts --prefix js/zk-query`,
+then build with `node js/zk-query/scripts/build.mjs`. The build also generates
+shared support for the sibling package. Run the fast suite with
+`python3 js/zk-query/scripts/offline.py node --test --test-concurrency=1 js/zk-query/test/*.test.js`.
+The offline wrapper also works before a build, directly from a source checkout.
+
+`build-circuits.mjs` regenerates missing catalogue artifacts and checks their pins.
+Its `--cache` directory retains completed native compilations; `--cases` accepts
+query/bounds profiles and `--write-pins` explicitly updates maintainer pins.
+Rebuild bindings after a pin update. An absent compiled plan refuses with
+`missing catalogue plan` rather than choosing a different capacity.
+
+The JS workflow runs issuance, stored-request refusals, a frozen native proof,
+report checks, binary refusals and shared/layout drift checks without native
+proof tools. The toolchain workflow rebuilds the catalogue and runs the explicit
+Rust `live` test target, which invokes the offline Node live suite for available
+authenticated profiles, a supplied-cell WebAssembly proof verified natively,
+independent native seeded issuance and the coverage-manifest agreement ratchet.
+The private live harness takes `SPARQ_QUERY_TEST_DIR` for resumable evidence and
+`SPARQ_ISSUANCE_REFERENCE` for its freshly built native reference executable.
+Neither variable affects the installed API.
+
+<!-- catalogue-pending:start -->
+
+Not yet catalogued on this branch: `join-two-credentials`, `values`, `projection-bag`, `distinct`, `slice`, `ask-true`, `ask-false`. Native maintainer compilation
+is still running. These plans receive the named missing-catalogue refusal.
+<!-- catalogue-pending:end -->
 
 ## Public-input layout
 
 The following section is generated through the query crate's layout and audited
 artifact ABI. Arrays flatten in declaration order; cells use the shown field
 order, and SELECT tables emit padded rows before their length. Scalars use
-canonical big-endian field words. Lengths follow the catalogue profile's capacities.
+canonical big-endian field words. Array lengths come from the audited ABI; byte digests retain their fixed length.
+Bounds flatten as credential, quad and row limits.
+
 
 <!-- public-input-layout:start -->
+
+- `request_digest: [u8; length]`
+- `input_commitment: [u8; length]`
+- `signature_mode: u8`
+- `bounds: [u32; length]`
+- `parameters: [TermCell; length]`
+- `indices: [u32; length]`
+- `result: bool`
+- `issuer_root: Field`
+- `issuer_depth: u32`
+- `holder_required: bool`
+- `holder_issuers_present: bool`
+- `holder_issuer_count: u32`
+- `holder_issuers: [Field; length]`
+- `status_required: bool`
+- `allow_missing_status: bool`
+- `snapshot_root: Field`
+- `snapshot_depth: u32`
+- `validity_required: bool`
+- `now: u64`
+- `freshness_required: bool`
+- `earliest_created: u64`
+- `credential_quad_bounds: [u32; length]`
+- `statement_binding: Field`
+
+Cell field order: `bound`, `kind`, `enc`, `key_class`, `key`, `dt`, `lang`, `scope`.
+SELECT table field order: `rows`, `len`.
 <!-- public-input-layout:end -->
 
 ## License

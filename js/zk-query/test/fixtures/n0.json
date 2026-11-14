@@ -1,0 +1,185 @@
+[
+  {
+    "bounds": {
+      "credentials": 1,
+      "quadsPerCredential": 4,
+      "rowsPerTable": 4
+    },
+    "name": "bgp",
+    "packageName": "query_f0f274f09385e498c6caa273348e5da64d3453e7df806d78d5567a83fec503d6",
+    "planHash": "f0f274f09385e498c6caa273348e5da64d3453e7df806d78d5567a83fec503d6",
+    "query": "SELECT ?s ?x WHERE {?s <urn:p> ?x}",
+    "sources": [
+      "<urn:a> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:b> <urn:p> \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n"
+    ]
+  },
+  {
+    "bounds": {
+      "credentials": 1,
+      "quadsPerCredential": 4,
+      "rowsPerTable": 4
+    },
+    "name": "join-one-credential",
+    "packageName": "query_d8f561cb7c83d037d062aa32e719455dc876bf99ec2b22ace824654dc3cd987f",
+    "planHash": "d8f561cb7c83d037d062aa32e719455dc876bf99ec2b22ace824654dc3cd987f",
+    "query": "SELECT ?s WHERE {?s <urn:p> ?x . ?s <urn:q> ?y}",
+    "sources": [
+      "<urn:a> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:b> <urn:p> \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:a> <urn:q> <urn:g> .\n<urn:b> <urn:q> <urn:h> .\n"
+    ]
+  },
+  {
+    "bounds": {
+      "credentials": 2,
+      "quadsPerCredential": 4,
+      "rowsPerTable": 4
+    },
+    "name": "join-two-credentials",
+    "packageName": "query_d0140fff365e1a31bccf59c9b7dc4cf843bc27ab819b89462d58d57fe3ac4f63",
+    "planHash": "d0140fff365e1a31bccf59c9b7dc4cf843bc27ab819b89462d58d57fe3ac4f63",
+    "query": "SELECT ?s WHERE {?s <urn:p> ?x . ?s <urn:q> ?y}",
+    "sources": [
+      "<urn:a> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:b> <urn:p> \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n",
+      "<urn:a> <urn:q> <urn:g> .\n<urn:b> <urn:q> <urn:h> .\n"
+    ]
+  },
+  {
+    "bounds": {
+      "credentials": 1,
+      "quadsPerCredential": 4,
+      "rowsPerTable": 4
+    },
+    "name": "integer-range",
+    "packageName": "query_8faedc0eac6a6d60d78d15a36a8a9b4f4f6f83370f339061e3999b43c24cefd4",
+    "planHash": "8faedc0eac6a6d60d78d15a36a8a9b4f4f6f83370f339061e3999b43c24cefd4",
+    "query": "SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x >= 1 && ?x < 2)}",
+    "sources": [
+      "<urn:a> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:b> <urn:p> \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n"
+    ]
+  },
+  {
+    "bounds": {
+      "credentials": 1,
+      "quadsPerCredential": 4,
+      "rowsPerTable": 4
+    },
+    "name": "decimal-range",
+    "packageName": "query_8faedc0eac6a6d60d78d15a36a8a9b4f4f6f83370f339061e3999b43c24cefd4",
+    "planHash": "8faedc0eac6a6d60d78d15a36a8a9b4f4f6f83370f339061e3999b43c24cefd4",
+    "query": "SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x >= 1.25 && ?x < 2.5)}",
+    "sources": [
+      "<urn:a> <urn:p> \"1.25\"^^<http://www.w3.org/2001/XMLSchema#decimal> .\n<urn:b> <urn:p> \"2.5\"^^<http://www.w3.org/2001/XMLSchema#decimal> .\n"
+    ]
+  },
+  {
+    "bounds": {
+      "credentials": 1,
+      "quadsPerCredential": 4,
+      "rowsPerTable": 4
+    },
+    "name": "date-range",
+    "packageName": "query_8faedc0eac6a6d60d78d15a36a8a9b4f4f6f83370f339061e3999b43c24cefd4",
+    "planHash": "8faedc0eac6a6d60d78d15a36a8a9b4f4f6f83370f339061e3999b43c24cefd4",
+    "query": "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x >= \"2024-01-01\"^^xsd:date && ?x < \"2024-02-01\"^^xsd:date)}",
+    "sources": [
+      "<urn:a> <urn:p> \"2024-01-01\"^^<http://www.w3.org/2001/XMLSchema#date> .\n<urn:b> <urn:p> \"2024-02-01\"^^<http://www.w3.org/2001/XMLSchema#date> .\n"
+    ]
+  },
+  {
+    "bounds": {
+      "credentials": 1,
+      "quadsPerCredential": 4,
+      "rowsPerTable": 4
+    },
+    "name": "membership",
+    "packageName": "query_c2b2a2f0615549ab6983bb0dc93f849634a077cb78695ce1372271ccf4b7f877",
+    "planHash": "c2b2a2f0615549ab6983bb0dc93f849634a077cb78695ce1372271ccf4b7f877",
+    "query": "SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x IN (1,3))}",
+    "sources": [
+      "<urn:a> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:b> <urn:p> \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n"
+    ]
+  },
+  {
+    "bounds": {
+      "credentials": 1,
+      "quadsPerCredential": 4,
+      "rowsPerTable": 4
+    },
+    "name": "values",
+    "packageName": "query_95157e414c770a48ec55f51ca1f1814f7da7671ad3297f3993ea5004ffcc824a",
+    "planHash": "95157e414c770a48ec55f51ca1f1814f7da7671ad3297f3993ea5004ffcc824a",
+    "query": "SELECT ?s WHERE {?s <urn:p> ?x VALUES ?x {1 UNDEF}}",
+    "sources": [
+      "<urn:a> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:b> <urn:p> \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n"
+    ]
+  },
+  {
+    "bounds": {
+      "credentials": 1,
+      "quadsPerCredential": 4,
+      "rowsPerTable": 4
+    },
+    "name": "projection-bag",
+    "packageName": "query_4d29fe33e6aeee7d4fbcb551864fc302714b56bbe815d53aa8f81ec1377701c3",
+    "planHash": "4d29fe33e6aeee7d4fbcb551864fc302714b56bbe815d53aa8f81ec1377701c3",
+    "query": "SELECT ?p WHERE {?s ?p ?o}",
+    "sources": [
+      "<urn:a> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:b> <urn:p> \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n"
+    ]
+  },
+  {
+    "bounds": {
+      "credentials": 1,
+      "quadsPerCredential": 4,
+      "rowsPerTable": 4
+    },
+    "name": "distinct",
+    "packageName": "query_856bd49187ca09dd1fc69d06505ad6573eab2556da7756e6e2d12fc54907a156",
+    "planHash": "856bd49187ca09dd1fc69d06505ad6573eab2556da7756e6e2d12fc54907a156",
+    "query": "SELECT DISTINCT ?p WHERE {?s ?p ?o}",
+    "sources": [
+      "<urn:a> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:b> <urn:p> \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n"
+    ]
+  },
+  {
+    "bounds": {
+      "credentials": 1,
+      "quadsPerCredential": 4,
+      "rowsPerTable": 4
+    },
+    "name": "slice",
+    "packageName": "query_d3b2ff1313d581819975301c0ba248b432950865e470a138b8387a7ea1b1f892",
+    "planHash": "d3b2ff1313d581819975301c0ba248b432950865e470a138b8387a7ea1b1f892",
+    "query": "SELECT ?s WHERE {?s <urn:p> ?x} LIMIT 1 OFFSET 1",
+    "sources": [
+      "<urn:a> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:b> <urn:p> \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n"
+    ]
+  },
+  {
+    "bounds": {
+      "credentials": 1,
+      "quadsPerCredential": 4,
+      "rowsPerTable": 4
+    },
+    "name": "ask-true",
+    "packageName": "query_5d4fc1f7547b7155e7f1b12ed0df15330572d568bc0ffe8d2cc95fa03415fc9f",
+    "planHash": "5d4fc1f7547b7155e7f1b12ed0df15330572d568bc0ffe8d2cc95fa03415fc9f",
+    "query": "ASK {?s <urn:p> ?x}",
+    "sources": [
+      "<urn:a> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:b> <urn:p> \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n"
+    ]
+  },
+  {
+    "bounds": {
+      "credentials": 1,
+      "quadsPerCredential": 4,
+      "rowsPerTable": 4
+    },
+    "name": "ask-false",
+    "packageName": "query_2f5e58f438ca4a281129f7329eb374f0417a9c49bd6e713fe603034a7d93a408",
+    "planHash": "2f5e58f438ca4a281129f7329eb374f0417a9c49bd6e713fe603034a7d93a408",
+    "query": "ASK {?s <urn:p> ?x FILTER(?x > 8)}",
+    "sources": [
+      "<urn:a> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:b> <urn:p> \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n"
+    ]
+  }
+]

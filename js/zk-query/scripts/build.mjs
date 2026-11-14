@@ -10,6 +10,7 @@ const root = fileURLToPath(new URL('../../../', import.meta.url));
 const version = readFileSync(join(root, 'Cargo.lock'), 'utf8').match(/name = "wasm-bindgen"\nversion = "([^"]+)"/)[1];
 if (execFileSync('wasm-bindgen', ['--version'], { encoding: 'utf8' }).trim() !== `wasm-bindgen ${version}`) throw new Error('binding generator does not match Cargo.lock');
 syncShared(directory);
+syncShared(fileURLToPath(new URL('../../zk-result/', import.meta.url)));
 const staging = mkdtempSync(join(directory, '.host-'));
 try {
   execFileSync('cargo', ['build', '--locked', '-p', 'sparq-zk-query-wasm', '--target', 'wasm32-unknown-unknown', '--release'], { cwd: root, stdio: 'inherit' });

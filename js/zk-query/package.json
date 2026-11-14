@@ -20,10 +20,12 @@
     "README.md",
     "scripts/offline.py",
     "native.mjs",
-    "wasm-prover.mjs"
+    "wasm-prover.mjs",
+    "scripts/check-package.mjs"
   ],
   "scripts": {
-    "test": "node --test --test-concurrency=1 test/*.test.js"
+    "test": "node --test --test-concurrency=1 test/*.test.js",
+    "prepack": "node scripts/check-package.mjs"
   },
   "engines": {
     "node": ">=24"

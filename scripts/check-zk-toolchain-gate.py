@@ -302,6 +302,7 @@ ACCEPTED_JOB_IF = (
 
 SCAN_DIRS: list[tuple[str, str]] = [
     ("sparq-merkle-suite", "crates/sparq-merkle-suite/tests"),
+    ("sparq-zk-query-wasm", "crates/sparq-zk-query-wasm/tests"),
     ("sparq-zk", "crates/sparq-zk/tests"),
     ("sparq-zk", "crates/sparq-zk/tests/support"),
     ("sparq-zk-compose", "crates/sparq-zk-compose/tests"),
@@ -334,6 +335,7 @@ HELPER_MODULES: list[str] = [
 ]
 CARGO_TOMLS: dict[str, str] = {
     "sparq-merkle-suite": "crates/sparq-merkle-suite/Cargo.toml",
+    "sparq-zk-query-wasm": "crates/sparq-zk-query-wasm/Cargo.toml",
     "sparq-zk": "crates/sparq-zk/Cargo.toml",
     "sparq-zk-compose": "crates/sparq-zk-compose/Cargo.toml",
     "sparq-zk-query": "crates/sparq-zk-query/Cargo.toml",
@@ -353,6 +355,7 @@ LAUNCHERS = ("env", "xargs", "nice", "nohup", "timeout", "stdbuf", "time", "sets
 # checker compares it against what the scanner DISCOVERS in both directions.
 DECLARED_REL: dict[str, str] = {
     "sparq-merkle-suite": "crates/sparq-merkle-suite/tests/live-tests.txt",
+    "sparq-zk-query-wasm": "crates/sparq-zk-query-wasm/tests/live-tests.txt",
     "sparq-zk": "crates/sparq-zk/tests/live-tests.txt",
     "sparq-zk-compose": "crates/sparq-zk-compose/tests/live-tests.txt",
     "sparq-zk-query": "crates/sparq-zk-query/tests/live-tests.txt",
@@ -2566,6 +2569,7 @@ _FIXTURE_KEYS = [
 
 
 _DECLARED = {
+    "sparq-zk-query-wasm": "",
     "sparq-zk-query": "live src/thing.rs::src_live_case\n",
     "sparq-merkle-suite": "live tests/live.rs::live_case\n",
     "sparq-zk": "live tests/plain.rs::plain_case\nlive src/thing.rs::src_live_case\n",

@@ -1,0 +1,1302 @@
+{
+  "query": "SELECT ?s ?x WHERE {?s <urn:p> ?x}",
+  "bounds": {
+    "credentials": 1,
+    "quadsPerCredential": 4,
+    "rowsPerTable": 4
+  },
+  "abi": {
+    "parameters": [
+      {
+        "name": "request_digest",
+        "type": {
+          "kind": "array",
+          "length": 32,
+          "type": {
+            "kind": "integer",
+            "sign": "unsigned",
+            "width": 8
+          }
+        },
+        "visibility": "public"
+      },
+      {
+        "name": "input_commitment",
+        "type": {
+          "kind": "array",
+          "length": 32,
+          "type": {
+            "kind": "integer",
+            "sign": "unsigned",
+            "width": 8
+          }
+        },
+        "visibility": "public"
+      },
+      {
+        "name": "signature_mode",
+        "type": {
+          "kind": "integer",
+          "sign": "unsigned",
+          "width": 8
+        },
+        "visibility": "public"
+      },
+      {
+        "name": "bounds",
+        "type": {
+          "kind": "array",
+          "length": 3,
+          "type": {
+            "kind": "integer",
+            "sign": "unsigned",
+            "width": 32
+          }
+        },
+        "visibility": "public"
+      },
+      {
+        "name": "parameters",
+        "type": {
+          "kind": "array",
+          "length": 1,
+          "type": {
+            "kind": "struct",
+            "path": "core::table::TermCell",
+            "fields": [
+              {
+                "name": "bound",
+                "type": {
+                  "kind": "boolean"
+                }
+              },
+              {
+                "name": "kind",
+                "type": {
+                  "kind": "integer",
+                  "sign": "unsigned",
+                  "width": 8
+                }
+              },
+              {
+                "name": "enc",
+                "type": {
+                  "kind": "field"
+                }
+              },
+              {
+                "name": "key_class",
+                "type": {
+                  "kind": "integer",
+                  "sign": "unsigned",
+                  "width": 8
+                }
+              },
+              {
+                "name": "key",
+                "type": {
+                  "kind": "field"
+                }
+              },
+              {
+                "name": "dt",
+                "type": {
+                  "kind": "field"
+                }
+              },
+              {
+                "name": "lang",
+                "type": {
+                  "kind": "field"
+                }
+              },
+              {
+                "name": "scope",
+                "type": {
+                  "kind": "integer",
+                  "sign": "unsigned",
+                  "width": 32
+                }
+              }
+            ]
+          }
+        },
+        "visibility": "public"
+      },
+      {
+        "name": "indices",
+        "type": {
+          "kind": "array",
+          "length": 1,
+          "type": {
+            "kind": "integer",
+            "sign": "unsigned",
+            "width": 32
+          }
+        },
+        "visibility": "public"
+      },
+      {
+        "name": "result",
+        "type": {
+          "kind": "struct",
+          "path": "core::table::Table",
+          "fields": [
+            {
+              "name": "rows",
+              "type": {
+                "kind": "array",
+                "length": 4,
+                "type": {
+                  "kind": "array",
+                  "length": 2,
+                  "type": {
+                    "kind": "struct",
+                    "path": "core::table::TermCell",
+                    "fields": [
+                      {
+                        "name": "bound",
+                        "type": {
+                          "kind": "boolean"
+                        }
+                      },
+                      {
+                        "name": "kind",
+                        "type": {
+                          "kind": "integer",
+                          "sign": "unsigned",
+                          "width": 8
+                        }
+                      },
+                      {
+                        "name": "enc",
+                        "type": {
+                          "kind": "field"
+                        }
+                      },
+                      {
+                        "name": "key_class",
+                        "type": {
+                          "kind": "integer",
+                          "sign": "unsigned",
+                          "width": 8
+                        }
+                      },
+                      {
+                        "name": "key",
+                        "type": {
+                          "kind": "field"
+                        }
+                      },
+                      {
+                        "name": "dt",
+                        "type": {
+                          "kind": "field"
+                        }
+                      },
+                      {
+                        "name": "lang",
+                        "type": {
+                          "kind": "field"
+                        }
+                      },
+                      {
+                        "name": "scope",
+                        "type": {
+                          "kind": "integer",
+                          "sign": "unsigned",
+                          "width": 32
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "name": "len",
+              "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 32
+              }
+            }
+          ]
+        },
+        "visibility": "public"
+      },
+      {
+        "name": "issuer_root",
+        "type": {
+          "kind": "field"
+        },
+        "visibility": "public"
+      },
+      {
+        "name": "issuer_depth",
+        "type": {
+          "kind": "integer",
+          "sign": "unsigned",
+          "width": 32
+        },
+        "visibility": "public"
+      },
+      {
+        "name": "holder_required",
+        "type": {
+          "kind": "boolean"
+        },
+        "visibility": "public"
+      },
+      {
+        "name": "holder_issuers_present",
+        "type": {
+          "kind": "boolean"
+        },
+        "visibility": "public"
+      },
+      {
+        "name": "holder_issuer_count",
+        "type": {
+          "kind": "integer",
+          "sign": "unsigned",
+          "width": 32
+        },
+        "visibility": "public"
+      },
+      {
+        "name": "holder_issuers",
+        "type": {
+          "kind": "array",
+          "length": 4,
+          "type": {
+            "kind": "field"
+          }
+        },
+        "visibility": "public"
+      },
+      {
+        "name": "status_required",
+        "type": {
+          "kind": "boolean"
+        },
+        "visibility": "public"
+      },
+      {
+        "name": "allow_missing_status",
+        "type": {
+          "kind": "boolean"
+        },
+        "visibility": "public"
+      },
+      {
+        "name": "snapshot_root",
+        "type": {
+          "kind": "field"
+        },
+        "visibility": "public"
+      },
+      {
+        "name": "snapshot_depth",
+        "type": {
+          "kind": "integer",
+          "sign": "unsigned",
+          "width": 32
+        },
+        "visibility": "public"
+      },
+      {
+        "name": "validity_required",
+        "type": {
+          "kind": "boolean"
+        },
+        "visibility": "public"
+      },
+      {
+        "name": "now",
+        "type": {
+          "kind": "integer",
+          "sign": "unsigned",
+          "width": 64
+        },
+        "visibility": "public"
+      },
+      {
+        "name": "freshness_required",
+        "type": {
+          "kind": "boolean"
+        },
+        "visibility": "public"
+      },
+      {
+        "name": "earliest_created",
+        "type": {
+          "kind": "integer",
+          "sign": "unsigned",
+          "width": 64
+        },
+        "visibility": "public"
+      },
+      {
+        "name": "credential_quad_bounds",
+        "type": {
+          "kind": "array",
+          "length": 1,
+          "type": {
+            "kind": "integer",
+            "sign": "unsigned",
+            "width": 32
+          }
+        },
+        "visibility": "public"
+      },
+      {
+        "name": "statement_binding",
+        "type": {
+          "kind": "field"
+        },
+        "visibility": "public"
+      },
+      {
+        "name": "credential_0",
+        "type": {
+          "kind": "array",
+          "length": 4,
+          "type": {
+            "kind": "array",
+            "length": 4,
+            "type": {
+              "kind": "struct",
+              "path": "core::suite_entry::TermOpening",
+              "fields": [
+                {
+                  "name": "bound",
+                  "type": {
+                    "kind": "boolean"
+                  }
+                },
+                {
+                  "name": "kind",
+                  "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 8
+                  }
+                },
+                {
+                  "name": "lexical",
+                  "type": {
+                    "kind": "array",
+                    "length": 32,
+                    "type": {
+                      "kind": "integer",
+                      "sign": "unsigned",
+                      "width": 8
+                    }
+                  }
+                },
+                {
+                  "name": "lexical_len",
+                  "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 32
+                  }
+                },
+                {
+                  "name": "datatype",
+                  "type": {
+                    "kind": "array",
+                    "length": 128,
+                    "type": {
+                      "kind": "integer",
+                      "sign": "unsigned",
+                      "width": 8
+                    }
+                  }
+                },
+                {
+                  "name": "datatype_len",
+                  "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 32
+                  }
+                },
+                {
+                  "name": "language",
+                  "type": {
+                    "kind": "array",
+                    "length": 64,
+                    "type": {
+                      "kind": "integer",
+                      "sign": "unsigned",
+                      "width": 8
+                    }
+                  }
+                },
+                {
+                  "name": "language_len",
+                  "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 32
+                  }
+                },
+                {
+                  "name": "key",
+                  "type": {
+                    "kind": "array",
+                    "length": 31,
+                    "type": {
+                      "kind": "integer",
+                      "sign": "unsigned",
+                      "width": 8
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "visibility": "private"
+      },
+      {
+        "name": "credential_proof_0",
+        "type": {
+          "kind": "struct",
+          "path": "core::ops_core_suite::CredentialProof",
+          "fields": [
+            {
+              "name": "salt",
+              "type": {
+                "kind": "field"
+              }
+            },
+            {
+              "name": "salts",
+              "type": {
+                "kind": "array",
+                "length": 4,
+                "type": {
+                  "kind": "field"
+                }
+              }
+            },
+            {
+              "name": "config",
+              "type": {
+                "kind": "array",
+                "length": 2,
+                "type": {
+                  "kind": "integer",
+                  "sign": "unsigned",
+                  "width": 128
+                }
+              }
+            },
+            {
+              "name": "created",
+              "type": {
+                "kind": "struct",
+                "path": "core::suite_entry::TermOpening",
+                "fields": [
+                  {
+                    "name": "bound",
+                    "type": {
+                      "kind": "boolean"
+                    }
+                  },
+                  {
+                    "name": "kind",
+                    "type": {
+                      "kind": "integer",
+                      "sign": "unsigned",
+                      "width": 8
+                    }
+                  },
+                  {
+                    "name": "lexical",
+                    "type": {
+                      "kind": "array",
+                      "length": 32,
+                      "type": {
+                        "kind": "integer",
+                        "sign": "unsigned",
+                        "width": 8
+                      }
+                    }
+                  },
+                  {
+                    "name": "lexical_len",
+                    "type": {
+                      "kind": "integer",
+                      "sign": "unsigned",
+                      "width": 32
+                    }
+                  },
+                  {
+                    "name": "datatype",
+                    "type": {
+                      "kind": "array",
+                      "length": 128,
+                      "type": {
+                        "kind": "integer",
+                        "sign": "unsigned",
+                        "width": 8
+                      }
+                    }
+                  },
+                  {
+                    "name": "datatype_len",
+                    "type": {
+                      "kind": "integer",
+                      "sign": "unsigned",
+                      "width": 32
+                    }
+                  },
+                  {
+                    "name": "language",
+                    "type": {
+                      "kind": "array",
+                      "length": 64,
+                      "type": {
+                        "kind": "integer",
+                        "sign": "unsigned",
+                        "width": 8
+                      }
+                    }
+                  },
+                  {
+                    "name": "language_len",
+                    "type": {
+                      "kind": "integer",
+                      "sign": "unsigned",
+                      "width": 32
+                    }
+                  },
+                  {
+                    "name": "key",
+                    "type": {
+                      "kind": "array",
+                      "length": 31,
+                      "type": {
+                        "kind": "integer",
+                        "sign": "unsigned",
+                        "width": 8
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "name": "method",
+              "type": {
+                "kind": "struct",
+                "path": "core::suite_entry::TermOpening",
+                "fields": [
+                  {
+                    "name": "bound",
+                    "type": {
+                      "kind": "boolean"
+                    }
+                  },
+                  {
+                    "name": "kind",
+                    "type": {
+                      "kind": "integer",
+                      "sign": "unsigned",
+                      "width": 8
+                    }
+                  },
+                  {
+                    "name": "lexical",
+                    "type": {
+                      "kind": "array",
+                      "length": 128,
+                      "type": {
+                        "kind": "integer",
+                        "sign": "unsigned",
+                        "width": 8
+                      }
+                    }
+                  },
+                  {
+                    "name": "lexical_len",
+                    "type": {
+                      "kind": "integer",
+                      "sign": "unsigned",
+                      "width": 32
+                    }
+                  },
+                  {
+                    "name": "datatype",
+                    "type": {
+                      "kind": "array",
+                      "length": 128,
+                      "type": {
+                        "kind": "integer",
+                        "sign": "unsigned",
+                        "width": 8
+                      }
+                    }
+                  },
+                  {
+                    "name": "datatype_len",
+                    "type": {
+                      "kind": "integer",
+                      "sign": "unsigned",
+                      "width": 32
+                    }
+                  },
+                  {
+                    "name": "language",
+                    "type": {
+                      "kind": "array",
+                      "length": 64,
+                      "type": {
+                        "kind": "integer",
+                        "sign": "unsigned",
+                        "width": 8
+                      }
+                    }
+                  },
+                  {
+                    "name": "language_len",
+                    "type": {
+                      "kind": "integer",
+                      "sign": "unsigned",
+                      "width": 32
+                    }
+                  },
+                  {
+                    "name": "key",
+                    "type": {
+                      "kind": "array",
+                      "length": 31,
+                      "type": {
+                        "kind": "integer",
+                        "sign": "unsigned",
+                        "width": 8
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "name": "pk",
+              "type": {
+                "kind": "struct",
+                "path": "core::compose::issuer::Point",
+                "fields": [
+                  {
+                    "name": "x",
+                    "type": {
+                      "kind": "field"
+                    }
+                  },
+                  {
+                    "name": "y",
+                    "type": {
+                      "kind": "field"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "name": "r",
+              "type": {
+                "kind": "struct",
+                "path": "core::compose::issuer::Point",
+                "fields": [
+                  {
+                    "name": "x",
+                    "type": {
+                      "kind": "field"
+                    }
+                  },
+                  {
+                    "name": "y",
+                    "type": {
+                      "kind": "field"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "name": "s",
+              "type": {
+                "kind": "field"
+              }
+            },
+            {
+              "name": "e",
+              "type": {
+                "kind": "field"
+              }
+            },
+            {
+              "name": "e_k",
+              "type": {
+                "kind": "field"
+              }
+            },
+            {
+              "name": "issuer_index",
+              "type": {
+                "kind": "field"
+              }
+            },
+            {
+              "name": "issuer_siblings",
+              "type": {
+                "kind": "array",
+                "length": 4,
+                "type": {
+                  "kind": "field"
+                }
+              }
+            }
+          ]
+        },
+        "visibility": "private"
+      },
+      {
+        "name": "counts",
+        "type": {
+          "kind": "array",
+          "length": 1,
+          "type": {
+            "kind": "integer",
+            "sign": "unsigned",
+            "width": 32
+          }
+        },
+        "visibility": "private"
+      },
+      {
+        "name": "credential_count",
+        "type": {
+          "kind": "integer",
+          "sign": "unsigned",
+          "width": 32
+        },
+        "visibility": "private"
+      },
+      {
+        "name": "presentation_salt",
+        "type": {
+          "kind": "array",
+          "length": 32,
+          "type": {
+            "kind": "integer",
+            "sign": "unsigned",
+            "width": 8
+          }
+        },
+        "visibility": "private"
+      },
+      {
+        "name": "t0",
+        "type": {
+          "kind": "struct",
+          "path": "core::table::Table",
+          "fields": [
+            {
+              "name": "rows",
+              "type": {
+                "kind": "array",
+                "length": 4,
+                "type": {
+                  "kind": "array",
+                  "length": 2,
+                  "type": {
+                    "kind": "struct",
+                    "path": "core::table::TermCell",
+                    "fields": [
+                      {
+                        "name": "bound",
+                        "type": {
+                          "kind": "boolean"
+                        }
+                      },
+                      {
+                        "name": "kind",
+                        "type": {
+                          "kind": "integer",
+                          "sign": "unsigned",
+                          "width": 8
+                        }
+                      },
+                      {
+                        "name": "enc",
+                        "type": {
+                          "kind": "field"
+                        }
+                      },
+                      {
+                        "name": "key_class",
+                        "type": {
+                          "kind": "integer",
+                          "sign": "unsigned",
+                          "width": 8
+                        }
+                      },
+                      {
+                        "name": "key",
+                        "type": {
+                          "kind": "field"
+                        }
+                      },
+                      {
+                        "name": "dt",
+                        "type": {
+                          "kind": "field"
+                        }
+                      },
+                      {
+                        "name": "lang",
+                        "type": {
+                          "kind": "field"
+                        }
+                      },
+                      {
+                        "name": "scope",
+                        "type": {
+                          "kind": "integer",
+                          "sign": "unsigned",
+                          "width": 32
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "name": "len",
+              "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 32
+              }
+            }
+          ]
+        },
+        "visibility": "private"
+      },
+      {
+        "name": "t1",
+        "type": {
+          "kind": "struct",
+          "path": "core::table::Table",
+          "fields": [
+            {
+              "name": "rows",
+              "type": {
+                "kind": "array",
+                "length": 4,
+                "type": {
+                  "kind": "array",
+                  "length": 2,
+                  "type": {
+                    "kind": "struct",
+                    "path": "core::table::TermCell",
+                    "fields": [
+                      {
+                        "name": "bound",
+                        "type": {
+                          "kind": "boolean"
+                        }
+                      },
+                      {
+                        "name": "kind",
+                        "type": {
+                          "kind": "integer",
+                          "sign": "unsigned",
+                          "width": 8
+                        }
+                      },
+                      {
+                        "name": "enc",
+                        "type": {
+                          "kind": "field"
+                        }
+                      },
+                      {
+                        "name": "key_class",
+                        "type": {
+                          "kind": "integer",
+                          "sign": "unsigned",
+                          "width": 8
+                        }
+                      },
+                      {
+                        "name": "key",
+                        "type": {
+                          "kind": "field"
+                        }
+                      },
+                      {
+                        "name": "dt",
+                        "type": {
+                          "kind": "field"
+                        }
+                      },
+                      {
+                        "name": "lang",
+                        "type": {
+                          "kind": "field"
+                        }
+                      },
+                      {
+                        "name": "scope",
+                        "type": {
+                          "kind": "integer",
+                          "sign": "unsigned",
+                          "width": 32
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "name": "len",
+              "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 32
+              }
+            }
+          ]
+        },
+        "visibility": "private"
+      }
+    ],
+    "return_type": null,
+    "error_types": {
+      "81443583697770499": {
+        "error_kind": "string",
+        "string": "non-zero key tail"
+      },
+      "361444214588792908": {
+        "error_kind": "string",
+        "string": "attempt to multiply with overflow"
+      },
+      "437612349474977946": {
+        "error_kind": "string",
+        "string": "credential count"
+      },
+      "595537537255736568": {
+        "error_kind": "string",
+        "string": "credential proof padding"
+      },
+      "616500237488781120": {
+        "error_kind": "string",
+        "string": "absent time lexical"
+      },
+      "745233435529752958": {
+        "error_kind": "string",
+        "string": "schnorr verification equation failed"
+      },
+      "748432579770386570": {
+        "error_kind": "string",
+        "string": "boolean key payload"
+      },
+      "842086612280710690": {
+        "error_kind": "string",
+        "string": "table capacity"
+      },
+      "992401946138144806": {
+        "error_kind": "string",
+        "string": "Attempted to read past end of BoundedVec"
+      },
+      "1040567045895277544": {
+        "error_kind": "string",
+        "string": "holder issuer presence"
+      },
+      "1499104929359656741": {
+        "error_kind": "string",
+        "string": "quads not strictly increasing"
+      },
+      "1927814410962972087": {
+        "error_kind": "string",
+        "string": "non-zero padding"
+      },
+      "1998584279744703196": {
+        "error_kind": "string",
+        "string": "attempt to subtract with overflow"
+      },
+      "2183549947278737111": {
+        "error_kind": "string",
+        "string": "created must be a literal"
+      },
+      "2336531439293059733": {
+        "error_kind": "string",
+        "string": "subject kind"
+      },
+      "2960901383740330075": {
+        "error_kind": "string",
+        "string": "N0 credential literal datatype"
+      },
+      "3172986584152997763": {
+        "error_kind": "string",
+        "string": "suite dataset commitment"
+      },
+      "4451024933570688834": {
+        "error_kind": "string",
+        "string": "operator length"
+      },
+      "4459504348015329672": {
+        "error_kind": "string",
+        "string": "inactive freshness policy"
+      },
+      "4465767467112793850": {
+        "error_kind": "string",
+        "string": "per-credential quad count"
+      },
+      "4949284470474153701": {
+        "error_kind": "string",
+        "string": "encoded byte length"
+      },
+      "5421095327929394772": {
+        "error_kind": "string",
+        "string": "attempt to bit-shift with overflow"
+      },
+      "5518442806234925027": {
+        "error_kind": "string",
+        "string": "credential padding count"
+      },
+      "5709057177320904959": {
+        "error_kind": "string",
+        "string": "unbound lexical opening"
+      },
+      "6276453858708207445": {
+        "error_kind": "string",
+        "string": "index padding"
+      },
+      "6720759575836586765": {
+        "error_kind": "string",
+        "string": "byte capacity"
+      },
+      "6954557700313815613": {
+        "error_kind": "string",
+        "string": "identity key is not admitted"
+      },
+      "7220074087796954083": {
+        "error_kind": "string",
+        "string": "empty key payload"
+      },
+      "7393549285676195791": {
+        "error_kind": "string",
+        "string": "challenge reduction not bound to its preimage"
+      },
+      "8051490839407871637": {
+        "error_kind": "string",
+        "string": "credential named graph not yet supported"
+      },
+      "8086167173253898483": {
+        "error_kind": "string",
+        "string": "inactive holder policy"
+      },
+      "8189835557297515222": {
+        "error_kind": "string",
+        "string": "term scope"
+      },
+      "8299425108256767787": {
+        "error_kind": "string",
+        "string": "non-zero byte padding"
+      },
+      "8400482264603146299": {
+        "error_kind": "string",
+        "string": "non-literal metadata"
+      },
+      "8457678688354705366": {
+        "error_kind": "string",
+        "string": "default graph lexical"
+      },
+      "8515871937511137518": {
+        "error_kind": "string",
+        "string": "holder issuer capacity"
+      },
+      "8624037060145050868": {
+        "error_kind": "string",
+        "string": "issuer key is not a member of the committed key set"
+      },
+      "8762780884288702032": {
+        "error_kind": "string",
+        "string": "predicate kind"
+      },
+      "9230457233189587827": {
+        "error_kind": "string",
+        "string": "credential verifiedIssuer assertion"
+      },
+      "9395804461053827540": {
+        "error_kind": "string",
+        "string": "operator capacity"
+      },
+      "9537330626372423756": {
+        "error_kind": "string",
+        "string": "Field failed to decompose into specified 251 limbs"
+      },
+      "9560167555061956828": {
+        "error_kind": "string",
+        "string": "leaf salt not derived from tree salt"
+      },
+      "9698390346799968641": {
+        "error_kind": "string",
+        "string": "holder issuer order"
+      },
+      "9881629358342848834": {
+        "error_kind": "string",
+        "string": "public constant"
+      },
+      "9942088503165521683": {
+        "error_kind": "string",
+        "string": "inactive status policy"
+      },
+      "10843810106516118511": {
+        "error_kind": "string",
+        "string": "language datatype"
+      },
+      "10860460569425344761": {
+        "error_kind": "string",
+        "string": "holder issuer padding"
+      },
+      "11019205087382408538": {
+        "error_kind": "string",
+        "string": "Field failed to decompose into specified 4 limbs"
+      },
+      "11316893427002657865": {
+        "error_kind": "string",
+        "string": "lexical opening differs"
+      },
+      "11555026550892079673": {
+        "error_kind": "string",
+        "string": "zero holder issuer"
+      },
+      "11632851800199474294": {
+        "error_kind": "string",
+        "string": "inactive validity policy"
+      },
+      "12136842887374738062": {
+        "error_kind": "string",
+        "string": "credential signature padding"
+      },
+      "12345605179889702996": {
+        "error_kind": "string",
+        "string": "verification method must be an IRI"
+      },
+      "12382077634043642117": {
+        "error_kind": "string",
+        "string": "message padding"
+      },
+      "12469291177396340830": {
+        "error_kind": "string",
+        "string": "call to assert_max_bit_size"
+      },
+      "12503300356356875086": {
+        "error_kind": "string",
+        "string": "key disagrees with lexical form"
+      },
+      "12659316033304120378": {
+        "error_kind": "string",
+        "string": "authenticated statement binding"
+      },
+      "12952428654475462531": {
+        "error_kind": "string",
+        "string": "wrong count"
+      },
+      "13006455714621752581": {
+        "error_kind": "string",
+        "string": "class disagrees with datatype"
+      },
+      "13161506238767563578": {
+        "error_kind": "string",
+        "string": "term kind"
+      },
+      "13655139524061473406": {
+        "error_kind": "string",
+        "string": "hidden suite signature mode"
+      },
+      "13659395267648872468": {
+        "error_kind": "string",
+        "string": "key requires literal"
+      },
+      "13959066774647869312": {
+        "error_kind": "string",
+        "string": "table order"
+      },
+      "14009049794313929848": {
+        "error_kind": "string",
+        "string": "point is not on Baby-JubJub"
+      },
+      "14194756468325654588": {
+        "error_kind": "string",
+        "string": "identity issuer key rejected"
+      },
+      "14364392314410679675": {
+        "error_kind": "string",
+        "string": "datatype specialization differs"
+      },
+      "14990209321349310352": {
+        "error_kind": "string",
+        "string": "attempt to add with overflow"
+      },
+      "15835548349546956319": {
+        "error_kind": "string",
+        "string": "Field failed to decompose into specified 32 limbs"
+      },
+      "16049792251010893430": {
+        "error_kind": "string",
+        "string": "unbound padding"
+      },
+      "16431471497789672479": {
+        "error_kind": "string",
+        "string": "Index out of bounds"
+      },
+      "16615973362395562352": {
+        "error_kind": "string",
+        "string": "table padding"
+      },
+      "16647017619936182857": {
+        "error_kind": "string",
+        "string": "operator rows"
+      },
+      "16971163814709147110": {
+        "error_kind": "string",
+        "string": "public key not in prime-order subgroup (torsion / low-order key rejected)"
+      },
+      "17167839776400960283": {
+        "error_kind": "string",
+        "string": "row request capacity"
+      },
+      "17200572207616664197": {
+        "error_kind": "string",
+        "string": "key width"
+      },
+      "17558050003890529665": {
+        "error_kind": "string",
+        "string": "object kind"
+      },
+      "17842223509087181478": {
+        "error_kind": "string",
+        "string": "graph kind"
+      },
+      "17885380776686846557": {
+        "error_kind": "string",
+        "string": "row request bound"
+      },
+      "17993512535712032858": {
+        "error_kind": "string",
+        "string": "literal datatype"
+      }
+    }
+  }
+}

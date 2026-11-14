@@ -18,4 +18,5 @@ export function syncShared(directory) {
   const target = join(directory, 'internal');
   mkdirSync(target, { recursive: true });
   for (const name of sharedFiles) copyFileSync(join(source, name), join(target, name));
+  copyFileSync(join(source, '../../LICENSE'), join(directory, 'LICENSE'));
 }

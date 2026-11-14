@@ -64,3 +64,9 @@ and the [Rust host adapter](../../crates/sparq-zk-query-wasm/README.md).
 A source checkout builds bindings and pinned CRS with
 `node js/zk-query/scripts/build.mjs`; circuit regeneration is a separate
 `build-circuits.mjs` maintainer operation. Consumer tarballs are self-contained.
+
+For a verifier-agreed `inputCommitment`, the holder passes the existing commitment's
+salt as `backend: { type: 'native', presentationSaltHex }` (or the corresponding
+WebAssembly option). The salt is a full hexadecimal byte string, goes only into
+private witness inputs, and is checked against the stored commitment in Rust.
+Omitting this prover option draws a fresh random presentation salt.
