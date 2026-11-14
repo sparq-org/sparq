@@ -187,6 +187,11 @@ pub const VOCABULARY: &[(&str, &str)] = &[
         "ASSERTION_METHOD",
         "https://w3id.org/security#assertionMethod",
     ),
+    (
+        "CONFIDENCE_METHOD",
+        "https://www.w3.org/2018/credentials#confidenceMethod",
+    ),
+    ("VERIFIED_ISSUER", "https://w3id.org/sparq/vcq#verifiedIssuer"),
 ];
 
 /// Exact UTC milliseconds of a representable zoned date-time; otherwise unknown.

@@ -193,6 +193,8 @@ pub fn iri_status_index() -> TermCell { fixed_iri(crate::suite_constants::IRI_ST
 pub fn iri_status_purpose() -> TermCell { fixed_iri(crate::suite_constants::IRI_STATUS_PURPOSE, crate::suite_constants::IRI_STATUS_PURPOSE_IDENTITY) }
 pub fn iri_status_size() -> TermCell { fixed_iri(crate::suite_constants::IRI_STATUS_SIZE, crate::suite_constants::IRI_STATUS_SIZE_IDENTITY) }
 pub fn iri_assertion_method() -> TermCell { fixed_iri(crate::suite_constants::IRI_ASSERTION_METHOD, crate::suite_constants::IRI_ASSERTION_METHOD_IDENTITY) }
+pub fn iri_confidence_method() -> TermCell { fixed_iri(crate::suite_constants::IRI_CONFIDENCE_METHOD, crate::suite_constants::IRI_CONFIDENCE_METHOD_IDENTITY) }
+pub fn iri_verified_issuer() -> TermCell { fixed_iri(crate::suite_constants::IRI_VERIFIED_ISSUER, crate::suite_constants::IRI_VERIFIED_ISSUER_IDENTITY) }
 
 /// Credential-only constructor for positions whose RDF role excludes literals.
 /// All raw metadata and backing padding are still checked before minting a cell.
