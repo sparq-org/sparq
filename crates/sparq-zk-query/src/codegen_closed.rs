@@ -640,18 +640,33 @@ fn emit_reads(i: usize, plan: &Plan, out: &mut String) {
             plan.nodes[site.input as usize].output.capacity
         );
         *out = out.replacen(") {", &format!("{declaration}) {{"), 1);
-        let checker = if site.identity_strings {
-            "check_identity_equalities"
+        let columns = array(site.columns.iter().map(usize::to_string));
+        if site.profiled() {
+            let checker = if site.identity_strings {
+                "check_identity_profiled"
+            } else {
+                "check_profiled"
+            };
+            writeln!(
+                out,
+                "    core::ops_core_reads::{checker}(t{}, {name}, {columns}, {}, parameters);",
+                site.input,
+                array(site.profiles.iter().map(u32::to_string))
+            )
+            .unwrap();
         } else {
-            "check_with_parameters"
-        };
-        writeln!(
-            out,
-            "    core::ops_core_reads::{checker}(t{}, {name}, {}, parameters);",
-            site.input,
-            array(site.columns.iter().map(usize::to_string))
-        )
-        .unwrap();
+            let checker = if site.identity_strings {
+                "check_identity_equalities"
+            } else {
+                "check_with_parameters"
+            };
+            writeln!(
+                out,
+                "    core::ops_core_reads::{checker}(t{}, {name}, {columns}, parameters);",
+                site.input
+            )
+            .unwrap();
+        }
     }
 }
 

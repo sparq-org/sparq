@@ -216,7 +216,8 @@ fn expression_reads_cover_the_entire_consumer_input_before_filtering() {
     )));
     let check = source
         .find(&format!(
-            "core::ops_core_reads::check_with_parameters(t{input}, reads_{i}, [1], parameters);"
+            // Integer constants admit only the comparable numeric datatypes.
+            "core::ops_core_reads::check_profiled(t{input}, reads_{i}, [1], [6], parameters);"
         ))
         .unwrap();
     let eval = source.find(&format!("let predicate_{i} =")).unwrap();

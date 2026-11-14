@@ -253,13 +253,16 @@ fn closed_string_reads_follow_the_shared_equality_contract() {
         let trace = graphs::evaluate(&plan, &credentials).unwrap();
         let package = codegen::generate_suite_fixture(&plan).unwrap();
         let source = &package.files[&format!("{}/src/main.nr", package.name)];
-        let checker = if identities {
-            "check_identity_equalities"
+        // Identity-mode sites never compile the string value branch, so they are profiled.
+        let checkers: &[&str] = if identities {
+            &["check_identity_profiled"]
         } else {
-            "check_with_parameters"
+            &["check_with_parameters", "check_profiled"]
         };
         assert!(
-            source.contains(&format!("core::ops_core_reads::{checker}(")),
+            checkers
+                .iter()
+                .any(|c| source.contains(&format!("core::ops_core_reads::{c}("))),
             "{body}"
         );
         let witness = witness_closed::prover_toml(
@@ -473,6 +476,59 @@ fn compact_profile_credential_executes() {
         error.contains("schnorr verification equation failed"),
         "{error}"
     );
+    support::complete(gate);
+}
+
+#[test]
+fn value_reads_follow_the_column_datatype_profile() {
+    let Some(gate) = support::gate("value_reads_follow_the_column_datatype_profile", &["nargo"]) else {
+        return;
+    };
+    let p = graphs::bind_issuer_registry(
+        graphs::lower(
+            "SELECT ?s {?s <urn:p> ?x FILTER(?x >= 1)}",
+            Bounds {
+                credentials: 1,
+                quads_per_credential: 4,
+                rows_per_table: 2,
+            },
+        )
+        .unwrap(),
+        &issuer_registry(),
+    )
+    .unwrap();
+    let pkg = codegen::generate_suite_fixture(&p).unwrap();
+    let source = &pkg.files[&format!("{}/src/main.nr", pkg.name)];
+    // An integer constant admits integer and decimal values only.
+    assert!(source.contains("core::ops_core_reads::check_profiled("), "{source}");
+    assert!(source.contains(", [6], parameters);"), "{source}");
+    let witness = |value: &str| {
+        let credentials = vec![signed(triple("<urn:s>", "<urn:p>", value), "urn:issuer", 3)];
+        let trace = graphs::evaluate(&p, &credentials).unwrap();
+        witness_closed::prover_toml(&p, &credentials, &trace, [7; 32], [3; 32], issuer_root())
+    };
+    // A string in a numeric-compared column is a named profile refusal before proving.
+    assert_eq!(
+        witness("\"abc\"").unwrap_err(),
+        sparq_zk_query::Error::Capacity("value datatype outside the column's profile".into())
+    );
+    let temp = tempfile::tempdir().unwrap();
+    for (name, source) in &pkg.files {
+        let target = temp.path().join(name);
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(target, source).unwrap();
+    }
+    std::os::unix::fs::symlink(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../zk")
+            .canonicalize()
+            .unwrap(),
+        temp.path().join("zk"),
+    )
+    .unwrap();
+    // A decimal inside the {integer, decimal} profile still executes natively.
+    let decimal = witness("\"2.5\"^^<http://www.w3.org/2001/XMLSchema#decimal>").unwrap();
+    execute_bounded(&gate, temp.path(), &pkg.name, &decimal, "profiled_decimal").unwrap();
     support::complete(gate);
 }
 

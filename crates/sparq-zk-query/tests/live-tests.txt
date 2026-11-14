@@ -40,6 +40,7 @@ live tests/closed_profile.rs::nested_exists_corpus_results_and_hidden_matches_ar
 live tests/closed_profile.rs::compact_profile_credential_executes
 live tests/closed_profile.rs::bounded_runner_requires_a_fresh_witness_for_the_generated_relation
 live tests/closed_profile.rs::literal_families_are_plan_bound_and_cover_unused_rows
+live tests/closed_profile.rs::value_reads_follow_the_column_datatype_profile
 live tests/solid_paths.rs::insurance_count_operator
 live tests/solid_paths.rs::insurance_closed_operator
 live tests/solid_paths.rs::trial_eligibility_operator
