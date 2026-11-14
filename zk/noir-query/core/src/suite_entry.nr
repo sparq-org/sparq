@@ -120,6 +120,34 @@ pub(crate) fn open_credential_bounded_quads<let N: u32, let L: u32, let D: u32, 
     quads
 }
 
+/// Merge K long-bound rows into S short-bound rows in tree order. Long indices
+/// strictly increase below N; short rows fill the other indices in their order.
+/// That makes the placement a bijection onto the N leaves, so the root is unchanged.
+pub(crate) fn merge_mixed_rows<let N: u32, let S: u32, let K: u32>(
+    short: [[TermCell; 4]; S], long: [[TermCell; 4]; K], long_index: [u32; K],
+) -> [[TermCell; 4]; N] {
+    std::static_assert(S + K == N, "mixed row capacity");
+    for k in 0..K {
+        assert(long_index[k] < N, "long row index");
+        if k > 0 { assert(long_index[k - 1] < long_index[k], "long rows out of order"); }
+    }
+    // Pad both ends so every static candidate index stays in range.
+    let mut window = [[padding(); 4]; N + K];
+    for s in 0..S { window[K + s] = short[s]; }
+    let mut rows = [[padding(); 4]; N];
+    for i in 0..N {
+        let mut before: u32 = 0;
+        for k in 0..K { before += (long_index[k] < i) as u32; }
+        let mut is_long = false;
+        let mut row = [padding(); 4];
+        for k in 0..K { if long_index[k] == i { is_long = true; row = long[k]; } }
+        // A short row at tree index i is short row i - before.
+        for d in 0..K + 1 { if (!is_long) & (before == d) { row = window[i + K - d]; } }
+        rows[i] = row;
+    }
+    rows
+}
+
 fn assert_raw_padding<let L: u32, let D: u32, let G: u32>(raw: BoundedTermOpening<L,D,G>) {
     // Byte ranges make this sum nonnegative and smaller than the field modulus.
     let sum = crate::term_bytes::byte_sum(raw.lexical) + crate::term_bytes::byte_sum(raw.datatype)
