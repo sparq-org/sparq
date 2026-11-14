@@ -199,6 +199,30 @@ its plan and result encoding from the stored request and RDF answer and consumes
 the original challenge last. Toolchain pins and verifier target are independent
 of the cache location.
 
+The query crate's `envelope_policy::{PolicyInput, derive, public_words}` helper
+prepares the agreed public policy extension from typed stored-policy input.
+`TrustMember` binds issuer, verification method, suite and key; `HolderBinding`
+selects all issuers when its issuer list is absent, or a non-empty explicit list with
+a capacity of four before deduplication. An empty list is refused with
+`Invalid("empty holder issuer list")`. To require no holder keys, omit `holderBinding`.
+`AcceptedSnapshots` takes verifier-curated digests. The helper sorts canonical set
+members, computes minimal roots/depths and emits zero words for disabled conditions.
+`holder_message` hashes the complete request digest for holder signing. `status_leaf`
+and `snapshot_digest` reproduce the tagged status-tree encodings; callers authenticate
+and admit the status list separately. The fixture generator uses these same helpers.
+The digest remains a separate host-computed public input. This helper is not yet
+admitted as a complete generated method. The envelope consumes authenticated suite metadata,
+uses exact Unix epoch milliseconds for request instants, and scopes graph names by the public
+request digest. Generated policy enforcement remains an integration item; the method is not
+externally audited. `check_holder_key` binds each active credential's key, and
+`check_holder_signatures` checks the accumulated required slots once across the batch;
+generated callers must derive those slots from active credentials and the public policy.
+`credential_dataset<N, O, G>(credential, issuer, view)` consumes the direct result of
+`from_authenticated_bounded`, with the same credential index bound at authentication and
+conversion and the public request digest supplied to conversion. The view is internal data,
+never an independent witness. The builder uses the operator order and fixes its sorting depth
+`G` so the smallest tree covers the default/named copies plus the issuer assertion.
+
 ## Prerequisites
 
 - **Noir toolchain on `PATH`** (the only way to prove/verify): `nargo` **1.0.0-beta.21** and Barretenberg `bb` **5.0.0-nightly.20260324** (bb target `noir-recursive`). Other versions may change the bb public-input byte layout the verifier reconstructs against. If `nargo`/`bb` are absent, the structural pre-filter and all host-side helpers still work, but `verify_manifest` / `CircuitProver` cannot.
