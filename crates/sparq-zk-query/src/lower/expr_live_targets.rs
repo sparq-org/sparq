@@ -3,7 +3,7 @@ use super::expr_test_support::Scratch;
 use std::path::Path;
 use std::process::Command;
 
-const SUITE_COMMIT: &str = "6c44aa1db6ee99fa7dcabacf8971f5cbc9d576b1";
+const SUITE_COMMIT: &str = "3abc203961e075e092d0a0dba0d2f0c11370214a";
 fn snapshot_file(name: &str) -> Vec<u8> {
     let file = format!("zk/noir-query/core/src/{name}");
     let local = Command::new("git")
@@ -51,6 +51,19 @@ impl CheckedLexicalOpening<32,128,64> for Opening {
   else {self.cell.assert_padding();}
   LexicalOpening {cell:convert(self.cell),lexical:self.lexical,datatype:self.datatype,language:empty}
  }
+}
+struct TaggedOpening {cell:credential_terms::term::TermCell,lexical:BoundedVec<u8,32>,datatype:BoundedVec<u8,128>,language:BoundedVec<u8,64>}
+impl CheckedLexicalOpening<32,128,64> for TaggedOpening {
+ fn open_lexical(self)->LexicalOpening<32,128,64> {
+  let _=credential_terms::term::recompute_key_for(self.cell,self.lexical,self.datatype,self.language,DT_LANGSTRING);
+  LexicalOpening {cell:convert(self.cell),lexical:self.lexical,datatype:self.datatype,language:self.language}
+ }
+}
+fn tagged<let N:u32>(text:[u8;N])->(Lane<Scalar<128>>,bool) {
+ let lexical=bytes(text);let datatype=metadata("http://www.w3.org/1999/02/22-rdf-syntax-ns#langString".as_bytes());
+ let mut language=BoundedVec::<u8,64>::new();language.push(101);language.push(110);
+ let cell=credential_terms::term::open_term(3,lexical,datatype,language,[0;31],0);
+ widened(expressions::expr_open::variable(TaggedOpening {cell,lexical,datatype,language}))
 }
 struct IriOpening {cell:credential_terms::term::TermCell,lexical:BoundedVec<u8,128>}
 impl CheckedLexicalOpening<128,128,64> for IriOpening {
@@ -191,12 +204,13 @@ fn noir_target_queries_match_host_mirror() {
         "suite_constants.nr",
         "term_bytes.nr",
         "term_ids.nr",
+        "suite_entry.nr",
     ] {
         std::fs::write(scratch.0.join("suite/src").join(file), snapshot_file(file)).unwrap();
     }
     std::fs::write(
         scratch.0.join("suite/src/lib.nr"),
-        "pub mod term;\nmod term_key;\nmod term_float;\nmod term_bytes;\nmod term_ids;\npub mod suite_constants;\n",
+        "pub mod term;\nmod term_key;\nmod term_float;\nmod term_bytes;\nmod term_ids;\npub mod suite_constants;\npub mod suite_entry;\n",
     )
     .unwrap();
     std::fs::write(scratch.0.join("suite/Nargo.toml"),format!("[package]\nname=\"nd_credential_snapshot\"\ntype=\"lib\"\n[dependencies]\nposeidon={{git=\"https://github.com/noir-lang/poseidon\",tag=\"v0.3.0\"}}\ncompose={{path={:?}}}\n",compose)).unwrap();
@@ -207,6 +221,23 @@ fn noir_target_queries_match_host_mirror() {
         .1;
     let helpers = cases[cases.find("fn all").unwrap()..cases.find("#[test]").unwrap()].to_owned();
     let tests = r#"
+#[test] fn literal_dispatch_and_raw_checked_opening() {
+ let plain=text("a".as_bytes());let en=tagged("a".as_bytes());
+ check(value_compare(plain,en,EQ),false,true);
+ check(value_compare(en,plain,EQ),false,true);
+ check(value_compare(en,en,EQ),true,false);
+ check(value_compare(en,tagged("b".as_bytes()),EQ),false,true);
+ check(value_compare(iri(1),plain,EQ),false,false);
+ let raw=credential_terms::suite_entry::BoundedTermOpening {
+  bound:true,kind:3,lexical:[52,50,0,0],lexical_len:2,
+  datatype:"http://www.w3.org/2001/XMLSchema#integer".as_bytes(),datatype_len:40,
+  language:[],language_len:0,
+  key:(0x1800000000000000000000000000000000000000000000000000000000000+42*SCALE).to_be_bytes::<31>(),
+ };
+ let c=credential_terms::term::open_key_checked(raw,0,DT_INTEGER).cell();
+ assert_eq(c.key_class(),1);assert_eq(c.datatype(),DT_INTEGER);
+ assert_eq(c.key(),0x1800000000000000000000000000000000000000000000000000000000000+42*SCALE);
+}
 #[test] fn target_1a_actual_openings_and_binding() {
  bind(stated(integer(12),integer(0),integer(0),boolean(true)),true,false);
  bind(stated(missing(),integer(0),integer(0),boolean(true)),false,true);
@@ -293,6 +324,7 @@ fn changed_opened_bytes() {
     // Separate compiler processes bound retained compiler memory while preserving
     // every positive case and every negative control.
     for name in [
+        "literal_dispatch_and_raw_checked_opening",
         "canonical_boolean_is_distinct_from_alias",
         "changed_checked_numeric_key",
         "changed_opened_bytes",

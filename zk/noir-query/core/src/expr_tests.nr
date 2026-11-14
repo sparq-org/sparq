@@ -268,10 +268,11 @@ fn strings_booleans_and_dates() {
     );
     b = a;
     b.string.lang = 6;
+    b.term.enc = 2;
     check_bool(
         value_compare((lane(a), false), (lane(b), false), EQ),
         false,
-        false,
+        true,
     );
     check_bool(
         value_compare((lane(a), false), (lane(b), false), LT),
@@ -561,4 +562,127 @@ fn floating_boundaries() {
         exact_to_bits::<52, 1023>(exact(DECIMAL, false, 34359738368000011444091796875)),
         0x4220000000000002,
     );
+}
+
+#[test]
+fn literal_dispatch_matches_recommendation() {
+    let mut plain = scalar(STRING);
+    plain.term.enc = 11;
+    plain.string.bytes = [97, 0, 0, 0];
+    plain.string.len = 1;
+    let mut tagged = plain;
+    tagged.term.enc = 12;
+    tagged.string.lang = 1;
+    let mut tagged_other_text = tagged;
+    tagged_other_text.term.enc = 13;
+    tagged_other_text.string.bytes[0] = 98;
+    let mut tagged_other_lang = tagged;
+    tagged_other_lang.term.enc = 14;
+    tagged_other_lang.string.lang = 2;
+    // Section 17.3 has a character comparison for simple/xsd:string pairs.
+    // Other literal pairs reach RDFterm-equal, with its identity/error rule.
+    for pair in [
+        [plain, tagged],
+        [tagged, plain],
+        [tagged, tagged_other_text],
+        [tagged, tagged_other_lang],
+        [plain, scalar(NUMERIC)],
+        [scalar(NUMERIC), plain],
+        [plain, scalar(DATE)],
+        [scalar(DATE), plain],
+    ] {
+        check_bool(
+            value_compare((lane(pair[0]), false), (lane(pair[1]), false), EQ),
+            false,
+            true,
+        );
+        check_bool(
+            logical_not(
+                value_compare((lane(pair[0]), false), (lane(pair[1]), false), EQ),
+            ),
+            false,
+            true,
+        );
+    }
+    check_bool(
+        value_compare((lane(tagged), false), (lane(tagged), false), EQ),
+        true,
+        false,
+    );
+    let mut iri = scalar(TERM);
+    iri.term.kind = 1;
+    iri.term.enc = 15;
+    for literal in [plain, tagged, scalar(NUMERIC), scalar(DATE)] {
+        check_bool(
+            value_compare((lane(iri), false), (lane(literal), false), EQ),
+            false,
+            false,
+        );
+        check_bool(
+            logical_not(
+                value_compare((lane(literal), false), (lane(iri), false), EQ),
+            ),
+            true,
+            false,
+        );
+    }
+}
+
+#[test]
+fn empty_membership_retains_capacity() {
+    let input = (Lane { value: scalar(TERM), capacity: true }, true);
+    let (v, e) = in_list::<4, 0>(input, []);
+    assert(!e);
+    assert(v.capacity, "membership capacity");
+    let (v, e) = not_in_list::<4, 0>(input, []);
+    assert(!e);
+    assert(v.capacity, "membership capacity");
+}
+
+#[test]
+fn exact_capacity_boundary_is_literal() {
+    let max: Field = 5192296858534827628530496329220095;
+    let input = (lane(exact(DECIMAL, false, max)), false);
+    let (sum, e) = binary(input, (lane(exact(DECIMAL, false, 1)), false), ADD);
+    assert(!e);
+    assert(sum.capacity, "exact boundary capacity");
+    assert_eq(sum.value.magnitude, 0);
+    let (same, e) = numeric_compare(input, input, EQ);
+    assert(!e & !same.capacity & same.value);
+    let (same, e) = binary(input, (lane(exact(DECIMAL, false, 0)), false), ADD);
+    assert(!e & !same.capacity);
+    assert_eq(same.value.magnitude, max);
+}
+
+#[test]
+fn capacity_and_error_channels_remain_distinct() {
+    let capped = (Lane { value: true, capacity: true }, true);
+    for result in [logical_or(capped, truth(true, false)), logical_and(capped, truth(false, false))]
+         {
+            assert(result.0.capacity, "logic capacity");
+            assert(!result.1);
+        }
+    let (chosen, e) = choose(truth(true, false), capped, truth(false, false));
+    assert(e & chosen.capacity);
+    let (unused, e) = choose(truth(false, false), capped, truth(false, false));
+    assert(!e & !unused.capacity);
+    let (fallback, e) = coalesce([capped, truth(false, false)], false);
+    assert(!e & fallback.capacity);
+}
+
+#[test(should_fail_with = "forced literal error low")]
+fn language_literal_error_low() {
+    let mut a = scalar(STRING);
+    let mut b = a;
+    a.term.enc = 10;
+    b.term.enc = 11;
+    b.string.lang = 7;
+    let (_, e) = value_compare((lane(a), false), (lane(b), false), EQ);
+    assert(!e, "forced literal error low");
+}
+
+#[test(should_fail_with = "expression capacity")]
+fn empty_membership_capacity_root_rejected() {
+    let input = (Lane { value: scalar(TERM), capacity: true }, true);
+    let _ = filter_accept(in_list::<4, 0>(input, []));
 }
