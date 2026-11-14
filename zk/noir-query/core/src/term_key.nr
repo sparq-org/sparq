@@ -29,11 +29,18 @@ pub(crate) fn class_matches(class: u8, dt: Field) -> bool {
 /// Bytes outside each class's payload are canonical zero even before value use.
 pub(crate) fn check_key_shape(key: [u8;31]) {
     let class = key[0];
+    // Each packed tail is shorter than a field, so zero fixes every byte.
+    let mut payload: Field = 0;
+    let mut wide_tail: Field = 0;
+    let mut boolean_tail: Field = 0;
     for i in 1..31 {
-        if (class == CLASS_NONE) | (class == CLASS_UNREPRESENTABLE) { assert(key[i] == 0, "empty key payload"); }
-        if ((class == CLASS_DOUBLE) | (class == CLASS_DATE_TIME) | (class == CLASS_LOCAL_DATE_TIME) | (class == CLASS_DATE)) & (i >= 9) { assert(key[i] == 0, "non-zero key tail"); }
-        if (class == CLASS_BOOLEAN) & (i >= 2) { assert(key[i] == 0, "non-zero key tail"); }
+        payload = payload * 256 + key[i] as Field;
+        if i >= 9 { wide_tail = wide_tail * 256 + key[i] as Field; }
+        if i >= 2 { boolean_tail = boolean_tail * 256 + key[i] as Field; }
     }
+    if (class == CLASS_NONE) | (class == CLASS_UNREPRESENTABLE) { assert(payload == 0, "empty key payload"); }
+    if (class == CLASS_DOUBLE) | (class == CLASS_DATE_TIME) | (class == CLASS_LOCAL_DATE_TIME) | (class == CLASS_DATE) { assert(wide_tail == 0, "non-zero key tail"); }
+    if class == CLASS_BOOLEAN { assert(boolean_tail == 0, "non-zero key tail"); }
     if class == CLASS_BOOLEAN { assert(key[1] <= 1, "boolean key payload"); }
 }
 pub(crate) fn recompute<let L: u32>(text: BoundedVec<u8, L>, dt: Field) -> (u8, Field) {
@@ -66,10 +73,20 @@ pub(crate) fn recompute<let L: u32>(text: BoundedVec<u8, L>, dt: Field) -> (u8, 
 }
 
 pub(crate) fn equals<let L: u32, let N: u32>(text: BoundedVec<u8, L>, expected: [u8; N]) -> bool {
-    // A matching length makes every compared position active. Static backing
-    // access avoids rebuilding bounded-vector reads for each identifier byte.
+    // Fixed-width byte words are injective below the field modulus.
     let mut same = text.len() == N;
-    for i in 0..N { if i < L { same = same & (text.get_unchecked(i) == expected[i]); } }
+    for chunk in 0..(N + 30) / 31 {
+        let mut actual: Field = 0;
+        let mut wanted: Field = 0;
+        for j in 0..31 {
+            let i = chunk * 31 + j;
+            if (i < N) & (i < L) {
+                actual = actual * 256 + text.get_unchecked(i) as Field;
+                wanted = wanted * 256 + expected[i] as Field;
+            }
+        }
+        same = same & (actual == wanted);
+    }
     same & (N <= L)
 }
 
@@ -227,4 +244,17 @@ fn temporal<let L: u32>(text: BoundedVec<u8, L>, date: bool) -> (u8, Field) {
     if !valid { class_key(CLASS_NONE, 0) }
     else if !representable { class_key(CLASS_UNREPRESENTABLE, 0) }
     else { class_key(if date { CLASS_DATE } else if zoned { CLASS_DATE_TIME } else { CLASS_LOCAL_DATE_TIME }, biased as Field * 0x100000000000000000000000000000000000000000000) }
+}
+
+#[test]
+fn packed_identifier_comparison_checks_both_words() {
+    let expected = "http://www.w3.org/2001/XMLSchema#integer".as_bytes();
+    let matching = BoundedVec::<u8, 64>::from_array(expected);
+    assert(equals(matching, expected));
+    let mut different = expected;
+    different[39] = 0;
+    assert(!equals(BoundedVec::<u8, 64>::from_array(different), expected));
+    different = expected;
+    different[0] = 0;
+    assert(!equals(BoundedVec::<u8, 64>::from_array(different), expected));
 }

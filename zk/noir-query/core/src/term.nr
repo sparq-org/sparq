@@ -4,9 +4,12 @@
 use std::collections::bounded_vec::BoundedVec;
 use poseidon::poseidon2::Poseidon2;
 use crate::term_bytes::{BytePacker, check_bytes};
-use crate::suite_constants::{TERM_DOMAIN, DT_LANGSTRING, KIND_DEFAULT_GRAPH, KIND_BLANK_NODE, KIND_LITERAL, DEFAULT_GRAPH_ENC, GRAPH_DOMAIN};
+use crate::suite_constants::{DT_LANGSTRING, KIND_DEFAULT_GRAPH, KIND_BLANK_NODE, KIND_LITERAL, DEFAULT_GRAPH_ENC, GRAPH_DOMAIN};
 
 pub struct TermCell {
+    // Empty storage is valid internally and deliberately invalid in an ABI.
+    // Field privacy alone does not prevent a caller from witnessing a struct.
+    constructed: [u8; 0],
     bound: bool,
     kind: u8,
     enc: Field,
@@ -34,16 +37,13 @@ impl TermCell {
 
 /// Canonical table padding. A bound default-graph cell is different.
 pub fn padding() -> TermCell {
-    TermCell { bound: false, kind: 0, enc: 0, key_class: 0, key: 0, dt: 0, lang: 0, credential: 0 }
+    TermCell { constructed: [], bound: false, kind: 0, enc: 0, key_class: 0, key: 0, dt: 0, lang: 0, credential: 0 }
 }
 
 /// The byte hash has the same value in every capacity bucket. Zero padding is
 /// checked explicitly because BoundedVec's private backing storage is still ABI data.
 pub fn hash_bytes<let L: u32>(domain: Field, bytes: BoundedVec<u8, L>) -> Field {
-    check_bytes(bytes);
-    let mut packed: BytePacker<L> = BytePacker::new(domain, bytes.len());
-    packed.extend(bytes);
-    packed.finish()
+    crate::term_bytes::straight_hash(domain, bytes)
 }
 
 /// Build every component from an opening. Non-literals carry no key or metadata.
@@ -52,14 +52,23 @@ pub fn open_term<let L: u32, let D: u32, let G: u32>(
     kind: u8, lexical: BoundedVec<u8, L>, datatype: BoundedVec<u8, D>,
     language: BoundedVec<u8, G>, key: [u8; 31], credential: u32,
 ) -> TermCell {
+    if D == 0 {
+        open_nonliteral_term::<L, D, G, 3>(kind, lexical, datatype, language, key, credential)
+    } else {
+        open_metadata_term(kind, lexical, datatype, language, key, credential)
+    }
+}
+
+fn open_metadata_term<let L: u32, let D: u32, let G: u32>(
+    kind: u8, lexical: BoundedVec<u8, L>, datatype: BoundedVec<u8, D>,
+    language: BoundedVec<u8, G>, key: [u8; 31], credential: u32,
+) -> TermCell {
     assert(kind <= KIND_LITERAL, "term kind");
     let length = 1 + if kind == KIND_DEFAULT_GRAPH { 0 } else { 4 + lexical.len() }
         + if kind == KIND_LITERAL { 8 + datatype.len() + language.len() } else { 0 };
-    let mut encoded: BytePacker<L + D + G + 13> = BytePacker::new(TERM_DOMAIN, length);
-    encoded.push(kind);
-    if kind == KIND_DEFAULT_GRAPH {
-        assert(lexical.len() == 0, "default graph lexical");
-    } else { encoded.framed(lexical); }
+    if kind == KIND_DEFAULT_GRAPH { assert(lexical.len() == 0, "default graph lexical"); }
+    let mut encoded: BytePacker<L + D + G + 13> =
+        BytePacker::framed_prefix(kind, lexical, if kind == KIND_DEFAULT_GRAPH { 5 } else { length });
     let mut key_field: Field = 0;
     for i in 0..31 { key_field = key_field * 256 + key[i] as Field; }
     let mut dt: Field = 0;
@@ -68,12 +77,10 @@ pub fn open_term<let L: u32, let D: u32, let G: u32>(
         assert(datatype.len() > 0, "literal datatype");
         encoded.framed(datatype);
         encoded.framed(language);
-        check_bytes(datatype);
         dt = crate::term_ids::datatype(datatype);
         assert(crate::term_key::class_matches(key[0], dt), "class disagrees with datatype");
         crate::term_key::check_key_shape(key);
         assert((language.len() > 0) == (dt == DT_LANGSTRING), "language datatype");
-        check_bytes(language);
         lang = crate::term_ids::language(language);
     } else {
         assert((datatype.len() == 0) & (language.len() == 0) & (key_field == 0), "non-literal metadata");
@@ -82,10 +89,9 @@ pub fn open_term<let L: u32, let D: u32, let G: u32>(
         assert((language.len() > 0) == (dt == DT_LANGSTRING), "language datatype");
         check_bytes(language);
     }
-    // Hashing also canonicalizes storage for default-graph lexical input.
-    check_bytes(lexical);
+    // The framed prefix checks lexical backing storage in every term kind.
     let enc = if kind == KIND_DEFAULT_GRAPH { DEFAULT_GRAPH_ENC } else { Poseidon2::hash([kind as Field, encoded.finish(), key_field], 3) };
-    TermCell { bound: true, kind, enc, key_class: key[0], key: key_field, dt, lang,
+    TermCell { constructed: [], bound: true, kind, enc, key_class: key[0], key: key_field, dt, lang,
         credential: if kind == KIND_BLANK_NODE { credential } else { 0 } }
 }
 
@@ -145,12 +151,7 @@ fn check_opened_key<let L: u32>(cell: TermCell, lexical: BoundedVec<u8, L>, expe
 
 /// Canonical unsigned field order, including values above the signed bit range.
 pub fn field_lt(a: Field, b: Field) -> bool {
-    let a = a.to_be_bytes::<32>();
-    let b = b.to_be_bytes::<32>();
-    let mut equal = true;
-    let mut lt = false;
-    for i in 0..32 { lt = lt | (equal & (a[i] < b[i])); equal = equal & (a[i] == b[i]); }
-    lt
+    a.lt(b)
 }
 
 /// Equality includes issuer blank-node scope; metadata hashes are bound by enc.
@@ -159,13 +160,13 @@ pub fn same_term(a: TermCell, b: TermCell) -> bool {
         & (a.credential == b.credential)
 }
 fn fixed_iri(enc: Field) -> TermCell {
-    TermCell { bound: true, kind: 1, enc, key_class: 0, key: 0, dt: 0, lang: 0, credential: 0 }
+    TermCell { constructed: [], bound: true, kind: 1, enc, key_class: 0, key: 0, dt: 0, lang: 0, credential: 0 }
 }
 /// A synthetic graph name has its own domain and cannot equal an issuer's label.
 /// Request digest and dataset index must be fixed by generated request wiring.
 pub fn credential_graph(request: [u128;2], index: u32) -> TermCell {
     assert(index < 0xffffffff, "credential scope capacity");
-    TermCell { bound: true, kind: 2,
+    TermCell { constructed: [], bound: true, kind: 2,
         enc: Poseidon2::hash([GRAPH_DOMAIN, request[0] as Field, request[1] as Field, index as Field], 4),
         key_class: 0, key: 0, dt: 0, lang: 0, credential: index + 1 }
 }
@@ -194,16 +195,23 @@ pub(crate) fn open_nonliteral_term<let L: u32, let D: u32, let G: u32, let P: u3
     std::static_assert((P == 0) | (P == 1) | (P == 3), "nonliteral RDF position");
     assert(kind < KIND_LITERAL, "nonliteral position");
     if P != 3 { assert(kind > KIND_DEFAULT_GRAPH, "subject kind"); }
-    assert((datatype.len() == 0) & (language.len() == 0) & (key == [0; 31]), "non-literal metadata");
-    check_bytes(lexical); check_bytes(datatype); check_bytes(language);
+    assert((datatype.len() == 0) & (language.len() == 0) & (crate::term_bytes::byte_sum(key) == 0), "non-literal metadata");
+    check_bytes(datatype); check_bytes(language);
     let default_graph = (P == 3) & (kind == KIND_DEFAULT_GRAPH);
-    let length = 1 + if default_graph { 0 } else { 4 + lexical.len() };
-    let mut encoded: BytePacker<L + 5> = BytePacker::new(TERM_DOMAIN, length);
-    encoded.push(kind);
-    if default_graph { assert(lexical.len() == 0, "default graph lexical"); }
-    else { encoded.framed(lexical); }
+    if default_graph { assert(lexical.len() == 0, "default graph lexical"); check_bytes(lexical); }
     let enc = if default_graph { DEFAULT_GRAPH_ENC }
-        else { Poseidon2::hash([kind as Field, encoded.finish(), 0], 3) };
-    TermCell { bound: true, kind, enc, key_class: 0, key: 0, dt: 0, lang: 0,
+        else { Poseidon2::hash([kind as Field, crate::term_bytes::nonliteral_hash(kind, lexical), 0], 3) };
+    TermCell { constructed: [], bound: true, kind, enc, key_class: 0, key: 0, dt: 0, lang: 0,
         credential: if kind == KIND_BLANK_NODE { credential } else { 0 } }
+}
+
+
+#[test]
+fn field_order_is_canonical_across_limb_and_modulus_boundaries() {
+    let values: [Field; 9] = [0, 1, 0x7fffffffffffffffffffffffffffffff,
+        0x80000000000000000000000000000000, 0xffffffffffffffffffffffffffffffff,
+        0x100000000000000000000000000000000,
+        0x2000000000000000000000000000000000000000000000000000000000000000,
+        0 - 2, 0 - 1];
+    for i in 0..9 { for j in 0..9 { assert(field_lt(values[i], values[j]) == (i < j)); } }
 }

@@ -47,7 +47,7 @@ pub fn open_bounded_cell<let L: u32, let D: u32, let G: u32>(
             BoundedVec::from_parts_unchecked(raw.language, raw.language_len), raw.key, credential)
     } else {
         assert((raw.kind == 0) & (raw.lexical_len == 0) & (raw.datatype_len == 0) & (raw.language_len == 0), "non-zero padding");
-        assert((raw.lexical == [0; L]) & (raw.datatype == [0; D]) & (raw.language == [0; G]) & (raw.key == [0; KEY_BYTES]), "non-zero padding");
+        assert_raw_padding(raw);
         padding()
     }
 }
@@ -85,7 +85,7 @@ fn open_nonliteral_cell<let L: u32, let D: u32, let G: u32, let P: u32>(
             BoundedVec::from_parts_unchecked(raw.language, raw.language_len), raw.key, credential)
     } else {
         assert((raw.kind == 0) & (raw.lexical_len == 0) & (raw.datatype_len == 0) & (raw.language_len == 0), "non-zero padding");
-        assert((raw.lexical == [0; L]) & (raw.datatype == [0; D]) & (raw.language == [0; G]) & (raw.key == [0; KEY_BYTES]), "non-zero padding");
+        assert_raw_padding(raw);
         padding()
     }
 }
@@ -118,4 +118,11 @@ pub(crate) fn open_credential_bounded_quads<let N: u32, let L: u32, let D: u32, 
         quads[i] = quad;
     }
     quads
+}
+
+fn assert_raw_padding<let L: u32, let D: u32, let G: u32>(raw: BoundedTermOpening<L,D,G>) {
+    // Byte ranges make this sum nonnegative and smaller than the field modulus.
+    let sum = crate::term_bytes::byte_sum(raw.lexical) + crate::term_bytes::byte_sum(raw.datatype)
+        + crate::term_bytes::byte_sum(raw.language) + crate::term_bytes::byte_sum(raw.key);
+    assert(sum == 0, "non-zero padding");
 }

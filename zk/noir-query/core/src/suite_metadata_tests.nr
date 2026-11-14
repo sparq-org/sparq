@@ -64,6 +64,35 @@ fn bounded_wrong_created_instant() {
 fn bounded_wrong_authenticated_key() {
     let _opened=bounded_fixture(compact(created()),Point {x:0x10e2b0752a9934ad28c9b07eeaa19a511df7bd67051d2b03c0e9e4b51f33c1f6,y:0x0ac6e1123840c217fcf07ef14dacccb4381e5d732458f79a425dfe6af6c17d75});
 }
+
+fn cells_fixture(cells: [[crate::term::TermCell;4];1], index: u32) -> OpenedCredential<1> {
+    crate::suite::open_credential_hidden_from_quads(cells,[crate::suite::leaf_salt(7,0)],7,1,
+        [0x09090909090909090909090909090909;2],created(),method(),pk(),index,
+        Point {x:0x270d497e79fbe3b7574d1fc62b211e0009ba391e1c8e12c1175632f2fb5afdba,y:0x164b448b1476688eeddfc1359220d79e0c2ed96a694bdd84114fcc63d0a01d0b},
+        0x03203196df02ebfe53e3fa449595f2c334699ac289cb3597b8a1dade2f18df0f,
+        0x03b86d67c45349ac68136ab7c56ee819e85f3c2e4a60f2f1150c18ab98ade013,4)
+}
+#[test]
+fn constructor_cells_authenticate_in_both_modes() {
+    let cells=crate::suite_entry::open_quads(quads(),1);
+    let hidden=cells_fixture(cells,0);
+    let revealed=crate::suite::open_credential_revealed_from_quads(cells,[crate::suite::leaf_salt(7,0)],7,1,
+        [0x09090909090909090909090909090909;2],created(),method(),pk(),0);
+    same_opening(hidden,fixture(created(),pk()));same_opening(revealed,hidden);
+}
+#[test(should_fail_with="credential blank-node scope")]
+fn constructor_cells_refuse_another_credential_scope() {
+    let _opened=cells_fixture(crate::suite_entry::open_quads(quads(),2),0);
+}
+#[test(should_fail_with="credential scope capacity")]
+fn constructor_cells_refuse_scope_overflow() {
+    let _opened=cells_fixture(crate::suite_entry::open_quads(quads(),1),0xffffffff);
+}
+#[test(should_fail_with="challenge reduction not bound to its preimage")]
+fn constructor_cells_cannot_replace_the_signed_table() {
+    let mut changed=quads();changed[0][0].lexical[4]=49;
+    let _opened=cells_fixture(crate::suite_entry::open_quads(changed,1),0);
+}
 fn raw<let C:u32,let L:u32,let D:u32>(kind:u8,lex:[u8;L],dt:[u8;D],key:Field)->TermOpening<C> {
     let mut lexical=[0;C];for i in 0..L { lexical[i]=lex[i]; }
     let mut datatype=[0;128];for i in 0..D { datatype[i]=dt[i]; }
