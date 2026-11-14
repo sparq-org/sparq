@@ -10,7 +10,7 @@ use sparq_zk_query::{
     credential_graphs as graphs,
     interp::{ResultValue, Trace},
     plan::{Operator, Plan},
-    plan_closed::{ClosedOperator, Predicate},
+    plan_closed::{self, ClosedOperator, Predicate},
     witness_closed,
 };
 use std::path::Path;
@@ -194,6 +194,16 @@ fn fixtures(target: &str, case: &str) -> Vec<Credential> {
                 "\"condition-a\""
             },
         );
+        if case == "diagnoses" {
+            // Honest-looking extra claims that widen the outer rows past R4.
+            for i in 0..4 {
+                data += &fact(
+                    owner,
+                    "urn:claim:trial.diagnosis",
+                    &format!("\"condition-{i}\""),
+                );
+            }
+        }
         data += &period(
             if case == "start" {
                 "2026-11-02"
@@ -290,6 +300,7 @@ fn fixtures(target: &str, case: &str) -> Vec<Credential> {
 
 fn canonical_fixtures(
     target: &str,
+    case: &str,
 ) -> (
     Vec<Credential>,
     sparq_zk_query::envelope_policy::PolicyInput,
@@ -297,7 +308,7 @@ fn canonical_fixtures(
     use sparq_zk_query::envelope_policy::TrustMember;
     let mut policy = closed_native::canonical_policy();
     policy.trust_members.clear();
-    let data = fixtures(target, "honest");
+    let data = fixtures(target, case);
     for credential in &data {
         let quads = oxttl::NQuadsParser::new()
             .for_slice(credential.credential.document.as_bytes())
@@ -395,23 +406,14 @@ enum Size {
     /// The per-request buckets a receiver chooses for each target.
     Request,
 }
-/// The canonical (production) program for `target` at `size`.
-fn canonical_case(
-    target: &str,
-    size: Size,
-) -> (
-    Plan,
-    Vec<Credential>,
-    sparq_zk_query::envelope_policy::PolicyInput,
-    Trace,
-) {
-    use sparq_zk_query::{credential::assemble_issuer_dataset, interp::evaluate_dataset};
-    let (data, policy) = canonical_fixtures(target);
+/// The canonical (production) plan for `target` at `size`.
+fn canonical_plan(target: &str, size: Size) -> Plan {
+    let credentials = fixtures(target, "honest").len() as u32;
     let recycled = target.starts_with("recycled-");
     let (bounds, quads) = match size {
         Size::Small => (
             Bounds {
-                credentials: if recycled { 4 } else { data.len() as u32 },
+                credentials: if recycled { 4 } else { credentials },
                 quads_per_credential: 8,
                 rows_per_table: if recycled { 4 } else { 2 },
             },
@@ -455,6 +457,28 @@ fn canonical_case(
         Some(q) => plan.with_credential_quad_bounds(&q).unwrap(),
         None => plan,
     };
+    // Request buckets size the NOT EXISTS body for the complete list and the
+    // outer tables for the single subject.
+    if size == Size::Request && matches!(target, "insurance-closed" | "trial-eligibility") {
+        let rows = plan_closed::exists_row_bounds(&plan, 4, bounds.rows_per_table);
+        plan_closed::with_row_bounds(plan, bounds, &rows).unwrap()
+    } else {
+        plan
+    }
+}
+/// The canonical program for `target` at `size` with its honest witness.
+fn canonical_case(
+    target: &str,
+    size: Size,
+) -> (
+    Plan,
+    Vec<Credential>,
+    sparq_zk_query::envelope_policy::PolicyInput,
+    Trace,
+) {
+    use sparq_zk_query::{credential::assemble_issuer_dataset, interp::evaluate_dataset};
+    let (data, policy) = canonical_fixtures(target, "honest");
+    let plan = canonical_plan(target, size);
     let dataset = assemble_issuer_dataset(&data, &policy.trust_members, DIGEST).unwrap();
     let trace = evaluate_dataset(&plan, &dataset, &SuiteEncoder).unwrap();
     assert_eq!(released_for(target, &trace.result), Some(true), "{target}");
@@ -713,6 +737,33 @@ fn captures(p: &Plan) -> usize {
         .iter()
         .filter(|n| matches!(n.operator, Operator::Closed(ClosedOperator::Capture { .. })))
         .count()
+}
+#[test]
+fn canonical_table_buckets_refuse_outer_and_body_overflow() {
+    use sparq_zk_query::{credential::assemble_issuer_dataset, interp::evaluate_dataset};
+    let target = "trial-eligibility";
+    let evaluate = |plan: &Plan, case: &str| {
+        let (data, policy) = canonical_fixtures(target, case);
+        let dataset = assemble_issuer_dataset(&data, &policy.trust_members, DIGEST).unwrap();
+        evaluate_dataset(plan, &dataset, &SuiteEncoder)
+    };
+    let refused = |result: Result<Trace, sparq_zk_query::Error>| {
+        matches!(result, Err(sparq_zk_query::Error::Capacity(m)) if m == "per-table operator output")
+    };
+    // Outer R4, body R32.
+    let plan = canonical_plan(target, Size::Request);
+    let rows: Vec<_> = plan.nodes().iter().map(|n| n.output.capacity).collect();
+    assert!(rows.contains(&4) && rows.contains(&32), "{rows:?}");
+    evaluate(&plan, "honest").unwrap();
+    evaluate(&plan, "medicines").unwrap();
+    assert!(refused(evaluate(&plan, "diagnoses")));
+    // A body bucket below the complete body refuses rather than truncating.
+    let bounds = plan.bounds();
+    let lowered = sparq_zk_query::lower::lower(&query(target), bounds).unwrap();
+    let rows = plan_closed::exists_row_bounds(&lowered, 4, 16);
+    let narrow = plan_closed::with_row_bounds(lowered, bounds, &rows).unwrap();
+    evaluate(&narrow, "honest").unwrap();
+    assert!(refused(evaluate(&narrow, "medicines")));
 }
 #[test]
 fn uncorrelated_not_exists_lowers_its_body_once() {
