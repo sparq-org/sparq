@@ -1,0 +1,6 @@
+# Leg-name changes also update scripts/tests/feature-matrix-legnames.golden.txt.
+# Exercise canonical request parameters with the alternate JSON map backend.
+- name: "sparq-zk-query (ordered-json — canonical request parameters)"
+  crate: "sparq-zk-query"
+  features: "ordered-json"
+  test: true

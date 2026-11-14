@@ -1,0 +1,634 @@
+#[path = "support/authenticated.rs"]
+mod authenticated;
+#[path = "support/fixture.rs"]
+mod fixture_support;
+#[path = "../../sparq-zk-compose/tests/support/mod.rs"]
+mod support;
+use fixture_support::{dataset, FixtureEncoder, Workspace};
+use serde_json::Value;
+use sparq_zk_compose::driver::ProgramProver;
+use sparq_zk_query::{
+    capacity::Bounds,
+    interp::{evaluate, Cell, ResultValue, Trace},
+    lower::lower,
+    witness::prover_toml,
+};
+
+fn root() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../")
+}
+fn corpus() -> Value {
+    serde_json::from_str(
+        &std::fs::read_to_string(
+            root().join("zk/sparql-evaluator/fixtures/conformance/cases.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+fn merged_manifest() -> Value {
+    let mut m: Value = serde_json::from_str(
+        &std::fs::read_to_string(root().join("zk/noir-query/coverage.json")).unwrap(),
+    )
+    .unwrap();
+    let mut fragments: Vec<_> = std::fs::read_dir(root().join("zk/noir-query/coverage.d"))
+        .unwrap()
+        .map(Result::unwrap)
+        .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
+        .collect();
+    fragments.sort_by_key(|e| e.file_name());
+    let mut replaced = std::collections::BTreeSet::new();
+    for f in fragments {
+        let fragment: Value = serde_json::from_slice(&std::fs::read(f.path()).unwrap()).unwrap();
+        for (group, key) in [("cases", "id"), ("features", "id"), ("functions", "name")] {
+            for row in fragment[group].as_array().into_iter().flatten() {
+                let name = row[key].as_str().unwrap();
+                assert!(
+                    replaced.insert((group.to_owned(), name.to_owned())),
+                    "conflicting lane fragment: {group}/{name}"
+                );
+                let mut row = row.clone();
+                row["evidence"] = fragment["evidence"].clone();
+                if let Some(slot) = m[group]
+                    .as_array_mut()
+                    .unwrap()
+                    .iter_mut()
+                    .find(|r| r[key] == name)
+                {
+                    *slot = row;
+                } else {
+                    // These reviewed integration probes are outside the standard
+                    // inventory and cannot alter its passing floor.
+                    assert!(
+                        matches!(
+                            (group, name),
+                            ("features", "target_query_expressions")
+                                | ("features", "term_functions_second_group")
+                                | ("features", "temporal_functions_second_group")
+                                | ("features", "numeric_functions_second_group")
+                                | ("features", "literal_dispatch_and_capacity_controls")
+                                | ("functions", "to_term(boolean,integer,decimal)")
+                        ),
+                        "unknown inventory row: {group}/{name}"
+                    );
+                    assert_eq!(row["evidence"]["layer"], "isolated_gadget_execution");
+                    assert_eq!(row["guest_proof_evidence"], "not_asserted");
+                    assert_eq!(row["status"], "partial_fixture_coverage");
+                    if m["isolated_extensions"].is_null() {
+                        m["isolated_extensions"] = serde_json::json!([]);
+                    }
+                    m["isolated_extensions"].as_array_mut().unwrap().push(row);
+                }
+            }
+        }
+    }
+    m
+}
+const B: Bounds = Bounds {
+    credentials: 1,
+    quads_per_credential: 16,
+    rows_per_table: 4,
+};
+
+#[test]
+fn manifest_covers_the_corpus_without_overstating_and_never_lowers_the_floor() {
+    let m = merged_manifest();
+    let c = corpus();
+    let inventory: Value = serde_json::from_str(
+        &std::fs::read_to_string(root().join("zk/sparql-evaluator/coverage.json")).unwrap(),
+    )
+    .unwrap();
+    for (group, key) in [("cases", "id"), ("features", "id"), ("functions", "name")] {
+        let source = if group == "cases" { &c } else { &inventory };
+        let expected: std::collections::BTreeSet<_> = source[group]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r[key].as_str().unwrap())
+            .collect();
+        let actual: std::collections::BTreeSet<_> = m[group]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r[key].as_str().unwrap())
+            .collect();
+        assert_eq!(expected, actual, "{group} inventory");
+        assert_eq!(
+            actual.len(),
+            m[group].as_array().unwrap().len(),
+            "duplicate {group}"
+        );
+    }
+    assert_eq!(m["evidence"]["negative_cases_are_feature_support"], false);
+    let cases = m["cases"].as_array().unwrap();
+    for entry in cases {
+        let fixture = c["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["id"] == entry["id"])
+            .unwrap();
+        match entry["status"].as_str().unwrap() {
+            "passing" => {
+                assert_eq!(fixture["expected"]["kind"], "result");
+                lower(fixture["query"].as_str().unwrap(), B).unwrap();
+            }
+            "refused" => assert_eq!(
+                lower(fixture["query"].as_str().unwrap(), B)
+                    .unwrap_err()
+                    .to_string(),
+                entry["refusal"].as_str().unwrap()
+            ),
+            "not_attempted" => (),
+            other => panic!("unknown status {other}"),
+        }
+    }
+    for group in ["features", "functions"] {
+        for row in m[group].as_array().unwrap() {
+            let positives = row["positive_cases"].as_array().unwrap();
+            assert!(matches!(
+                row["status"].as_str(),
+                Some("not_attempted" | "refused" | "partial_fixture_coverage")
+            ));
+            if row["status"] == "partial_fixture_coverage" {
+                assert!(!positives.is_empty());
+            } else {
+                assert!(positives.is_empty());
+            }
+            for id in positives {
+                if let Some(reference) = id.as_str().and_then(|s| s.strip_prefix("noir:")) {
+                    assert_eq!(row["evidence"]["layer"], "isolated_gadget_execution");
+                    assert_eq!(row["guest_proof_evidence"], "not_asserted");
+                    assert_noir_reference(reference, false);
+                    continue;
+                }
+                if let Some(reference) = id.as_str().and_then(|s| s.strip_prefix("rust:")) {
+                    assert_eq!(row["evidence"]["layer"], "isolated_gadget_execution");
+                    assert_eq!(row["guest_proof_evidence"], "not_asserted");
+                    assert_rust_reference(reference);
+                    continue;
+                }
+                assert!(
+                    cases
+                        .iter()
+                        .any(|c| c["id"] == *id && c["status"] == "passing"),
+                    "feature claim lacks executed case: {id}"
+                );
+            }
+            for id in row["rejection_cases"].as_array().into_iter().flatten() {
+                if let Some(reference) = id.as_str().and_then(|s| s.strip_prefix("noir:")) {
+                    assert_eq!(row["evidence"]["layer"], "isolated_gadget_execution");
+                    assert_noir_reference(reference, true);
+                }
+            }
+        }
+    }
+    for row in m["isolated_extensions"].as_array().into_iter().flatten() {
+        assert_isolated_extension(row);
+    }
+    let floor: Value = serde_json::from_str(
+        &std::fs::read_to_string(root().join("zk/noir-query/coverage-floor.json")).unwrap(),
+    )
+    .unwrap();
+    for id in floor["passing_cases"].as_array().unwrap() {
+        assert!(
+            cases
+                .iter()
+                .any(|c| c["id"] == *id && c["status"] == "passing"),
+            "coverage floor: {id}"
+        );
+    }
+}
+
+#[test]
+fn isolated_expression_extensions_require_noir_controls() {
+    let manifest = merged_manifest();
+    for row in manifest["isolated_extensions"].as_array().unwrap() {
+        assert_isolated_extension(row);
+    }
+    let mut host_only = manifest["isolated_extensions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == "literal_dispatch_and_capacity_controls")
+        .unwrap()
+        .clone();
+    host_only["positive_cases"] =
+        serde_json::json!(["rust:expr_tests::literal_dispatch_recommendation_table"]);
+    assert!(std::panic::catch_unwind(|| assert_isolated_extension(&host_only)).is_err());
+}
+
+fn assert_isolated_extension(row: &Value) {
+    assert_eq!(row["guest_proof_evidence"], "not_asserted");
+    assert!(
+        row["positive_cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id.as_str().is_some_and(|s| s.starts_with("noir:"))),
+        "isolated expression coverage needs a native gadget control"
+    );
+    for (group, rejection) in [("positive_cases", false), ("rejection_cases", true)] {
+        for id in row[group].as_array().unwrap() {
+            let id = id.as_str().unwrap();
+            if let Some(reference) = id.strip_prefix("noir:") {
+                assert_noir_reference(reference, rejection);
+            } else if let Some(reference) = id.strip_prefix("rust:") {
+                assert!(!rejection);
+                if matches!(
+                    reference,
+                    "expr_tests::literal_dispatch_recommendation_table"
+                        | "expr_tests::cell_alias_binding_keeps_rdf_identity"
+                ) {
+                    // These supplemental host controls run in the ordinary Rust legs.
+                    // Native gadget controls above remain independently required.
+                    let (module, function, _) = rust_test_source(reference);
+                    let inventory = std::fs::read_to_string(
+                        root().join("crates/sparq-zk-query/tests/live-tests.txt"),
+                    )
+                    .unwrap();
+                    assert!(!inventory
+                        .lines()
+                        .any(|line| line == format!("live src/lower/{module}.rs::{function}")));
+                } else {
+                    assert_rust_reference(reference);
+                }
+            } else {
+                panic!("unknown isolated evidence reference: {id}");
+            }
+        }
+    }
+}
+
+fn rust_test_source(reference: &str) -> (String, String, String) {
+    let (module, function) = reference.split_once("::").expect("Rust test reference");
+    for identifier in [module, function] {
+        assert!(
+            !identifier.is_empty()
+                && identifier
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        );
+    }
+    let source = std::fs::read_to_string(
+        root()
+            .join("crates/sparq-zk-query/src/lower")
+            .join(format!("{module}.rs")),
+    )
+    .unwrap();
+    let (before, _) = source
+        .split_once(&format!("fn {function}("))
+        .expect("referenced live Rust test");
+    assert_eq!(
+        before
+            .lines()
+            .rev()
+            .find(|s| !s.trim().is_empty())
+            .unwrap()
+            .trim(),
+        "#[test]"
+    );
+    (module.to_owned(), function.to_owned(), source)
+}
+
+fn assert_rust_reference(reference: &str) {
+    let (module, function, source) = rust_test_source(reference);
+    let (_, body) = source
+        .split_once(&format!("fn {function}("))
+        .expect("referenced live Rust test");
+    // The gate checker parses Rust functions, including their embedded Noir tests.
+    assert!(body.contains("crate::support::gate("));
+    assert!(body.contains("crate::support::complete("));
+    let inventory =
+        std::fs::read_to_string(root().join("crates/sparq-zk-query/tests/live-tests.txt")).unwrap();
+    assert!(inventory
+        .lines()
+        .any(|line| line == format!("live src/lower/{module}.rs::{function}")));
+}
+
+// Isolated gadget references are tracked separately from generated-query cases.
+// The workflow runs the committed package's tests; these references cannot raise
+// the query corpus floor or claim guest-proof coverage.
+fn assert_noir_reference(reference: &str, rejection: bool) {
+    let (module, function) = reference.split_once("::").expect("Noir test reference");
+    assert!(module
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'_'));
+    assert!(function
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'_'));
+    let source = std::fs::read_to_string(
+        root()
+            .join("zk/noir-query/core/src")
+            .join(format!("{module}.nr")),
+    )
+    .expect("referenced Noir module");
+    let declaration = format!("fn {function}(");
+    let preceding = source
+        .split_once(&declaration)
+        .expect("referenced Noir test")
+        .0;
+    let attribute = preceding
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .unwrap()
+        .trim();
+    if rejection {
+        assert!(
+            attribute.starts_with("#[test(should_fail"),
+            "rejection test: {reference}"
+        );
+    } else {
+        assert_eq!(attribute, "#[test]", "positive test: {reference}");
+    }
+}
+
+fn assert_expected(trace: &Trace, fixture: &Value) {
+    let expected = &fixture["expected"]["result"];
+    match &trace.result {
+        ResultValue::Ask(value) => assert_eq!(Some(*value), expected["Ask"].as_bool()),
+        ResultValue::Select { variables, rows } => {
+            let expected = &expected["Select"];
+            assert_eq!(
+                *variables,
+                expected["variables"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|v| v.as_str().unwrap().to_owned())
+                    .collect::<Vec<_>>()
+            );
+            let mut expected_rows = vec![];
+            for row in expected["rows"].as_array().unwrap() {
+                let mut cells = vec![];
+                for term in row.as_array().unwrap() {
+                    if term.is_null() {
+                        cells.push(None);
+                        continue;
+                    }
+                    let (_, terms) =
+                        dataset(&format!("<urn:s> <urn:p> {} .", term.as_str().unwrap()));
+                    use sparq_zk_query::interp::EncodeTerm;
+                    cells.push(Some(FixtureEncoder.encode(&terms[2]).unwrap().enc));
+                }
+                expected_rows.push(cells);
+            }
+            let mut actual: Vec<Vec<_>> = rows
+                .iter()
+                .map(|r| r.iter().map(|c| c.bound.then_some(c.enc)).collect())
+                .collect();
+            if expected["order"] == "Bag" {
+                actual.sort();
+                expected_rows.sort();
+            }
+            assert_eq!(actual, expected_rows);
+        }
+    }
+}
+
+#[test]
+#[ignore = "requires the pinned native query toolchain"]
+fn corpus_cases_execute_with_engine_expected_result_and_altered_witness_controls() {
+    let Some(gate) = support::gate(
+        "corpus_cases_execute_with_engine_expected_result_and_altered_witness_controls",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
+    let corpus = corpus();
+    let manifest = merged_manifest();
+    let mut workspaces = std::collections::BTreeMap::new();
+    for fixture in corpus["cases"].as_array().unwrap() {
+        let entry = manifest["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["id"] == fixture["id"])
+            .unwrap();
+        let query = fixture["query"].as_str().unwrap();
+        // In addition to the ratcheted claims, exercise every currently admitted
+        // positive fixture so new lowering cannot bypass the differential runner.
+        if fixture["expected"]["kind"] != "result" {
+            continue;
+        }
+        let plan = match lower(query, B) {
+            Ok(plan) => plan,
+            Err(_) if entry["status"] != "passing" => continue,
+            Err(e) => panic!("{}: {e}", fixture["id"]),
+        };
+        let (credentials, trace) = host_fixture(fixture, &plan);
+        let data = credentials
+            .iter()
+            .enumerate()
+            .map(|(i, c)| c.cells(i as u32).unwrap())
+            .collect::<Vec<_>>();
+        let package = sparq_zk_query::codegen::generate_operator_fixture(&plan).unwrap();
+        let workspace = workspaces
+            .entry(plan.hash())
+            .or_insert_with(|| Workspace::new(&package));
+        let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+        let input = prover_toml(&plan, &data, &FixtureEncoder, &trace, [7; 32], [3; 32]).unwrap();
+        driver
+            .execute(&input, "corpus")
+            .unwrap_or_else(|e| panic!("{}: {e}", fixture["id"]));
+        for (n, table) in trace.tables.iter().enumerate() {
+            let mut changed = trace.clone();
+            if table.rows.is_empty() {
+                changed.tables[n].rows.push(vec![
+                    Cell::default();
+                    plan.nodes()[n].output.variables.len()
+                ]);
+            } else if table.rows[0].is_empty() {
+                changed.tables[n].rows.pop();
+            } else {
+                changed.tables[n].rows[0][0].enc[31] ^= 1;
+            }
+            let input =
+                prover_toml(&plan, &data, &FixtureEncoder, &changed, [7; 32], [3; 32]).unwrap();
+            assert!(
+                driver.execute(&input, "altered_table").is_err(),
+                "{}, node {n}",
+                fixture["id"]
+            );
+        }
+        let mut controls = 0;
+        let result_line = input.lines().find(|l| l.starts_with("result = ")).unwrap();
+        if matches!(trace.result, ResultValue::Ask(_)) {
+            let changed = input.replace(
+                result_line,
+                if result_line == "result = true" {
+                    "result = false"
+                } else {
+                    "result = true"
+                },
+            );
+            assert!(driver.execute(&changed, "altered_result").is_err());
+            controls += 1;
+        } else {
+            for (position, _) in result_line.match_indices("enc = \"0x") {
+                let mut changed = result_line.as_bytes().to_vec();
+                let p = position + "enc = \"0x".len() + 63;
+                changed[p] = if changed[p] == b'1' { b'2' } else { b'1' };
+                let changed = input.replace(result_line, &String::from_utf8(changed).unwrap());
+                assert!(driver.execute(&changed, "altered_result").is_err());
+                controls += 1;
+            }
+        }
+        assert!(controls > 0);
+        let changed = input.replace("request_digest = [7,", "request_digest = [8,");
+        assert!(driver.execute(&changed, "altered_public").is_err());
+    }
+    support::complete(gate);
+}
+
+#[test]
+#[ignore = "requires the pinned native query toolchain"]
+fn compiler_agreement_for_every_passing_plan() {
+    let Some(gate) = support::gate(
+        "compiler_agreement_for_every_passing_plan",
+        &["nargo", "bb", "node"],
+    ) else {
+        return;
+    };
+    let corpus = corpus();
+    let manifest = merged_manifest();
+    let mut programs = std::collections::BTreeMap::new();
+    for entry in manifest["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["status"] == "passing")
+    {
+        let fixture = corpus["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["id"] == entry["id"])
+            .unwrap();
+        let plan = lower(fixture["query"].as_str().unwrap(), B).unwrap();
+        programs.entry(plan.hash()).or_insert(plan);
+    }
+    assert!(
+        !programs.is_empty(),
+        "compiler ratchet has no passing plans"
+    );
+    let mut compared = std::collections::BTreeMap::new();
+    for (hash, plan) in &programs {
+        let package = sparq_zk_query::codegen::generate_operator_fixture(plan).unwrap();
+        let workspace = Workspace::new(&package);
+        let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+        let artifact = driver.compile().unwrap();
+        let cache = workspace.0.join("wasm-cache");
+        let check = |key: &std::path::Path, known: bool| {
+            let output = support::live_tool(&gate, "node")
+                .arg(root().join("zk/noir-query/compiler-agreement/check.mjs"))
+                .arg(workspace.0.join(&package.name))
+                .arg(&artifact)
+                .arg(key)
+                .arg(&cache)
+                .args(known.then_some("--record-known-failures"))
+                .output()
+                .unwrap();
+            if output.status.code() == Some(2) {
+                assert!(known);
+                assert!(
+                    String::from_utf8_lossy(&output.stderr).contains("xpath-vendored-sha-alias")
+                );
+            } else {
+                assert!(
+                    output.status.success(),
+                    "{}{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            output
+        };
+        let compile = check(std::path::Path::new("--compile-only"), true);
+        let record = if compile.status.code() == Some(2) {
+            assert!(String::from_utf8_lossy(&compile.stderr).contains("xpath-vendored-sha-alias"));
+            let record: Value = serde_json::from_slice(
+                &std::fs::read(cache.join("compiler-agreement.json")).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(record["status"], "known_failure");
+            assert_eq!(record["id"], "xpath-vendored-sha-alias");
+            assert_eq!(record["bytecode"], "not_compared");
+            assert_eq!(record["key"], "not_compared");
+            record
+        } else {
+            assert!(
+                compile.status.success(),
+                "bytecode agreement: {}{}",
+                String::from_utf8_lossy(&compile.stdout),
+                String::from_utf8_lossy(&compile.stderr)
+            );
+            let key_file = workspace.0.join("agreement.vk");
+            std::fs::write(&key_file, driver.canonical_vk(&workspace.0).unwrap()).unwrap();
+            let key = check(&key_file, false);
+            assert!(
+                key.status.success(),
+                "key agreement: {}{}",
+                String::from_utf8_lossy(&key.stdout),
+                String::from_utf8_lossy(&key.stderr)
+            );
+            let record: Value = serde_json::from_slice(
+                &std::fs::read(cache.join("compiler-agreement.json")).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(record["status"], "passing");
+            assert_eq!(record["bytecode"], "identical");
+            assert_eq!(record["key"], "identical");
+            record
+        };
+        assert_eq!(record["program"], package.name);
+        use sha2::{Digest, Sha256};
+        let digest = Sha256::digest(std::fs::read(&artifact).unwrap())
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+        assert_eq!(record["native_artifact_digest"], digest);
+        eprintln!("Compiler agreement {}: {record}", package.name);
+        assert!(compared.insert(*hash, record).is_none());
+    }
+    assert_eq!(
+        compared.keys().collect::<Vec<_>>(),
+        programs.keys().collect::<Vec<_>>()
+    );
+    support::complete(gate);
+}
+
+fn host_fixture(
+    fixture: &Value,
+    plan: &sparq_zk_query::plan::Plan,
+) -> (Vec<sparq_zk_query::credential::Credential>, Trace) {
+    let query = fixture["query"].as_str().unwrap();
+    let rdf = fixture
+        .get("dataset")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .unwrap_or_else(|| {
+            std::fs::read_to_string(root().join("zk/sparql-evaluator/fixtures/conformance/core.nt"))
+                .unwrap()
+        });
+    let data = vec![authenticated::sign(&rdf, 0)];
+    assert_eq!(data[0].issuer_root().unwrap(), authenticated::issuer_root());
+    let cells = vec![data[0].cells(0).unwrap()];
+    let trace = evaluate(plan, &cells, &FixtureEncoder)
+        .unwrap_or_else(|e| panic!("{}: {e}", fixture["id"]));
+    assert_expected(&trace, fixture);
+    fixture_support::assert_engine(query, &rdf, &trace.result);
+    (data, trace)
+}
+
+#[test]
+fn admitted_corpus_suite_inputs_match_both_host_oracles() {
+    for fixture in corpus()["cases"].as_array().unwrap() {
+        if fixture["expected"]["kind"] == "result" {
+            if let Ok(plan) = lower(fixture["query"].as_str().unwrap(), B) {
+                let _checked = host_fixture(fixture, &plan);
+            }
+        }
+    }
+}

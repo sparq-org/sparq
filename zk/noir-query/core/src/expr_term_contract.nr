@@ -1,0 +1,224 @@
+// Temporary lane-D contract. Lane A replaces this file with term.nr.
+// Research grade; not externally audited. No credential encoding is defined here.
+use crate::expr_core::Scalar;
+
+pub struct TermCell {
+    pub bound: bool,
+    pub kind: u8,
+    pub enc: Field,
+    pub key_class: u8,
+    pub key: Field,
+    pub dt: Field,
+    pub lang: Field,
+    pub credential: u32,
+}
+
+// There is deliberately no implementation for a bare TermCell. The implementation
+// supplied by the term module must open enc, validate the datatype/lexical form,
+// recompute key_class/key, validate UTF-8 and padding, and derive ALL Scalar
+// fields from that opening. IEEE bits come from the lexical opening, retaining
+// signed zero even if a comparison key normalizes it. Blank
+// node identity includes the separate credential field. This trait is a compile-time seam,
+// never a witness-supplied `key_checked` flag.
+pub trait CheckedOpening<let L: u32> {
+    fn open(self) -> Scalar<L>;
+}
+
+// Contract fields/constants agree with lane A at 3abc203961e075e092d0a0dba0d2f0c11370214a.
+// Replace these imports and the public mirror with A's private cell at integration.
+pub global CLASS_NONE: u8 = 0;
+pub global CLASS_DECIMAL: u8 = 1;
+pub global CLASS_DOUBLE: u8 = 2;
+pub global CLASS_DATE_TIME: u8 = 3;
+pub global CLASS_LOCAL_DATE_TIME: u8 = 4;
+pub global CLASS_BOOLEAN: u8 = 5;
+pub global CLASS_STRING: u8 = 6;
+pub global CLASS_STRING_PREFIX: u8 = 7;
+pub global CLASS_DATE: u8 = 8;
+pub global CLASS_UNREPRESENTABLE: u8 = 127;
+pub global DT_INTEGER: Field = 0x0a7208b76d85ea2290a33b1932ddeca10e8acaa3191915e26db178f0bdafd2fa;
+pub global DT_DECIMAL: Field = 0x1c84b6b9f9826b96b83e5ca9ab437970720413d23db6f52cf393c88981520a14;
+pub global DT_DOUBLE: Field = 0x1e5a392e58db9a4d3aaead8b0744b68b53f21edcc5293ca067c9220fe3a06a13;
+pub global DT_FLOAT: Field = 0x1d69a2854fbaa3966f764069594c0ce5315ce523b566e72cf12bd6fc1e8554ae;
+pub global DT_DATETIME: Field = 0x2b8b41b4eef8c53c46d958b1c936f2ab2a07cad42cf188d80bea026a9021d099;
+pub global DT_BOOLEAN: Field = 0x032641e10feb6a65ebe1791f64db183511a9701e7f8cbb027ad0b282bbae19e8;
+pub global DT_STRING: Field = 0x20bd98b85f0a5afe4c816b2dd66017170c61876fa819f53ad74c1ba905961400;
+pub global DT_DATE: Field = 0x2b913f1d3cce00d157d3a2f242e06b78ba4690f3169768c2840d99d79e5521d0;
+pub global DT_NONPOSITIVEINTEGER: Field =
+    0x20e4426505c45a6c3bc45e90c7b82558b333c6340eeafbc4c13d4375875b3cac;
+pub global DT_NEGATIVEINTEGER: Field =
+    0x235d0da2e08119f7b497007c6795cb49cace0627fbeff11667c614e3b267b9ba;
+pub global DT_LONG: Field = 0x1426a6c54ab80ea2bcefe5d99be1314f2c9bf16be0c36f7cac1b78ce4eceef4a;
+pub global DT_INT: Field = 0x2d2a3f74288d70d666e33ec27c24f43592914e0f3d6555ece5d9733fb81ef3dd;
+pub global DT_SHORT: Field = 0x27da187a883e40bbe595538de26e05d5ddf526a58eb750e4ee5c2d429b9db364;
+pub global DT_BYTE: Field = 0x14e3920b464d072c15081b34d016b8d23a36c503dc230fc52dc8b68511d5e6a6;
+pub global DT_NONNEGATIVEINTEGER: Field =
+    0x1233b193aaff724d2ef2558a340af79c2ac12ecdbf03f9f309699f8a5f8686a2;
+pub global DT_UNSIGNEDLONG: Field =
+    0x14caf20016b20bafe266909204f879042e3f00e78c12e0e43f2fecd3d883a544;
+pub global DT_UNSIGNEDINT: Field =
+    0x27c4e02a2fe79c1285caa087e535e68de17b248633888b9eeb98c1d214ab3eaf;
+pub global DT_UNSIGNEDSHORT: Field =
+    0x2bde6c508aa67fc6323860931eb36a8f1a569ec77bd89b839c94d27438429ca6;
+pub global DT_UNSIGNEDBYTE: Field =
+    0x0bbd090cd528cd9095b7d23b0c3a70b568c389e5d8459788ec819024c040cafa;
+pub global DT_POSITIVEINTEGER: Field =
+    0x02b0b0cea3b1390254029161fc49193254f5705d4a1b6b115269718e204c108b;
+pub global DT_LANGSTRING: Field =
+    0x0eb6478ded5db6ac415603573fafac6836b76d48c2315d3b206ee24b3c31ffd5;
+pub global LANG_EMPTY: Field = 0x1a3838163a3bfceec91def0fb1c526eed692b8c508b6c0198aa96104499158ea;
+pub global KIND_DEFAULT_GRAPH: u8 = 0;
+pub global KIND_IRI: u8 = 1;
+pub global KIND_BLANK_NODE: u8 = 2;
+pub global KIND_LITERAL: u8 = 3;
+
+impl TermCell {
+    pub fn bound(self) -> bool {
+        self.bound
+    }
+    pub fn kind(self) -> u8 {
+        self.kind
+    }
+    pub fn enc(self) -> Field {
+        self.enc
+    }
+    pub fn key_class(self) -> u8 {
+        self.key_class
+    }
+    pub fn key(self) -> Field {
+        self.key
+    }
+    pub fn datatype(self) -> Field {
+        self.dt
+    }
+    pub fn language(self) -> Field {
+        self.lang
+    }
+    pub fn credential(self) -> u32 {
+        self.credential
+    }
+    pub fn assert_padding(self) {
+        assert(
+            !self.bound
+                & (self.kind == 0)
+                & (self.enc == 0)
+                & (self.key_class == 0)
+                & (self.key == 0)
+                & (self.dt == 0)
+                & (self.lang == 0)
+                & (self.credential == 0),
+            "non-zero padding",
+        );
+    }
+}
+
+// The adapter must call lane A's open_lexical and, for literals, recompute_key.
+// A also supplies open_key_checked(BoundedTermOpening<L,D,G>, credential,
+// expected_dt), binding raw bytes and checking their key in one construction.
+// That sealed result plus its original constrained bytes is an equivalent path.
+// All bytes here are returned by that constrained adapter, never independent
+// arguments to a function which reads a term's characters.
+use std::collections::bounded_vec::BoundedVec;
+pub struct LexicalOpening<let L: u32, let D: u32, let G: u32> {
+    pub cell: TermCell,
+    pub lexical: BoundedVec<u8, L>,
+    pub datatype: BoundedVec<u8, D>,
+    pub language: BoundedVec<u8, G>,
+}
+pub trait CheckedLexicalOpening<let L: u32, let D: u32, let G: u32> {
+    fn open_lexical(self) -> LexicalOpening<L, D, G>;
+}
+pub fn check_bytes<let L: u32>(bytes: BoundedVec<u8, L>) {
+    assert(bytes.len() <= L, "opening capacity");
+    for i in 0..L {
+        if i >= bytes.len() {
+            assert(bytes.get_unchecked(i) == 0, "opening padding");
+        }
+    }
+}
+pub fn read<T, let L: u32, let D: u32, let G: u32>(value: T) -> LexicalOpening<L, D, G>
+where
+    T: CheckedLexicalOpening<L, D, G>,
+{
+    let out = value.open_lexical();
+    check_bytes(out.lexical);
+    check_bytes(out.datatype);
+    check_bytes(out.language);
+    utf8(out.lexical);
+    utf8(out.datatype);
+    utf8(out.language);
+    if !out.cell.bound() {
+        out.cell.assert_padding();
+        assert(
+            (out.lexical.len() == 0) & (out.datatype.len() == 0) & (out.language.len() == 0),
+            "unbound opening bytes",
+        );
+    }
+    assert(out.cell.kind() <= KIND_LITERAL, "term kind");
+    assert((out.cell.kind() == KIND_BLANK_NODE) | (out.cell.credential() == 0), "credential scope");
+    out
+}
+// Key includes its class byte: one class byte followed by thirty payload bytes.
+pub fn key_payload(cell: TermCell) -> Field {
+    cell.key().assert_max_bit_size::<248>();
+    let bytes = cell.key().to_be_bytes::<31>();
+    assert(bytes[0] == cell.key_class(), "key class byte");
+    cell.key()
+        - cell.key_class() as Field
+            * 0x1000000000000000000000000000000000000000000000000000000000000
+}
+
+// RDF lexical strings contain Unicode scalar values. Lengths remain explicit,
+// including embedded U+0000; malformed UTF-8 is outside the RDF method input.
+fn utf8<let L: u32>(bytes: BoundedVec<u8, L>) {
+    let mut remaining: u8 = 0;
+    let mut low: u8 = 128;
+    let mut high: u8 = 191;
+    for i in 0..L {
+        if i < bytes.len() {
+            let b = bytes.get_unchecked(i);
+            if remaining > 0 {
+                assert((b >= low) & (b <= high), "opening UTF-8");
+                remaining = remaining - 1;
+                low = 128;
+                high = 191;
+            } else if b >= 128 {
+                assert((b >= 194) & (b <= 244), "opening UTF-8");
+                if b <= 223 {
+                    remaining = 1;
+                } else if b <= 239 {
+                    remaining = 2;
+                } else {
+                    remaining = 3;
+                }
+                low = if b == 224 {
+                    160
+                } else if b == 240 {
+                    144
+                } else {
+                    128
+                };
+                high = if b == 237 {
+                    159
+                } else if b == 244 {
+                    143
+                } else {
+                    191
+                };
+            }
+        }
+    }
+    assert(remaining == 0, "opening UTF-8");
+}
+
+// Function inputs retain the caller's error and capacity channels alongside the
+// statically checked opening. A computed refusal must survive metadata access.
+pub fn read_input<T, let L: u32, let D: u32, let G: u32>(
+    input: (crate::expr_core::Lane<T>, bool),
+) -> (LexicalOpening<L, D, G>, bool, bool)
+where
+    T: CheckedLexicalOpening<L, D, G>,
+{
+    let (a, e) = input;
+    (read(a.value), e, a.capacity)
+}

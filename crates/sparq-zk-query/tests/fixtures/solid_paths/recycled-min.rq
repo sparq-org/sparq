@@ -1,0 +1,12 @@
+PREFIX vcq: <https://w3id.org/sparq/vcq#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+SELECT DISTINCT ((MIN(?value) >= 0.3 && COUNT(DISTINCT ?iss) = 3 && COUNT(?value) = 3)
+                 AS ?result) WHERE {
+  ?g vcq:verifiedIssuer ?iss .
+  FILTER(?iss IN (<urn:fictional:recycled-content:tier>,
+                  <urn:fictional:recycled-content:tier-2>,
+                  <urn:fictional:recycled-content:tier-3>))
+  GRAPH ?g { <urn:fictional:recycled-content:lot>
+               <urn:claim:material.recycled-fraction> ?value . }
+}

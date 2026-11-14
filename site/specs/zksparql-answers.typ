@@ -216,8 +216,8 @@ The query MUST meet these requirements:
   pattern, and none of the functions whose value depends on when or where they are evaluated
   (`NOW`, `RAND`, `UUID`, `STRUUID`, and `BNODE` with no argument).
 
-A query request states nothing about credential status (revocation) or about whether the
-presenter is the credential subject. This document checks neither (@sec-not-established).
+The optional draft credential statement profile (@sec-envelope-draft) adds request-bound
+holder-key use, status and validity requirements for methods that implement that profile.
 
 = Answer presentation <sec-presentation>
 
@@ -250,9 +250,10 @@ the credentials themselves. Its properties, by JSON-LD term:
     `proofValue` (byte string: the evidence, encoded as the proof method defines).],
 )
 
-Except in the disclosed signature mode (@sec-modes), the presentation carries no credential
-and no per-row provenance, and in the hidden signature mode it also carries no issuer
-identity. What the verifier learns is listed in @sec-learns.
+Except in the disclosed signature mode (@sec-modes), the presentation carries no credential.
+In hidden mode, issuer identity is not required as additional presentation metadata. A query
+can select provenance or issuer information under the draft profile (@sec-envelope-draft),
+so its result can disclose those values. What the verifier learns is listed in @sec-learns.
 
 == Result <sec-result>
 
@@ -431,7 +432,8 @@ statement does not verify for another. In particular:
 
 + The request digest MUST be bound. The digest covers the query, the input commitment, the
   trust requirements, the accepted cryptosuites, signature modes and proof methods, the
-  bounds, the challenge, the domain and the validity period. Binding it means a proof made for
+  bounds, the challenge, the domain and the validity period. For @sec-envelope-draft it also
+  covers the holder requirement, status policy and validity time. Binding it means a proof made for
   one request does not verify for another, including one sent to another verifier, and the
   proof needs only one public value for all of them.
 + The result MUST be bound. The verifier takes the result only from what the proof proves.
@@ -577,11 +579,10 @@ the dataset was built from:
 
 == What an accepted answer does not establish <sec-not-established>
 
-- #strong[Credential status.] This document does not check whether a credential was revoked
-  or suspended.
-- #strong[Holder binding.] This document does not show that the presenter is the credential
-  subject or controls a key bound to the credential. Anyone who holds the credentials can
-  answer.
+- #strong[Unrequested credential conditions.] Status, holder-key use and credential validity
+  are established only when the request requires them and its selected method implements
+  @sec-envelope-draft. Other methods retain their declared bearer and status semantics.
+  Key use alone does not establish a person's identity.
 - #strong[Truth of claims.] A valid issuer signature shows that the issuer made the claims, not
   that they are true #cite("VC-DATA-MODEL-2.0").
 - #strong[More than the method's trust assumptions.] An accepted proof means the statement
@@ -654,6 +655,234 @@ to its description in RDF.
   https://sparq.jeswr.org/ns/vcq/v1.jsonld. A Working Group taking this design forward would
   decide the final IRIs.
 ]
+
+= Draft amendment: credential statements <sec-envelope-draft>
+
+#strong[Draft — authenticated envelope integration of the Noir query programme.]
+This section proposes an opt-in credential statement profile for methods that explicitly
+implement it. It takes precedence over the earlier dataset-layout and bearer-only wording
+only for those methods. The profile is research grade and not externally audited. A method
+with stand-ins is not an available proof method and MUST NOT be admitted for this profile.
+The implementation companion describes the draft method and its current boundary.
+
+== Dataset and issuer per fact
+
+A request for this profile MUST include `trustedIssuers`, `cryptosuite` and `signatureMode`. A
+method implementing this profile MUST open every quad of every selected credential. Each
+credential MUST contain only a default graph; a credential containing a named graph MUST be
+refused. The method assigns each credential a distinct presentation-local blank node graph name,
+scopes its blank nodes to that credential, and places its triples in that named graph. The
+default graph is the RDF merge of those graphs, with duplicate triples collapsed, plus exactly
+one method-asserted triple per credential:
+
+```sparql
+?credentialGraph vcq:verifiedIssuer ?verifiedIssuer .
+```
+
+`vcq:verifiedIssuer` is reserved for this method assertion. Input credentials using that
+predicate MUST be refused. The assertion's subject is the credential's assigned graph name; its
+object MUST be an IRI, with exactly the spelling of the issuer in the trust-set member whose key
+actually verified the credential, and in the credential's `issuer` or `issuer.id`. A non-IRI
+issuer or a different spelling MUST be refused. There is no case folding, trailing-slash change
+or `did:` rewriting; a `did:web:` issuer remains a `did:web:` IRI. The assertion is in the
+default graph, outside `GRAPH` blocks. `GRAPH` uses a variable because the graph name is a blank
+node. The graph name is the suite-domain hash of the two unsigned big-endian halves of the
+public request digest and the credential index; its blank-node scope is that index plus one.
+The request digest MUST supply this scope; a private presentation value MUST NOT replace it.
+Different request digests change graph names. Reusing a request repeats its graph names.
+Authentication and dataset conversion MUST use the same credential-index binding. The envelope
+consumes the resulting internal view; an independent witnessed view MUST NOT replace it.
+The method makes no additional graph-to-issuer inference. The trust set binds issuer, verification method, cryptosuite,
+assertion authorization and key together. The issuer IRI comes from the opened credential
+subject’s unique `issuer` property; the verification-method IRI and Multikey come from the
+suite-authenticated proof metadata. The key coordinates MUST open that Multikey, and the
+authorization term is exactly `https://w3id.org/security#assertionMethod`. Hidden mode proves
+membership in its public digest with the member and membership path private. A query can require an issuer for a particular
+fact, for example:
+
+```sparql
+GRAPH ?c { ?payment ex:status ex:Returned }
+?c vcq:verifiedIssuer <https://bank.example/> .
+```
+
+A query that does not select or pin the issuer does not require its identity to be released. A
+projected graph name is scoped to this presentation, not a persistent credential identifier. The
+method fixes graph-name assignment and the merge; the holder cannot add assertions to it.
+
+== Optional request properties and presentation meaning
+
+These are draft `vcq:` properties in the proposal vocabulary and context. Their presence in that
+draft context does not establish admission of an implementing method. A request using them with
+a method that does not enforce their meaning MUST be refused. They are part of the request RDF
+dataset and therefore part of the request digest, along with the exact query, domain, challenge,
+trust set and accepted method. No value is taken from the presentation as a substitute for the
+verifier's stored request.
+
+There is no request or policy derivation inside the circuit. Rust computes the request digest
+from the stored request and supplies it as a public input, used for holder-signature messages
+and binding the proof to that request. The verifier independently derives every envelope policy
+value from the same stored request and supplies each as its own public input. It MUST NOT use
+policy values supplied by a presentation. The circuit checks those public values against the
+credential evidence. A proof satisfying another policy therefore does not verify against this
+request's public words.
+
+The public policy includes the trust-set root and minimal depth, holder requirement and issuer
+scope, status requirement, missing-status option, snapshot-set root and minimal depth, validity
+requirement and instant, and freshness requirement and earliest creation instant. When a
+requirement flag is false its value words MUST be zero: no holder scope, count or issuer words
+for disabled holder binding; no missing-status option, snapshot root or depth for disabled
+status; no validity instant for disabled validity; and no creation bound for disabled freshness.
+All public instants (`now` and `earliest_created`) are exact nonnegative Unix epoch
+milliseconds, at most the maximum signed sixty-four-bit integer. The suite timestamps
+retain signed epoch milliseconds for comparisons, including pre-epoch credential bounds.
+No fractional milliseconds are rounded; unrepresentable instants are refused.
+
+An absent holder issuer list has zero count and issuer words even when holder binding is
+enabled. The circuit MUST assert these encodings as well as applicable credential conditions.
+
+- `holderBinding`: optional object; absent means no holder requirement. Its optional
+  `issuer` RDF list contains issuer IRIs spelled exactly as in `trustedIssuers`.
+  The `holderBinding` scoped JSON-LD context preserves the list structure. When present,
+  the list MUST be non-empty; an explicitly empty list MUST be refused. Omission of the
+  list means all trusted issuers. To require no holder keys, omit `holderBinding`.
+  A credential from a listed issuer MUST carry the profile's
+  subject-to-key relation. The evidence MUST contain exactly one Schnorr signature per
+  distinct required holder key, each over a domain-separated encoding of the entire request
+  digest. Credentials sharing a key share that signature; distinct keys require distinct
+  signatures. Missing key or signature is a refusal. Issuers outside the collection impose
+  no holder requirement. This establishes use of the key the issuer named; a claim about a
+  person additionally depends on the issuer's subject binding. The collection is interpreted
+  as a set; the method sorts its unique suite IRI encodings as canonical unsigned
+  big-endian field bytes before assigning padded policy slots. The issuer-list capacity is
+  four entries; a request with more entries MUST be refused before deduplication.
+- `earliestCreated`: optional `xsd:dateTime` with an explicit timezone. When present,
+  every credential's authenticated suite creation instant MUST be at or after this bound,
+  including equality. Unknown creation MUST be refused. This is freshness, separate from
+  validity. The verifier computes the bound, for example from its desired age limit;
+  the circuit only compares the instants. Absence of this property imposes no freshness
+  condition, even when creation is unknown. It does not alter the fallback validity start.
+- `statusPolicy`: optional object; absent means status is not checked. When present it has
+  a non-empty `acceptedSnapshot` collection of snapshot digests and `allowMissingStatus`
+  (boolean, absent means false). Each accepted digest binds the list identifier, purpose,
+  bit length, tree depth and a Merkle root of its decompressed bits. The verifier
+  authenticates the source status-list credential and decides freshness before admitting its
+  digest. Each
+  status entry on each credential MUST have its indicated bit clear in such a snapshot.
+  Missing evidence for an entry is a refusal. Absence of all `credentialStatus` triples is
+  permitted only when `allowMissingStatus` is true. This exception states absence, not a
+  successful check against a list. This status check supports only single-bit revocation and suspension entries; a required
+  check of other purposes, sizes or entry shapes MUST be refused.
+- `validityTime`: optional time, with the time-zone requirement of @sec-vocab. When present,
+  every credential's `validFrom` MUST be at or before it and `validUntil` MUST be at or
+  after it, including equality at either endpoint. An omitted individual bound contributes
+  no comparison. If both are absent, validity has no end, with creation assumed as the
+  start in the VC Data Model. The method MUST establish that creation instant from
+  authenticated suite metadata and require the request time to be at or after it; when
+  that instant is unavailable, this profile refuses the validity requirement. It MUST NOT
+  infer a creation timestamp from an absent property or use an unverified timestamp. A present but unrepresentable time MUST be refused,
+  never treated as an absent bound. The request's own acceptance window remains separate.
+
+The proof statement establishes these requirements for every credential in the input dataset,
+including credentials contributing no result row. An empty dataset satisfies such universal
+conditions without establishing that any credential exists. The request digest publicly fixes
+which requirements apply. Per-credential keys, signatures, status indices, snapshot selection,
+and presence flags remain private in hidden mode unless the query result discloses them. No
+additional presentation flags can turn a required check off. A method MUST document its exact
+public-input layout and bind the same statement to the result and dataset commitment.
+
+Absence is exact: the evidence checks all of each credential's authenticated quads, not just
+quads used by a matching solution. `credentialStatus`, `validFrom` and `validUntil` are read on
+the credential root. Holder keys are read through its `credentialSubject` relation. All matching
+status entries are checked. This profile requires singleton issuer, credential subject, key,
+status-entry fields and individual validity bounds; every present bound is applied. A method
+MUST refuse ambiguous cardinalities or unsupported shapes rather than select a convenient entry.
+Exact absence still says nothing about other credentials the holder did not include; the
+closed-world qualifications in @sec-cwa and dataset agreement in @sec-input still apply.
+Agreement fixes the selected dataset, not a claim that it covers the world.
+
+== Vocabulary basis and privacy
+
+The vocabulary choices were checked on 2026-11-13 against the editor sources linked below.
+The VC Data Model source currently identifies itself as a later editor draft; this amendment
+retains the validity-period interpretation of the cited VC Data Model v2.0, including its
+earliest/latest endpoint wording. The current holder-key extension uses `cred:confidenceMethod`
+on a credential subject, with a cryptographic key such as `sec:Multikey`. This profile chooses
+that shape and a method-specific Schnorr key encoding; it does not introduce a W3C
+`holderBinding` credential property or treat the older `confirmationMethod` example caption
+as a defined property. The proposal history is recorded in VC Data Model issue
+#link("https://github.com/w3c/vc-data-model/issues/882")[882].
+Bitstring entries use `cred:credentialStatus`, `status:BitstringStatusListEntry`,
+`status:statusListCredential`, `status:statusListIndex` and `status:statusPurpose`, where
+`status:` is `https://www.w3.org/ns/credentials/status#`. Bit order follows the W3C list
+encoding; the method's Merkle digest is a profile commitment to that snapshot, not a new
+W3C digest property. Snapshot acceptance includes authenticating the list and its purpose. The internal trust-set
+and snapshot commitments in this draft use domain-separated Poseidon2 field digests,
+canonically encoded as big-endian field bytes; this is an explicit exception to @sec-vocab's
+SHA-256 rule for these profile commitments only. Request, plan and result digests keep their
+specified algorithms. The method must identify the internal profile and exact byte encoding
+in its parameters before wire use.
+
+The snapshot digest is `P(SNAPSHOT, list.enc, purpose.enc, bitLength, D, root)`, where `D` is
+the compiled status-tree depth. A status leaf is `P(STATUS_LEAF, bit, 0)`, with `bit` restricted
+to zero or one; internal nodes remain `P(left, right)`. `P` is the length-bound Poseidon2 hash.
+The distinct status-leaf tag and arity separate leaves from other envelope hash inputs,
+including internal nodes. The draft tags are `SNAPSHOT = 0x5643515f45534e50` and `STATUS_LEAF =
+0x5643515f45534c46`.
+
+== Deterministic policy roots
+
+The accepted-snapshot set and trust set use the same canonical set-tree algorithm. A snapshot
+member is the field digest specified above. A trust member is `P(KEY_SET_LEAF, issuer.enc,
+verificationMethod.enc, P(SUITE_ID, key.x, key.y), assertionMethod.enc)`. `KEY_SET_LEAF =
+0x5643515f454b4559`; `SUITE_ID` and RDF term encodings are those of
+`schnorr-poseidon2-merkle-2026`. `assertionMethod` is the exact IRI
+`https://w3id.org/security#assertionMethod`. This binds the issuer IRI, method, authorized
+assertion use, suite and both key coordinates. All identifiers preserve their RDF spelling.
+
+Encode each member as its canonical unsigned field value in exactly thirty-two big-endian bytes,
+with no modular reduction. Sort those byte strings in ascending lexicographic order and collapse
+byte-identical duplicates. A member equal to the zero field value MUST be refused. An enabled
+policy set MUST be nonempty. Let `n` be its unique member count and choose the least depth `d`
+such that `2^d >= n`, including depth zero for a singleton. Put members in sorted order in the
+first `n` leaves; fill every remaining leaf up to `2^d` with the zero field value. Reduce
+adjacent pairs left to right with `P(left, right)` until one root remains. Larger compilation
+capacity adds no levels to this tree. There is no separate leaf rehash after the member digest
+and no extra root wrapper. A computed zero root MUST be refused; zero is reserved for a publicly
+disabled policy. The verifier computes both set roots and their minimal depths in Rust from the
+stored request. Roots and depths enter the circuit as public inputs.
+
+A membership path has the compiled maximum number of siblings, from the leaf upward. Only the
+first `d` levels enter the root hash, using directions from the member's zero-based index. Every
+sibling and index bit above that public depth MUST be zero. The public depth MUST NOT exceed the
+compiled maximum. The circuit refuses a leaf opened one level too shallow or too deep for the
+accepted root. Root construction and sorting never run in a generated circuit. Thus different
+enumerations or duplicate listings of the same set give the same root for every verifier. This
+set-tree depth is distinct from the status-bit-tree depth `D` inside a snapshot digest.
+
+#strong[Source snapshots, retrieved 2026-11-13:]
+#link("https://raw.githubusercontent.com/w3c/vc-data-model/main/index.html")[VC Data Model,
+Validity Period, Status and confidenceMethod extension];
+#link("https://raw.githubusercontent.com/w3c/vc-bitstring-status-list/main/index.html")[Bitstring
+Status List, entry model, validation and bitstring encoding];
+#link("https://raw.githubusercontent.com/w3c/vc-confidence-method/main/index.html")[VC Confidence
+Method, Data Model and Cryptographic Key]. These are editor sources as retrieved on that
+date, not assertions that their current drafts are Recommendations.
+
+A holder service SHOULD assess cumulative disclosure before answering another question,
+including a repeated question with a different filter, time or dataset. Comparing answers can
+reveal individual facts even if each answer is small. A service SHOULD apply a consent and
+query-history policy across verifier identities and refuse questions exceeding that policy;
+fresh challenges and zero-knowledge proofs do not enforce that policy. This draft specifies that
+policy boundary without claiming an implemented holder-service hook.
+
+A fresh presentation salt and private credential roots avoid repeating a dataset identifier for
+holder-chosen datasets. A reused salt, an agreed input commitment, revealed signatures,
+query-selected identifiers, distinctive results and public policy or capacity choices can still
+link presentations. Hidden membership establishes an authorized issuer without publishing its
+selected key; a singleton trust set or a query pin can itself identify it. Domain binding limits
+where a presentation verifies; it does not prevent parties comparing results they already
+received. These statements are disclosure limits, not an external audit or an assurance of
+unlinkability.
 
 = References <sec-refs>
 

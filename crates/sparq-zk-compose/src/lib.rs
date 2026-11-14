@@ -184,7 +184,7 @@ pub use verifier::HolderRegistry;
 #[cfg(feature = "successful-results")]
 pub mod result;
 // beadzkp-13.5: private exact pinned-toolchain version matcher.
-#[cfg(all(feature = "successful-results", not(target_arch = "wasm32")))]
+#[cfg(not(target_arch = "wasm32"))]
 mod toolchain;
 
 // The LIVE-toolchain gate for the `#[cfg(test)]` tests that live in `src/` (the
