@@ -275,100 +275,173 @@
           "kind": "array",
           "length": 4,
           "type": {
-            "kind": "array",
-            "length": 4,
-            "type": {
-              "kind": "struct",
-              "path": "core::suite_entry::TermOpening",
-              "fields": [
-                {
-                  "name": "bound",
-                  "type": {
-                    "kind": "boolean"
-                  }
-                },
-                {
-                  "name": "kind",
-                  "type": {
-                    "kind": "integer",
-                    "sign": "unsigned",
-                    "width": 8
-                  }
-                },
-                {
-                  "name": "lexical",
-                  "type": {
-                    "kind": "array",
-                    "length": 32,
-                    "type": {
-                      "kind": "integer",
-                      "sign": "unsigned",
-                      "width": 8
+            "kind": "struct",
+            "path": "core::ops_core_profile::QuadOpening",
+            "fields": [
+              {
+                "name": "subject",
+                "type": {
+                  "kind": "struct",
+                  "path": "core::ops_core_profile::ResourceOpening",
+                  "fields": [
+                    {
+                      "name": "kind",
+                      "type": {
+                        "kind": "integer",
+                        "sign": "unsigned",
+                        "width": 8
+                      }
+                    },
+                    {
+                      "name": "lexical",
+                      "type": {
+                        "kind": "array",
+                        "length": 128,
+                        "type": {
+                          "kind": "integer",
+                          "sign": "unsigned",
+                          "width": 8
+                        }
+                      }
+                    },
+                    {
+                      "name": "lexical_len",
+                      "type": {
+                        "kind": "integer",
+                        "sign": "unsigned",
+                        "width": 32
+                      }
                     }
-                  }
-                },
-                {
-                  "name": "lexical_len",
-                  "type": {
-                    "kind": "integer",
-                    "sign": "unsigned",
-                    "width": 32
-                  }
-                },
-                {
-                  "name": "datatype",
-                  "type": {
-                    "kind": "array",
-                    "length": 128,
-                    "type": {
-                      "kind": "integer",
-                      "sign": "unsigned",
-                      "width": 8
-                    }
-                  }
-                },
-                {
-                  "name": "datatype_len",
-                  "type": {
-                    "kind": "integer",
-                    "sign": "unsigned",
-                    "width": 32
-                  }
-                },
-                {
-                  "name": "language",
-                  "type": {
-                    "kind": "array",
-                    "length": 64,
-                    "type": {
-                      "kind": "integer",
-                      "sign": "unsigned",
-                      "width": 8
-                    }
-                  }
-                },
-                {
-                  "name": "language_len",
-                  "type": {
-                    "kind": "integer",
-                    "sign": "unsigned",
-                    "width": 32
-                  }
-                },
-                {
-                  "name": "key",
-                  "type": {
-                    "kind": "array",
-                    "length": 31,
-                    "type": {
-                      "kind": "integer",
-                      "sign": "unsigned",
-                      "width": 8
-                    }
-                  }
+                  ]
                 }
-              ]
-            }
+              },
+              {
+                "name": "predicate",
+                "type": {
+                  "kind": "struct",
+                  "path": "core::ops_core_profile::ResourceOpening",
+                  "fields": [
+                    {
+                      "name": "kind",
+                      "type": {
+                        "kind": "integer",
+                        "sign": "unsigned",
+                        "width": 8
+                      }
+                    },
+                    {
+                      "name": "lexical",
+                      "type": {
+                        "kind": "array",
+                        "length": 128,
+                        "type": {
+                          "kind": "integer",
+                          "sign": "unsigned",
+                          "width": 8
+                        }
+                      }
+                    },
+                    {
+                      "name": "lexical_len",
+                      "type": {
+                        "kind": "integer",
+                        "sign": "unsigned",
+                        "width": 32
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "object",
+                "type": {
+                  "kind": "struct",
+                  "path": "core::ops_core_profile::ObjectOpening",
+                  "fields": [
+                    {
+                      "name": "kind",
+                      "type": {
+                        "kind": "integer",
+                        "sign": "unsigned",
+                        "width": 8
+                      }
+                    },
+                    {
+                      "name": "lexical",
+                      "type": {
+                        "kind": "array",
+                        "length": 160,
+                        "type": {
+                          "kind": "integer",
+                          "sign": "unsigned",
+                          "width": 8
+                        }
+                      }
+                    },
+                    {
+                      "name": "lexical_len",
+                      "type": {
+                        "kind": "integer",
+                        "sign": "unsigned",
+                        "width": 32
+                      }
+                    },
+                    {
+                      "name": "datatype",
+                      "type": {
+                        "kind": "array",
+                        "length": 41,
+                        "type": {
+                          "kind": "integer",
+                          "sign": "unsigned",
+                          "width": 8
+                        }
+                      }
+                    },
+                    {
+                      "name": "datatype_len",
+                      "type": {
+                        "kind": "integer",
+                        "sign": "unsigned",
+                        "width": 32
+                      }
+                    },
+                    {
+                      "name": "language",
+                      "type": {
+                        "kind": "array",
+                        "length": 1,
+                        "type": {
+                          "kind": "integer",
+                          "sign": "unsigned",
+                          "width": 8
+                        }
+                      }
+                    },
+                    {
+                      "name": "language_len",
+                      "type": {
+                        "kind": "integer",
+                        "sign": "unsigned",
+                        "width": 32
+                      }
+                    },
+                    {
+                      "name": "key",
+                      "type": {
+                        "kind": "array",
+                        "length": 31,
+                        "type": {
+                          "kind": "integer",
+                          "sign": "unsigned",
+                          "width": 8
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
           }
         },
         "visibility": "private"
@@ -377,7 +450,7 @@
         "name": "credential_proof_0",
         "type": {
           "kind": "struct",
-          "path": "core::ops_core_suite::CredentialProof",
+          "path": "core::ops_core_suite::BoundedCredentialProof",
           "fields": [
             {
               "name": "salt",
@@ -411,7 +484,7 @@
               "name": "created",
               "type": {
                 "kind": "struct",
-                "path": "core::suite_entry::TermOpening",
+                "path": "core::suite_entry::BoundedTermOpening",
                 "fields": [
                   {
                     "name": "bound",
@@ -451,7 +524,7 @@
                     "name": "datatype",
                     "type": {
                       "kind": "array",
-                      "length": 128,
+                      "length": 41,
                       "type": {
                         "kind": "integer",
                         "sign": "unsigned",
@@ -471,7 +544,7 @@
                     "name": "language",
                     "type": {
                       "kind": "array",
-                      "length": 64,
+                      "length": 1,
                       "type": {
                         "kind": "integer",
                         "sign": "unsigned",
@@ -506,14 +579,8 @@
               "name": "method",
               "type": {
                 "kind": "struct",
-                "path": "core::suite_entry::TermOpening",
+                "path": "core::ops_core_profile::ResourceOpening",
                 "fields": [
-                  {
-                    "name": "bound",
-                    "type": {
-                      "kind": "boolean"
-                    }
-                  },
                   {
                     "name": "kind",
                     "type": {
@@ -540,58 +607,6 @@
                       "kind": "integer",
                       "sign": "unsigned",
                       "width": 32
-                    }
-                  },
-                  {
-                    "name": "datatype",
-                    "type": {
-                      "kind": "array",
-                      "length": 128,
-                      "type": {
-                        "kind": "integer",
-                        "sign": "unsigned",
-                        "width": 8
-                      }
-                    }
-                  },
-                  {
-                    "name": "datatype_len",
-                    "type": {
-                      "kind": "integer",
-                      "sign": "unsigned",
-                      "width": 32
-                    }
-                  },
-                  {
-                    "name": "language",
-                    "type": {
-                      "kind": "array",
-                      "length": 64,
-                      "type": {
-                        "kind": "integer",
-                        "sign": "unsigned",
-                        "width": 8
-                      }
-                    }
-                  },
-                  {
-                    "name": "language_len",
-                    "type": {
-                      "kind": "integer",
-                      "sign": "unsigned",
-                      "width": 32
-                    }
-                  },
-                  {
-                    "name": "key",
-                    "type": {
-                      "kind": "array",
-                      "length": 31,
-                      "type": {
-                        "kind": "integer",
-                        "sign": "unsigned",
-                        "width": 8
-                      }
                     }
                   }
                 ]
@@ -981,13 +996,13 @@
         "error_kind": "string",
         "string": "attempt to bit-shift with overflow"
       },
+      "5476849662351484621": {
+        "error_kind": "string",
+        "string": "Field failed to decompose into specified 5 limbs"
+      },
       "5518442806234925027": {
         "error_kind": "string",
         "string": "credential padding count"
-      },
-      "5709057177320904959": {
-        "error_kind": "string",
-        "string": "unbound lexical opening"
       },
       "6276453858708207445": {
         "error_kind": "string",
@@ -997,6 +1012,14 @@
         "error_kind": "string",
         "string": "byte capacity"
       },
+      "6793902366074650148": {
+        "error_kind": "string",
+        "string": "chunk split width"
+      },
+      "6943261920537458947": {
+        "error_kind": "string",
+        "string": "credential scalar lexical capacity"
+      },
       "6954557700313815613": {
         "error_kind": "string",
         "string": "identity key is not admitted"
@@ -1005,17 +1028,21 @@
         "error_kind": "string",
         "string": "empty key payload"
       },
+      "7327296941349474725": {
+        "error_kind": "string",
+        "string": "credential blank-node scope"
+      },
       "7393549285676195791": {
         "error_kind": "string",
         "string": "challenge reduction not bound to its preimage"
       },
+      "7599978336173926558": {
+        "error_kind": "string",
+        "string": "credential resource lexical capacity"
+      },
       "7829214461486016634": {
         "error_kind": "string",
         "string": "parameter padding"
-      },
-      "8051490839407871637": {
-        "error_kind": "string",
-        "string": "credential named graph not yet supported"
       },
       "8086167173253898483": {
         "error_kind": "string",
@@ -1024,10 +1051,6 @@
       "8189835557297515222": {
         "error_kind": "string",
         "string": "term scope"
-      },
-      "8299425108256767787": {
-        "error_kind": "string",
-        "string": "non-zero byte padding"
       },
       "8400482264603146299": {
         "error_kind": "string",
@@ -1077,6 +1100,10 @@
         "error_kind": "string",
         "string": "inactive status policy"
       },
+      "10581609047269650812": {
+        "error_kind": "string",
+        "string": "empty holder issuer list"
+      },
       "10843810106516118511": {
         "error_kind": "string",
         "string": "language datatype"
@@ -1120,6 +1147,14 @@
       "12503300356356875086": {
         "error_kind": "string",
         "string": "key disagrees with lexical form"
+      },
+      "12505993672147081698": {
+        "error_kind": "string",
+        "string": "credential normalization count"
+      },
+      "12514726124350553137": {
+        "error_kind": "string",
+        "string": "validity instant range"
       },
       "12659316033304120378": {
         "error_kind": "string",
@@ -1165,6 +1200,10 @@
         "error_kind": "string",
         "string": "attempt to add with overflow"
       },
+      "14992740858847533537": {
+        "error_kind": "string",
+        "string": "nonliteral position"
+      },
       "15835548349546956319": {
         "error_kind": "string",
         "string": "Field failed to decompose into specified 32 limbs"
@@ -1197,17 +1236,21 @@
         "error_kind": "string",
         "string": "key width"
       },
+      "17220376482881474570": {
+        "error_kind": "string",
+        "string": "byte prefix length"
+      },
       "17558050003890529665": {
         "error_kind": "string",
         "string": "object kind"
       },
-      "17842223509087181478": {
-        "error_kind": "string",
-        "string": "graph kind"
-      },
       "17885380776686846557": {
         "error_kind": "string",
         "string": "row request bound"
+      },
+      "17928045010679114796": {
+        "error_kind": "string",
+        "string": "freshness instant range"
       },
       "17993512535712032858": {
         "error_kind": "string",

@@ -31,8 +31,8 @@ It copies binaries and witness material into private temporary directories and
 removes them afterwards. It does not send credentials to a proving service.
 `backend: 'wasm'` is opt-in and refuses entries outside its supported catalogue.
 Measured authenticated entries admit it and run the same proof and refusal
-contracts in the live suite. Resident memory may exceed the consumer budget even
-when the linear heap fits. Native remains the default.
+contracts in the live suite, including queries spanning credentials. Native
+remains the default pending the full generated consumer-query measurements.
 
 `issuerKeygen()` uses system randomness and accepts no seed. Keep its opaque
 `secretKeyHex` private. `testIssuerKeygen(seedHex)` is deterministic and test-only.
@@ -49,6 +49,8 @@ later. `maxResultSize` defaults to the table bound; `maxPresentationBytes` defau
 to sixteen mebibytes. `inputCommitment` names an agreed salted dataset commitment.
 Required holder binding, snapshots, credential validity and freshness receive
 the primitive's envelope-integration refusal.
+Underlying credential-policy instants use epoch milliseconds. Request-window
+instants retain their seconds representation; the extra credential policies remain refused.
 
 Replay protection lives in the caller's synchronous, atomic, durable
 `consume(nonce)` store. Return `fresh` or `alreadyConsumed`; throw on failure.
@@ -69,6 +71,8 @@ A source checkout builds bindings and pinned CRS with
 `build-circuits.mjs` maintainer operation. Consumer tarballs are self-contained.
 `CARGO_BUILD_JOBS` also limits concurrent native catalogue compilations; unset
 means serial. Completed cache entries are checked against the committed pins.
+After rebuilding, regenerate every plan, key and fixture together; the catalogue
+test rejects stale assets and examples whose Rust-derived plan differs.
 
 For a verifier-agreed `inputCommitment`, the holder passes the existing commitment's
 salt as `backend: { type: 'native', presentationSaltHex }` (or the corresponding

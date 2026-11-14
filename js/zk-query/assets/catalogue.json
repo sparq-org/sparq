@@ -4,18 +4,18 @@
     "operator": "required",
     "authenticated": {
       "status": "skipped-by-design",
-      "reason": "The measured authenticated compiler exhausted the WebAssembly allocation limit; authenticated catalogue programs are compiled natively."
+      "reason": "Authenticated catalogue programs are compiled natively; holders derive the plan from the query and check pinned artifacts and keys. The pinned XPath dependency also blocks the WebAssembly resolver."
     },
     "xpathKnownFailure": "noir_XPath at the pinned tag vendors sha256 under an alias equal to a nested module basename; the WebAssembly compiler rejects that dependency graph. These are named known failures pending the upstream alias repair."
   },
   "entries": [
     {
-      "planHash": "e3d9b31f843a0f143dd75bc71f65b3871625ee545c1c4b45be1fbc3ce9fbc9ff",
-      "packageName": "query_e3d9b31f843a0f143dd75bc71f65b3871625ee545c1c4b45be1fbc3ce9fbc9ff",
-      "acir": "e3d9b31f843a0f143dd75bc71f65b3871625ee545c1c4b45be1fbc3ce9fbc9ff.json",
-      "vk": "e3d9b31f843a0f143dd75bc71f65b3871625ee545c1c4b45be1fbc3ce9fbc9ff.vk.hex",
-      "acirSha256": "b6b8cc18f394b3fa6164bca3f7e82ac4ca2436f25246ac9fb34cde5969263ecc",
-      "vkSha256": "eb64c092c45ef6159a43d734a17e7857afb47c2124f679525a36727adce07e8c",
+      "planHash": "18f1e50f8314c66e1f2e80dfa3f5ac71d121babc3cd938fcc989ec7515143210",
+      "packageName": "query_18f1e50f8314c66e1f2e80dfa3f5ac71d121babc3cd938fcc989ec7515143210",
+      "acir": "18f1e50f8314c66e1f2e80dfa3f5ac71d121babc3cd938fcc989ec7515143210.json",
+      "vk": "18f1e50f8314c66e1f2e80dfa3f5ac71d121babc3cd938fcc989ec7515143210.vk.hex",
+      "acirSha256": "1a3906d3a84e9c1a0832ab091c4330ee4acdc8bd5b20405486a94808709ccfff",
+      "vkSha256": "68cc2cbf4518ca2fd4171f98d0c40d77bdd70038383e004b47c0fac702e981d4",
       "wasmProving": true,
       "example": {
         "query": "ASK {}",
@@ -27,12 +27,12 @@
       }
     },
     {
-      "planHash": "f0f274f09385e498c6caa273348e5da64d3453e7df806d78d5567a83fec503d6",
-      "packageName": "query_f0f274f09385e498c6caa273348e5da64d3453e7df806d78d5567a83fec503d6",
-      "acir": "f0f274f09385e498c6caa273348e5da64d3453e7df806d78d5567a83fec503d6.json",
-      "vk": "f0f274f09385e498c6caa273348e5da64d3453e7df806d78d5567a83fec503d6.vk.hex",
-      "acirSha256": "5b8d0d747bef3ceef86497d7f980ee92525078c0ee1a99320f30ca1eea03539d",
-      "vkSha256": "9dbaf94d450af888cbfd1aa7a56e8d441c8cb868a1864949126202b3c3fdbb0e",
+      "planHash": "f4be0bfb23545961099597734c2855c60e3efd13463f7eb81be0ebfba05fb637",
+      "packageName": "query_f4be0bfb23545961099597734c2855c60e3efd13463f7eb81be0ebfba05fb637",
+      "acir": "f4be0bfb23545961099597734c2855c60e3efd13463f7eb81be0ebfba05fb637.json",
+      "vk": "f4be0bfb23545961099597734c2855c60e3efd13463f7eb81be0ebfba05fb637.vk.hex",
+      "acirSha256": "cfe5dd5381847b2b8d785d1da2ef55966b3cb02d727ff2a3c815bcbf585641bd",
+      "vkSha256": "5ec49517de1746d47b87fabe24ce4f6a05a600b08bd4c93aed262b606e0feebc",
       "wasmProving": true,
       "example": {
         "query": "SELECT ?s ?x WHERE {?s <urn:p> ?x}",
@@ -44,12 +44,12 @@
       }
     },
     {
-      "planHash": "d8f561cb7c83d037d062aa32e719455dc876bf99ec2b22ace824654dc3cd987f",
-      "packageName": "query_d8f561cb7c83d037d062aa32e719455dc876bf99ec2b22ace824654dc3cd987f",
-      "acir": "d8f561cb7c83d037d062aa32e719455dc876bf99ec2b22ace824654dc3cd987f.json",
-      "vk": "d8f561cb7c83d037d062aa32e719455dc876bf99ec2b22ace824654dc3cd987f.vk.hex",
-      "acirSha256": "86a5d2a64c81e336b680b093aba6c272083c128de0673b5a0366558e465fdff9",
-      "vkSha256": "393b059403f260617de04966bad696395061f61e0e6faf98bbc52385efaab424",
+      "planHash": "269128f9fff952d5a0860b33a1ef5c7985f32697ea9ae0e712652ff7505ec6ec",
+      "packageName": "query_269128f9fff952d5a0860b33a1ef5c7985f32697ea9ae0e712652ff7505ec6ec",
+      "acir": "269128f9fff952d5a0860b33a1ef5c7985f32697ea9ae0e712652ff7505ec6ec.json",
+      "vk": "269128f9fff952d5a0860b33a1ef5c7985f32697ea9ae0e712652ff7505ec6ec.vk.hex",
+      "acirSha256": "10663351f19e65756c22b8653b6f1cad52bcefbae48cc0923b07968f9458caee",
+      "vkSha256": "5a55bf6d90f74d0e35f6a265d6acfd23937b0404ea5abff11b5e11289c9a108d",
       "wasmProving": true,
       "example": {
         "query": "SELECT ?s WHERE {?s <urn:p> ?x . ?s <urn:q> ?y}",
@@ -61,12 +61,29 @@
       }
     },
     {
-      "planHash": "8faedc0eac6a6d60d78d15a36a8a9b4f4f6f83370f339061e3999b43c24cefd4",
-      "packageName": "query_8faedc0eac6a6d60d78d15a36a8a9b4f4f6f83370f339061e3999b43c24cefd4",
-      "acir": "8faedc0eac6a6d60d78d15a36a8a9b4f4f6f83370f339061e3999b43c24cefd4.json",
-      "vk": "8faedc0eac6a6d60d78d15a36a8a9b4f4f6f83370f339061e3999b43c24cefd4.vk.hex",
-      "acirSha256": "3462a5bf1f2117166616b988a7740e0730fdd9bf5422c9cea0045e78477a4997",
-      "vkSha256": "d35a5c9a48ac59cf2524f1758cdc06806a655d8f6e4e6836bfb73c6e43fc4e0c",
+      "planHash": "cf14fc19d26e4cb75a0189a2b59dc4f1fe77c708ee6bb4f15c221fa7a826c5b8",
+      "packageName": "query_cf14fc19d26e4cb75a0189a2b59dc4f1fe77c708ee6bb4f15c221fa7a826c5b8",
+      "acir": "cf14fc19d26e4cb75a0189a2b59dc4f1fe77c708ee6bb4f15c221fa7a826c5b8.json",
+      "vk": "cf14fc19d26e4cb75a0189a2b59dc4f1fe77c708ee6bb4f15c221fa7a826c5b8.vk.hex",
+      "acirSha256": "396e3b9ab7231910fb1721bcdcd4b9455edbbf5af8da493cbd98d1f6a0228211",
+      "vkSha256": "eb16b63f5e657eed60fce4dfbe45392c73d809c8138c02c2261b52c46aa74790",
+      "wasmProving": true,
+      "example": {
+        "query": "SELECT ?s WHERE {?s <urn:p> ?x . ?s <urn:q> ?y}",
+        "bounds": {
+          "credentials": 2,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "6409d4ef6b04098a7b3c3f45cb5491295dbc5abd942b5f0a74dfaa1379e1fc41",
+      "packageName": "query_6409d4ef6b04098a7b3c3f45cb5491295dbc5abd942b5f0a74dfaa1379e1fc41",
+      "acir": "6409d4ef6b04098a7b3c3f45cb5491295dbc5abd942b5f0a74dfaa1379e1fc41.json",
+      "vk": "6409d4ef6b04098a7b3c3f45cb5491295dbc5abd942b5f0a74dfaa1379e1fc41.vk.hex",
+      "acirSha256": "ef804f829b4f27736f33cad9859d8a8367617ce21fa906c84b98f1ad7bc958a4",
+      "vkSha256": "27f25ab5c2c38fa023cfb3dcafac663d95b04dc59023d962875135e8b03cbd3a",
       "wasmProving": true,
       "example": {
         "query": "SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x >= 1 && ?x < 2)}",
@@ -78,12 +95,12 @@
       }
     },
     {
-      "planHash": "c2b2a2f0615549ab6983bb0dc93f849634a077cb78695ce1372271ccf4b7f877",
-      "packageName": "query_c2b2a2f0615549ab6983bb0dc93f849634a077cb78695ce1372271ccf4b7f877",
-      "acir": "c2b2a2f0615549ab6983bb0dc93f849634a077cb78695ce1372271ccf4b7f877.json",
-      "vk": "c2b2a2f0615549ab6983bb0dc93f849634a077cb78695ce1372271ccf4b7f877.vk.hex",
-      "acirSha256": "243ff5bb5eab6b3ff395dda5eb2ff2da97b7c7e85198875f115651dfda6eb287",
-      "vkSha256": "82b53294b3bfa946a5a57a62c224059e857568531d35c3c47a2f7649c90b64a5",
+      "planHash": "df2bf3db2f2b1896b734cbea2d98568eabbaebfd89f703f1334452faff9f37ab",
+      "packageName": "query_df2bf3db2f2b1896b734cbea2d98568eabbaebfd89f703f1334452faff9f37ab",
+      "acir": "df2bf3db2f2b1896b734cbea2d98568eabbaebfd89f703f1334452faff9f37ab.json",
+      "vk": "df2bf3db2f2b1896b734cbea2d98568eabbaebfd89f703f1334452faff9f37ab.vk.hex",
+      "acirSha256": "98e5573f6213f5b0289eebfa74f312717fd820d5e20402bf22a01a3bb86e5f3a",
+      "vkSha256": "84857282bfb7399f805cc380aebc03d2417cac8a7f2f104b31ca1f1c69bc06f7",
       "wasmProving": true,
       "example": {
         "query": "SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x IN (1,3))}",
@@ -95,29 +112,12 @@
       }
     },
     {
-      "planHash": "d0140fff365e1a31bccf59c9b7dc4cf843bc27ab819b89462d58d57fe3ac4f63",
-      "packageName": "query_d0140fff365e1a31bccf59c9b7dc4cf843bc27ab819b89462d58d57fe3ac4f63",
-      "acir": "d0140fff365e1a31bccf59c9b7dc4cf843bc27ab819b89462d58d57fe3ac4f63.json",
-      "vk": "d0140fff365e1a31bccf59c9b7dc4cf843bc27ab819b89462d58d57fe3ac4f63.vk.hex",
-      "acirSha256": "97e0745f37a4f49d42b5094b1afd5f867c094624e61e66828e4f5cc5414a8c45",
-      "vkSha256": "1c12ba5369aabdfc49010df64b426d263c00310915e7b78b14888517445fd4ea",
-      "wasmProving": false,
-      "example": {
-        "query": "SELECT ?s WHERE {?s <urn:p> ?x . ?s <urn:q> ?y}",
-        "bounds": {
-          "credentials": 2,
-          "quadsPerCredential": 4,
-          "rowsPerTable": 4
-        }
-      }
-    },
-    {
-      "planHash": "95157e414c770a48ec55f51ca1f1814f7da7671ad3297f3993ea5004ffcc824a",
-      "packageName": "query_95157e414c770a48ec55f51ca1f1814f7da7671ad3297f3993ea5004ffcc824a",
-      "acir": "95157e414c770a48ec55f51ca1f1814f7da7671ad3297f3993ea5004ffcc824a.json",
-      "vk": "95157e414c770a48ec55f51ca1f1814f7da7671ad3297f3993ea5004ffcc824a.vk.hex",
-      "acirSha256": "286862f3491f9c90a5220314d4b6a0b1abf9fd5910f763db711ee8588a4e3ef4",
-      "vkSha256": "98682d6f0d020d76b07f468abb4e6b242a7f48980f025ea1b9f3344b13042651",
+      "planHash": "c3a86629c45eca7ad1ddb0d03fc85a875bc16128ca49478095f0f038c92ed363",
+      "packageName": "query_c3a86629c45eca7ad1ddb0d03fc85a875bc16128ca49478095f0f038c92ed363",
+      "acir": "c3a86629c45eca7ad1ddb0d03fc85a875bc16128ca49478095f0f038c92ed363.json",
+      "vk": "c3a86629c45eca7ad1ddb0d03fc85a875bc16128ca49478095f0f038c92ed363.vk.hex",
+      "acirSha256": "58a18727fa9634a277526669341d5d4b455f3461a81ed0d1448009060db7d4e5",
+      "vkSha256": "dbf7f9477ddd5b07b3b0d44ec7124714524a0b9ef5ea5e2047fcd3eab80ff8ab",
       "wasmProving": true,
       "example": {
         "query": "SELECT ?s WHERE {?s <urn:p> ?x VALUES ?x {1 UNDEF}}",
@@ -129,12 +129,12 @@
       }
     },
     {
-      "planHash": "4d29fe33e6aeee7d4fbcb551864fc302714b56bbe815d53aa8f81ec1377701c3",
-      "packageName": "query_4d29fe33e6aeee7d4fbcb551864fc302714b56bbe815d53aa8f81ec1377701c3",
-      "acir": "4d29fe33e6aeee7d4fbcb551864fc302714b56bbe815d53aa8f81ec1377701c3.json",
-      "vk": "4d29fe33e6aeee7d4fbcb551864fc302714b56bbe815d53aa8f81ec1377701c3.vk.hex",
-      "acirSha256": "38e44b2968ddfae546535473025428d4970e70a0fb9eca91a7ee18a49fbba216",
-      "vkSha256": "5af6180b5c639b8adce102257343140d6d02812c91073e77f76da96a23b1729f",
+      "planHash": "c70aa99aaf7af6effdc9ea62f1b741c0afde8e143b6e833a5c45ef5004645ff7",
+      "packageName": "query_c70aa99aaf7af6effdc9ea62f1b741c0afde8e143b6e833a5c45ef5004645ff7",
+      "acir": "c70aa99aaf7af6effdc9ea62f1b741c0afde8e143b6e833a5c45ef5004645ff7.json",
+      "vk": "c70aa99aaf7af6effdc9ea62f1b741c0afde8e143b6e833a5c45ef5004645ff7.vk.hex",
+      "acirSha256": "0ca6f334fa38d598220fea8a8937a1f75662c63f5764cf3321398e3a7e709d2e",
+      "vkSha256": "e0f69f88cf14c4e657dafa5e31e5f5af228ce4268503e54608aeaee1b390bc04",
       "wasmProving": true,
       "example": {
         "query": "SELECT ?p WHERE {?s ?p ?o}",
@@ -146,12 +146,12 @@
       }
     },
     {
-      "planHash": "856bd49187ca09dd1fc69d06505ad6573eab2556da7756e6e2d12fc54907a156",
-      "packageName": "query_856bd49187ca09dd1fc69d06505ad6573eab2556da7756e6e2d12fc54907a156",
-      "acir": "856bd49187ca09dd1fc69d06505ad6573eab2556da7756e6e2d12fc54907a156.json",
-      "vk": "856bd49187ca09dd1fc69d06505ad6573eab2556da7756e6e2d12fc54907a156.vk.hex",
-      "acirSha256": "ddeb78aeec1a9e44292a44946ae3f212ded87ce0eba239e27beed0690e86d5ec",
-      "vkSha256": "5a37a8b52a776cae73336a10fa0d42ae6d5dc9d7bb32d8b522f7df231f330288",
+      "planHash": "8e8ec6c2dc6b4d37b773d8912c2a4dfb6d9dfcbb2ece23c5ac3aac95986bdb52",
+      "packageName": "query_8e8ec6c2dc6b4d37b773d8912c2a4dfb6d9dfcbb2ece23c5ac3aac95986bdb52",
+      "acir": "8e8ec6c2dc6b4d37b773d8912c2a4dfb6d9dfcbb2ece23c5ac3aac95986bdb52.json",
+      "vk": "8e8ec6c2dc6b4d37b773d8912c2a4dfb6d9dfcbb2ece23c5ac3aac95986bdb52.vk.hex",
+      "acirSha256": "b175dee8d455b5a3d852c305b1e3cfcb7ee0fe03f0c738befcf77ce352ff8610",
+      "vkSha256": "a352f19ebb5e01c9e4f1fb18111eca57c92f37b3914d6da5f34c9bd6dca0e2a1",
       "wasmProving": true,
       "example": {
         "query": "SELECT DISTINCT ?p WHERE {?s ?p ?o}",
@@ -163,12 +163,12 @@
       }
     },
     {
-      "planHash": "d3b2ff1313d581819975301c0ba248b432950865e470a138b8387a7ea1b1f892",
-      "packageName": "query_d3b2ff1313d581819975301c0ba248b432950865e470a138b8387a7ea1b1f892",
-      "acir": "d3b2ff1313d581819975301c0ba248b432950865e470a138b8387a7ea1b1f892.json",
-      "vk": "d3b2ff1313d581819975301c0ba248b432950865e470a138b8387a7ea1b1f892.vk.hex",
-      "acirSha256": "d844054d2029321844dfe49623e5e9b4788096cb9c9f111786f5439439329b6e",
-      "vkSha256": "8eabba236b9d0ffb22d330b3c67a63dd8db0f5afbef422ea545484a61b674a79",
+      "planHash": "57edf42454c145acd9d1ce784ce98ba57867cbdd39afe19ec7a1b7c5c7b31a3a",
+      "packageName": "query_57edf42454c145acd9d1ce784ce98ba57867cbdd39afe19ec7a1b7c5c7b31a3a",
+      "acir": "57edf42454c145acd9d1ce784ce98ba57867cbdd39afe19ec7a1b7c5c7b31a3a.json",
+      "vk": "57edf42454c145acd9d1ce784ce98ba57867cbdd39afe19ec7a1b7c5c7b31a3a.vk.hex",
+      "acirSha256": "181c73c11e9a3388f8e04e4d78672fb6afc5be9fe5948c33ed10bc4120d81e8f",
+      "vkSha256": "cced7dd70e767f968646dff29b0edf024daa764729a3a56ead70db7764e3dc72",
       "wasmProving": true,
       "example": {
         "query": "SELECT ?s WHERE {?s <urn:p> ?x} LIMIT 1 OFFSET 1",
@@ -180,12 +180,12 @@
       }
     },
     {
-      "planHash": "5d4fc1f7547b7155e7f1b12ed0df15330572d568bc0ffe8d2cc95fa03415fc9f",
-      "packageName": "query_5d4fc1f7547b7155e7f1b12ed0df15330572d568bc0ffe8d2cc95fa03415fc9f",
-      "acir": "5d4fc1f7547b7155e7f1b12ed0df15330572d568bc0ffe8d2cc95fa03415fc9f.json",
-      "vk": "5d4fc1f7547b7155e7f1b12ed0df15330572d568bc0ffe8d2cc95fa03415fc9f.vk.hex",
-      "acirSha256": "fbf5256f1742c62e9dcbfea95691dac1267ca499098ab8dbe3d6ceeee7cdbe86",
-      "vkSha256": "3542e31c51e8aa4e7ef3150c5aff6072a49aaa4ee9d132c477cd864a4da51d4a",
+      "planHash": "8bbf5639808fbab2c7bc9ab8a762cb44b47035dca47f9c3559ea618ea74cc7cf",
+      "packageName": "query_8bbf5639808fbab2c7bc9ab8a762cb44b47035dca47f9c3559ea618ea74cc7cf",
+      "acir": "8bbf5639808fbab2c7bc9ab8a762cb44b47035dca47f9c3559ea618ea74cc7cf.json",
+      "vk": "8bbf5639808fbab2c7bc9ab8a762cb44b47035dca47f9c3559ea618ea74cc7cf.vk.hex",
+      "acirSha256": "36245c76cb8326141ff9de0f63892ff084eab0be73849c5c76bece1017ab5cf0",
+      "vkSha256": "a0a1639f8d412969b570b33abe1c901749a4613e8ccfced21146250d3986ea25",
       "wasmProving": true,
       "example": {
         "query": "ASK {?s <urn:p> ?x}",
@@ -197,12 +197,12 @@
       }
     },
     {
-      "planHash": "2f5e58f438ca4a281129f7329eb374f0417a9c49bd6e713fe603034a7d93a408",
-      "packageName": "query_2f5e58f438ca4a281129f7329eb374f0417a9c49bd6e713fe603034a7d93a408",
-      "acir": "2f5e58f438ca4a281129f7329eb374f0417a9c49bd6e713fe603034a7d93a408.json",
-      "vk": "2f5e58f438ca4a281129f7329eb374f0417a9c49bd6e713fe603034a7d93a408.vk.hex",
-      "acirSha256": "331d5d48df06f02ddfdaf1b35a3abe8da58c251285b1eab0006c2f1b27cddbe7",
-      "vkSha256": "907ef3e2ad4d3e7bd2055e5b4e59b9f461bd5a8c0961ccf150111a5e929a6a3c",
+      "planHash": "3362346230644f35055b1045c3eb0a7a9931a9f961c5daedc09402f28c274f5a",
+      "packageName": "query_3362346230644f35055b1045c3eb0a7a9931a9f961c5daedc09402f28c274f5a",
+      "acir": "3362346230644f35055b1045c3eb0a7a9931a9f961c5daedc09402f28c274f5a.json",
+      "vk": "3362346230644f35055b1045c3eb0a7a9931a9f961c5daedc09402f28c274f5a.vk.hex",
+      "acirSha256": "033e01b8f143a15b1958bb48d08a51c8293bcc1e9d738c7ea0acaf5401aa0079",
+      "vkSha256": "7081752b74f9c671449c3bff6ea2d1e7c568fb72a7ef1862c65c9fdcc658facf",
       "wasmProving": true,
       "example": {
         "query": "ASK {?s <urn:p> ?x FILTER(?x > 8)}",
@@ -214,15 +214,8 @@
       }
     }
   ],
-  "sourceBundleSha256": "3764e678da429d6aaf1f2d014989f1ce07a3c6b1fcb03af7d71fe1c848dc4e69",
-  "crsPinsSha256": "b31eedd906f0f02d8e940af834a239694c9ef9790909e7c8b77d0065d819c41d",
+  "sourceBundleSha256": "293e4a52f03a27bcd6258cf5c962e41b6f87875164006f31ce3089ebd61ca43f",
+  "crsPinsSha256": "a55f3432e56bad219cd34d54c02adfce00c441c916a5bfa4045751fadf3c9d24",
   "notYetCatalogued": [],
-  "nativeKnownFailures": [
-    {
-      "case": "date-range",
-      "stage": "witness",
-      "expectedRefusal": "native witness execution failed",
-      "reason": "The unchanged native date comparison reaches assert_max_bit_size in expr_compare.nr through value_compare. This authenticated fixture is a named known failure and does not count as proved."
-    }
-  ]
+  "nativeKnownFailures": []
 }

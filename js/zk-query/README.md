@@ -43,6 +43,8 @@ creation and verification-method metadata. Omission selects the suite-only
 configuration. This argument is a configuration carrier; credential status
 checking requires the envelope integration. Required holder binding, accepted
 status snapshots, validity time and freshness policies are currently refused.
+The underlying credential policy uses epoch milliseconds for validity and
+freshness instants; request-window instants retain their seconds representation.
 
 `prove` returns `{ presentation, result }`. ASK results contain `boolean`; SELECT
 results contain `variables` and ordered `rows` of RDF term strings or `null` for
@@ -81,10 +83,10 @@ binary pins select the supported native platform. Secret inputs use private file
 child output is bounded and untrusted, and temporary files are removed afterwards.
 
 Catalogue entries marked `wasmProving` admit the opt-in WebAssembly backend and
-run the same successful-proof and refusal contracts in the live suite. Entries
-outside that measured set require native proving. WebAssembly resident
-memory can exceed a consumer's budget even when its linear heap fits; native
-remains the default. Consumer-limit profiles are not yet catalogued and refuse.
+run the same successful-proof and refusal contracts in the live suite, including
+queries spanning credentials. Native remains the default pending measurement of
+the full generated consumer queries against the agreed gate budget.
+Consumer-limit profiles are not yet catalogued and refuse.
 
 `backend: 'wasm'` selects the in-process witness and prover implementation for
 catalogue entries that admit it. Other entries return a refusal before witness
@@ -127,6 +129,8 @@ query/bounds profiles and `--write-pins` explicitly updates maintainer pins.
 when unset. Duplicate plan hashes share a build and must generate identical sources.
 Cached source paths through symbolic links are refused; staging replaces ordinary
 cached files without modifying another hard link's contents.
+Catalogue checks derive each example's plan again through Rust and reject stale
+key or program files left over from a rebuild.
 Rebuild bindings after a pin update. An absent compiled plan refuses with
 `missing catalogue plan` rather than choosing a different capacity.
 
@@ -141,9 +145,6 @@ The private live harness takes `SPARQ_QUERY_TEST_DIR` for resumable evidence and
 Neither variable affects the installed API.
 
 <!-- catalogue-pending:start -->
-
-Named native witness known failures: `date-range`. They are exercised as
-refusals and are not counted as proved; the catalogue records their cause.
 
 All listed test profiles have pinned catalogue entries.
 <!-- catalogue-pending:end -->
