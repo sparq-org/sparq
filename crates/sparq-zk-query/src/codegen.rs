@@ -298,17 +298,25 @@ fn generate_inner(
             Operator::Filter(a, expr) => {
                 let read_columns = read_columns(expr, &plan.nodes[*a as usize].output.variables);
                 if authenticated && !read_columns.is_empty() {
-                    let checker = if identity_string_reads(expr) {
-                        "check_identity_equalities"
+                    let profiles = filter_read_profiles(plan, *a, expr, &read_columns);
+                    let identity = identity_string_reads(expr);
+                    let columns = array(read_columns.iter().map(usize::to_string));
+                    if profiles.iter().any(|&p| p != READ_ALL) {
+                        let checker = if identity { "check_identity_profiled" } else { "check_profiled" };
+                        writeln!(
+                            source,
+                            "    core::ops_core_reads::{checker}(t{a}, reads_{i}, {columns}, {}, parameters);",
+                            array(profiles.iter().map(u32::to_string))
+                        )
+                        .unwrap();
                     } else {
-                        "check_with_parameters"
-                    };
-                    writeln!(
-                        source,
-                        "    core::ops_core_reads::{checker}(t{a}, reads_{i}, {}, parameters);",
-                        array(read_columns.iter().map(usize::to_string))
-                    )
-                    .unwrap();
+                        let checker = if identity { "check_identity_equalities" } else { "check_with_parameters" };
+                        writeln!(
+                            source,
+                            "    core::ops_core_reads::{checker}(t{a}, reads_{i}, {columns}, parameters);"
+                        )
+                        .unwrap();
+                    }
                 }
                 let mut steps = vec![];
                 expression(
@@ -434,6 +442,96 @@ pub(crate) fn read_columns(expr: &Expr, schema: &[Var]) -> Vec<usize> {
     let mut columns = std::collections::BTreeSet::new();
     collect(expr, schema, &mut columns);
     columns.into_iter().collect()
+}
+
+/// Value-read datatype profile bits, equal to `ops_core_suite::READ_*` in the Noir core.
+pub(crate) const READ_STRING: u32 = 1;
+pub(crate) const READ_ALL: u32 = 63;
+const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
+/// The XSD local names a read profile admits, in bit order.
+pub(crate) const READ_DATATYPES: [&str; 6] =
+    ["string", "integer", "decimal", "date", "dateTime", "boolean"];
+
+fn constant_profile(parameter: Option<&Parameter>) -> u32 {
+    let Some(Parameter::Term(oxrdf::Term::Literal(l))) = parameter else {
+        return READ_ALL;
+    };
+    if l.language().is_some() {
+        return READ_ALL;
+    }
+    match l.datatype().as_str().strip_prefix(XSD) {
+        Some("integer" | "decimal") => 2 | 4,
+        Some("date" | "dateTime") => 8 | 16,
+        Some("boolean") => 32,
+        Some("string") => READ_STRING,
+        _ => READ_ALL,
+    }
+}
+
+/// Per-variable value-read datatype profiles, derived only from the (hashed) plan: a
+/// variable compared only with typed constants needs key checks for those constants'
+/// comparable datatypes; any other use needs all of them. A value outside its profile
+/// has no proof (a named profile refusal, never a different answer).
+pub(crate) fn read_profiles(expr: &Expr, parameters: &[Parameter], out: &mut BTreeMap<Var, u32>) {
+    fn all(e: &Expr, out: &mut BTreeMap<Var, u32>) {
+        match e {
+            Expr::Term(Slot::Variable(v)) => {
+                out.insert(*v, READ_ALL);
+            }
+            Expr::Term(Slot::Parameter(_)) => {}
+            Expr::Compare(_, a, b) | Expr::And(a, b) | Expr::Or(a, b) => {
+                all(a, out);
+                all(b, out);
+            }
+            Expr::Not(a) | Expr::InList { value: a, .. } => all(a, out),
+            Expr::In(a, list) => {
+                all(a, out);
+                list.iter().for_each(|b| all(b, out));
+            }
+        }
+    }
+    let mut add = |v: Var, bits: u32| *out.entry(v).or_insert(0) |= bits;
+    match expr {
+        Expr::Compare(_, a, b) => match (&**a, &**b) {
+            (Expr::Term(Slot::Variable(v)), Expr::Term(Slot::Parameter(p)))
+            | (Expr::Term(Slot::Parameter(p)), Expr::Term(Slot::Variable(v))) => {
+                add(*v, constant_profile(parameters.get(*p as usize)))
+            }
+            _ => all(expr, out),
+        },
+        Expr::In(a, list) => match &**a {
+            Expr::Term(Slot::Variable(v))
+                if list.iter().all(|e| matches!(e, Expr::Term(Slot::Parameter(_)))) =>
+            {
+                let bits = list.iter().fold(0, |bits, e| match e {
+                    Expr::Term(Slot::Parameter(p)) => bits | constant_profile(parameters.get(*p as usize)),
+                    _ => READ_ALL,
+                });
+                add(*v, bits)
+            }
+            _ => all(expr, out),
+        },
+        Expr::And(a, b) | Expr::Or(a, b) => {
+            read_profiles(a, parameters, out);
+            read_profiles(b, parameters, out);
+        }
+        Expr::Not(a) => read_profiles(a, parameters, out),
+        _ => all(expr, out),
+    }
+}
+
+/// Profiles for a canonical FILTER's read columns (identity-mode strings never reach a check).
+pub(crate) fn filter_read_profiles(plan: &Plan, input: NodeId, expr: &Expr, columns: &[usize]) -> Vec<u32> {
+    let mut typed = BTreeMap::new();
+    read_profiles(expr, plan.parameters(), &mut typed);
+    let strip = if identity_string_reads(expr) { READ_STRING } else { 0 };
+    columns
+        .iter()
+        .map(|&c| {
+            let v = plan.nodes()[input as usize].output.variables[c];
+            typed.get(&v).copied().unwrap_or(READ_ALL) & !strip
+        })
+        .collect()
 }
 
 // Plain strings use identity only when every use is term equality/membership.
@@ -571,4 +669,18 @@ fn expression(
     let index = steps.len();
     steps.push(step);
     index
+}
+
+#[cfg(test)]
+mod read_profile_tests {
+    #[test]
+    fn read_profile_bits_match_the_noir_core() {
+        let core = include_str!("../../../zk/noir-query/core/src/ops_core_suite.nr");
+        for (bit, name) in super::READ_DATATYPES.iter().enumerate() {
+            let global = format!("pub global READ_{}:u32={};", name.to_uppercase(), 1u32 << bit);
+            assert!(core.contains(&global), "{global}");
+        }
+        assert!(core.contains(&format!("pub global READ_ALL:u32={};", super::READ_ALL)));
+        assert_eq!(super::READ_ALL, (1 << super::READ_DATATYPES.len()) - 1);
+    }
 }

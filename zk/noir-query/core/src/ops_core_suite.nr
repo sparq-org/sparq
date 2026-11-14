@@ -254,6 +254,42 @@ pub fn checked_bounded_literal<let L:u32>(cell:TermCell,raw:BoundedTermOpening<L
     };
     table_cell(checked)
 }
+/// Value-read datatype profile bits; the compiler derives one per read column from its
+/// consumers (crates/sparq-zk-query codegen::read_profiles). Keep the values equal.
+pub global READ_STRING:u32=1;
+pub global READ_INTEGER:u32=2;
+pub global READ_DECIMAL:u32=4;
+pub global READ_DATE:u32=8;
+pub global READ_DATETIME:u32=16;
+pub global READ_BOOLEAN:u32=32;
+pub global READ_ALL:u32=63;
+/// `checked_bounded_literal` restricted to a compile-time datatype profile. Key checks
+/// outside the profile are not compiled; a cell outside it has no proof.
+pub fn checked_profiled_literal<let L:u32>(cell:TermCell,raw:BoundedTermOpening<L,41,1>,profile:u32) -> TermCell {
+    let has=|bit:u32,dt:Field| ((profile & bit)!=0) & (cell.dt==dt);
+    assert(has(READ_STRING,DT_STRING)|has(READ_INTEGER,DT_INTEGER)|has(READ_DECIMAL,DT_DECIMAL)
+        |has(READ_DATE,DT_DATE)|has(READ_DATETIME,DT_DATETIME)|has(READ_BOOLEAN,DT_BOOLEAN),
+        "value datatype outside the column's profile");
+    let mut checked=cell;
+    if (profile & READ_STRING)!=0 {
+        if cell.dt==DT_STRING {checked=table_cell(crate::term::open_key_checked(raw,0,DT_STRING).cell());}
+    }
+    if (profile & (READ_ALL-READ_STRING))!=0 {
+        if cell.dt!=DT_STRING {
+            let scalar=scalar_opening(raw);
+            let mut tail:Field=0;
+            for i in 32..L {tail=tail+raw.lexical[i] as Field;}
+            assert(tail==0,"read scalar backing padding");
+            let opened=crate::term::open_literal_for_key_check(scalar,0);
+            if (profile & READ_INTEGER)!=0 {if cell.dt==DT_INTEGER {checked=table_cell(crate::term::check_literal_key_for(opened,DT_INTEGER).cell());}}
+            if (profile & READ_DECIMAL)!=0 {if cell.dt==DT_DECIMAL {checked=table_cell(crate::term::check_literal_key_for(opened,DT_DECIMAL).cell());}}
+            if (profile & READ_DATE)!=0 {if cell.dt==DT_DATE {checked=table_cell(crate::term::check_literal_key_for(opened,DT_DATE).cell());}}
+            if (profile & READ_DATETIME)!=0 {if cell.dt==DT_DATETIME {checked=table_cell(crate::term::check_literal_key_for(opened,DT_DATETIME).cell());}}
+            if (profile & READ_BOOLEAN)!=0 {if cell.dt==DT_BOOLEAN {checked=table_cell(crate::term::check_literal_key_for(opened,DT_BOOLEAN).cell());}}
+        }
+    }
+    checked
+}
 /// The complete bounded suite opening is shared with the envelope consumer.
 pub fn authenticate_bounded<let N:u32,let R:u32,let L:u32>(
     credentials:[crate::ops_core_profile::QuadOpening<R,L>;N],proof:BoundedCredentialProof<N>,
