@@ -27,9 +27,12 @@
   },
   "permissions": {
     "allow": [
-      "Bash(gh api -X PATCH repos/sparq-org/sparq/issues/*)",
-      "Bash(gh api -X POST repos/sparq-org/sparq/actions/runs/*/cancel)",
-      "Bash(gh api -X PUT repos/sparq-org/sparq/pulls/*/merge*)",
+      "Bash(gh api -X PATCH repos/sparq-org/*/issues/*)",
+      "Bash(gh api -X PATCH repos/sparq-org/*/pulls/*)",
+      "Bash(gh api -X POST repos/sparq-org/*/actions/runs/*/cancel)",
+      "Bash(gh api -X POST repos/sparq-org/*/pulls/*/ccr/convert_to_draft)",
+      "Bash(gh api -X POST repos/sparq-org/*/pulls/*/ccr/ready_for_review)",
+      "Bash(gh api -X PUT repos/sparq-org/*/pulls/*/merge*)",
       "Bash(gh issue close *)",
       "Bash(gh pr close *)",
       "Bash(gh pr ready*)",
