@@ -240,7 +240,16 @@ WebAssembly host, ACIR, canonical VKs, CRS and npm dependencies; installation an
 runtime require no native proving toolchain or network. It uses the same shared
 preparation and verifier reconstruction as Rust, with the ZK `noir-recursive`
 verifier target. A data-driven member registry joins each ACIR to its canonical
-VK; unsupported members reject.
+VK. It bundles the public-predicate family
+`result_v5_k{1,2}_n16_p3_r4_f0_d10`, the hidden date family
+`result_v5_k{1,2}_n16_p3_r4_f1_date_d10` and the hidden unsigned integer family
+`result_v5_k{1,2}_n16_p3_r4_f2_i64_d{10,17,20}`. The latter uses canonical
+nonnegative `xsd:integer`, including values above the signed range; negative
+constants reject. The date family uses canonical timezone-free `xsd:date` and
+refuses mixed hidden date/integer comparisons and multiple hidden date
+comparisons. The host returns the member chosen by native preparation, and the
+JavaScript layer requires its exact registry entry. Regeneration checks each key
+against the native canonical key pin; unsupported members reject.
 
 `prove({query, credentials, policy, nonce})` returns a presentation and released
 result. `verify({expectedQuery, presentation, policy, nonce, seenNonces})` first
@@ -255,17 +264,90 @@ The Rust seam exposes `PreparedResult::member()`, `witness_inputs()`,
 public bytes and admitted mappings from the same expected-query checks used by
 `verify_result`; it does not verify a proof or grant acceptance on its own.
 
-The host crate exposes JSON `testIssuerKeygen`, `issue`, `prepare`,
+The host crate exposes JSON `issuerKeygen`, `testIssuerKeygen`, `issue`, `testIssue`, `prepare`,
 `reconstructPublicInputs` and `canonicalVkHash`. Issuance uses string-canonical
 commitments and method-bound presentation attestations. `prepare` returns the
 member, exact private ABI input map and public skeleton. Its private witness data
 must never be sent to the relying party. The native subprocess driver and
 file-backed nonce store are excluded from wasm32. Target-specific entropy
-features use the platform CSPRNG; test issuer seed generation is explicitly
-deterministic test tooling, not production key generation.
+features use the platform CSPRNG. `issuerKeygen()` returns
+`{ secretKeyHex, publicKey }`; `issue` imports the canonical secret scalar and
+checks the matching public key. The caller must store and protect the secret;
+the package never persists it. Keys remain research grade, not externally audited.
+`testIssuerKeygen(seedHex)` retains its deterministic `{ seedHex, publicKey }`
+test-only format. Objects mixing secret and seed fields reject.
+
+The documented Node issuance form is `issue({ issuer, graphNQuads, status })`;
+the older positional call remains accepted. Both always use a CSPRNG salt.
+`testIssue({ issuer, graphNQuads, status, seedHex })` is an object-only,
+deterministic test helper that refuses production `secretKeyHex` and mixed
+issuer objects. A predictable salt lets anyone who can guess the graph test a
+guess against the commitment. Rust derives it from the hexadecimal unsigned
+`u64` issuance seed, the canonical issuer public key and exact graph UTF-8 bytes,
+under a separate domain; status does not affect the salt but remains
+signature-bound. Identical inputs produce byte-identical credentials for the
+ordinary proof relation. The [Node README](../../../js/zk-result/README.md)
+specifies the exact derivation and the public-input layout, whose order and count
+are checked against reconstruction and every bundled ABI by the offline suite.
+
+The Node policy also accepts `issuers?: Record<string, string>` alongside
+`trustedIssuers?: string[]`; both grant trust. Scoped queries use
+`?g vcq:verifiedIssuer <urn:issuer:a> . GRAPH ?g { BGP + FILTERs }`, with
+`vcq:` = `https://w3id.org/sparq/vcq#`. The WHERE contains only issuer declarations
+and GRAPH blocks. Each graph variable must be declared, used as a graph name,
+and occur nowhere else. FILTERs remain inside their GRAPH block and use variables
+bound in their own input. All graph variables must name the same issuer IRI;
+different IRIs reject `per-fact-issuer-binding-needs-query-method`, even if their
+policy keys coincide. Multiple graph variables may use separate credentials with
+that issuer's key; they do not identify individual credentials.
+
+`planner::lower_issuer_scope(query)` returns `(flat_query, optional_issuer_iri)`
+after shared syntax admission, preserving original text for admitted unscoped
+queries. It authenticates no issuer by itself. The Node Rust adapter resolves
+the IRI through the policy map (`issuer-not-in-policy` if unknown), restricts
+proving credentials to that key, reconstructs the flat relation independently,
+and checks every authenticated public issuer slot for that key
+(`issuer-scope-mismatch` before nonce-store access). The outer presentation retains
+the exact receiver request. This binds all supporting facts to **one issuer per
+proof**, without circuit changes. Per-fact binding across issuers is the query
+method's job; the flat relation does not establish it. Native unscoped result
+verification retains its existing behavior. Research grade, not externally audited.
+
+Successful Node verification also returns
+`report: { rule: { query, member }, issuers, subject: [], fresh, complete: false }`.
+Rust resolves the issuer keys from reconstructed public coordinates and receiver
+trust policy, never unchecked presentation metadata. Scoped `issuers` is the
+single requested policy IRI, meaning every authenticated public issuer slot carries
+its policy key. Unscoped slots resolve to matching policy IRIs, sorted per slot,
+or key hex when unnamed. Key-only policies retain their existing hex report.
+Every public signature slot authenticates a private credential and must be trusted;
+canonical slot order and duplicates are preserved for unscoped queries. A slot may
+be padding or unused by selected solutions.
+It establishes neither distinct credential count nor which issuer signed which
+fact, because selected credential/leaf references stay private. `rule` records
+the exact expected query and independently selected member. `subject` is empty
+because there is no holder binding. `fresh` is the canonical nonce consumed by
+the caller's store. `complete` is false: this establishes support for returned
+solutions, not that none is missing. Refusals, replay and store errors omit the
+report; raw reconstruction grants no acceptance. This remains research grade and
+not externally audited, with no native verification behavior change.
 
 Research grade and not externally audited: this proves selected support over
 sparq commitment-signed credentials, not standard VCs. It provides no answer or
 wallet completeness, absence or holder identity. Issuer identities, capacities
 and result size remain observable. See the
 [Node skill](../../zk-result-javascript/SKILL.md) for the application contract.
+
+### Issuer key generation and storage
+
+`sig::SecretKey::generate() -> Result<SecretKey, getrandom::Error>` uses the
+platform CSPRNG and returns entropy errors without a deterministic fallback.
+`to_bytes()` / `from_bytes(&[u8]) -> Option<SecretKey>` export/import exactly
+32 canonical little-endian scalar bytes; `to_hex()` / `from_hex(&str)` use
+exactly 64 lowercase, unprefixed hex digits. Import rejects zero, wrong lengths
+and integers at or above the Baby-JubJub scalar modulus, without modular reduction.
+`from_seed(u64)` remains a deterministic test-only helper. Debug output is
+redacted and the Rust key zeroizes on drop. The caller must protect, store and
+erase exported secrets; exported bytes/strings are not automatically scrubbed.
+These keys remain research grade, not externally audited, and generation does
+not change the signing path's constant-time caveats.

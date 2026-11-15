@@ -13,7 +13,7 @@ use base64::{
 };
 use rand_core::RngCore as _;
 use serde_json::{json, Value};
-use sha2::{Digest as _, Sha256, Sha384};
+use sha2::{Digest as _, Sha256, Sha384, Sha512};
 use sparq_vc::{
     api::{router, OfflineContexts, Service, CONTEXT_FILES},
     SigningKey,
@@ -111,6 +111,17 @@ fn rejected(status: StatusCode, body: &Value) {
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert_eq!(body["verified"], false);
     assert!(!body["errors"].as_array().unwrap().is_empty());
+    assert_eq!(
+        body["type"],
+        "https://sparq.jeswr.org/ns/vc-api#ValidationError"
+    );
+    assert!(body["errors"][0].is_object());
+    assert_eq!(body["errors"][0]["type"], body["type"]);
+    assert_eq!(body["errors"][0]["title"], "ValidationError");
+    assert_eq!(body["errors"][0]["status"], 400);
+    assert_eq!(body["errors"][0]["detail"], body["message"]);
+    assert!(body["message"].as_str().is_some_and(|s| !s.is_empty()));
+    assert_eq!(body["message"], body["errors"][0]["message"]);
 }
 
 #[tokio::test]
@@ -376,7 +387,7 @@ async fn proof_errors_and_requested_options() {
     rejected(status, &body);
     assert_eq!(
         body["errors"][0]["message"],
-        "verificationMethod controller must be the did:key issuer"
+        "verificationMethod controller must be the did:key issuer or holder"
     );
 }
 
@@ -396,6 +407,12 @@ async fn offline_contexts_include_nested_references_and_protected_terms() {
     let (status, doc) = request(&app, "GET", "/did.json", String::new(), "application/json").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(doc["testOnly"], true);
+    assert_eq!(
+        doc["@context"][2],
+        json!({
+            "testOnly": "https://sparq.jeswr.org/ns/vc-api#testOnly"
+        })
+    );
     assert!(doc["verificationMethod"][0]
         .get("secretKeyMultibase")
         .is_none());
@@ -406,15 +423,33 @@ async fn offline_contexts_include_nested_references_and_protected_terms() {
 }
 
 #[tokio::test]
-async fn related_resource_shape_and_cached_byte_digests() {
+async fn related_resource_shape_and_digest_encodings() {
     let app = app();
     let bytes = include_str!("api-fixtures/base.jsonld").as_bytes();
-    let resource = json!({"id":"https://www.w3.org/ns/credentials/v2",
+    let resource = json!({"id":"urn:resource:format-check",
         "digestSRI":format!("sha384-{}", STANDARD.encode(Sha384::digest(bytes))),
         "digestMultibase":format!("u{}", URL_SAFE_NO_PAD.encode(Sha256::digest(bytes)))});
     let mut vc = credential();
     vc["relatedResource"] = resource.clone();
     issue(&app, vc).await;
+    for resources in [
+        json!({"id":"urn:resource:sri", "digestSRI":"sha384-l/HrjlBCNWyAX91hr6LFV2Y3heB5Tcr6IeE4/Tje8YyzYBM8IhqjHWiWpr8+ZbYU"}),
+        json!({"id":"urn:resource:multibase", "digestMultibase":"uWZVc7WaX1h4D8rJVb-vlMIqxaEKEb1tYbX8fet7JJzQ"}),
+        json!([{"id":"https://unavailable.example/resource", "mediaType":"application/ld+json", "digestSRI":resource["digestSRI"]}]),
+        json!({"id":"urn:resource:sha512", "digestSRI":format!("sha512-{}",STANDARD.encode(Sha512::digest(bytes)))}),
+    ] {
+        let mut vc = credential();
+        vc["relatedResource"] = resources.clone();
+        let signed = issue(&app, vc).await;
+        assert_eq!(signed["relatedResource"], resources);
+        let (status, body) = post(
+            &app,
+            "/credentials/verify",
+            json!({"verifiableCredential":signed}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
     for resources in [
         json!([resource["id"]]),
         json!({"digestSRI":resource["digestSRI"]}),
@@ -422,7 +457,14 @@ async fn related_resource_shape_and_cached_byte_digests() {
         json!([resource, resource]),
         json!({"id":resource["id"],"digestSRI":"sha384-invalid"}),
         json!({"id":resource["id"],"digestMultibase":"uInvalid"}),
-        json!({"id":"https://unavailable.example/resource","digestSRI":resource["digestSRI"]}),
+        json!({"id":resource["id"],"digestSRI":format!("sha384-{}",STANDARD.encode([0;32]))}),
+        json!({"id":resource["id"],"digestMultibase":format!("u{}",URL_SAFE_NO_PAD.encode([0;31]))}),
+        json!({"id":resource["id"],"digestSRI":resource["digestSRI"],"mediaType":null}),
+        json!({"id":resource["id"],"digestSRI":resource["digestSRI"],"mediaType":""}),
+        json!({"id":resource["id"],"digestSRI":format!("md5-{}",STANDARD.encode([0;32]))}),
+        json!({"id":resource["id"],"digestMultibase":format!("x{}",URL_SAFE_NO_PAD.encode([0;32]))}),
+        json!({"id":resource["id"],"digestSRI":null}),
+        json!({"id":resource["id"],"digestMultibase":false}),
     ] {
         let mut vc = credential();
         vc["relatedResource"] = resources;
@@ -559,3 +601,5 @@ async fn vc_v1_adds_the_data_integrity_context() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
 }
+
+mod api_cases;

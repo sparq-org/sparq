@@ -9,7 +9,8 @@ JSON-LD expansion runs through `sparq-jsonld`; its expanded output reaches
 
 The issuer key is **test-only**. Generate a dedicated seed for this service,
 never reuse it, and keep it in the environment. `GET /did.json` publishes only
-the public verification method and explicitly marks the document `testOnly`.
+the public verification method and explicitly marks the document `testOnly`,
+using `https://sparq.jeswr.org/ns/vc-api#testOnly` for that context term.
 
 ## Configuration and native startup
 
@@ -18,7 +19,7 @@ with network access. This script downloads VC v1/v2, examples v2, Data Integrity
 v1/v2, Multikey v1, and DID v1, preserving the original bytes and writing a
 SHA-256 provenance manifest. Review and retain that manifest with suite results.
 The service reads the cache once at startup; request handling uses memory only.
-Uncached context URLs, imports, and related resources return an error.
+Uncached context URLs and imports return an error; related resource IDs are never retrieved.
 
 ```sh
 python3 crates/sparq-vc/vercel/prepare-contexts.py
@@ -38,13 +39,23 @@ cargo run -p sparq-vc --features vc-api --bin sparq-vc-api
 | --- | --- | --- |
 | `POST /credentials/issue` | `{"credential": {...}, "options": {...}}` | 201, `{"verifiableCredential": {...}}` |
 | `POST /credentials/verify` | `{"verifiableCredential": {...}, "options": {...}}` | 200, `{"verified":true,"checks":["proof"],"warnings":[],"errors":[]}` |
+| `POST /presentations/verify` | `{"verifiablePresentation": {...}, "options": {...}}` | 200, the same verified proof-check result |
 | `GET /did.json` | None | 200, public test issuer DID document |
 
 Malformed JSON, invalid credentials, unsupported options, and invalid proofs
-return 400 with `verified: false`, empty `checks`/`warnings`, and a nonempty
-`errors` array of `{type, message}` objects. JSON and JSON-LD media types are
-accepted. Request bodies are limited to 256 KiB; RDF canonicalization has fixed
-input/output and work limits.
+return 400 with `verified: false`, empty `checks`/`warnings`, and
+`errors:[ProblemDetails]`, following the VC-API successor's
+[Error Handling](https://w3c.github.io/vcalm/#error-handling) and
+[Verification Errors vs. Warnings](https://w3c.github.io/vcalm/#verification-errors-vs-warnings)
+sections. Each problem has `type: "https://sparq.jeswr.org/ns/vc-api#ValidationError"`,
+`title: "ValidationError"`, HTTP `status`, a readable `detail`, and a `message`
+string extension; the top-level body mirrors these problem fields.
+JSON and JSON-LD media types are
+accepted. Unknown routes return 404 and unsupported methods return 405 with
+the same problem shape. Request bodies are limited to 256 KiB and JSON nesting depth 64.
+Presentations contain at most 32 credentials; each document has at most 64
+proofs, each proof at most 64 references, and chains at most 16 proofs deep.
+RDF canonicalization has fixed input/output, HNDQ-call and permutation limits.
 
 Issue accepts `type: "DataIntegrityProof"`, `cryptosuite: "eddsa-rdfc-2022"`,
 `proofPurpose: "assertionMethod"`, `verificationMethod` naming this service's
@@ -56,14 +67,50 @@ Already secured credentials are rejected. VC v1 credentials receive the Data
 Integrity v2 context if needed.
 
 Verify accepts `checks: ["proof"]`, `domain`, `challenge`, and the supported
-`type`, `cryptosuite`, and `proofPurpose` identifiers. It requires each proof's
-method to belong to the credential's `did:key` issuer and checks every proof
-in a nonempty proof set. Proof chains and other cryptosuites are unsupported.
+`type`, `cryptosuite`, and `proofPurpose` identifiers. It requires each terminal
+proof's method to belong to the credential's `did:key` issuer and checks every
+proof in a nonempty proof set. `previousProof` accepts a string or nonempty
+list of IDs in the set; referenced proofs verify first and may have different
+`did:key` controllers. Unknown, missing, duplicate, self and cyclic references
+are errors. Other cryptosuites are unsupported.
 Dates are validated as timestamp strings and checked for interval ordering;
 verification with `checks: ["proof"]` does not apply a current-time validity policy.
 Status and schema properties are checked for data-model shape. Related-resource
-digests are checked against cached bytes only. The service exposes credential
-operations; it does not expose presentation or enveloping operations.
+objects are signed as supplied without retrieving their IDs. If an ID names any
+document already held in the offline cache, issuance and verification compare
+all supplied digests against its exact held bytes. Every cached context and any
+additional trusted cached document is covered. Unknown IDs are accepted unchanged
+when their shape and digest encodings are valid; integrity of resources the
+service does not hold is **not checked**. IDs must be unique absolute IRIs;
+a digest is required. `digestSRI`
+accepts SHA-256/384/512 standard base64 digests; `digestMultibase` accepts
+`u`-prefixed unpadded base64url SHA-256 digests; optional `mediaType` must be a
+nonempty string. Held-byte mismatches return `relatedResource digestSRI mismatch
+for held resource` or `relatedResource digestMultibase mismatch for held resource`
+in the problem's `detail` and `message`; these errors do not imply a remote fetch.
+The staged credentials-v2 fixture and cache use the GitHub document's exact bytes,
+which match the suite digests. The npm document has the same JSON-LD content
+with different formatting and therefore different resource digests.
+
+Presentation verification checks its context order, type, optional ID/holder,
+every embedded credential through the credential verifier, and every presentation
+proof with purpose `authentication`. Request challenge/domain options bind the
+presentation proofs; credential assertion proofs use the credential verifier's
+default proof check. An omitted holder is supported; when present, it must match
+the terminal proof's `did:key` controller. A missing proof, unsupported kind, or
+failed proof returns an error. Binding applies to every terminal proof, so this
+profile rejects an issuer proof followed by a different notary's countersignature
+and unordered credential proof sets containing another co-signer.
+
+Issuance and verification share a compatibility leniency beyond the JSON-LD 1.1
+context processing algorithm, matching jsonld.js 9.0.0. An inline context-array
+entry containing `@context` is replaced once by that key's object value;
+sibling keys are ignored. A wrapped string, array, null or other non-object entry
+is an error. A direct local context wrapper is resolved first, so its value can
+instead be an object, a context URL or an array. The same processing covers nested
+and scoped contexts and documents loaded from the offline cache. Hashing uses the
+processed contexts; the issued document retains the submitted context spelling.
+Enveloping operations are outside this service's scope.
 
 ## Run the W3C suites on the maintainer's Mac
 
@@ -80,7 +127,7 @@ The script uses the inspected source revisions, prepares the context cache,
 generates an environment-only test seed, builds and starts the native service,
 and writes `localConfig.cjs` in each suite using the registry README's
 [Testing locally](https://github.com/w3c/vc-test-suite-implementations#testing-locally)
-format. Both issuer and verifier carry `vc2.0` and `eddsa-rdfc-2022` tags. It
+format. Issuer, credential verifier, and `vpVerifiers` entries carry `vc2.0` and `eddsa-rdfc-2022` tags. It
 installs Node dependencies, selects only sparq, runs both suites, and writes
 per-suite JSON reports, logs, source revisions, the public DID, and `counts.json`
 with tests/passes/failures/pending counts. It exits nonzero on suite failures,
@@ -94,9 +141,8 @@ script in existing clones. `VC_SUITE_ROOT` defaults to
 and invokes Mocha directly to avoid `pretest` fetching a moving registry branch.
 
 **Suite counts are pending the external run.** Rust fixtures and handler tests
-are separate evidence. The current data-model suite also asserts presentation
-behavior even when no presentation endpoint is registered; report those failures
-as observed instead of treating credential coverage as full suite conformance.
+are separate evidence. The runner advertises `/presentations/verify` with the same cryptosuite tags.
+Keep handler test evidence distinct from the external suite results.
 
 ## Vercel packaging
 

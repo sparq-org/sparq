@@ -11,6 +11,15 @@ pub enum Predicate {
     /// Uncorrelated EXISTS: the body is evaluated once and a row passes when
     /// some body row is compatible with it on their shared variables.
     SemiJoin(NodeId),
+    /// FILTER-only identity membership: the variable is bound and the same term
+    /// as one of `count` IRI or simple-literal constants. Like an IN list, the
+    /// constants fill `IN_CAPACITY` public slots from `start`, so the plan shape
+    /// does not depend on the list.
+    Membership {
+        variable: Var,
+        start: crate::plan::ParameterId,
+        count: crate::plan::ParameterId,
+    },
     Not(Box<Predicate>),
     And(Box<Predicate>, Box<Predicate>),
     Or(Box<Predicate>, Box<Predicate>),
@@ -349,7 +358,7 @@ impl ClosedOperator {
 impl Predicate {
     fn inputs(&self, ids: &mut Vec<NodeId>) {
         match self {
-            Self::Expression(_) | Self::Arithmetic(_) => (),
+            Self::Expression(_) | Self::Arithmetic(_) | Self::Membership { .. } => (),
             Self::Exists(rights) => ids.extend(rights),
             Self::SemiJoin(right) => ids.push(*right),
             Self::Not(a) => a.inputs(ids),
@@ -457,6 +466,17 @@ impl Writer<'_> {
             Predicate::SemiJoin(right) => {
                 self.byte(6);
                 self.id(*right);
+            }
+            Predicate::Membership {
+                variable,
+                start,
+                count,
+            } => {
+                self.byte(7);
+                self.id(*variable);
+                self.id(*start);
+                self.id(*count);
+                self.id(crate::plan::IN_CAPACITY as u32);
             }
             Predicate::Not(a) => {
                 self.byte(2);

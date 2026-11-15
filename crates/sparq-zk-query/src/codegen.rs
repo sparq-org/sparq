@@ -449,9 +449,6 @@ pub(crate) fn read_columns(expr: &Expr, schema: &[Var]) -> Vec<usize> {
 /// Value-read datatype profile bits, equal to `ops_core_suite::READ_*` in the Noir core.
 pub(crate) const READ_STRING: u32 = 1;
 pub(crate) const READ_ALL: u32 = 63;
-/// The XSD local names a read profile admits, in bit order.
-pub(crate) const READ_DATATYPES: [&str; 6] =
-    ["string", "integer", "decimal", "date", "dateTime", "boolean"];
 
 /// Reads only the constant's [`ConstantClass`], which `Plan::canonical_bytes` encodes.
 fn constant_profile(parameter: Option<&Parameter>) -> u32 {
@@ -460,8 +457,10 @@ fn constant_profile(parameter: Option<&Parameter>) -> u32 {
     };
     match ConstantClass::of(term) {
         ConstantClass::Numeric => 2 | 4,
-        // Temporal constants admit their own datatype; mixed date/dateTime data is a
-        // profile refusal rather than a cross-type comparison.
+        // Temporal constants admit their own datatype. The comparator never orders date
+        // against dateTime (a type error or a refusal, pinned by the Noir test
+        // `unchecked_other_temporal_cells_never_compare_with_a_date`), so the other
+        // temporal type needs no key check.
         ConstantClass::Date => 8,
         ConstantClass::DateTime => 16,
         ConstantClass::Boolean => 32,
@@ -473,8 +472,8 @@ fn constant_profile(parameter: Option<&Parameter>) -> u32 {
 /// Per-variable value-read datatype profiles. They depend on the expression shape and on
 /// the class of each compared constant, both of which the plan hash encodes: a variable
 /// compared only with typed constants needs key checks for those constants' comparable
-/// datatypes; any other use needs all of them. A value outside its profile has no proof
-/// (a named profile refusal, never a different answer).
+/// datatypes; any other use needs all of them. A supported value outside its profile is
+/// not key-checked; it compares with those constants as a type error, exactly as SPARQL.
 pub(crate) fn read_profiles(expr: &Expr, parameters: &[Parameter], out: &mut BTreeMap<Var, u32>) {
     fn all(e: &Expr, out: &mut BTreeMap<Var, u32>) {
         match e {
@@ -678,12 +677,15 @@ fn expression(
 mod read_profile_tests {
     #[test]
     fn read_profile_bits_match_the_noir_core() {
+        // The XSD local names a read profile admits, in bit order.
+        const READ_DATATYPES: [&str; 6] =
+            ["string", "integer", "decimal", "date", "dateTime", "boolean"];
         let core = include_str!("../../../zk/noir-query/core/src/ops_core_suite.nr");
-        for (bit, name) in super::READ_DATATYPES.iter().enumerate() {
+        for (bit, name) in READ_DATATYPES.iter().enumerate() {
             let global = format!("pub global READ_{}:u32={};", name.to_uppercase(), 1u32 << bit);
             assert!(core.contains(&global), "{global}");
         }
         assert!(core.contains(&format!("pub global READ_ALL:u32={};", super::READ_ALL)));
-        assert_eq!(super::READ_ALL, (1 << super::READ_DATATYPES.len()) - 1);
+        assert_eq!(super::READ_ALL, (1 << READ_DATATYPES.len()) - 1);
     }
 }

@@ -21,27 +21,6 @@ impl ReadSite {
         self.profiles.iter().any(|&p| p != crate::codegen::READ_ALL)
     }
 }
-/// Host-side profile refusal before any proving, matching the circuit assertion. A
-/// datatype no profile admits keeps the read path's own named refusal.
-pub(crate) fn check_profile(dt: crate::interp::Word, profile: u32) -> Result<(), crate::Error> {
-    use crate::interp::EncodeTerm;
-    let mut known = false;
-    for (bit, name) in crate::codegen::READ_DATATYPES.iter().enumerate() {
-        let datatype = oxrdf::NamedNode::new_unchecked(format!("http://www.w3.org/2001/XMLSchema#{name}"));
-        let sample = oxrdf::Literal::new_typed_literal("0", datatype);
-        if crate::credential::SuiteEncoder.encode(&sample.into())?.dt == dt {
-            if profile & (1 << bit) != 0 {
-                return Ok(());
-            }
-            known = true;
-        }
-    }
-    if known {
-        Err(crate::Error::Capacity("value datatype outside the column's profile".into()))
-    } else {
-        Ok(())
-    }
-}
 fn arithmetic(e: &Integer, vars: &mut BTreeSet<Var>) {
     match e {
         Integer::Term(Slot::Variable(v)) => {
@@ -77,6 +56,8 @@ fn predicate(p: &Predicate, plan: &Plan, vars: &mut BTreeSet<Var>) {
         }
         // EXISTS reads table cardinality. Its child value consumers get their own sites.
         Predicate::Exists(_) | Predicate::SemiJoin(_) => (),
+        // FILTER membership is a term-identity test, not a value read: no site.
+        Predicate::Membership { .. } => (),
     }
 }
 fn profiles(p: &Predicate, plan: &Plan, out: &mut std::collections::BTreeMap<Var, u32>) {
@@ -98,6 +79,9 @@ fn identity_strings(p: &Predicate) -> bool {
         Predicate::Not(a) => identity_strings(a),
         Predicate::And(a, b) | Predicate::Or(a, b) => identity_strings(a) && identity_strings(b),
         Predicate::Exists(_) | Predicate::SemiJoin(_) => true,
+        // Membership reads no value, so it never forces a value-mode site; it is
+        // not an identity-string read either (see codegen::identity_string_reads).
+        Predicate::Membership { .. } => true,
     }
 }
 pub(crate) fn sites(plan: &Plan, node: usize) -> Vec<ReadSite> {

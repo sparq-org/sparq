@@ -2,7 +2,7 @@
 // Rust guideline compliant 2026-02-21
 //! Compiled only with `--features authenticated-rdf`.
 //!
-//! One ignored test is a driver only: set `SPARQ_AUTHRDF_PROOF_JOB` to an
+//! The archived-case driver is ignored: set `SPARQ_AUTHRDF_PROOF_JOB` to an
 //! explicit job file and `RISC0_SERVER_PATH` to the real local `r0vm`, then run
 //! it by name; see `skills/zk-query-proofs/references/authenticated-rdf-guest.md`.
 //! A missing job, tool or input fails; nothing is skipped or counted as a run.
@@ -14,6 +14,10 @@
 //! never removed; `summary.json` is written last. Every nonce store here is an
 //! in-memory test double, never a production store. Not yet run at the current
 //! checkpoint: no V5 receipt exists.
+//!
+//! The separate ignored revealed-stage test uses the same job's approved guest,
+//! executable and nonce seed. It proves the payment fixture under both suites,
+//! reuses each receipt for controls and writes no evidence archive.
 #![cfg(feature = "authenticated-rdf")]
 
 #[path = "support/authenticated_rdf_evidence.rs"]
@@ -492,6 +496,27 @@ fn run_case(s: &Setup, case: &Case) -> Value {
     let journal = verify_with_artifact(&presentation, &request, &mut nonces, &s.guest)
         .unwrap_or_else(|error| panic!("{}: verification: {error}", case.id));
     assert_eq!(nonces.calls, 1, "{}: nonce consumed once", case.id);
+    // Reuse this receipt: the timed production path makes one receipt check
+    // and consumes one nonce in its own verifier store, without another proof.
+    let answer = sparq_proved_evaluator::authenticated_rdf::AnswerPresentation {
+        presentation: presentation.clone(),
+        signatures: None,
+    };
+    let start = std::time::Instant::now();
+    let mut timed_nonces = CountingNonces::default();
+    let (timed_journal, times) =
+        sparq_proved_evaluator::authenticated_rdf::verify_answer_with_artifact_timed(
+            &answer,
+            &request,
+            &mut timed_nonces,
+            &s.guest,
+        )
+        .expect("timed production verification");
+    let elapsed = start.elapsed();
+    assert_eq!(timed_journal, journal);
+    assert_eq!(timed_nonces.calls, 1);
+    assert!(times.signatures.is_none());
+    assert!(times.receipt + times.request <= elapsed);
     let status = genuine_status(&presentation);
     assert_eq!(journal, native, "{}: guest vs native model", case.id);
     assert_eq!(journal.result, case.expect.result(), "{}", case.id);
@@ -687,5 +712,92 @@ fn genuine_job_case_selection_is_bounded_known_and_distinct() {
     for (declared, error) in rejected {
         let outcome = select_cases(&ids(&declared)).err();
         assert_eq!(outcome.as_deref(), Some(error), "{declared:?}");
+    }
+}
+
+#[test]
+#[ignore = "genuine proofs: needs SPARQ_AUTHRDF_PROOF_JOB, a real RISC0_SERVER_PATH and approved guests and pins"]
+fn genuine_revealed_receipt_stage_timings_and_legacy_entry_point_agree() {
+    use sparq_proved_evaluator::Nonces;
+    use sparq_proved_evaluator::authenticated_rdf::{
+        AnswerPresentation, verify_answer_with_artifact_timed, verify_revealed_with_artifact,
+    };
+    use sparq_proved_evaluator_model::merkle_suite;
+    let s = Setup::load();
+    for suite in [
+        auth::Cryptosuite::EddsaRdfc2022,
+        auth::Cryptosuite::EddsaSha256Merkle2026,
+    ] {
+        let mut credential = fixture::payment_credential();
+        if suite == auth::Cryptosuite::EddsaSha256Merkle2026 {
+            let key = ed25519_dalek::SigningKey::from_bytes(&fixture::hex(
+                "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+            ));
+            let config = fixture::PAYMENT_PROOF.replace("eddsa-rdfc-2022", suite.name());
+            credential =
+                merkle_suite::issue(fixture::PAYMENT_DOCUMENT, &config, &key, [0x40; 32]).unwrap();
+        }
+        let signature = credential.signature.drain(..64).collect::<Vec<_>>();
+        let request = Request {
+            version: auth::VERSION,
+            query: fixture::ASK_PAYMENT_RETURNED.into(),
+            authority: DatasetAuthority::HolderDeclared,
+            policy: fixture::payment_policy()
+                .with_cryptosuite(suite)
+                .with_signature_mode(auth::SignatureMode::Revealed),
+            nonce: nonce_for(&s.seed, suite.name()),
+        };
+        let witness = auth::Witness {
+            request: request.clone(),
+            dataset: fixture::credentials(vec![credential], fixture::SALT),
+        };
+        let presentation =
+            prove_with_artifact(&witness, &s.r0vm, &s.guest).expect("opt-in genuine proof");
+        let answer = AnswerPresentation {
+            presentation,
+            signatures: Some(vec![signature]),
+        };
+        for case in [
+            "valid",
+            "tamper",
+            "wrong_nonce",
+            "wrong_request",
+            "bad_signature",
+            "replay",
+        ] {
+            let mut answer = answer.clone();
+            let mut expected = request.clone();
+            let mut old_nonces = CountingNonces::default();
+            let mut new_nonces = CountingNonces::default();
+            match case {
+                "tamper" => answer.presentation.receipt.journal.bytes[0] ^= 1,
+                "wrong_nonce" => expected.nonce[0] ^= 1,
+                "wrong_request" => expected.query = fixture::ASK_PAYMENT_SETTLED.into(),
+                "bad_signature" => answer.signatures.as_mut().unwrap()[0][0] ^= 1,
+                "replay" => {
+                    old_nonces.consume(expected.nonce).unwrap();
+                    new_nonces.consume(expected.nonce).unwrap();
+                }
+                _ => {}
+            }
+            let old = verify_revealed_with_artifact(
+                &answer.presentation,
+                &expected,
+                answer.signatures.as_ref().unwrap(),
+                &mut old_nonces,
+                &s.guest,
+            );
+            let start = std::time::Instant::now();
+            let timed =
+                verify_answer_with_artifact_timed(&answer, &expected, &mut new_nonces, &s.guest);
+            let elapsed = start.elapsed();
+            if let Ok((_, times)) = &timed {
+                assert!(times.signatures.is_some());
+                assert!(times.receipt + times.signatures.unwrap() + times.request <= elapsed);
+            }
+            assert_eq!(timed.map(|(journal, _)| journal), old, "{suite:?}/{case}");
+            assert_eq!(new_nonces.calls, old_nonces.calls);
+            assert_eq!(old.is_ok(), case == "valid");
+        }
     }
 }

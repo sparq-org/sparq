@@ -3,6 +3,8 @@
 
 risc0_zkvm::guest::entry!(main);
 
+mod profile;
+
 type Outputs = (
     Result<String, String>,
     Result<String, String>,
@@ -17,13 +19,7 @@ fn outputs<D: sparq_canon::Digest>(text: &str) -> Outputs {
             return (Err(message.clone()), Err(message.clone()), Err(message));
         }
     };
-    let limits = sparq_canon::CanonicalizationLimits {
-        max_quads: 100_000,
-        max_input_bytes: 16 << 20,
-        max_output_bytes: 16 << 20,
-        max_hndq_calls: 4000,
-        max_permutation_steps: 1 << 28,
-    };
+    let limits = profile::limits();
     (
         sparq_canon::canonicalize_quads_with::<D>(&quads).map_err(|e| e.to_string()),
         sparq_canon::canonicalize_quads_bounded_with::<D>(&quads, &limits)

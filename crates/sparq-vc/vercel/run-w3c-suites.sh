@@ -57,7 +57,7 @@ for attempt in {1..60}; do
 done
 [[ $vc_ready = true ]] || { echo 'VC-API failed to become ready' >&2; exit 1; }
 # The registry README's "Testing locally" format, with both requested tags.
-# No vpVerifiers/EnvelopingProof/jcs endpoints are advertised.
+# Presentation verification uses the same cryptosuite tags as credential verification.
 python3 - "$vc_report_dir/did.json" "$vc_suite_root" <<'PY'
 import json,pathlib,sys
 issuer=json.loads(pathlib.Path(sys.argv[1]).read_text())['id']
@@ -65,6 +65,7 @@ base='http://127.0.0.1:3000'
 config={'settings':{'enableInteropTests':True,'testAllImplementations':False},
  'implementations':[{'name':'sparq','implementation':'sparq-vc test endpoint',
  'issuers':[{'id':issuer,'endpoint':base+'/credentials/issue','tags':['vc2.0','eddsa-rdfc-2022']}],
+ 'vpVerifiers':[{'id':base+'/presentations/verify','endpoint':base+'/presentations/verify','tags':['vc2.0','eddsa-rdfc-2022']}],
  'verifiers':[{'id':base+'/credentials/verify','endpoint':base+'/credentials/verify','tags':['vc2.0','eddsa-rdfc-2022']}]}]}
 for name in ['vc-data-model-2.0-test-suite','vc-di-eddsa-test-suite']:
  path=pathlib.Path(sys.argv[2])/name/'localConfig.cjs'

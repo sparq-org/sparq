@@ -105,6 +105,7 @@ function simulated(options = {}) {
     session_id: randomBytes(32).toString('base64url'),
     statistic: options.countOnly ? 'count-only' : 'count-and-sum',
     min_group: options.minimum ?? (options.computeOnly ? 4 : 6),
+    min_contributors: options.minContributors ?? (options.computeOnly ? 2 : 3),
     max_value_bits: options.bits,
     threshold: options.threshold,
     roster: keys.map((k, i) => ({
@@ -119,7 +120,8 @@ function simulated(options = {}) {
   const f = JSON.parse(aggregate.simulateSession(JSON.stringify(params), inputs.map((p) => JSON.stringify(p))));
   assert.deepEqual(call('verifyOutcome', { session: f.session, contributions: f.contributions, outcome: f.outcome }), { verified: true });
   assert.equal(f.contributions.length, keys.length);
-  assert.equal(f.partials.length, keys.length < 3 ? 0 : keys.length);
+  const inputParties = keys.length - (options.computeOnly ? 1 : 0);
+  assert.equal(f.partials.length, inputParties < params.min_contributors ? 0 : keys.length);
   evidence.push({ mode: 'simulation', parties: keys.length, minimum: params.min_group,
     statistic: params.statistic, threshold: params.threshold ?? null,
     elapsed_ms: Number(process.hrtime.bigint() - start) / 1e6,
@@ -205,6 +207,50 @@ test('two holders and a compute-only requester use the same steps', () => {
   assert.deepEqual(call('verifyOutcome', { session: threshold.session,
     contributions: threshold.contributions, outcome: requesterOutcome }), { verified: true });
   assert.equal(simulated({ computeOnly: true, countOnly: true }).outcome.outcome.count, 4);
+});
+
+test('the contributor minimum counts only parties that commit inputs', () => {
+  const refused = simulated({ computeOnly: true, minContributors: 3 });
+  assert.equal(refused.outcome.outcome.kind, 'too-few-contributors');
+  assert.deepEqual(refused.partials, []);
+  const released = simulated({ n: 4, computeOnly: true, minContributors: 3 });
+  assert.equal(released.outcome.outcome.kind, 'release');
+  assert.equal(released.outcome.outcome.count, 6);
+});
+
+test('missing and malformed signatures keep the existing signature errors', () => {
+  const f = session(3, 6);
+  const verifyRequest = { session: f.session, contributions: f.contributions, outcome: f.outputs[0] };
+  const finishRequest = { session: f.session, index: 0,
+    keys: JSON.parse(aggregate.generateKeys(Buffer.alloc(32, 1).toString('base64url'))).secret,
+    contributions: f.contributions, local: f.partials[0].local,
+    messages: f.partials.flatMap((p) => p.messages.filter((m) => m.recipient === 0)) };
+  for (const [name, request, select, code, index] of [
+    ['verifyOutcome', verifyRequest, (r) => r.contributions[1], 'input-not-attested', 1],
+    ['finish', finishRequest, (r) => r.local, 'protocol-error', 0],
+    ['verifyOutcome', verifyRequest, (r) => r.outcome, 'protocol-error', 0],
+  ]) {
+    for (const signature of [undefined, null, false, 7, {}, [], '!', 'AA==', 'AA']) {
+      const changed = structuredClone(request);
+      const message = select(changed);
+      if (signature === undefined) delete message.signature;
+      else message.signature = signature;
+      assert.throws(() => call(name, changed), (e) => {
+        assert.deepEqual(JSON.parse(String(e)), { code, index, check: 'signature' });
+        return true;
+      });
+    }
+  }
+  for (const [name, request, select, field] of [
+    ['verifyOutcome', verifyRequest, (r) => r.contributions[1], 'range_proof'],
+    ['finish', finishRequest, (r) => r.local, 'shares'],
+    ['verifyOutcome', verifyRequest, (r) => r.outcome, 'outcome'],
+  ]) {
+    const changed = structuredClone(request);
+    delete select(changed)[field];
+    assert.throws(() => call(name, changed), (e) =>
+      JSON.parse(String(e)).check === 'json-encoding');
+  }
 });
 
 test('simulation preserves attestation checks and validates its party array', () => {

@@ -420,8 +420,8 @@ fn compact_profile_credential_executes() {
         .find(|line| line.starts_with("credential_0 = "))
         .unwrap();
     for (field, label) in [("subject", "nonliteral position"),("predicate", "predicate kind")] {
-        let marker=format!("{field} = {{ kind = 1");
-        let position=raw_line.find(&marker).expect("bounded resource opening")+marker.len()-8;
+        let start = raw_line.find(&format!("{field} = {{")).expect("resource digest opening");
+        let position = start + raw_line[start..].find("kind = 1").expect("resource kind");
         let mut raw = raw_line.to_owned();
         raw.replace_range(position..position + 8, "kind = 3");
         let changed = witness.replace(raw_line, &raw);
@@ -481,54 +481,77 @@ fn compact_profile_credential_executes() {
 
 #[test]
 fn value_reads_follow_the_column_datatype_profile() {
-    let Some(gate) = support::gate("value_reads_follow_the_column_datatype_profile", &["nargo"]) else {
+    let Some(gate) = support::gate("value_reads_follow_the_column_datatype_profile", &["nargo"])
+    else {
         return;
     };
-    let p = graphs::bind_issuer_registry(
-        graphs::lower(
-            "SELECT ?s {?s <urn:p> ?x FILTER(?x >= 1)}",
-            Bounds {
-                credentials: 1,
-                quads_per_credential: 4,
-                rows_per_table: 2,
-            },
-        )
-        .unwrap(),
-        &issuer_registry(),
-    )
-    .unwrap();
-    let pkg = codegen::generate_suite_fixture(&p).unwrap();
-    let source = &pkg.files[&format!("{}/src/main.nr", pkg.name)];
-    // An integer constant admits integer and decimal values only.
-    assert!(source.contains("core::ops_core_reads::check_profiled("), "{source}");
-    assert!(source.contains(", [6], parameters);"), "{source}");
-    let witness = |value: &str| {
-        let credentials = vec![signed(triple("<urn:s>", "<urn:p>", value), "urn:issuer", 3)];
-        let trace = graphs::evaluate(&p, &credentials).unwrap();
-        witness_closed::prover_toml(&p, &credentials, &trace, [7; 32], [3; 32], issuer_root())
+    let bounds = Bounds {
+        credentials: 1,
+        quads_per_credential: 8,
+        rows_per_table: 2,
     };
-    // A string in a numeric-compared column is a named profile refusal before proving.
-    assert_eq!(
-        witness("\"abc\"").unwrap_err(),
-        sparq_zk_query::Error::Capacity("value datatype outside the column's profile".into())
-    );
-    let temp = tempfile::tempdir().unwrap();
-    for (name, source) in &pkg.files {
-        let target = temp.path().join(name);
-        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
-        std::fs::write(target, source).unwrap();
+    // A string in a column compared only with an integer constant is a type error: FILTER
+    // drops its row (also under `!`) and BIND leaves the variable unbound. Its key is not
+    // checked, the host does not refuse, and the program executes natively.
+    let data = triple("<urn:s>", "<urn:p>", "\"abc\"")
+        + &triple("<urn:t>", "<urn:p>", &format!("\"2.5\"^^<{XSD}decimal>"));
+    for (tag, query, expected) in [
+        (
+            "profiled_filter",
+            "SELECT ?s {?s <urn:p> ?x FILTER(?x >= 1)}",
+            1,
+        ),
+        (
+            "profiled_not",
+            "SELECT ?s {?s <urn:p> ?x FILTER(!(?x < 1))}",
+            1,
+        ),
+        (
+            "profiled_bind",
+            "SELECT ?s ?b {?s <urn:p> ?x BIND(?x >= 1 AS ?b)}",
+            2,
+        ),
+    ] {
+        let p =
+            graphs::bind_issuer_registry(graphs::lower(query, bounds).unwrap(), &issuer_registry())
+                .unwrap();
+        let pkg = codegen::generate_suite_fixture(&p).unwrap();
+        let source = &pkg.files[&format!("{}/src/main.nr", pkg.name)];
+        // An integer constant admits integer and decimal values only.
+        assert!(
+            source.contains("core::ops_core_reads::check_profiled("),
+            "{tag}: {source}"
+        );
+        assert!(source.contains(", [6], parameters);"), "{tag}: {source}");
+        let credentials = vec![signed(data.clone(), "urn:issuer", 3)];
+        let trace = graphs::evaluate(&p, &credentials).unwrap();
+        fixtures::assert_engine(query, &data, &trace.result);
+        let ResultValue::Select { rows, .. } = &trace.result else {
+            panic!("{tag}: SELECT result")
+        };
+        assert_eq!(rows.len(), expected, "{tag}");
+        if tag == "profiled_bind" {
+            assert_eq!(rows.iter().filter(|row| !row[1].bound).count(), 1, "{tag}");
+        }
+        let input =
+            witness_closed::prover_toml(&p, &credentials, &trace, [7; 32], [3; 32], issuer_root())
+                .unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        for (name, source) in &pkg.files {
+            let target = temp.path().join(name);
+            std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+            std::fs::write(target, source).unwrap();
+        }
+        std::os::unix::fs::symlink(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../zk")
+                .canonicalize()
+                .unwrap(),
+            temp.path().join("zk"),
+        )
+        .unwrap();
+        execute_bounded(&gate, temp.path(), &pkg.name, &input, tag).unwrap();
     }
-    std::os::unix::fs::symlink(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../zk")
-            .canonicalize()
-            .unwrap(),
-        temp.path().join("zk"),
-    )
-    .unwrap();
-    // A decimal inside the {integer, decimal} profile still executes natively.
-    let decimal = witness("\"2.5\"^^<http://www.w3.org/2001/XMLSchema#decimal>").unwrap();
-    execute_bounded(&gate, temp.path(), &pkg.name, &decimal, "profiled_decimal").unwrap();
     support::complete(gate);
 }
 

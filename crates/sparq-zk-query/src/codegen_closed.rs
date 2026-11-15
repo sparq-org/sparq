@@ -317,6 +317,28 @@ fn predicate_source(
             array(rights.iter().map(|id| format!("t{id}")))
         )
         .unwrap(),
+        Predicate::Membership {
+            variable,
+            start,
+            count,
+        } => {
+            let index = plan.parameters[..*count as usize]
+                .iter()
+                .filter(|p| matches!(p, Parameter::Index(_)))
+                .count();
+            writeln!(
+                out,
+                "    let {name} = core::ops_closed_expr::membership(t{input}, {}, {}, indices[{index}]);",
+                plan.nodes[input as usize]
+                    .output
+                    .variables
+                    .iter()
+                    .position(|v| v == variable)
+                    .expect("membership column"),
+                array((*start..*start + crate::plan::IN_CAPACITY as u32).map(|p| term(p, ids)))
+            )
+            .unwrap()
+        }
         Predicate::SemiJoin(right) => writeln!(
             out,
             "    let {name} = core::ops_closed_negation::semi_join(t{input}, t{right}, {});",

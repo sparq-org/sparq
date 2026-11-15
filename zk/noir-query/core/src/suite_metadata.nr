@@ -3,7 +3,7 @@ use std::collections::bounded_vec::BoundedVec;
 use compose::issuer::{Point, schnorr_verify, assert_on_curve, assert_in_prime_order_subgroup};
 use poseidon::poseidon2::Poseidon2;
 use crate::term::{TermCell, padding, same_term, open_term, recompute_key_for};
-use crate::suite_entry::{TermOpening, open_cell, BoundedTermOpening, open_bounded_cell, open_credential_quads, open_credential_bounded_quads, merge_mixed_rows};
+use crate::suite_entry::{TermOpening, open_cell, BoundedTermOpening, open_bounded_cell, open_credential_quads, open_credential_bounded_quads, merge_mixed_rows, DigestQuadOpening, open_credential_digest_quads};
 use crate::suite::{credential_root, signed_message};
 use crate::suite_constants::{METADATA_DOMAIN, MULTIKEY_LENGTH, MULTIKEY_PREFIX_0, MULTIKEY_PREFIX_1, MULTIKEY_PREFIX_2, MULTIKEY_PREFIX_3, CLASS_STRING_PREFIX, DT_DATETIME, DT_STRING, CLASS_DATE_TIME};
 
@@ -211,9 +211,8 @@ pub fn open_bounded_credential_revealed<let N: u32, let L: u32, let C: u32, let 
     pk: Point, credential_index: u32,
 ) -> OpenedCredential<N> {
     assert(credential_index < 0xffffffff, "credential scope capacity");
-    finish_opening(open_credential_bounded_quads(raw, credential_index + 1), salts, salt, count, configuration,
-        open_bounded_cell(created_raw, 0), BoundedVec::from_parts_unchecked(created_raw.lexical, created_raw.lexical_len),
-        open_bounded_cell(method_raw, 0), pk, credential_index)
+    finish_bounded(open_credential_bounded_quads(raw, credential_index + 1), salts, salt, count, configuration,
+        created_raw, method_raw, pk, credential_index)
 }
 /// Hidden signature mode over the same bounded complete opening.
 pub fn open_bounded_credential_hidden<let N: u32, let L: u32, let C: u32, let V: u32, let D: u32, let G: u32>(
@@ -239,9 +238,7 @@ pub fn open_bounded_credential_mixed_revealed<let N: u32, let S: u32, let K: u32
     let scope = credential_index + 1;
     let quads = merge_mixed_rows(open_credential_bounded_quads(raw_short, scope),
         open_credential_bounded_quads(raw_long, scope), long_index);
-    finish_opening(quads, salts, salt, count, configuration,
-        open_bounded_cell(created_raw, 0), BoundedVec::from_parts_unchecked(created_raw.lexical, created_raw.lexical_len),
-        open_bounded_cell(method_raw, 0), pk, credential_index)
+    finish_bounded(quads, salts, salt, count, configuration, created_raw, method_raw, pk, credential_index)
 }
 /// Hidden signature mode over the same mixed-bound complete opening.
 pub fn open_bounded_credential_mixed_hidden<let N: u32, let S: u32, let K: u32, let L: u32, let LL: u32,
@@ -252,6 +249,64 @@ pub fn open_bounded_credential_mixed_hidden<let N: u32, let S: u32, let K: u32, 
     pk: Point, credential_index: u32, r: Point, s: Field, e: Field, e_k: Field,
 ) -> OpenedCredential<N> {
     let opened = open_bounded_credential_mixed_revealed(raw_short, raw_long, long_index, salts, salt, count,
+        configuration, created_raw, method_raw, pk, credential_index);
+    authenticate_signature(opened, pk, r, s, e, e_k)
+}
+fn finish_bounded<let N: u32, let C: u32, let V: u32, let D: u32, let G: u32>(quads: [[TermCell; 4]; N],
+    salts: [Field; N], salt: Field, count: u32, configuration: [u128; 2],
+    created_raw: BoundedTermOpening<C, D, G>, method_raw: BoundedTermOpening<V, D, G>, pk: Point, credential_index: u32,
+) -> OpenedCredential<N> {
+    finish_opening(quads, salts, salt, count, configuration,
+        open_bounded_cell(created_raw, 0), BoundedVec::from_parts_unchecked(created_raw.lexical, created_raw.lexical_len),
+        open_bounded_cell(method_raw, 0), pk, credential_index)
+}
+
+/// Complete opening whose subjects, predicates and graph names enter by framed
+/// digest; objects keep their bytes. Leaves, root, identities and the returned
+/// opening equal the byte opening. Read resource bytes, if ever needed, with
+/// `term::open_lexical` against the returned cell.
+pub fn open_digest_credential_revealed<let N: u32, let L: u32, let C: u32, let V: u32, let D: u32, let G: u32>(
+    raw: [DigestQuadOpening<L, D, G>; N], salts: [Field; N], salt: Field, count: u32,
+    configuration: [u128; 2], created_raw: BoundedTermOpening<C, D, G>, method_raw: BoundedTermOpening<V, D, G>,
+    pk: Point, credential_index: u32,
+) -> OpenedCredential<N> {
+    assert(credential_index < 0xffffffff, "credential scope capacity");
+    finish_bounded(open_credential_digest_quads(raw, credential_index + 1), salts, salt, count, configuration,
+        created_raw, method_raw, pk, credential_index)
+}
+/// Hidden signature mode over the digest opening.
+pub fn open_digest_credential_hidden<let N: u32, let L: u32, let C: u32, let V: u32, let D: u32, let G: u32>(
+    raw: [DigestQuadOpening<L, D, G>; N], salts: [Field; N], salt: Field, count: u32,
+    configuration: [u128; 2], created_raw: BoundedTermOpening<C, D, G>, method_raw: BoundedTermOpening<V, D, G>,
+    pk: Point, credential_index: u32, r: Point, s: Field, e: Field, e_k: Field,
+) -> OpenedCredential<N> {
+    let opened = open_digest_credential_revealed(raw, salts, salt, count, configuration, created_raw, method_raw, pk, credential_index);
+    authenticate_signature(opened, pk, r, s, e, e_k)
+}
+/// Digest opening with S short-bound and K long-bound objects; placement as in
+/// `open_bounded_credential_mixed_revealed`.
+pub fn open_digest_credential_mixed_revealed<let N: u32, let S: u32, let K: u32, let L: u32, let LL: u32,
+    let C: u32, let V: u32, let D: u32, let G: u32>(
+    raw_short: [DigestQuadOpening<L, D, G>; S], raw_long: [DigestQuadOpening<LL, D, G>; K],
+    long_index: [u32; K], salts: [Field; N], salt: Field, count: u32,
+    configuration: [u128; 2], created_raw: BoundedTermOpening<C, D, G>, method_raw: BoundedTermOpening<V, D, G>,
+    pk: Point, credential_index: u32,
+) -> OpenedCredential<N> {
+    assert(credential_index < 0xffffffff, "credential scope capacity");
+    let scope = credential_index + 1;
+    let quads = merge_mixed_rows(open_credential_digest_quads(raw_short, scope),
+        open_credential_digest_quads(raw_long, scope), long_index);
+    finish_bounded(quads, salts, salt, count, configuration, created_raw, method_raw, pk, credential_index)
+}
+/// Hidden signature mode over the mixed digest opening.
+pub fn open_digest_credential_mixed_hidden<let N: u32, let S: u32, let K: u32, let L: u32, let LL: u32,
+    let C: u32, let V: u32, let D: u32, let G: u32>(
+    raw_short: [DigestQuadOpening<L, D, G>; S], raw_long: [DigestQuadOpening<LL, D, G>; K],
+    long_index: [u32; K], salts: [Field; N], salt: Field, count: u32,
+    configuration: [u128; 2], created_raw: BoundedTermOpening<C, D, G>, method_raw: BoundedTermOpening<V, D, G>,
+    pk: Point, credential_index: u32, r: Point, s: Field, e: Field, e_k: Field,
+) -> OpenedCredential<N> {
+    let opened = open_digest_credential_mixed_revealed(raw_short, raw_long, long_index, salts, salt, count,
         configuration, created_raw, method_raw, pk, credential_index);
     authenticate_signature(opened, pk, r, s, e, e_k)
 }

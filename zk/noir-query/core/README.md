@@ -90,6 +90,14 @@ the trailing indices. Short rows fill the remaining tree positions in order, so 
 leaves, root and returned `OpenedCredential<N>` equal the uniform opening. A quad
 too long for the short bound needs a long slot; otherwise no proof exists.
 
+To skip resource bytes, call `suite::{open_digest_credential_hidden,
+open_digest_credential_revealed}` or their `_mixed_` forms with
+`DigestQuadOpening<L, D, G>` rows: subject, predicate and graph are
+`ResourceDigest { bound, kind, framed }`, where `framed` is the term's
+`TERM_DOMAIN` hash over its typed byte frame; the object keeps its bytes. The
+signed root binds `P(kind, framed, 0)`, so leaves, root and identities equal the
+byte opening. Reopen a resource's bytes with `term::open_lexical` if a read needs them.
+
 Use `open_status_index` for decimal string indices, `open_status_purpose` for
 literal purposes, and `open_multikey` for the private codec. Synthetic credential
 graph names come from `term::credential_graph` and include the request digest and
@@ -115,9 +123,10 @@ the public active-length index. Canonical policy consumption uses the envelope m
 dispatch retains its own admission contract.
 
 The `ops_core_profile` adapter holds raw witness structs and normalization only.
-It constructs zero resource datatype, language and key fields and derives bound
-flags and the default graph. `ops_core_suite::open_bounded_one` delegates the
-complete signed opening once to `suite::open_bounded_credential_hidden`.
+Its `QuadOpening` carries subjects and predicates as `ResourceDigestOpening`
+digests and objects as bytes; normalization derives bound flags and the default
+graph. `ops_core_suite::open_bounded_one` delegates the complete signed opening
+once to `suite::open_digest_credential_hidden`.
 Value consumers use fixed datatype `term::open_key_checked` calls with separate
 scalar bounds. Envelope wiring can share `authenticate_bounded`'s opaque suite
 object and convert it through `from_authenticated_bounded` after policy checks.
@@ -177,6 +186,13 @@ are computed inside the gadget.
 
 Plain-string equality classifies its operands from the authenticated datatype
 before value-key guards; identity-only comparison does not inspect unused keys.
+
+Closed FILTER membership (`ops_closed_expr::membership`) is separate from those
+identity-string reads: at a FILTER's top-level AND/OR only, `?v = c` and
+`?v IN (c...)` over IRI or simple-literal constants test bound plus `same_term`
+against public constants. Error and false both reject there, so it opens no
+value and has no read site. NOT, BIND and released booleans keep the value
+comparison.
 
 The converted operator view exposes `rows()`, `active()`, `message()` and `graph()`.
 Its private construction marker excludes it from entry-point witnesses and external

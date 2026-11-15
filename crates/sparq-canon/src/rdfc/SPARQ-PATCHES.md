@@ -136,10 +136,23 @@ The following stay green:
 [hndq]: https://www.w3.org/TR/rdf-canon/#hash-nd-quads
 [hrbn]: https://www.w3.org/TR/rdf-canon/#hash-related-blank-node
 
+## 3. Explicit permutation budget
+
+The internal options accept an optional permutation limit. The HNDQ counter
+holds the remaining candidate count alongside its call budget. Every candidate
+in the lazy permutation iterator decrements that count before path processing,
+including candidates later skipped by pruning. All three bounded public entry points
+supply this budget; default entry points retain their existing behavior.
+The input/output preflight remains in `bounded.rs`. Regression tests compare
+bounded and standard output for high-degree first-degree-resolved inputs and
+exercise budget exhaustion across HNDQ calls.
+
 ## zkVM collection adapter
 
-On `target_os = "zkvm"`, work maps are ordered and the private dataset adapter
+On `target_os = "zkvm"`, work maps and sets are ordered and the private dataset adapter
 stores quads by their serialized lexical keys. This preserves RDF set semantics
 without constructing oxrdf's randomly seeded string interner. Canonical output
 still goes through the existing relabelling and final serialization. Native
 builds retain oxrdf's Dataset and the original work-map types.
+The ordered bounded issuer uses the same explicit HNDQ and per-candidate
+permutation budgets as canonical output and the existing issuer entry point.

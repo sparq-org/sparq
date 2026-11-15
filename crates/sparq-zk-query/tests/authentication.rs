@@ -171,13 +171,18 @@ fn suite_program_checks_authentication_membership_keys_and_credential_limits() {
         );
     }
     let mut changed = parsed.clone();
-    changed["credential_0"][0]["subject"]["lexical"][0] = json!(1);
+    change_field(&mut changed["credential_0"][0]["subject"]["framed"]);
+    assert!(driver
+        .execute(&render(&changed), "altered_resource_digest")
+        .is_err());
+    let mut changed = parsed.clone();
+    changed["credential_0"][0]["object"]["lexical"][0] = json!(1);
     assert!(driver
         .execute(&render(&changed), "altered_lexical")
         .is_err());
     let mut changed = parsed.clone();
     let padding = data[0].credential.count as usize;
-    changed["credential_0"][padding]["subject"]["lexical"][0] = json!(1);
+    change_field(&mut changed["credential_0"][padding]["subject"]["framed"]);
     assert!(driver
         .execute(&render(&changed), "altered_opening_padding")
         .is_err());
@@ -616,7 +621,6 @@ fn read_site_keys_bind_complete_consumer_inputs_and_lexical_openings() {
         // Closest N0 form for MIN inputs: the larger figure still enters the consumer.
         ("integer", "2", "1", "3", "0"),
     ];
-    let mut compiled = None;
     for (datatype, target, other, replacement, threshold) in cases {
         let dt = format!("http://www.w3.org/2001/XMLSchema#{datatype}");
         let source = format!(
@@ -639,18 +643,14 @@ fn read_site_keys_bind_complete_consumer_inputs_and_lexical_openings() {
             )
             .unwrap(),
         );
+        // The constant's datatype class is part of the program identity, so each case compiles.
         let package = sparq_zk_query::codegen::generate_suite_fixture(&plan).unwrap();
-        if let Some((expected, _)) = &compiled {
-            assert_eq!(&package, expected);
-        } else {
-            let workspace = fixture_support::Workspace::new(&package);
-            ProgramProver::new(&workspace.0, &package.name)
-                .unwrap()
-                .compile()
-                .unwrap();
-            compiled = Some((package.clone(), workspace));
-        }
-        let driver = ProgramProver::new(&compiled.as_ref().unwrap().1 .0, &package.name).unwrap();
+        let workspace = fixture_support::Workspace::new(&package);
+        ProgramProver::new(&workspace.0, &package.name)
+            .unwrap()
+            .compile()
+            .unwrap();
+        let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
         driver
             .execute(&render(&honest), "complete_read_input")
             .unwrap();
@@ -733,7 +733,6 @@ fn request_values_use_exact_verifier_encoded_keys_without_private_openings() {
     };
     let data = vec![authenticated::sign("<urn:s> <urn:p> <urn:o> .", 0)];
     let cells = vec![data[0].cells(0).unwrap()];
-    let mut compiled = None;
     for literal in [format!("\"{}\"", "a".repeat(100)), "\"hello\"@en".into()] {
         let query = format!("SELECT ?x WHERE {{VALUES ?x {{{literal}}} FILTER(?x = {literal})}}");
         let plan = lower(
@@ -755,18 +754,14 @@ fn request_values_use_exact_verifier_encoded_keys_without_private_openings() {
             authenticated::issuer_root(),
         )
         .unwrap();
+        // The constant's datatype class is part of the program identity, so each case compiles.
         let package = sparq_zk_query::codegen::generate_suite_fixture(&plan).unwrap();
-        if let Some((expected, _)) = &compiled {
-            assert_eq!(&package, expected);
-        } else {
-            let workspace = fixture_support::Workspace::new(&package);
-            ProgramProver::new(&workspace.0, &package.name)
-                .unwrap()
-                .compile()
-                .unwrap();
-            compiled = Some((package.clone(), workspace));
-        }
-        let driver = ProgramProver::new(&compiled.as_ref().unwrap().1 .0, &package.name).unwrap();
+        let workspace = fixture_support::Workspace::new(&package);
+        ProgramProver::new(&workspace.0, &package.name)
+            .unwrap()
+            .compile()
+            .unwrap();
+        let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
         driver.execute(&input, "verifier_values_honest").unwrap();
         let mut changed = parse(&input);
         let reads = changed

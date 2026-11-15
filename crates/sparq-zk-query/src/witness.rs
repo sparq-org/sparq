@@ -402,8 +402,8 @@ fn prover_toml_authenticated_mode(
                     term_opening_with_capacity(Some(&q.object), opening.object as usize)?;
                 object.as_object_mut().unwrap().remove("bound");
                 quads.push(serde_json::json!({
-                    "subject":resource_opening(Some(&oxrdf::Term::from(q.subject)), opening.resource as usize)?,
-                    "predicate":resource_opening(Some(&oxrdf::Term::NamedNode(q.predicate)), opening.resource as usize)?,
+                    "subject":resource_digest(Some(&oxrdf::Term::from(q.subject)))?,
+                    "predicate":resource_digest(Some(&oxrdf::Term::NamedNode(q.predicate)))?,
                     "object":object,
                 }));
             }
@@ -454,7 +454,7 @@ fn prover_toml_authenticated_mode(
         }
         let mut object = term_opening_with_capacity(None, opening.object as usize)?;
         object.as_object_mut().unwrap().remove("bound");
-        let resource = resource_opening(None, opening.resource as usize)?;
+        let resource = resource_digest(None)?;
         quads.resize(
             capacity as usize,
             serde_json::json!({"subject":resource,"predicate":resource,"object":object}),
@@ -575,11 +575,10 @@ fn prover_toml_authenticated_mode(
             if columns.is_empty() {
                 continue;
             }
-            let profiles = crate::codegen::filter_read_profiles(plan, input as crate::plan::NodeId, expr, &columns);
             let mut reads = Vec::new();
             for r in 0..plan.nodes()[input].output.capacity as usize {
                 let mut row = Vec::new();
-                for (&column, &profile) in columns.iter().zip(&profiles) {
+                for &column in &columns {
                     let cell = trace.tables[input].rows.get(r).map(|row| row[column]);
                     let term = if let Some(cell) = cell.filter(|c| {
                         c.bound
@@ -588,7 +587,6 @@ fn prover_toml_authenticated_mode(
                             && !(crate::codegen::identity_string_reads(expr)
                                 && c.dt == string_datatype)
                     }) {
-                        crate::reads_closed::check_profile(cell.dt, profile)?;
                         Some(match literals.iter().find(|(c, _)| *c == cell) {
                             Some((_, term)) => term.clone(),
                             None => crate::witness_closed::computed(cell).map_err(|e| match e {
@@ -638,6 +636,21 @@ fn value_read_opening(
     term_opening_with_capacity(term, capacity)
 }
 
+/// A credential subject or predicate as `{kind, framed}`: the suite's framed term
+/// digest, which the signed root binds; padding is all zero.
+fn resource_digest(term: Option<&oxrdf::Term>) -> Result<serde_json::Value, Error> {
+    let Some(term) = term else {
+        return Ok(serde_json::json!({"kind":0,"framed":"0"}));
+    };
+    let kind = match term {
+        oxrdf::Term::NamedNode(_) => 1,
+        oxrdf::Term::BlankNode(_) => 2,
+        _ => return Err(Error::Invalid("credential resource term".into())),
+    };
+    let framed = sparq_merkle_suite::poseidon::resource_digest(term)
+        .map_err(|_| Error::Invalid("credential resource digest".into()))?;
+    Ok(serde_json::json!({"kind":kind,"framed":sparq_zk::field::field_to_hex(&framed)}))
+}
 fn resource_opening(
     term: Option<&oxrdf::Term>,
     capacity: usize,

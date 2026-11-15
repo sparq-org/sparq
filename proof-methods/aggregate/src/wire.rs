@@ -26,6 +26,13 @@ impl<'de> Deserialize<'de> for Bytes {
     }
 }
 
+// Let the signature verifier classify absent or malformed attestations consistently.
+// Other byte fields retain strict decoding and their existing encoding errors.
+fn deserialize_signature<'de, D: Deserializer<'de>>(d: D) -> std::result::Result<Bytes, D::Error> {
+    let value = serde_json::Value::deserialize(d)?;
+    Ok(Bytes::deserialize(value).unwrap_or_default())
+}
+
 /// Supported statistics; sum inputs are unsigned integers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -76,6 +83,7 @@ pub struct Parameters {
     pub session_id: Bytes,
     pub statistic: Statistic,
     pub min_group: u32,
+    /// Minimum number of parties that commit inputs, excluding compute-only roles.
     #[serde(default = "default_contributors")]
     pub min_contributors: u32,
     #[serde(default = "default_bits")]
@@ -150,6 +158,7 @@ pub struct Contribution {
     pub range_proof: Bytes,
     pub share_commitments: Vec<Commitments>,
     pub ciphertexts: Vec<Option<Ciphertext>>,
+    #[serde(default, deserialize_with = "deserialize_signature")]
     pub signature: Bytes,
 }
 
@@ -190,6 +199,7 @@ pub struct Partial {
     pub contributions_digest: Bytes,
     pub index: u32,
     pub shares: Shares,
+    #[serde(default, deserialize_with = "deserialize_signature")]
     pub signature: Bytes,
 }
 /// An encrypted signed partial addressed to one contributor.
@@ -243,6 +253,7 @@ pub struct SignedOutcome {
     pub contributions_digest: Bytes,
     pub finisher: u32,
     pub outcome: Outcome,
+    #[serde(default, deserialize_with = "deserialize_signature")]
     pub signature: Bytes,
 }
 

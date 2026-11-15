@@ -188,30 +188,43 @@ propagate their errors. Witness generation carries creation and verification
 method as private openings and uses the authenticated opener's returned message.
 `credential::credential_graph(request_digest, index)` shares the suite's
 presentation-local graph-name construction. Credentials using the reserved
-`vcq:verifiedIssuer` predicate are refused before dataset assembly.
+`vcq:verifiedIssuer` predicate are refused before dataset assembly. In the
+canonical envelope the holder chooses the slot order, so which credential
+receives which graph name is the holder's choice. Graph names are
+presentation-local blank-node-like labels: answers are equal up to their
+renaming, and a query that releases a graph name releases only that label.
 
 Constant membership lists use a fixed parameter block and a public active-length
 index, so changing their contents or admitted length preserves plan hash and
 program source. Oversized lists receive the named `IN list` capacity refusal.
 The existing parameter enum and envelope group order are unchanged.
 
-Value reads carry a datatype profile per column, a limit of the same kind as
-capacity. The compiler derives each profile from the hashed plan alone: the plan
-encoding carries the datatype class of every constant an expression reads
-(non-literal, numeric, date, dateTime, boolean, string, other literal) and the
-generation mode (operator fixture, suite fixture, canonical envelope), so equal
-plan hashes generate identical programs. Values and list members stay outside
-the hash. A variable compared only with constants gets the datatypes comparable with them:
+Value reads carry a datatype profile per column. The compiler derives each
+profile from the hashed plan alone: the plan encoding carries the datatype class
+of every constant an expression reads (non-literal, numeric, date, dateTime,
+boolean, string, other literal) and the generation mode (operator fixture, suite
+fixture, canonical envelope), so equal plan hashes generate identical programs.
+Values and list members stay outside the hash: a public membership list reads
+every supported datatype and compares at run time, so a member's class changes
+neither the mask nor the program.
+
+A variable compared only with constants gets the datatypes comparable with them:
 integer or decimal constants admit `{integer, decimal}`, a date constant admits
 `{date}`, a dateTime constant admits `{dateTime}`, boolean admits `{boolean}`,
-and a plain string admits `{string}`. Any other use admits every supported datatype.
-Identity-mode sites never value-check plain strings. A value outside its
-column's profile has no proof, never a different answer: the host refuses it
-before proving with the named `value datatype outside the column's profile`
-capacity error, and the circuit asserts the same. A datatype outside every
-profile keeps the read path's own unsupported-datatype refusal. For example, a string in a
-numeric-compared column is refused, while a decimal in an `{integer, decimal}`
-column proves.
+and a plain string admits `{string}`. Any other use admits every supported
+datatype. Identity-mode sites never value-check plain strings. The read site
+recomputes the key only for a value inside the profile. A supported value outside
+it keeps its unchecked key, and that is exact: the column's consumers compare it
+only with constants of another class, and the comparator dispatches such a pair
+from the authenticated datatype and key class to a type error (date against
+dateTime is a type error or a capacity refusal, never an order). So a FILTER
+drops the row, also under `!`, and a BIND leaves its variable unbound, exactly as
+SPARQL. For example, a string in a numeric-compared column is simply not
+selected, and a decimal in an `{integer, decimal}` column is key-checked and
+compared. An unsupported datatype has no proof (the read path's named
+unsupported-datatype refusal). Ordering date against dateTime is likewise a
+named profile limit (`mixed temporal datatypes`), listed with capacity: SPARQL
+gives a type error there, and the method refuses rather than answer.
 
 For the closed-world integration, `credential::assemble_dataset` takes complete
 opened credential cells, envelope-authenticated issuer cells and the request
@@ -240,14 +253,17 @@ they were absent from the source vocabulary. Other result terms use the supplied
 vocabulary or the plan's public constants.
 
 The circuit library's `ops_core_profile` contains raw witness structs and
-resource normalization only. Generated credential openings call
+normalization only. Generated credential openings call
 `ops_core_suite::open_profile_one`, delegating the complete signed opening to
-`suite::open_bounded_credential_hidden` once per credential. Resource datatype,
-language and key bytes are zero; the default graph and active flags are derived.
-Scans, joins, GRAPH and DISTINCT compare authenticated term identity, retaining
-blank-node scope. Value consumers call `term::open_key_checked` with fixed datatype
-identifiers. Raw lexical backing is separately bounded for resources, objects
-and scalars. Shape encoding includes all these capacities.
+`suite::open_digest_credential_hidden` once per credential. Subjects and
+predicates enter as `ResourceDigestOpening {kind, framed}`, the framed term
+digest the signed root binds, so no resource bytes are opened; objects keep their
+bytes because their datatype dispatches value reads. The default graph and
+active flags are derived. Scans, joins, GRAPH and DISTINCT compare authenticated
+term identity, retaining blank-node scope. Value consumers call
+`term::open_key_checked` with fixed datatype identifiers. Raw lexical backing is
+bounded for objects and scalars; the resource limit remains a host admission
+bound. Shape encoding includes all these capacities.
 The verifier selects `capacity::OpeningProfile::{Solid, LongObjects, Extended}`. Its
 `limits()` reports the compiled resource, object, scalar, datatype, language,
 creation and verification-method bounds. `Solid` is the default. Choose

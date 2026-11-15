@@ -1,6 +1,6 @@
 ---
 name: vc-api
-description: Run the opt-in sparq-vc credential issue/verify HTTP test endpoint, prepare its offline JSON-LD context cache, embed its axum router, and run the W3C VC Data Model 2.0 and eddsa-rdfc-2022 suites locally.
+description: Run the opt-in sparq-vc credential issue/verify and presentation verify HTTP test endpoint, prepare its offline JSON-LD context cache, embed its axum router, and run the W3C VC Data Model 2.0 and eddsa-rdfc-2022 suites locally.
 license: MIT
 ---
 
@@ -26,15 +26,61 @@ retrieve remote contexts or resources.
   preserving optional issuer metadata.
 - `POST /credentials/verify` accepts `{verifiableCredential, options?}` and
   returns 200 with `{verified:true, checks:["proof"], warnings:[], errors:[]}`.
-  A rejection returns 400 with `verified:false` and `{type,message}` errors.
-- `GET /did.json` returns a public DID document with `testOnly: true`.
+- `POST /presentations/verify` accepts `{verifiablePresentation, options?}`
+  and returns the same proof-check result after checking every presentation
+  proof and every embedded credential through the credential verifier.
+- Rejections return 400 with `verified:false`, empty `checks`/`warnings`, and
+  `errors:[ProblemDetails]`. Each problem has `type: "https://sparq.jeswr.org/ns/vc-api#ValidationError"`, `title`, HTTP
+  `status`, readable `detail`, and a `message` string extension. The top-level
+  body also exposes that problem's fields for direct error readers.
+  Unknown routes return 404 and unsupported methods return 405 with that shape.
+- `GET /did.json` returns a public DID document with `testOnly: true`, mapped to
+  `https://sparq.jeswr.org/ns/vc-api#testOnly`.
 
 Issue options: `type`, `cryptosuite`, `proofPurpose`, `verificationMethod`,
 `created`, `domain`, `challenge`. Supported identifiers are `DataIntegrityProof`,
 `eddsa-rdfc-2022`, and `assertionMethod`. Verify accepts those identifiers,
 `checks: ["proof"]`, `domain`, and `challenge`. Defaults select a proof check;
-current-time credential validity, presentation operations, and proof chains
-are outside this endpoint's scope. Requests are limited to 256 KiB.
+current-time credential validity is outside this endpoint's scope. Presentation
+proofs use `authentication`; supplied challenge/domain options bind the
+presentation's proofs. Embedded credentials use assertion proofs and the existing
+credential verifier's default proof check. A supplied holder must match the
+terminal presentation proof's `did:key` controller; holder omission is supported.
+Unsupported proof kinds and unsigned documents are errors.
+
+Proofs may be an object or a nonempty set. `previousProof` is a string or
+nonempty list of proof IDs in that set. Dependencies verify first; terminal
+credential proofs must use the issuer's key, while referenced proofs may use
+other `did:key` controllers. Unknown, missing, duplicate, self and cyclic
+references reject. This profile binds every terminal proof (one that no other
+proof references) to the issuer or holder. An issuer proof followed by a different
+notary's countersignature, and an unordered credential proof set with another
+co-signer, are rejected even when their signatures are valid.
+
+Limits: 256 KiB per request, JSON nesting depth 64,
+32 credentials per presentation, 64 proofs per document, 64 references per proof,
+and chain depth 16 (including the current proof).
+
+Issuance preserves and signs `relatedResource` objects without dereferencing
+IDs. If an ID belongs to any document held in the offline cache, both issuance
+and verification compare each supplied digest against those exact held bytes.
+This covers every context URL and any additional trusted cached document;
+a mismatch returns a readable held-resource digest error. For unknown IDs,
+resource integrity is **not checked**: validly encoded descriptors are signed
+unchanged, without retrieving their contents. Each needs a unique absolute `id` and
+`digestSRI` (SHA-256/384/512, standard base64) or `digestMultibase` (`u`, unpadded
+base64url SHA-256); optional `mediaType` is a nonempty string. Contexts use only
+the startup cache. The staged credentials-v2 fixture uses the GitHub context's
+exact bytes; the npm copy has identical JSON-LD content but different digest bytes.
+
+Issuance and verification share a compatibility leniency beyond the JSON-LD 1.1
+context processing algorithm, matching jsonld.js 9.0.0. An inline context-array
+entry containing `@context` is replaced once by that key's object value;
+sibling keys are ignored. A wrapped string, array, null or other non-object entry
+is an error. A direct local context wrapper is resolved first, so its value can
+instead be an object, a context URL or an array. The same processing covers nested
+and scoped contexts and documents loaded from the offline cache. Hashing uses the
+processed contexts; the issued document retains the submitted context spelling.
 
 To embed without a listener, use `sparq_vc::api::{router, Service,
 OfflineContexts}`. `OfflineContexts::from_directory(&Path)` loads all

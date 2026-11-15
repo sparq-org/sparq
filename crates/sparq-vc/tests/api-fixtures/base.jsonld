@@ -120,8 +120,22 @@
           "@type": "https://w3id.org/security#multibase"
         },
         "challenge": "https://w3id.org/security#challenge",
-        "domain": "https://w3id.org/security#domain"
+        "domain": "https://w3id.org/security#domain",
+        "previousProof": {
+          "@id": "https://w3id.org/security#previousProof",
+          "@type": "@id"
+        }
       }
+    },
+    "VerifiablePresentation": "https://www.w3.org/2018/credentials#VerifiablePresentation",
+    "holder": {
+      "@id": "https://www.w3.org/2018/credentials#holder",
+      "@type": "@id"
+    },
+    "verifiableCredential": {
+      "@id": "https://www.w3.org/2018/credentials#verifiableCredential",
+      "@type": "@id",
+      "@container": "@graph"
     }
   }
 }

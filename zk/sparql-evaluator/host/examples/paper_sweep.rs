@@ -21,22 +21,28 @@
 //! Synthetic test material only: every credential is signed with the public
 //! RFC 8032 section 7.1 TEST 1 key.
 
-use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
+use ed25519_dalek::{SigningKey, Verifier, VerifyingKey};
 use risc0_zkvm::{Executor, ExecutorEnv, ExternalProver};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sparq_proved_evaluator::authenticated_rdf::{
-    check_query_profile, prove_with_artifact, verify_revealed_with_artifact, verify_with_artifact,
+    AnswerPresentation, check_query_profile, prove_with_artifact, verify_answer_with_artifact_timed,
 };
-use sparq_proved_evaluator::{AcceptedGuest, Error, Nonces, embedded_authrdf_artifact, embedded_authrdf_pin};
+use sparq_proved_evaluator::{
+    AcceptedGuest, Error, Nonces, embedded_authrdf_artifact, embedded_authrdf_pin,
+};
 use sparq_proved_evaluator_model::DatasetAuthority;
 use sparq_proved_evaluator_model::authenticated_rdf::{
     self as auth, AuthorizedKey, Cryptosuite, Policy, PrivateCredentials, Request, SignatureMode, SignedCredential,
     Witness,
 };
-use sparq_proved_evaluator_model::merkle_suite;
+#[path = "paper_sweep/issuance.rs"]
+mod issuance;
+use issuance::issue;
+#[path = "paper_sweep/encoding.rs"]
+mod encoding;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::{hint::black_box, time::Instant};
 
 const TEST1_SECRET: &str = "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60";
 const ISSUER: &str = "https://issuer.example/sweep";
@@ -179,23 +185,11 @@ fn payment_document(i: usize) -> String {
     lines.join("\n") + "\n"
 }
 
-/// Issues one credential and returns it with the issuer's signing time in nanoseconds.
-fn issue(document: &str, config: &str, suite: Cryptosuite, salt: [u8; 32]) -> (SignedCredential, u128) {
-    let start = Instant::now();
-    let credential = match suite {
-        Cryptosuite::EddsaRdfc2022 => {
-            let config_hash = Sha256::digest(sparq_canon::canonicalize_nquads(config).unwrap());
-            let document_hash = Sha256::digest(sparq_canon::canonicalize_nquads(document).unwrap());
-            let message = [config_hash.as_slice(), document_hash.as_slice()].concat();
-            SignedCredential {
-                document: document.into(),
-                proof_config: config.into(),
-                signature: key().sign(&message).to_bytes().to_vec(),
-            }
-        }
-        Cryptosuite::EddsaSha256Merkle2026 => merkle_suite::issue(document, config, &key(), salt).unwrap(),
-    };
-    (credential, start.elapsed().as_nanos())
+// Serialize before removing revealed-mode signatures from the private witness.
+fn credential_encoded_len(credential: &SignedCredential) -> usize {
+    serde_json::to_vec(credential)
+        .expect("complete secured credential encoding")
+        .len()
 }
 
 struct Config {
@@ -278,22 +272,76 @@ fn phases(_: &Witness) -> Result<(Value, Value), String> {
     unreachable!("checked in args()")
 }
 
-fn run(args: &Args, set: &str, id: &str, query: &str, config: &Config, guest: &AcceptedGuest) -> Value {
-    let (issuer, vm) = if set == "main" { (PAYMENT_ISSUER, PAYMENT_VM) } else { (ISSUER, VM) };
+fn run(
+    args: &Args,
+    set: &str,
+    id: &str,
+    query: &str,
+    config: &Config,
+    guest: &AcceptedGuest,
+    issue: impl Fn(&str, &str, Cryptosuite, [u8; 32]) -> (SignedCredential, issuance::Timings),
+) -> Value {
+    let (issuer, vm) = if set == "main" {
+        (PAYMENT_ISSUER, PAYMENT_VM)
+    } else {
+        (ISSUER, VM)
+    };
     let config_text = proof_config(vm, config.suite);
     let mut credentials = Vec::new();
     let mut issue_ns = Vec::new();
+    let mut signature_ns = Vec::new();
+    let mut tree_ns = Vec::new();
     for i in 0..config.n {
-        let document = if set == "main" { payment_document(i) } else { sweep_document(i, config.size, args.blank_free) };
+        let document = if set == "main" {
+            payment_document(i)
+        } else {
+            sweep_document(i, config.size, args.blank_free)
+        };
         let (credential, ns) = issue(&document, &config_text, config.suite, [0x40 + i as u8; 32]);
+        // The reference implementation runs after the isolated/inclusive
+        // timers have stopped. Drift is an assertion failure, never admission data.
+        if config.suite == Cryptosuite::EddsaSha256Merkle2026 {
+            let normative = sparq_proved_evaluator_model::merkle_suite::issue(
+                &document,
+                &config_text,
+                &key(),
+                [0x40 + i as u8; 32],
+            )
+            .expect("normative S4 issuance");
+            assert_eq!(
+                serde_json::to_vec(&credential).unwrap(),
+                serde_json::to_vec(&normative).unwrap(),
+                "S4 issuer implementation drift"
+            );
+        }
         credentials.push(credential);
-        issue_ns.push(ns);
+        issue_ns.push(ns.inclusive_ns);
+        signature_ns.push(ns.signature_ns);
+        tree_ns.push(ns.tree_ns);
     }
-    let counts: Vec<usize> =
-        credentials.iter().map(|c| c.document.lines().filter(|line| !line.trim().is_empty()).count()).collect();
-    assert!(counts.windows(2).all(|pair| pair[0] == pair[1]), "credentials differ in size");
+    let counts: Vec<usize> = credentials
+        .iter()
+        .map(|c| {
+            c.document
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .count()
+        })
+        .collect();
+    assert!(
+        counts.windows(2).all(|pair| pair[0] == pair[1]),
+        "credentials differ in size"
+    );
     let statements = counts[0];
-    let credential_bytes: Vec<usize> = credentials.iter().map(|c| c.document.len() + c.proof_config.len()).collect();
+    let credential_bytes: Vec<usize> = credentials
+        .iter()
+        .map(|c| c.document.len() + c.proof_config.len())
+        .collect();
+    let credential_encoded_bytes: Vec<_> = credentials.iter().map(credential_encoded_len).collect();
+    let credential_bincode_bytes: Vec<_> = credentials
+        .iter()
+        .map(|c| encoding::bincode_bytes(c).len())
+        .collect();
     let mut presented = Vec::new();
     if config.mode == SignatureMode::Revealed {
         for credential in &mut credentials {
@@ -308,7 +356,14 @@ fn run(args: &Args, set: &str, id: &str, query: &str, config: &Config, guest: &A
     }])
     .with_cryptosuite(config.suite)
     .with_signature_mode(config.mode);
-    let nonce: [u8; 32] = Sha256::digest(format!("{id}:{}:{:?}:{}:{}", suite_name(config.suite), config.mode, config.n, config.size)).into();
+    let nonce: [u8; 32] = Sha256::digest(format!(
+        "{id}:{}:{:?}:{}:{}",
+        suite_name(config.suite),
+        config.mode,
+        config.n,
+        config.size
+    ))
+    .into();
     let request = Request {
         version: auth::VERSION,
         query: query.into(),
@@ -318,9 +373,13 @@ fn run(args: &Args, set: &str, id: &str, query: &str, config: &Config, guest: &A
     };
     let witness = Witness {
         request: request.clone(),
-        dataset: PrivateCredentials { credentials, salt: [0x5a; 32] },
+        dataset: PrivateCredentials {
+            credentials,
+            salt: [0x5a; 32],
+        },
     };
     let mut record = json!({
+        "schema": "sparq.zk-paper-sweep.v3",
         "set": set,
         "id": id,
         "suite": suite_name(config.suite),
@@ -329,6 +388,15 @@ fn run(args: &Args, set: &str, id: &str, query: &str, config: &Config, guest: &A
         "statements_per_credential": statements,
         "credential_blank_nodes": set != "main" && !args.blank_free,
         "issuer_sign_ns": issue_ns,
+        "issuer_signature_primitive_ns": signature_ns,
+        "issuer_merkle_tree_ns": tree_ns,
+        "credential_encoded_bytes": credential_encoded_bytes,
+        "credential_bincode_bytes": credential_bincode_bytes,
+        "credential_compact_encoding": encoding::BINCODE_ENCODING,
+        "presentation_compact_encoding": encoding::BINCODE_ENCODING,
+        "credential_encoding": "serde-json-signed-credential-v1",
+        "presentation_encoding": "serde-json-answer-presentation-v1",
+        "verifier_split_status": "not_measured_no_receipt",
         "credential_bytes": credential_bytes,
         "signature_bytes": 64,
     });
@@ -341,8 +409,9 @@ fn run(args: &Args, set: &str, id: &str, query: &str, config: &Config, guest: &A
     // is still executed below so the record also shows what the image itself does.
     let profile = check_query_profile(&request);
     record["query_profile"] = json!(profile.as_ref().map_or_else(|e| e.0, |()| "accepted"));
+    let native_input = black_box(&witness);
     let start = Instant::now();
-    let native = auth::evaluate(&witness);
+    let native = black_box(auth::evaluate(native_input));
     record["native_evaluate_ns"] = json!(start.elapsed().as_nanos());
     let journal = match native {
         Ok(journal) => journal,
@@ -352,11 +421,14 @@ fn run(args: &Args, set: &str, id: &str, query: &str, config: &Config, guest: &A
             if args.execute {
                 // Guest-level evidence: the production image must abort on it too.
                 let outcome = execute(&witness, guest_artifact(), None);
-                record["guest_aborted"] = json!(outcome.as_ref().is_err_and(|e| e.contains(GUEST_ABORT)));
+                record["guest_aborted"] =
+                    json!(outcome.as_ref().is_err_and(|e| e.contains(GUEST_ABORT)));
                 match outcome {
                     Ok(execution) => record["execution"] = execution,
                     // Any other executor error (for example the session limit) is kept verbatim.
-                    Err(error) if !error.contains(GUEST_ABORT) => record["guest_error"] = json!(error),
+                    Err(error) if !error.contains(GUEST_ABORT) => {
+                        record["guest_error"] = json!(error)
+                    }
                     Err(_) => {}
                 }
             }
@@ -366,7 +438,10 @@ fn run(args: &Args, set: &str, id: &str, query: &str, config: &Config, guest: &A
     record["admitted"] = json!(true);
     if args.phases {
         let native_bytes: Vec<u8> = risc0_zkvm::serde::to_vec(&journal)
-            .unwrap().into_iter().flat_map(u32::to_le_bytes).collect();
+            .unwrap()
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect();
         record["native_journal_sha256"] = json!(format!("{:x}", Sha256::digest(native_bytes)));
     }
     record["result_bytes"] = json!(serde_json::to_vec(&journal.result).unwrap().len());
@@ -379,13 +454,23 @@ fn run(args: &Args, set: &str, id: &str, query: &str, config: &Config, guest: &A
             .map(|entry| {
                 presented
                     .iter()
-                    .find(|s| key.verify(&entry.message, &ed25519_dalek::Signature::from_slice(s).unwrap()).is_ok())
+                    .find(|s| {
+                        key.verify(
+                            &entry.message,
+                            &ed25519_dalek::Signature::from_slice(s).unwrap(),
+                        )
+                        .is_ok()
+                    })
                     .expect("one presented signature per signed message")
                     .clone()
             })
             .collect();
+        let inputs = black_box((&journal, &request, presented.as_slice()));
         let start = Instant::now();
-        auth::check_revealed_signatures(&journal, &request, &presented).expect("revealed signatures verify");
+        black_box(auth::check_revealed_signatures(
+            inputs.0, inputs.1, inputs.2,
+        ))
+        .expect("revealed signatures verify");
         record["verifier_signature_check_ns"] = json!(start.elapsed().as_nanos());
         // The same check through the dalek API, as a verifier library would run it.
         let key = VerifyingKey::from_bytes(&public).unwrap();
@@ -395,7 +480,8 @@ fn run(args: &Args, set: &str, id: &str, query: &str, config: &Config, guest: &A
         }
     }
     if args.execute {
-        record["execution"] = execute(&witness, guest_artifact(), None).unwrap_or_else(|e| json!({"error": e}));
+        record["execution"] =
+            execute(&witness, guest_artifact(), None).unwrap_or_else(|e| json!({"error": e}));
     }
     if args.phases {
         match phases(&witness) {
@@ -412,34 +498,52 @@ fn run(args: &Args, set: &str, id: &str, query: &str, config: &Config, guest: &A
         for attempt in 0..args.prove {
             let mut witness = witness.clone();
             witness.request.nonce[0] ^= attempt as u8 + 1;
+            let inputs = black_box((&witness, Path::new(&r0vm), guest));
             let start = Instant::now();
-            let presentation = prove_with_artifact(&witness, Path::new(&r0vm), guest).expect("prove");
+            let presentation =
+                black_box(prove_with_artifact(inputs.0, inputs.1, inputs.2)).expect("prove");
             let prove_ns = start.elapsed().as_nanos();
-            let receipt_bytes = bincode_len(&presentation);
+            let receipt_bytes = receipt_json_len(&presentation);
+            let answer = AnswerPresentation {
+                presentation,
+                signatures: (config.mode == SignatureMode::Revealed).then(|| presented.clone()),
+            };
+            let encoded = serde_json::to_vec(&answer).expect("answer encoding");
+            // The verifier receives the same complete encoding whose size is
+            // measured. Decoding is outside both aggregate and split timers.
+            let answer: AnswerPresentation =
+                serde_json::from_slice(&encoded).expect("answer decoding");
+            let presentation_bincode_bytes = encoding::bincode_bytes(&answer).len();
             let mut nonces = CountingNonces::default();
+            let inputs = black_box((&answer, &witness.request, &mut nonces, guest));
             let start = Instant::now();
-            match config.mode {
-                SignatureMode::Hidden => {
-                    verify_with_artifact(&presentation, &witness.request, &mut nonces, guest).expect("verify");
-                }
-                SignatureMode::Revealed => {
-                    verify_revealed_with_artifact(&presentation, &witness.request, &presented, &mut nonces, guest)
-                        .expect("verify");
-                }
-            }
+            let (verified, times) = black_box(verify_answer_with_artifact_timed(
+                inputs.0, inputs.1, inputs.2, inputs.3,
+            ))
+            .expect("verify");
+            let verify_ns = start.elapsed().as_nanos();
+            assert_eq!(verified, auth::evaluate(&witness).expect("native oracle"));
+            let stage_total = times.receipt + times.signatures.unwrap_or_default() + times.request;
             runs.push(json!({
                 "prove_ns": prove_ns,
-                "verify_ns": start.elapsed().as_nanos(),
+                "verify_ns": verify_ns,
+                "verifier_receipt_ns": times.receipt.as_nanos(),
+                "verifier_signature_ns": times.signatures.map(|time| time.as_nanos()),
+                "verifier_request_ns": times.request.as_nanos(),
+                "verifier_stages_ns": stage_total.as_nanos(),
+                "presentation_encoded_bytes": encoded.len(),
+                "presentation_bincode_bytes": presentation_bincode_bytes,
                 "presentation_bytes": receipt_bytes + presented.iter().map(Vec::len).sum::<usize>(),
                 "receipt_kind": "succinct",
             }));
         }
         record["proofs"] = json!(runs);
+        record["verifier_split_status"] = json!("measured");
     }
     record
 }
 
-fn bincode_len(presentation: &sparq_proved_evaluator::Presentation) -> usize {
+fn receipt_json_len(presentation: &sparq_proved_evaluator::Presentation) -> usize {
     serde_json::to_vec(&presentation.receipt).map(|b| b.len()).unwrap_or(0)
 }
 
@@ -497,7 +601,7 @@ fn main() {
                         if args.size.is_some_and(|only| only != size) {
                             continue;
                         }
-                        let record = run(&args, &args.set, id, query, &Config { suite, mode, n, size }, &guest);
+                        let record = run(&args, &args.set, id, query, &Config { suite, mode, n, size }, &guest, issue);
                         println!("{record}");
                     }
                 }
@@ -505,3 +609,7 @@ fn main() {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "paper_sweep/tests.rs"]
+mod tests;

@@ -26,3 +26,7 @@ path = "api/verify.rs"
 [[bin]]
 name = "did"
 path = "api/did.rs"
+
+[[bin]]
+name = "verify-presentation"
+path = "api/verify-presentation.rs"

@@ -127,7 +127,7 @@ pub(crate) fn append_authenticated(
             let mut rows = vec![];
             for r in 0..plan.nodes()[site.input as usize].output.capacity as usize {
                 let mut row = vec![];
-                for (&column, &profile) in site.columns.iter().zip(&site.profiles) {
+                for &column in &site.columns {
                     let cell = trace.tables[site.input as usize]
                         .rows
                         .get(r)
@@ -138,7 +138,6 @@ pub(crate) fn append_authenticated(
                             && !parameters.contains(c)
                             && !(site.identity_strings && c.dt == string_datatype)
                     }) {
-                        crate::reads_closed::check_profile(cell.dt, profile)?;
                         Some(match literals.iter().find(|(c, _)| *c == cell) {
                             Some((_, t)) => t.clone(),
                             None => computed(cell)?,

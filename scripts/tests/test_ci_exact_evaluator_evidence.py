@@ -1,5 +1,6 @@
 """Hermetic provenance rejection tests; no simulated proof is evidence."""
 
+import ast
 import importlib.util
 import json
 from pathlib import Path
@@ -192,6 +193,21 @@ class EvidenceGuards(unittest.TestCase):
             self.assertIn(f'"{step}"', runner)
         self.assertIn('"--example", "export_authrdf_guest"', runner)
         self.assertIn("creates no V5 receipt", evidence.AUTHRDF_SCOPE)
+
+    def test_native_host_command_executes_stage_and_measurement_tests(self):
+        source = (Path(__file__).parents[2] / "scripts/ci_exact_evaluator_evidence.py").read_text()
+        commands = [node for node in ast.walk(ast.parse(source))
+                    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id == "run_logged" and len(node.args) > 1
+                    and isinstance(node.args[1], ast.Constant)
+                    and node.args[1].value == "native-authrdf-host"]
+        self.assertEqual(len(commands), 1)
+        argv = ast.literal_eval(commands[0].args[0].right)
+        self.assertIn("--lib", argv)
+        self.assertEqual(self.targets(argv), ["authenticated_rdf"])
+        examples = [argv[i + 1] for i, arg in enumerate(argv) if arg == "--example"]
+        self.assertEqual(examples, ["paper_sweep", "paper_verify"])
+        self.assertNotIn("--ignored", argv)
 
     # zkp-14.6: feature and target selection of the added commands.
     @staticmethod

@@ -4,6 +4,7 @@ export interface Party {
   party_iri: string;
   ed25519_public_key: Bytes;
   x25519_public_key: Bytes;
+  /** Proves zero inputs and does not count toward min_contributors. */
   computeOnly?: boolean;
 }
 export interface Threshold {
@@ -16,6 +17,7 @@ export interface SessionParams {
   session_id: Bytes;
   statistic: 'count-and-sum' | 'count-only';
   min_group: number;
+  /** Minimum parties that commit inputs, excluding compute-only slots; defaults to 3. */
   min_contributors?: number;
   max_value_bits?: number;
   threshold?: Threshold;
@@ -39,6 +41,7 @@ export interface Contribution {
   range_proof: Bytes;
   share_commitments: Commitments[];
   ciphertexts: (Ciphertext | null)[];
+  /** Missing or malformed signatures fail with input-not-attested / signature. */
   signature: Bytes;
 }
 /** Contributor-private openings: never include in recipient messages or logs. */
@@ -46,7 +49,11 @@ export interface Shares { count: Bytes; rho: Bytes; sum?: Bytes; sigma?: Bytes }
 export interface LocalShare { session_id: Bytes; rule_digest: Bytes; index: number; shares: Shares }
 export interface ContributionState { contribution: Contribution; local: LocalShare; audit_opening: Shares }
 /** Contributor-private signed plaintext. */
-export interface Partial extends LocalShare { contributions_digest: Bytes; signature: Bytes }
+export interface Partial extends LocalShare {
+  contributions_digest: Bytes;
+  /** Missing or malformed signatures fail with protocol-error / signature. */
+  signature: Bytes;
+}
 export interface PartialMessage {
   session_id: Bytes;
   rule_digest: Bytes;
@@ -67,6 +74,7 @@ export interface SignedOutcome {
   contributions_digest: Bytes;
   finisher: number;
   outcome: Outcome;
+  /** Missing or malformed signatures fail with protocol-error / signature. */
   signature: Bytes;
 }
 export interface VerifyResult { verified: true }
