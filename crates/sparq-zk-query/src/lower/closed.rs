@@ -104,6 +104,50 @@ impl Builder {
         vars.retain(|v| node.output.variables.contains(v));
         vars
     }
+    /// A FILTER's top-level AND/OR tree, where error and false both reject:
+    /// `?v = c` and `?v IN (c...)` over IRIs and simple literals become identity
+    /// membership. BIND and NOT keep the value comparison.
+    pub(super) fn filter_predicate(
+        &mut self,
+        e: &Expression,
+        input: NodeId,
+        context: Option<NodeId>,
+        graph: Option<u32>,
+    ) -> Result<Predicate, Error> {
+        use Expression as E;
+        if let Some((variable, constants)) = membership(e) {
+            if let Some(v) = self.plan.variable_names.iter().position(|n| n == variable) {
+                if self.schema(input).contains(&(v as Var))
+                    && constants.len() <= crate::plan::IN_CAPACITY
+                {
+                    let start = self.plan.parameters.len() as ParameterId;
+                    for i in 0..crate::plan::IN_CAPACITY {
+                        // Padding slots are never compared (k < count).
+                        let term = constants.get(i).unwrap_or(&constants[0]).clone();
+                        self.parameter(Parameter::Term(term));
+                    }
+                    let count = self.parameter(Parameter::Index(constants.len() as u32));
+                    return Ok(Predicate::Membership {
+                        variable: v as Var,
+                        start,
+                        count,
+                    });
+                }
+            }
+        }
+        match e {
+            E::And(a, b) | E::Or(a, b) if has_membership(e) => {
+                let a = Box::new(self.filter_predicate(a, input, context, graph)?);
+                let b = Box::new(self.filter_predicate(b, input, context, graph)?);
+                Ok(if matches!(e, E::And(..)) {
+                    Predicate::And(a, b)
+                } else {
+                    Predicate::Or(a, b)
+                })
+            }
+            _ => self.closed_predicate(e, input, context, graph),
+        }
+    }
     pub(super) fn closed_predicate(
         &mut self,
         e: &Expression,
@@ -262,7 +306,7 @@ impl Builder {
             }
             G::Filter { inner, expr } => {
                 let input = self.closed_in(inner, context, graph)?;
-                let predicate = self.closed_predicate(expr, input, context, graph)?;
+                let predicate = self.filter_predicate(expr, input, context, graph)?;
                 self.closed_push(
                     C::Filter {
                         input,
@@ -491,5 +535,34 @@ fn expression_variables(e: &Expression, out: &mut Vec<String>) -> bool {
             args.iter().all(|a| expression_variables(a, out))
         }
         _ => false,
+    }
+}
+fn has_membership(e: &Expression) -> bool {
+    match e {
+        Expression::And(a, b) | Expression::Or(a, b) => has_membership(a) || has_membership(b),
+        _ => membership(e).is_some(),
+    }
+}
+/// `?v = c`, `c = ?v` or `?v IN (c...)` where every `c` is an IRI or a simple
+/// literal, so `=` is true exactly when the terms are the same.
+fn membership(e: &Expression) -> Option<(&str, Vec<oxrdf::Term>)> {
+    use Expression as E;
+    let constant = |e: &Expression| match e {
+        E::NamedNode(n) => Some(oxrdf::Term::from(n.clone())),
+        E::Literal(l) if l.language().is_none() && l.datatype() == oxrdf::vocab::xsd::STRING => {
+            Some(oxrdf::Term::from(l.clone()))
+        }
+        _ => None,
+    };
+    match e {
+        E::Equal(a, b) => match (&**a, &**b) {
+            (E::Variable(v), c) | (c, E::Variable(v)) => Some((v.as_str(), vec![constant(c)?])),
+            _ => None,
+        },
+        E::In(a, cs) if !cs.is_empty() => match &**a {
+            E::Variable(v) => Some((v.as_str(), cs.iter().map(constant).collect::<Option<_>>()?)),
+            _ => None,
+        },
+        _ => None,
     }
 }
