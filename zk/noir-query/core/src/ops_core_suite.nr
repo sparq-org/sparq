@@ -58,10 +58,10 @@ fn table_identity(cell:crate::term::TermCell) -> Field { cell.identity() }
 
 pub struct OpenedCredential<let N: u32> {
     constructed: [u8;0],
-    pub rows: [[TermCell; 3]; N],
-    pub active: [bool; N],
-    pub message: Field,
-    pub graph: TermCell,
+    rows: [[TermCell; 3]; N],
+    active: [bool; N],
+    message: Field,
+    graph: TermCell,
 }
 
 impl<let N:u32> OpenedCredential<N> {

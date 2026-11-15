@@ -188,7 +188,11 @@ propagate their errors. Witness generation carries creation and verification
 method as private openings and uses the authenticated opener's returned message.
 `credential::credential_graph(request_digest, index)` shares the suite's
 presentation-local graph-name construction. Credentials using the reserved
-`vcq:verifiedIssuer` predicate are refused before dataset assembly.
+`vcq:verifiedIssuer` predicate are refused before dataset assembly. In the
+canonical envelope the holder chooses the slot order, so which credential
+receives which graph name is the holder's choice. Graph names are
+presentation-local blank-node-like labels: answers are equal up to their
+renaming, and a query that releases a graph name releases only that label.
 
 Constant membership lists use a fixed parameter block and a public active-length
 index, so changing their contents or admitted length preserves plan hash and

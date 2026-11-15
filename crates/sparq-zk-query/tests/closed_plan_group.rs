@@ -243,3 +243,59 @@ fn numeric_promotion_and_decimal_sum_bind_execute() {
     }
     support::complete(gate);
 }
+
+/// MIN and MAX over values SPARQL leaves unordered refuse by name, never pick one;
+/// ordered pairs agree with the engine. SAMPLE returns one of the group's values
+/// (SPARQL allows any).
+#[test]
+fn min_max_sample_over_unordered_values_match_the_engine() {
+    let xsd = "http://www.w3.org/2001/XMLSchema#";
+    let values = [
+        format!("\"5\"^^<{xsd}integer>"),
+        "\"abc\"".to_owned(),
+        format!("\"true\"^^<{xsd}boolean>"),
+        format!("\"2.5\"^^<{xsd}decimal>"),
+    ];
+    let mut compared = 0;
+    for (i, a) in values.iter().enumerate() {
+        for b in &values[i + 1..] {
+            let rdf = format!("<urn:a> <urn:p> {a} .\n<urn:b> <urn:p> {b} .\n");
+            let (data, _) = fixture_support::dataset(&rdf);
+            for aggregate in ["MIN", "MAX", "SAMPLE"] {
+                let query = format!("SELECT ({aggregate}(?v) AS ?m) WHERE {{ ?s <urn:p> ?v }}");
+                let p = lower(&query, B).unwrap();
+                match evaluate(&p, &data, &SuiteEncoder) {
+                    Ok(trace) if aggregate == "SAMPLE" => {
+                        // SPARQL allows any member; the circuit's choice must be one.
+                        let sparq_zk_query::interp::ResultValue::Select { rows, .. } = &trace.result
+                        else {
+                            panic!("SELECT result")
+                        };
+                        let members = [a, b].map(|t| {
+                            let (_, terms) =
+                                fixture_support::dataset(&format!("<urn:s> <urn:p> {t} ."));
+                            Some(SuiteEncoder.encode(&terms[2]).unwrap().enc)
+                        });
+                        assert!(members.contains(&Some(rows[0][0].enc)), "{query}");
+                    }
+                    Ok(trace) => {
+                        fixture_support::assert_engine(&query, &rdf, &trace.result);
+                        compared += 1;
+                    }
+                    Err(e) => {
+                        // Only pairs SPARQL leaves unordered refuse, and by name.
+                        let numeric = |t: &str| t.contains("integer") || t.contains("decimal");
+                        assert!(!(numeric(a) && numeric(b)), "{query} over {a}, {b}: {e}");
+                        assert_eq!(
+                            e,
+                            sparq_zk_query::Error::Capacity("ORDER BY comparison capacity".into()),
+                            "{query} over {a}, {b}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+    // MIN and MAX over the ordered pair (integer, decimal) are compared with the engine.
+    assert_eq!(compared, 2);
+}
