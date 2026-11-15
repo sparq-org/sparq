@@ -394,12 +394,10 @@ fn status_slot_count_matches_the_noir_consumer() {
 #[test]
 fn equal_plan_hashes_generate_identical_programs() {
     use sparq_zk_query::codegen::{generate_operator_fixture, generate_suite_fixture};
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
-    let corpus: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(root.join("zk/sparql-evaluator/fixtures/conformance/cases.json"))
-            .unwrap(),
-    )
-    .unwrap();
+    let cases = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../zk/sparql-evaluator/fixtures/conformance/cases.json");
+    let corpus: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(cases).unwrap()).unwrap();
     let mut queries: Vec<String> = corpus["cases"]
         .as_array()
         .unwrap()
