@@ -857,21 +857,10 @@ fn membership_controls_with_a_typed_column() {
                 assert!(rows.is_empty(), "{text}");
             }
             let released = !rows.is_empty();
+            // An integer outside a string-compared column's read profile is a type
+            // error, not a refusal: every position proves its exact answer.
             let honest =
                 witness_closed::prover_toml(&p, &data, &trace, DIGEST, [3; 32], issuer_root());
-            if !uses_membership {
-                if let Err(e) = &honest {
-                    // The value read's profile excludes the integer, so the
-                    // prover refuses before proving; nothing is released.
-                    assert!(
-                        e.to_string()
-                            .contains("value datatype outside the column's profile"),
-                        "{text}: {e}"
-                    );
-                    eprintln!("{text}: refused before proving ({e})");
-                    continue;
-                }
-            }
             let package = codegen::generate_suite_fixture(&p).unwrap();
             let workspace = closed_native::Workspace::new(&package);
             let root = workspace.0.path();
