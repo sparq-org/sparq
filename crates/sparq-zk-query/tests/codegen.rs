@@ -493,6 +493,19 @@ fn constant_classes_and_generation_modes_change_the_plan_hash() {
             }
         }
     }
+    // Public list members are data: their class never reaches the mask or the program.
+    let list = |c: &str| {
+        lower(
+            &format!("SELECT ?s WHERE {{?s <urn:p> ?x FILTER(?x IN ({c}, {c}))}}"),
+            B,
+        )
+        .unwrap()
+    };
+    let reference = list(CONSTANTS[0].0);
+    for (c, _) in CONSTANTS {
+        assert_eq!(list(c).hash(), reference.hash(), "{c}");
+        assert_eq!(generate(&list(c)).unwrap(), generate(&reference).unwrap());
+    }
     let p = plan("18");
     let modes = [
         GenerationMode::Operator,

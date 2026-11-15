@@ -201,7 +201,8 @@ encoding carries the datatype class of every constant an expression reads
 (non-literal, numeric, date, dateTime, boolean, string, other literal) and the
 generation mode (operator fixture, suite fixture, canonical envelope), so equal
 plan hashes generate identical programs. Values and list members stay outside
-the hash. A variable compared only with constants gets the datatypes comparable with them:
+the hash: a public membership list reads every supported datatype and compares at
+run time, so a member's class changes neither the mask nor the program. A variable compared only with constants gets the datatypes comparable with them:
 integer or decimal constants admit `{integer, decimal}`, a date constant admits
 `{date}`, a dateTime constant admits `{dateTime}`, boolean admits `{boolean}`,
 and a plain string admits `{string}`. Any other use admits every supported datatype.
