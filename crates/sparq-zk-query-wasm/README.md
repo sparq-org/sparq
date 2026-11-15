@@ -29,8 +29,10 @@ and mismatched keys refuse.
 
 Portable preparation and verification ordering share the native method's host logic.
 Default generation and witness rendering follow the canonical envelope consumer.
-The adapter's bearer and issuer-only policies need empty private holder and status
-evidence, supplied by the Rust witness API; callers need no extra evidence argument.
+Holder binding, accepted status snapshots, validity and freshness map onto the
+native typed policy and envelope features. The adapter assembles the holder's
+private evidence (a holder signature over the request digest and status-list
+openings against verifier-accepted snapshots); bearer requests need none.
 Verifier-supplied trust members bind issuer IRIs, verification methods and keys.
 Request construction, dataset assembly and authorization paths use the native
 typed policy APIs. Signed credentials must contain the matching canonical root
@@ -46,8 +48,7 @@ See the [package API](../../js/zk-query/README.md) and
 [usage skill](../../skills/zk-query-javascript/SKILL.md).
 Completeness is relative to the presented signed roots. The holder chooses those
 roots unless a verifier-agreed commitment applies. Replay protection lives in
-the caller's store. Additional credential-envelope policies remain refused by
-this adapter.
+the caller's store.
 
 ## License
 

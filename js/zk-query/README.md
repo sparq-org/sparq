@@ -27,6 +27,8 @@ public keys. `credentialQuadBounds` optionally refines ordered credential slots.
 `{ issuer, verificationMethod, publicKey }`. Its key set must equal
 `trustedIssuers`; missing entries or mismatched keys refuse. Rust derives the
 canonical authorization root and membership paths from these entries.
+The optional credential-envelope policy fields are described under
+[Credential envelope](#credential-envelope).
 Issuance signs the supplied graph without adding credential properties. For
 query proving, it must include a credential root typed as VerifiableCredential
 and its issuer IRI. The proof configuration must name its verification-method
@@ -51,14 +53,44 @@ draws a fresh platform-CSPRNG salt and refuses an issuance seed.
 `status`, when supplied to issuance, is `{ proofConfigNQuads }`: the exact Data
 Integrity proof configuration, including the suite declaration, with optional
 creation and verification-method metadata. Omission selects the suite-only
-configuration. This argument is a configuration carrier. The catalogue uses the
-canonical envelope consumer with issuer authentication and bearer acceptance.
-The native Rust witness renderer supplies its private envelope fields with empty
-holder and status evidence, so ordinary `prove({ request, credentials })` needs no
-extra caller evidence. Required holder binding, accepted status snapshots,
-validity time and freshness policies are refused by this Node adapter.
-The underlying credential policy uses epoch milliseconds for validity and
-freshness instants; request-window instants retain their seconds representation.
+configuration. This argument is a configuration carrier, not status enforcement.
+
+### Credential envelope
+
+Every request authenticates issuers through `trustMembers`. A request may also ask
+for any of the following; each one changes the compiled program, so only
+catalogued combinations prove.
+
+- `holderBinding: { issuers? }` requires a holder signature over the complete
+  request digest by the key each credential names as its
+  `confidenceMethod` Multikey. Omit `issuers` to bind every credential; a list
+  binds only credentials from those issuers. The holder passes `holder` (from
+  `holderKeygen()`, or `testHolderKeygen(seedHex)` in tests) to `prove`. Holder
+  multikeys need `openingProfile: 'long-objects'`.
+- `acceptedSnapshots: { digests, allowMissing? }` requires every
+  `credentialStatus` entry to open an unset bit in a status list whose snapshot
+  the verifier accepted. The verifier lists `statusSnapshot({ list, purpose, bits }).digest`
+  for each list it checked; the holder passes the same lists as `statusLists`.
+  `bits` has one `0` or `1` per entry. `allowMissing` admits credentials
+  without a status entry.
+- `validityTime` (epoch milliseconds) requires `validFrom <= validityTime <= validUntil`.
+- `earliestCreated` (epoch milliseconds) requires the proof configuration's
+  `created` instant to be no earlier.
+- `tableRowBounds` gives one row limit per plan node, in plan order; an overflow refuses.
+- `openingProfile` selects the lexical opening limits: `solid` (default),
+  `long-objects` or `extended`.
+
+```js
+const holder = holderKeygen();            // holder keeps secretKeyHex
+const snapshot = statusSnapshot(list);    // verifier checks the list, keeps snapshot.digest
+const { presentation } = await prove({ request: stored, credentials, holder, statusLists: [list] });
+```
+
+A set status bit, a list whose snapshot the request does not accept, a missing
+list and a missing or unrequested holder key refuse before proving. A credential
+outside its validity window, older than `earliestCreated`, or bound to another
+holder key has no witness and refuses at native witness execution. Request-window
+instants (`notBefore`, `notAfter`) stay in Unix seconds.
 
 `prove` returns `{ presentation, result }`. ASK results contain `boolean`; SELECT
 results contain `variables` and ordered `rows` of RDF term strings or `null` for
@@ -68,12 +100,14 @@ report. Successful reports contain `rule` with the exact query and plan hash,
 `issuers` with the whole trusted public-key set relied on for membership
 authorization (this differs from `@sparq-org/zk-result`, whose `issuers` lists the
 slots the proof used, so do not read the two fields the same way),
-`subject` empty because holder binding is unavailable, `fresh` with the consumed
+`subject` with the issuers whose credentials are holder-bound (empty without
+holder binding), `fresh` with the consumed
 challenge, `complete` relative to the presented roots, and the bound `issuerRoot`
 and canonical `trustMembers` authorization set.
 Membership keeps the individual signer hidden; the trust list does not claim that
-every listed key signed a presented credential. No status roots, times or
-per-predicate issuer guarantees are reported without their enforcement.
+every listed key signed a presented credential. `status`, `validityTime`,
+`earliestCreated` and `tableRowBounds` appear only when the request enforces them;
+no per-predicate issuer guarantees are reported.
 
 Replay protection lives in the caller's store. A durable store implements
 synchronous atomic `consume(nonce)` returning `fresh` or `alreadyConsumed`,
@@ -129,9 +163,9 @@ Keys, artifacts, library sources and CRS are pinned and checked before use.
 Unknown plans and keys differing from the catalogue refuse. Native compilation
 and key creation belong to the separate maintainer `scripts/build-circuits.mjs`
 step; authenticated compilation follows the catalogue's compiler-agreement policy.
-Operator compiler agreement is a live-toolchain ratchet. Dependency graphs that
-pull in the XPath library have a named known compiler failure, recorded in the
-catalogue; they do not count as agreement. Other operator programs remain required. The maintainer source
+Operator compiler agreement is a live-toolchain ratchet: every passing operator
+program, including those that pull in the XPath library, must reach ABI, bytecode
+and key agreement. The maintainer source
 snapshot carries the query core and tagged dependencies as local files, so native
 witness execution needs no network or warmed user dependency cache.
 
@@ -160,7 +194,9 @@ when unset. Duplicate plan hashes share a build and must generate identical sour
 Cached source paths through symbolic links are refused; staging replaces ordinary
 cached files without modifying another hard link's contents.
 Catalogue checks derive each example's plan again through Rust and reject stale
-key or program files left over from a rebuild.
+key or program files left over from a rebuild. An example's optional `envelope`
+(`holder`, `status`, `validity`, `freshness`, `tableRowBounds`, `openingProfile`)
+names the policy features its program enforces.
 Rebuild bindings after a pin update. An absent compiled plan refuses with
 `missing catalogue plan` rather than choosing a different capacity.
 

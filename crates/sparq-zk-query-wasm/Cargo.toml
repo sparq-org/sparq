@@ -20,6 +20,7 @@ sparq-zk-compose = { path = "../sparq-zk-compose" }
 sparq-zk = { path = "../sparq-zk" }
 sparq-core = { path = "../sparq-core" }
 oxrdf.workspace = true
+oxttl.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

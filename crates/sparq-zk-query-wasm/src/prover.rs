@@ -25,6 +25,10 @@ struct Input {
     clock: u64,
     #[serde(default, rename = "presentationSaltHex")]
     presentation_salt_hex: Option<String>,
+    #[serde(default, rename = "holderSecretKeyHex")]
+    holder_secret_key_hex: Option<String>,
+    #[serde(default, rename = "statusLists")]
+    status_lists: Vec<crate::envelope::StatusList>,
 }
 pub(crate) fn prepare(input: &str) -> Result<Value> {
     // Request/key checks precede decoding any private credential into suite cells.
@@ -60,6 +64,17 @@ pub(crate) fn prepare(input: &str) -> Result<Value> {
         request.digest(),
     )
     .map_err(err)?;
+    let documents: Vec<&str> = data
+        .iter()
+        .map(|c| c.credential.document.as_str())
+        .collect();
+    let evidence = crate::envelope::evidence(
+        &policy,
+        &request.digest(),
+        &documents,
+        input.holder_secret_key_hex.as_deref(),
+        &input.status_lists,
+    )?;
     let trace = interp::evaluate_dataset(&plan, &dataset, &SuiteEncoder).map_err(err)?;
     vocabulary
         .push(oxrdf::NamedNode::new_unchecked(sparq_zk_query::credential::VERIFIED_ISSUER).into());
@@ -91,7 +106,7 @@ pub(crate) fn prepare(input: &str) -> Result<Value> {
         salt,
         witness::EnvelopeInput {
             policy: &policy,
-            evidence: &witness::EnvelopeWitness::default(),
+            evidence: &evidence,
             revealed: None,
         },
     )

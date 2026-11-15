@@ -1,7 +1,7 @@
 // Research grade and not externally audited. Every manifest claim is visited.
 import assert from 'node:assert/strict';
 import { compilerControl } from './compiler-control.mjs';
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createFileManager, compile_program } from '@noir-lang/noir_wasm';
@@ -14,13 +14,6 @@ export function equalArtifacts(wasm, native) {
   assert.deepEqual(Buffer.from(wasm.bytecode, 'base64'), Buffer.from(native.bytecode, 'base64'), 'compiler bytecode differs');
 }
 export function equalKeys(wasm, native) { assert.deepEqual(Buffer.from(wasm), Buffer.from(native), 'compiler key differs'); }
-export function knownXPathFailure(diagnostic, sources) {
-  const collision = Object.entries(sources).some(([name, text]) => name.includes('noir_XPath') && name.endsWith('/xpath/Nargo.toml') && /^sha256\s*=\s*\{/m.test(text));
-  // Generated unused-import warnings accompany the dependency errors.
-  // Match only these imports and their generated location; other diagnostics stay fatal.
-  const errors = diagnostic.replace(/\n  unused import (unbound|ops_core_expr)\n    [^\n]*\/query_[a-f0-9]{64}\/src\/main\.nr:[0-9]+: \1(?=\n|$)/g, '');
-  return collision && diagnostic.includes('No module `constants` at path `sha256/constants.nr` or `sha256/constants/mod.nr`') && !errors.split('\n').filter(line => /^    .*:[0-9]+:/.test(line)).some(line => !/^    sha256\//.test(line));
-}
 export async function agreement({ root, directory, nargo, bb }) {
   await compilerControl({ directory, nargo, bb, equalArtifacts, equalKeys });
   const table = JSON.parse(readFileSync(new URL('../assets/catalogue.json', import.meta.url)));
@@ -40,22 +33,9 @@ export async function agreement({ root, directory, nargo, bb }) {
     if (programs.has(generated.name)) { assert.equal(programs.get(generated.name).sourceHash, sourceHash, 'one plan hash generated different programs'); results.push({ case: claim.id, ...programs.get(generated.name) }); continue; }
     const work = join(directory, generated.name); mkdirSync(work, { recursive: true });
     const resultPath = join(work, 'agreement-result.json');
-    if (existsSync(resultPath)) {
-      const cached = JSON.parse(readFileSync(resultPath));
-      if (cached.sourceHash === sourceHash && cached.status === 'known-failure' && cached.reason === table.compilerAgreement.xpathKnownFailure && knownXPathFailure(cached.diagnostic, sources)) { programs.set(generated.name, cached); results.push({ case: claim.id, ...cached }); continue; }
-    }
     for (const [name, text] of Object.entries({ ...sources, ...generated.files })) { const path = join(work, name); mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, text); }
     const artifactPath = join(work, 'target', generated.name + '.json');
-    let program;
-    try { ({ program } = await compile_program(createFileManager(work), join(work, generated.name), () => {}, () => {})); }
-    catch (error) {
-      const reason = table.compilerAgreement.xpathKnownFailure;
-      const diagnostic = String(error) + '\n' + JSON.stringify(error?.diagnostics || []);
-      // The dependency graph is inspected as well as the diagnostic: unrelated
-      // compiler errors remain fatal, including errors after upstream repairs.
-      if (!reason || !knownXPathFailure(diagnostic, sources)) throw error;
-      const result = { status: 'known-failure', reason, diagnostic, sourceHash }; writeFileSync(resultPath, JSON.stringify(result)); programs.set(generated.name, result); results.push({ case: claim.id, ...result }); console.log('Compiler known failure:', claim.id, diagnostic); continue;
-    }
+    const { program } = await compile_program(createFileManager(work), join(work, generated.name), () => {}, () => {});
     execFileSync(nargo, ['compile'], { cwd: work, stdio: 'pipe', env: { ...process.env, RAYON_NUM_THREADS: '1' } });
     const native = JSON.parse(readFileSync(artifactPath));
     equalArtifacts(program, native);

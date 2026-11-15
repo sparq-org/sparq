@@ -12,8 +12,22 @@ export interface Policy {
   bounds: Bounds; trustedIssuers: string[]; trustMembers: TrustMember[]; audience: string;
   notBefore?: number; notAfter?: number; credentialQuadBounds?: number[];
   inputCommitment?: string; maxPresentationBytes?: number; maxResultSize?: number;
-  holderBinding?: unknown; acceptedSnapshots?: unknown; validityTime?: number; earliestCreated?: number;
+  /** Holder binding: omit `issuers` to bind every credential; a present list is nonempty. */
+  holderBinding?: { issuers?: string[] };
+  /** Snapshot digests from `statusSnapshot`; every credential status entry must open in one. */
+  acceptedSnapshots?: { digests: string[]; allowMissing?: boolean };
+  /** Unix epoch milliseconds: credentials must be valid at this instant. */
+  validityTime?: number;
+  /** Unix epoch milliseconds: credential proofs must be created at or after this instant. */
+  earliestCreated?: number;
+  /** Row limits, one per plan node in plan order, committed in the plan hash. */
+  tableRowBounds?: number[];
+  /** Lexical opening limits, default `solid`; holder keys need `long-objects`. */
+  openingProfile?: 'solid' | 'long-objects' | 'extended';
 }
+export interface HolderKey { secretKeyHex: string; publicKey: string; multikey: string }
+/** One published status list: one character per entry, "0" valid and "1" set. */
+export interface StatusList { list: string; purpose: string; bits: string }
 export interface Request {
   query: string; policy: Policy; nonce: string; planHash: string;
   verificationKey: string; digest: string; requestRdf: string;
@@ -29,11 +43,15 @@ export interface VerificationReport {
    *  keys that signed the presented credentials (unlike `@sparq-org/zk-result`, whose
    *  `issuers` lists the slots the proof used). */
   issuers: string[];
+  /** Issuers whose credentials had to be bound to the presenting holder. */
   subject: string[];
   fresh: string;
   /** Complete relative to the presented signed roots only (closed world). */
   complete: true;
   issuerRoot: string; trustMembers: TrustMember[];
+  /** Present only when enforced. */
+  status?: { acceptedSnapshots: string[]; allowMissing: boolean };
+  validityTime?: number; earliestCreated?: number; tableRowBounds?: number[];
 }
 export type Verification =
   | { verified: true; released: QueryResult; report: VerificationReport }
@@ -42,8 +60,11 @@ export interface ChallengeStore { consume(nonce: string): 'fresh' | 'alreadyCons
 export type Backend = 'native' | 'wasm' | { type: 'native'; nargoPath?: string; bbPath?: string; presentationSaltHex?: string } | { type: 'wasm'; presentationSaltHex?: string };
 export function issuerKeygen(): ProductionIssuer;
 export function testIssuerKeygen(seedHex: string): TestIssuer;
+export function holderKeygen(): HolderKey;
+export function testHolderKeygen(seedHex: string): HolderKey;
+export function statusSnapshot(list: StatusList): { digest: string; root: string; depth: number; bitLength: number };
 export function issue(input: { issuer: ProductionIssuer | TestIssuer; graphNQuads: string; status?: ProofConfiguration }): Credential;
 export function testIssue(input: { issuer: TestIssuer; graphNQuads: string; status?: ProofConfiguration; seedHex: string }): Credential;
 export function request(input: { query: string; policy: Policy; nonce: string }): Request;
-export function prove(input: { request: Request; credentials: Credential[]; backend?: Backend }): Promise<{ presentation: Presentation; result: QueryResult }>;
+export function prove(input: { request: Request; credentials: Credential[]; holder?: { secretKeyHex: string }; statusLists?: StatusList[]; backend?: Backend }): Promise<{ presentation: Presentation; result: QueryResult }>;
 export function verify(input: { request: Request; presentation: Presentation; seenNonces: ChallengeStore | Set<string> }): Promise<Verification>;

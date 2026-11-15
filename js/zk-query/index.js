@@ -61,6 +61,12 @@ export function issuerKeygen() {
   return call('issuerKeygen', {});
 }
 export function testIssuerKeygen(seedHex) { return call('testIssuerKeygen', seedHex); }
+export function holderKeygen() {
+  if (arguments.length) throw new Error('holderKeygen does not accept a seed');
+  return call('holderKeygen', {});
+}
+export function testHolderKeygen(seedHex) { return call('testHolderKeygen', seedHex); }
+export function statusSnapshot({ list, purpose, bits }) { return call('statusSnapshot', { list, purpose, bits }); }
 export function issue(input) { return call('issue', input); }
 export function testIssue(input) { return call('testIssue', input); }
 export function request({ query, policy, nonce }) {
@@ -68,7 +74,7 @@ export function request({ query, policy, nonce }) {
   const entry = member(plan.planHash);
   return call('request', { query, policy, nonce, verificationKey: entry.key.toString('hex'), clock: clock() });
 }
-export async function prove({ request, credentials, backend = 'native' }) {
+export async function prove({ request, credentials, holder, statusLists = [], backend = 'native' }) {
   request = snapshot(request);
   const known = catalogue();
   const checked = call('holder', { request, clock: clock() });
@@ -79,7 +85,9 @@ export async function prove({ request, credentials, backend = 'native' }) {
   if (options.type === 'native') { const native = await import('./native.mjs'); await native.preflight(options); }
   const program = artifact(entry, request);
   const plan = call('plan', { query: request.query, policy: request.policy });
-  const prepared = call('prepareProof', { request, credentials, clock: clock(), ...(options.presentationSaltHex === undefined ? {} : { presentationSaltHex: options.presentationSaltHex }) });
+  const prepared = call('prepareProof', { request, credentials, clock: clock(), statusLists: snapshot(statusLists),
+    ...(holder === undefined ? {} : { holderSecretKeyHex: holder.secretKeyHex }),
+    ...(options.presentationSaltHex === undefined ? {} : { presentationSaltHex: options.presentationSaltHex }) });
   const pins = crsPins(known.table), crsDirectory = new URL('crs/', assets);
   const common = { expectedKey: entry.key, publicInputs: prepared.publicInputs, crsDirectory, crsPins: pins };
   let result;

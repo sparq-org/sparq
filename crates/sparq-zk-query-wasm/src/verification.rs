@@ -73,11 +73,41 @@ pub(crate) fn verify(
         return Err("cryptographic proof rejected".into());
     }
     let plan = request.plan().map_err(err)?;
+    let policy = &input.request.policy;
+    // Holder-bound issuers: the listed ones, or every trust member issuer.
+    let subject: Vec<String> = match &policy.holder_binding {
+        None => vec![],
+        Some(binding) => binding.issuers.clone().unwrap_or_else(|| {
+            let mut all: Vec<String> = policy
+                .trust_members
+                .iter()
+                .map(|m| m.issuer.clone())
+                .collect();
+            all.sort();
+            all.dedup();
+            all
+        }),
+    };
+    let mut report = json!({"rule":{"query":request.stored().query(),"planHash":hex(&plan.hash())},
+        "issuers":policy.trusted_issuers,"subject":subject,"fresh":hex(request.stored().challenge().as_bytes()),"complete":true,
+        "trustMembers":policy.trust_members,
+        "issuerRoot":hex(&request.issuer_root().map_err(err)?)});
+    // Only enforced envelope properties are reported.
+    if let Some(snapshots) = &policy.accepted_snapshots {
+        report["status"] =
+            json!({"acceptedSnapshots":snapshots.digests,"allowMissing":snapshots.allow_missing});
+    }
+    if let Some(t) = policy.validity_time {
+        report["validityTime"] = json!(t);
+    }
+    if let Some(t) = policy.earliest_created {
+        report["earliestCreated"] = json!(t);
+    }
+    if let Some(rows) = &policy.table_row_bounds {
+        report["tableRowBounds"] = json!(rows);
+    }
     let accepted = json!({"verified":true,"released":AnswerWire::from_answer(&input.presentation.result.answer()?),
-        "report":{"rule":{"query":request.stored().query(),"planHash":hex(&plan.hash())},
-        "issuers":input.request.policy.trusted_issuers,"subject":[],"fresh":hex(request.stored().challenge().as_bytes()),"complete":true,
-        "trustMembers":input.request.policy.trust_members,
-        "issuerRoot":hex(&request.issuer_root().map_err(err)?)}});
+        "report":report});
     request::freshness(&request, clock()?)?;
     consume_challenge(store, request.stored()).map_err(err)?;
     Ok(accepted)

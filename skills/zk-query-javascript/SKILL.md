@@ -40,7 +40,7 @@ remains the default pending the full generated consumer-query measurements.
 `testIssue({ issuer, graphNQuads, status, seedHex })` accepts only test issuers and
 uses the suite's deterministic entry point. N-Quads is the issuance input.
 `status`, if supplied, is `{ proofConfigNQuads }`, carrying the suite proof
-configuration. It does not enable status enforcement.
+configuration. It does not enable status enforcement; `acceptedSnapshots` does.
 
 Policy requires `bounds`, `trustedIssuers`, `trustMembers` and `audience`.
 Each trust member is `{ issuer, verificationMethod, publicKey }`; its key set
@@ -54,13 +54,18 @@ Optional
 `notBefore` and `notAfter` in Unix seconds, defaulting to creation and an hour
 later. `maxResultSize` defaults to the table bound; `maxPresentationBytes` defaults
 to sixteen mebibytes. `inputCommitment` names an agreed salted dataset commitment.
-Required holder binding, snapshots, credential validity and freshness receive
-the Node adapter's envelope-integration refusal. Catalogue programs use the
-canonical envelope consumer with issuer authentication and bearer acceptance.
-Rust supplies empty private holder and status evidence; ordinary
-`prove({ request, credentials })` needs no extra evidence argument.
-Underlying credential-policy instants use epoch milliseconds. Request-window
-instants retain their seconds representation; the extra credential policies remain refused.
+Optional envelope policy, each a distinct compiled program:
+`holderBinding: { issuers? }` (holder signs the request digest with the
+credential's `confidenceMethod` Multikey; needs `openingProfile: 'long-objects'`),
+`acceptedSnapshots: { digests, allowMissing? }` (verifier lists
+`statusSnapshot({ list, purpose, bits }).digest`), `validityTime` and
+`earliestCreated` (epoch milliseconds), `tableRowBounds` and `openingProfile`.
+The holder calls `prove({ request, credentials, holder, statusLists })`, with
+`holder` from `holderKeygen()` (or test-only `testHolderKeygen(seedHex)`).
+Set bits, unaccepted or missing lists and missing or unrequested holder keys
+refuse before proving; out-of-window, too-old or foreign-holder credentials refuse
+at witness execution. Without envelope fields, `prove({ request, credentials })`
+needs no extra evidence. Request-window instants stay in Unix seconds.
 
 Replay protection lives in the caller's synchronous, atomic, durable
 `consume(nonce)` store. Return `fresh` or `alreadyConsumed`; throw on failure.
@@ -70,11 +75,14 @@ Missing stores fail closed; refusals carry no report.
 
 Successful reports bind `rule` to the query and plan hash, `issuers` to the whole trusted
 key set used for membership authorization (unlike `@sparq-org/zk-result`, where
-`issuers` lists the slots the proof used), `subject` to an empty list, `fresh` to
+`issuers` lists the slots the proof used), `subject` to the holder-bound issuers
+(empty without holder binding), `fresh` to
 the consumed challenge, and `complete` to the presented roots. `issuerRoot` names
 the bound trust root; `trustMembers` records the authorized identities, methods
 and keys. The membership proof does not identify each hidden signer.
 Do not interpret the trust list as evidence that every member contributed.
+`status`, `validityTime`, `earliestCreated` and `tableRowBounds` appear only when
+enforced.
 
 Read the [package API and generated public-input layout](../../js/zk-query/README.md)
 and the [Rust host adapter](../../crates/sparq-zk-query-wasm/README.md).

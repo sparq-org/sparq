@@ -10,6 +10,7 @@ import { canonicalArtifact } from './artifact.mjs';
 import { stageSource } from './cache.mjs';
 import { snapshotSources } from './sources.mjs';
 import { sha256 } from '../internal/runtime.mjs';
+import { examplePolicy, exampleRecord } from './catalogue-example.mjs';
 const packageDir = fileURLToPath(new URL('../', import.meta.url));
 const assets = join(packageDir, 'assets'), tablePath = join(assets, 'catalogue.json');
 const table = JSON.parse(readFileSync(tablePath));
@@ -30,7 +31,7 @@ const bb = await copyPinnedBinary('bb', process.env.SPARQ_BB, join(bins, 'bb'));
 const entries = flag('--cases') ? JSON.parse(readFileSync(flag('--cases'))) : table.entries.map(e => e.example);
 const plans = new Map();
 for (const example of entries) {
-  const policy = { bounds: example.bounds, ...(example.credentialQuadBounds === undefined ? {} : { credentialQuadBounds: example.credentialQuadBounds }), trustedIssuers: [JSON.parse(host.hostCall('testIssuerKeygen', JSON.stringify('00'.repeat(32)))).publicKey], audience: 'urn:sparq:catalogue' };
+  const policy = examplePolicy(example, JSON.parse(host.hostCall('testIssuerKeygen', JSON.stringify('00'.repeat(32)))), 'urn:sparq:catalogue');
   const plan = JSON.parse(host.hostCall('plan', JSON.stringify({ query: example.query, policy })));
   if (plans.has(plan.planHash) && JSON.stringify(plans.get(plan.planHash).plan.files) !== JSON.stringify(plan.files)) throw new Error('catalogue plan generated different sources');
   plans.set(plan.planHash, { plan, example });
@@ -56,7 +57,7 @@ async function build({ plan, example }) {
   if (!existsSync(join(work, 'vk'))) await run(bb, ['write_vk', '-b', nativeArtifact, '-o', work, '-t', 'noir-recursive', '--crs_path', join(assets, 'crs')], { cwd: work, env: { ...process.env, HARDWARE_CONCURRENCY: '1' } });
   const key = readFileSync(join(work, 'vk'));
   const acirSha256 = sha256(bytes), vkSha256 = sha256(key);
-  const candidate = { planHash: plan.planHash, packageName: plan.packageName, acir, vk, acirSha256, vkSha256, wasmProving: Boolean(entry?.wasmProving && entry.acirSha256 === acirSha256 && entry.vkSha256 === vkSha256), example: { query: example.query, bounds: example.bounds, ...(example.credentialQuadBounds === undefined ? {} : { credentialQuadBounds: example.credentialQuadBounds }) } };
+  const candidate = { planHash: plan.planHash, packageName: plan.packageName, acir, vk, acirSha256, vkSha256, wasmProving: Boolean(entry?.wasmProving && entry.acirSha256 === acirSha256 && entry.vkSha256 === vkSha256), example: exampleRecord(example) };
   if (!update && (!entry || candidate.acirSha256 !== entry.acirSha256 || candidate.vkSha256 !== entry.vkSha256)) throw new Error('native catalogue rebuild differs from pinned program or key');
   writeFileSync(join(assets, acir), bytes); writeFileSync(join(assets, vk), key.toString('hex') + '\n');
   if (entry) Object.assign(entry, candidate); else table.entries.push(candidate);

@@ -6305,6 +6305,7 @@ dependencies = [
  "getrandom 0.3.4",
  "getrandom 0.4.2",
  "oxrdf 0.3.3",
+ "oxttl 0.2.3",
  "serde",
  "serde_json",
  "sha2 0.10.9",

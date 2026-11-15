@@ -3,6 +3,7 @@
 //! Research grade and not externally audited. Witness outputs contain secrets.
 
 mod codec;
+mod envelope;
 mod fixtures;
 mod issuance;
 mod presentation;
@@ -44,6 +45,12 @@ pub fn host_call(operation: &str, input: &str) -> std::result::Result<String, St
         }
         "issue" => serde_json::to_value(issuance::issue(input, false)?).map_err(err)?,
         "testIssue" => serde_json::to_value(issuance::issue(input, true)?).map_err(err)?,
+        "holderKeygen" => serde_json::to_value(envelope::holder_keygen()?).map_err(err)?,
+        "testHolderKeygen" => {
+            let seed: String = codec::parse(input)?;
+            serde_json::to_value(envelope::test_holder_keygen(&seed)?).map_err(err)?
+        }
+        "statusSnapshot" => envelope::status_snapshot(input)?,
         "plan" => request::plan_info(input)?,
         "testOperatorFixture" => fixtures::operator(input)?,
         "layout" => {

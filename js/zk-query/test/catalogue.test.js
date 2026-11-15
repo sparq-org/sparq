@@ -7,13 +7,14 @@ import { tmpdir } from 'node:os';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { request, testIssuerKeygen } from '../index.js';
-import { canonicalGraph, issueFixture, trustMembers } from '../scripts/test-credentials.mjs';
+import { canonicalGraph, issueFixture } from '../scripts/test-credentials.mjs';
+import { examplePolicy } from '../scripts/catalogue-example.mjs';
 test('every catalogue example derives its pinned plan and leaves no stale assets', () => {
   const directory = new URL('../assets/', import.meta.url);
   const table = JSON.parse(readFileSync(new URL('catalogue.json', directory)));
   const issuer = testIssuerKeygen('00'.repeat(32));
   for (const entry of table.entries) {
-    const stored = request({ query: entry.example.query, policy: { bounds: entry.example.bounds, ...(entry.example.credentialQuadBounds === undefined ? {} : { credentialQuadBounds: entry.example.credentialQuadBounds }), trustedIssuers: [issuer.publicKey], trustMembers: trustMembers(issuer), audience: 'urn:sparq:test:catalogue' }, nonce: '09'.repeat(32) });
+    const stored = request({ query: entry.example.query, policy: examplePolicy(entry.example, issuer, 'urn:sparq:test:catalogue'), nonce: '09'.repeat(32) });
     assert.equal(stored.planHash, entry.planHash);
     assert.equal(stored.verificationKey, readFileSync(new URL(entry.vk, directory), 'utf8').trim());
   }
