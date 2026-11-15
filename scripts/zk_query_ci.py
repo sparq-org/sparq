@@ -143,7 +143,7 @@ def steps(root: Path, profile: str) -> list[tuple[list[str], Path]]:
     common = [
         (["node", "zk/noir-query/compiler-agreement/check.mjs", "--self-test"], root),
         (["nargo", "check"], core),
-        (["python3", "scripts/check-noir-dependency-aliases.py", "--record-known-failures"], root),
+        (["python3", "scripts/check-noir-dependency-aliases.py"], root),
         (["nargo", "check"], smoke),
         (["nargo", "test", "--test-threads", "1"], smoke),
     ]
