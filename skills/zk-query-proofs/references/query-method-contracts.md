@@ -196,15 +196,20 @@ program source. Oversized lists receive the named `IN list` capacity refusal.
 The existing parameter enum and envelope group order are unchanged.
 
 Value reads carry a datatype profile per column, a limit of the same kind as
-capacity. The compiler derives each profile from the hashed plan alone. A
-variable compared only with constants gets the datatypes comparable with them:
+capacity. The compiler derives each profile from the hashed plan alone: the plan
+encoding carries the datatype class of every constant an expression reads
+(non-literal, numeric, date, dateTime, boolean, string, other literal) and the
+generation mode (operator fixture, suite fixture, canonical envelope), so equal
+plan hashes generate identical programs. Values and list members stay outside
+the hash. A variable compared only with constants gets the datatypes comparable with them:
 integer or decimal constants admit `{integer, decimal}`, a date constant admits
 `{date}`, a dateTime constant admits `{dateTime}`, boolean admits `{boolean}`,
 and a plain string admits `{string}`. Any other use admits every supported datatype.
 Identity-mode sites never value-check plain strings. A value outside its
 column's profile has no proof, never a different answer: the host refuses it
 before proving with the named `value datatype outside the column's profile`
-capacity error, and the circuit asserts the same. For example, a string in a
+capacity error, and the circuit asserts the same. A datatype outside every
+profile keeps the read path's own unsupported-datatype refusal. For example, a string in a
 numeric-compared column is refused, while a decimal in an `{integer, decimal}`
 column proves.
 

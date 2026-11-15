@@ -22,30 +22,32 @@ pub fn generate(plan: &Plan) -> Result<Package, Error> {
 /// Suite-opening fixture without the canonical envelope or dataset assertion.
 /// Native preparation uses `generate`.
 pub fn generate_suite_fixture(plan: &Plan) -> Result<Package, Error> {
-    generate_inner(plan, true, false)
+    generate_inner(plan, GenerationMode::Suite)
 }
 
 /// Operator-relation fixture. It has no credential-authentication claim.
 pub fn generate_operator_fixture(plan: &Plan) -> Result<Package, Error> {
-    generate_inner(plan, false, false)
+    generate_inner(plan, GenerationMode::Operator)
 }
 
 /// Generate canonical issuer and envelope consumer wiring.
 pub fn generate_enveloped(plan: &Plan) -> Result<Package, Error> {
-    generate_inner(plan, true, true)
+    generate_inner(plan, GenerationMode::CanonicalEnvelope)
 }
 
-fn generate_inner(
-    plan: &Plan,
-    authenticated: bool,
-    canonical_envelope: bool,
-) -> Result<Package, Error> {
+fn generate_inner(plan: &Plan, mode: GenerationMode) -> Result<Package, Error> {
+    let authenticated = mode != GenerationMode::Operator;
+    let canonical_envelope = mode == GenerationMode::CanonicalEnvelope;
     if canonical_envelope && crate::credential_graphs::is_profile(plan) {
         return Err(Error::Unsupported(
             "credential graph fixture profile in canonical generation".into(),
         ));
     }
-    let hash: String = plan.hash().iter().map(|b| format!("{b:02x}")).collect();
+    let hash: String = plan
+        .hash_for(mode)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
     let name = format!("query_{hash}");
     let mut source = String::from(
         "// Research query program; the selected library entry point defines its credential contract.\n\
@@ -447,34 +449,32 @@ pub(crate) fn read_columns(expr: &Expr, schema: &[Var]) -> Vec<usize> {
 /// Value-read datatype profile bits, equal to `ops_core_suite::READ_*` in the Noir core.
 pub(crate) const READ_STRING: u32 = 1;
 pub(crate) const READ_ALL: u32 = 63;
-const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
 /// The XSD local names a read profile admits, in bit order.
 pub(crate) const READ_DATATYPES: [&str; 6] =
     ["string", "integer", "decimal", "date", "dateTime", "boolean"];
 
+/// Reads only the constant's [`ConstantClass`], which `Plan::canonical_bytes` encodes.
 fn constant_profile(parameter: Option<&Parameter>) -> u32 {
-    let Some(Parameter::Term(oxrdf::Term::Literal(l))) = parameter else {
+    let Some(Parameter::Term(term)) = parameter else {
         return READ_ALL;
     };
-    if l.language().is_some() {
-        return READ_ALL;
-    }
-    match l.datatype().as_str().strip_prefix(XSD) {
-        Some("integer" | "decimal") => 2 | 4,
+    match ConstantClass::of(term) {
+        ConstantClass::Numeric => 2 | 4,
         // Temporal constants admit their own datatype; mixed date/dateTime data is a
         // profile refusal rather than a cross-type comparison.
-        Some("date") => 8,
-        Some("dateTime") => 16,
-        Some("boolean") => 32,
-        Some("string") => READ_STRING,
-        _ => READ_ALL,
+        ConstantClass::Date => 8,
+        ConstantClass::DateTime => 16,
+        ConstantClass::Boolean => 32,
+        ConstantClass::String => READ_STRING,
+        ConstantClass::NonLiteral | ConstantClass::OtherLiteral => READ_ALL,
     }
 }
 
-/// Per-variable value-read datatype profiles, derived only from the (hashed) plan: a
-/// variable compared only with typed constants needs key checks for those constants'
-/// comparable datatypes; any other use needs all of them. A value outside its profile
-/// has no proof (a named profile refusal, never a different answer).
+/// Per-variable value-read datatype profiles. They depend on the expression shape and on
+/// the class of each compared constant, both of which the plan hash encodes: a variable
+/// compared only with typed constants needs key checks for those constants' comparable
+/// datatypes; any other use needs all of them. A value outside its profile has no proof
+/// (a named profile refusal, never a different answer).
 pub(crate) fn read_profiles(expr: &Expr, parameters: &[Parameter], out: &mut BTreeMap<Var, u32>) {
     fn all(e: &Expr, out: &mut BTreeMap<Var, u32>) {
         match e {
