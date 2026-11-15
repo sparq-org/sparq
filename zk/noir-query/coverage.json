@@ -1,0 +1,1669 @@
+{
+  "schema_version": 1,
+  "standard_baseline": {
+    "sparql11": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/",
+    "optional_sparql12_working_draft": "https://www.w3.org/TR/2026/WD-sparql12-query-20260910/",
+    "checked_on": "2026-09-12"
+  },
+  "tracking": "#7384",
+  "profile": "NoirQuerySuppliedCellsDraft",
+  "evidence": {
+    "layer": "circuit_execution",
+    "corpus": "../sparql-evaluator/fixtures/conformance/cases.json",
+    "runner": "../../crates/sparq-zk-query/tests/coverage.rs",
+    "command": "cargo test -p sparq-zk-query --test coverage -- --include-ignored",
+    "guest_proof_coverage": "not_asserted",
+    "full_w3c_conformance": "not_asserted",
+    "negative_cases_are_feature_support": false
+  },
+  "features": [
+    {
+      "id": "aggregate_distinct",
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_aggCount",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "aggregate-count-distinct-unbound"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "aggregate_empty",
+      "spec": "https://www.w3.org/TR/sparql11-query/#aggregateExample",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "aggregate-empty-count"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "aggregates",
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_aggMin",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "aggregate-min-max",
+        "aggregate-average-value",
+        "aggregate-sample-unambiguous"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "ask",
+      "spec": "https://www.w3.org/TR/sparql11-query/#ask",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "ask-true",
+        "ask-false"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "bgp",
+      "spec": "https://www.w3.org/TR/sparql11-query/#BasicGraphPatterns",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "bgp-projection-bag",
+        "rdf-graph-deduplicates-source"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "bind_errors",
+      "spec": "https://www.w3.org/TR/sparql11-query/#bind",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:ops_closed_bind_tests::bind_error_keeps_an_unbound_solution"
+      ],
+      "rejection_cases": [
+        "noir:ops_closed_bind_tests::bind_boolean_wrong_result"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "evidence": {
+        "layer": "isolated_gadget_execution",
+        "corpus": "core/src/ops_closed_bind_tests.nr",
+        "runner": "nargo test --program-dir zk/noir-query/core",
+        "guest_proof_coverage": "not_asserted",
+        "full_w3c_conformance": "not_asserted",
+        "negative_cases_are_feature_support": false
+      }
+    },
+    {
+      "id": "blank_nodes",
+      "spec": "https://www.w3.org/TR/sparql11-query/#QSynBlankNodes",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "casts",
+      "spec": "https://www.w3.org/TR/sparql11-query/#FunctionMapping",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "custom_functions",
+      "spec": "https://www.w3.org/TR/sparql11-query/#extensionFunctions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "dataset_clauses",
+      "spec": "https://www.w3.org/TR/sparql11-query/#specifyingDataset",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "date_functions",
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-date-time",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "date-comparison"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "distinct",
+      "spec": "https://www.w3.org/TR/sparql11-query/#modDuplicates",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "distinct-projection"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "ebv",
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-logical-or",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "error-or-true",
+        "error-and-false"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "empty_group",
+      "spec": "https://www.w3.org/TR/sparql11-query/#emptyGroupPattern",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "empty-group-one-empty-mapping"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "exists",
+      "spec": "https://www.w3.org/TR/sparql11-query/#neg-exists",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "exists-filter-only-outer-variable"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "filter_errors",
+      "spec": "https://www.w3.org/TR/sparql11-query/#evaluation",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "filter-error-removes-only-error-row"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "functional_forms",
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-if",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "in-match-survives-error",
+        "not-in-absent"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "graph_outputs",
+      "spec": "https://www.w3.org/TR/sparql11-query/#construct",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "group_having",
+      "spec": "https://www.w3.org/TR/sparql11-query/#aggregates",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "aggregate-group-having"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "hash_functions",
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-hash",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "joins",
+      "spec": "https://www.w3.org/TR/sparql11-query/#GroupPatterns",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "join-shared-variable",
+        "repeated-variable-no-match"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "minus",
+      "spec": "https://www.w3.org/TR/sparql11-query/#neg-minus",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "minus-removes-compatible",
+        "minus-disjoint-domains-keeps-left"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "named_graphs",
+      "spec": "https://www.w3.org/TR/sparql11-query/#queryDataset",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "not_exists",
+      "spec": "https://www.w3.org/TR/sparql11-query/#neg-notexists",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "not-exists-correlated",
+        "not-exists-fixed-pattern-removes-all"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "numeric_functions",
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-numerics",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "numeric-unary"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "optional",
+      "spec": "https://www.w3.org/TR/sparql11-query/#optionals",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "optional-unbound-versus-empty"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "optional_correlation",
+      "spec": "https://www.w3.org/TR/sparql11-query/#OptionalMatching",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "order_slice",
+      "spec": "https://www.w3.org/TR/sparql11-query/#modOffset",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "limit-zero"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "paths_alternative",
+      "spec": "https://www.w3.org/TR/sparql11-query/#propertypaths",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "paths_inverse",
+      "spec": "https://www.w3.org/TR/sparql11-query/#propertypaths",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "path-inverse"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "paths_negated",
+      "spec": "https://www.w3.org/TR/sparql11-query/#propertypaths",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "paths_sequence",
+      "spec": "https://www.w3.org/TR/sparql11-query/#propertypaths",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "paths_transitive",
+      "spec": "https://www.w3.org/TR/sparql11-query/#PropertyPathPatterns",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "paths_zero",
+      "spec": "https://www.w3.org/TR/sparql11-query/#PropertyPathPatterns",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "projection",
+      "spec": "https://www.w3.org/TR/sparql11-query/#BasicGraphPatterns",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "bgp-projection-bag",
+        "subquery-project-scope"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "rdf12_direction",
+      "spec": "https://www.w3.org/TR/2026/WD-sparql12-query-20260910/#func-strlangdir",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "rdf12_triples",
+      "spec": "https://www.w3.org/TR/2026/WD-sparql12-query-20260910/#func-triple",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "reduced",
+      "spec": "https://www.w3.org/TR/sparql11-query/#modReduced",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "service",
+      "spec": "https://www.w3.org/TR/sparql11-query/#basic-federated-query",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "string_functions",
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-strings",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "subqueries",
+      "spec": "https://www.w3.org/TR/sparql11-query/#subqueries",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "subquery-project-scope"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "term_functions",
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-isIRI",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "union",
+      "spec": "https://www.w3.org/TR/sparql11-query/#alternatives",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "union-keeps-duplicates"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "updates",
+      "spec": "https://www.w3.org/TR/sparql11-update/",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "values",
+      "spec": "https://www.w3.org/TR/sparql11-query/#inline-data",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "values-tuple-compatible-join"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "volatile_functions",
+      "spec": "https://www.w3.org/TR/sparql11-query/#FunctionMapping",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "entailment",
+      "spec": "https://www.w3.org/TR/sparql11-entailment/",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "protocol_and_result_formats",
+      "spec": "https://www.w3.org/TR/sparql11-protocol/",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "rdf12_version_announcement",
+      "spec": "https://www.w3.org/TR/2026/WD-sparql12-query-20260910/#syntaxVersionAnnouncement",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "rdf12_same_value",
+      "spec": "https://www.w3.org/TR/2026/WD-sparql12-query-20260910/#func-sameValue",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "lateral_extension",
+      "spec": "https://www.w3.org/TR/2026/WD-sparql12-query-20260910/",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "syntax_and_ill_typed_values",
+      "spec": "https://www.w3.org/TR/sparql11-query/#sparqlGrammar",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "empty_named_graphs",
+      "spec": "https://www.w3.org/TR/sparql11-query/#rdfDataset",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "exists_complex_bodies",
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "nullable_path_composition",
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalPP",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "exists_minus_domains",
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#defn_substitute",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "exists-minus-disjoint-domain-after-substitution"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    }
+  ],
+  "functions": [
+    {
+      "name": "BOUND",
+      "group": "functional_forms",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "IF",
+      "group": "functional_forms",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "COALESCE",
+      "group": "functional_forms",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "IN",
+      "group": "functional_forms",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "in-match-survives-error",
+        "not-in-absent"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "NOT IN",
+      "group": "functional_forms",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "not-in-absent"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "EXISTS",
+      "group": "exists",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "NOT EXISTS",
+      "group": "not_exists",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "isIRI",
+      "group": "term_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "isURI",
+      "group": "term_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "isBlank",
+      "group": "term_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "isLiteral",
+      "group": "term_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "isNumeric",
+      "group": "term_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "STR",
+      "group": "term_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "LANG",
+      "group": "term_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "DATATYPE",
+      "group": "term_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "IRI",
+      "group": "term_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "URI",
+      "group": "term_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "STRDT",
+      "group": "term_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "STRLANG",
+      "group": "term_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "sameTerm",
+      "group": "term_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "STRLEN",
+      "group": "string_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "SUBSTR",
+      "group": "string_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "UCASE",
+      "group": "string_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "LCASE",
+      "group": "string_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "STRSTARTS",
+      "group": "string_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "STRENDS",
+      "group": "string_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "CONTAINS",
+      "group": "string_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "STRBEFORE",
+      "group": "string_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "STRAFTER",
+      "group": "string_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "ENCODE_FOR_URI",
+      "group": "string_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "CONCAT",
+      "group": "string_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "LANGMATCHES",
+      "group": "string_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "REGEX",
+      "group": "string_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "REPLACE",
+      "group": "string_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "ABS",
+      "group": "numeric_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "ROUND",
+      "group": "numeric_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "CEIL",
+      "group": "numeric_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "FLOOR",
+      "group": "numeric_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "YEAR",
+      "group": "date_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "MONTH",
+      "group": "date_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "DAY",
+      "group": "date_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "HOURS",
+      "group": "date_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "MINUTES",
+      "group": "date_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "SECONDS",
+      "group": "date_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "TIMEZONE",
+      "group": "date_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "TZ",
+      "group": "date_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "MD5",
+      "group": "hash_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "SHA1",
+      "group": "hash_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "SHA256",
+      "group": "hash_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "SHA384",
+      "group": "hash_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "SHA512",
+      "group": "hash_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "xsd:integer",
+      "group": "casts",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "xsd:decimal",
+      "group": "casts",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "xsd:float",
+      "group": "casts",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "xsd:double",
+      "group": "casts",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "xsd:string",
+      "group": "casts",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "xsd:boolean",
+      "group": "casts",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "xsd:dateTime",
+      "group": "casts",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "NOW",
+      "group": "volatile_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "RAND",
+      "group": "volatile_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "UUID",
+      "group": "volatile_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "STRUUID",
+      "group": "volatile_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "BNODE",
+      "group": "volatile_functions",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "COUNT",
+      "group": "aggregates",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "SUM",
+      "group": "aggregates",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "MIN",
+      "group": "aggregates",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "MAX",
+      "group": "aggregates",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "AVG",
+      "group": "aggregates",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "SAMPLE",
+      "group": "aggregates",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "GROUP_CONCAT",
+      "group": "aggregates",
+      "status": "not_attempted",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    }
+  ],
+  "known_semantic_divergences": [],
+  "cases": [
+    {
+      "id": "bgp-projection-bag",
+      "status": "passing"
+    },
+    {
+      "id": "join-shared-variable",
+      "status": "passing"
+    },
+    {
+      "id": "repeated-variable-no-match",
+      "status": "passing"
+    },
+    {
+      "id": "rdf-graph-deduplicates-source",
+      "status": "passing"
+    },
+    {
+      "id": "distinct-projection",
+      "status": "passing"
+    },
+    {
+      "id": "empty-group-one-empty-mapping",
+      "status": "passing"
+    },
+    {
+      "id": "union-keeps-duplicates",
+      "status": "passing"
+    },
+    {
+      "id": "values-undef-duplicate-bind",
+      "status": "refused",
+      "refusal": "arithmetic expression ?x + \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> is not yet supported by the query method"
+    },
+    {
+      "id": "values-tuple-compatible-join",
+      "status": "passing"
+    },
+    {
+      "id": "filter-error-removes-only-error-row",
+      "status": "passing"
+    },
+    {
+      "id": "bind-error-keeps-mapping-unbound",
+      "status": "refused",
+      "refusal": "arithmetic expression ?x + \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> is not yet supported by the query method"
+    },
+    {
+      "id": "error-or-true",
+      "status": "passing"
+    },
+    {
+      "id": "error-and-false",
+      "status": "passing"
+    },
+    {
+      "id": "if-lazy-branch",
+      "status": "refused",
+      "refusal": "IF is not yet supported by the query method"
+    },
+    {
+      "id": "coalesce-skips-errors",
+      "status": "refused",
+      "refusal": "COALESCE is not yet supported by the query method"
+    },
+    {
+      "id": "in-match-survives-error",
+      "status": "passing"
+    },
+    {
+      "id": "not-in-absent",
+      "status": "passing"
+    },
+    {
+      "id": "optional-unbound-versus-empty",
+      "status": "passing"
+    },
+    {
+      "id": "optional-filter-correlated",
+      "status": "refused",
+      "refusal": "arithmetic expression ?score + \"10\"^^<http://www.w3.org/2001/XMLSchema#integer> is not yet supported by the query method"
+    },
+    {
+      "id": "minus-removes-compatible",
+      "status": "passing"
+    },
+    {
+      "id": "minus-disjoint-domains-keeps-left",
+      "status": "passing"
+    },
+    {
+      "id": "not-exists-correlated",
+      "status": "passing"
+    },
+    {
+      "id": "not-exists-fixed-pattern-removes-all",
+      "status": "passing"
+    },
+    {
+      "id": "exists-correlated-filter",
+      "status": "not_attempted"
+    },
+    {
+      "id": "aggregate-group-having",
+      "status": "passing"
+    },
+    {
+      "id": "aggregate-empty-count",
+      "status": "passing"
+    },
+    {
+      "id": "aggregate-count-distinct-unbound",
+      "status": "passing"
+    },
+    {
+      "id": "aggregate-min-max",
+      "status": "passing"
+    },
+    {
+      "id": "aggregate-average-value",
+      "status": "passing"
+    },
+    {
+      "id": "aggregate-sample-unambiguous",
+      "status": "passing"
+    },
+    {
+      "id": "aggregate-group-concat-unambiguous",
+      "status": "refused",
+      "refusal": "GROUP_CONCAT lexical opening required is not yet supported by the query method"
+    },
+    {
+      "id": "subquery-project-scope",
+      "status": "passing"
+    },
+    {
+      "id": "ordered-limit-offset",
+      "status": "refused",
+      "refusal": "ORDER BY is not yet supported by the query method"
+    },
+    {
+      "id": "ordered-unbound-first",
+      "status": "refused",
+      "refusal": "ORDER BY is not yet supported by the query method"
+    },
+    {
+      "id": "limit-zero",
+      "status": "passing"
+    },
+    {
+      "id": "ask-true",
+      "status": "passing"
+    },
+    {
+      "id": "ask-false",
+      "status": "passing"
+    },
+    {
+      "id": "path-sequence",
+      "status": "refused",
+      "refusal": "query blank node is not yet supported by the query method"
+    },
+    {
+      "id": "path-inverse",
+      "status": "passing"
+    },
+    {
+      "id": "path-alternative-duplicates",
+      "status": "refused",
+      "refusal": "property path is not yet supported by the query method"
+    },
+    {
+      "id": "path-transitive-deduplicates",
+      "status": "refused",
+      "refusal": "property path is not yet supported by the query method"
+    },
+    {
+      "id": "path-zero-length",
+      "status": "refused",
+      "refusal": "property path is not yet supported by the query method"
+    },
+    {
+      "id": "path-zero-or-one",
+      "status": "refused",
+      "refusal": "property path is not yet supported by the query method"
+    },
+    {
+      "id": "path-negated-set",
+      "status": "refused",
+      "refusal": "property path is not yet supported by the query method"
+    },
+    {
+      "id": "term-types",
+      "status": "refused",
+      "refusal": "isIRI is not yet supported by the query method"
+    },
+    {
+      "id": "term-identity",
+      "status": "refused",
+      "refusal": "sameTerm is not yet supported by the query method"
+    },
+    {
+      "id": "term-str-lang-datatype",
+      "status": "refused",
+      "refusal": "STR is not yet supported by the query method"
+    },
+    {
+      "id": "term-constructors",
+      "status": "refused",
+      "refusal": "IRI is not yet supported by the query method"
+    },
+    {
+      "id": "string-length-unicode",
+      "status": "refused",
+      "refusal": "STRLEN is not yet supported by the query method"
+    },
+    {
+      "id": "string-substring",
+      "status": "refused",
+      "refusal": "SUBSTR is not yet supported by the query method"
+    },
+    {
+      "id": "string-case",
+      "status": "refused",
+      "refusal": "UCASE is not yet supported by the query method"
+    },
+    {
+      "id": "string-start-end-contains",
+      "status": "refused",
+      "refusal": "STRSTARTS is not yet supported by the query method"
+    },
+    {
+      "id": "string-before-after",
+      "status": "refused",
+      "refusal": "STRBEFORE is not yet supported by the query method"
+    },
+    {
+      "id": "string-concat",
+      "status": "refused",
+      "refusal": "CONCAT is not yet supported by the query method"
+    },
+    {
+      "id": "string-langmatches",
+      "status": "refused",
+      "refusal": "LANGMATCHES is not yet supported by the query method"
+    },
+    {
+      "id": "string-uri-encode",
+      "status": "refused",
+      "refusal": "ENCODE_FOR_URI is not yet supported by the query method"
+    },
+    {
+      "id": "string-regex-flags",
+      "status": "refused",
+      "refusal": "REGEX is not yet supported by the query method"
+    },
+    {
+      "id": "string-replace",
+      "status": "refused",
+      "refusal": "REPLACE is not yet supported by the query method"
+    },
+    {
+      "id": "numeric-promotion",
+      "status": "passing"
+    },
+    {
+      "id": "numeric-divide",
+      "status": "refused",
+      "refusal": "arithmetic expression \"5\"^^<http://www.w3.org/2001/XMLSchema#integer> / \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> is not yet supported by the query method"
+    },
+    {
+      "id": "numeric-abs",
+      "status": "refused",
+      "refusal": "ABS is not yet supported by the query method"
+    },
+    {
+      "id": "numeric-rounding",
+      "status": "refused",
+      "refusal": "CEIL is not yet supported by the query method"
+    },
+    {
+      "id": "numeric-unary",
+      "status": "passing"
+    },
+    {
+      "id": "date-components",
+      "status": "refused",
+      "refusal": "YEAR is not yet supported by the query method"
+    },
+    {
+      "id": "date-zone",
+      "status": "refused",
+      "refusal": "TZ is not yet supported by the query method"
+    },
+    {
+      "id": "date-comparison",
+      "status": "passing"
+    },
+    {
+      "id": "xsd-casts",
+      "status": "refused",
+      "refusal": "<http://www.w3.org/2001/XMLSchema#integer> is not yet supported by the query method"
+    },
+    {
+      "id": "hash-md5",
+      "status": "refused",
+      "refusal": "MD5 is not yet supported by the query method"
+    },
+    {
+      "id": "hash-sha1",
+      "status": "refused",
+      "refusal": "SHA1 is not yet supported by the query method"
+    },
+    {
+      "id": "hash-sha256",
+      "status": "refused",
+      "refusal": "SHA256 is not yet supported by the query method"
+    },
+    {
+      "id": "hash-sha384",
+      "status": "refused",
+      "refusal": "SHA384 is not yet supported by the query method"
+    },
+    {
+      "id": "hash-sha512",
+      "status": "refused",
+      "refusal": "SHA512 is not yet supported by the query method"
+    },
+    {
+      "id": "reject-named-graph",
+      "status": "not_attempted"
+    },
+    {
+      "id": "reject-from-default",
+      "status": "refused",
+      "refusal": "FROM is excluded by the query method"
+    },
+    {
+      "id": "reject-from-named",
+      "status": "refused",
+      "refusal": "FROM NAMED is excluded by the query method"
+    },
+    {
+      "id": "reject-construct",
+      "status": "refused",
+      "refusal": "CONSTRUCT is not yet supported by the query method"
+    },
+    {
+      "id": "reject-describe",
+      "status": "refused",
+      "refusal": "DESCRIBE is excluded by the query method"
+    },
+    {
+      "id": "reject-service",
+      "status": "refused",
+      "refusal": "SERVICE is excluded by the query method"
+    },
+    {
+      "id": "reject-query-blank-node",
+      "status": "refused",
+      "refusal": "query blank node is not yet supported by the query method"
+    },
+    {
+      "id": "reject-custom-function",
+      "status": "refused",
+      "refusal": "<http://example.org/custom> is not yet supported by the query method"
+    },
+    {
+      "id": "reject-now",
+      "status": "refused",
+      "refusal": "NOW is excluded by the query method"
+    },
+    {
+      "id": "reject-rand",
+      "status": "refused",
+      "refusal": "RAND is excluded by the query method"
+    },
+    {
+      "id": "reject-uuid",
+      "status": "refused",
+      "refusal": "UUID is excluded by the query method"
+    },
+    {
+      "id": "reject-struuid",
+      "status": "refused",
+      "refusal": "STRUUID is excluded by the query method"
+    },
+    {
+      "id": "reject-bnode",
+      "status": "refused",
+      "refusal": "BNODE is not yet supported by the query method"
+    },
+    {
+      "id": "reject-dataset-blank-subject",
+      "status": "not_attempted"
+    },
+    {
+      "id": "reject-dataset-blank-object",
+      "status": "not_attempted"
+    },
+    {
+      "id": "bound-unbound",
+      "status": "refused",
+      "refusal": "BOUND is not yet supported by the query method"
+    },
+    {
+      "id": "datetime-cast",
+      "status": "refused",
+      "refusal": "<http://www.w3.org/2001/XMLSchema#dateTime> is not yet supported by the query method"
+    },
+    {
+      "id": "uri-constructor-alias",
+      "status": "refused",
+      "refusal": "IRI is not yet supported by the query method"
+    },
+    {
+      "id": "reduced-unique-input",
+      "status": "refused",
+      "refusal": "REDUCED is not yet supported by the query method"
+    },
+    {
+      "id": "reject-update",
+      "status": "refused",
+      "refusal": "SPARQL Update is excluded by the query method"
+    },
+    {
+      "id": "reject-rdf12-triple-function",
+      "status": "refused",
+      "refusal": "TRIPLE is excluded by the query method"
+    },
+    {
+      "id": "reject-rdf12-direction-function",
+      "status": "refused",
+      "refusal": "STRLANGDIR is not yet supported by the query method"
+    },
+    {
+      "id": "reject-rdf12-direction-literal",
+      "status": "refused",
+      "refusal": "directional literal is not yet supported by the query method"
+    },
+    {
+      "id": "not-exists-correlated-filter",
+      "status": "not_attempted"
+    },
+    {
+      "id": "exists-filter-only-outer-variable",
+      "status": "passing"
+    },
+    {
+      "id": "subquery-order-does-not-order-outer-bag",
+      "status": "refused",
+      "refusal": "ORDER BY is not yet supported by the query method"
+    },
+    {
+      "id": "exists-minus-disjoint-domain-after-substitution",
+      "status": "passing"
+    },
+    {
+      "id": "reject-exists-optional",
+      "status": "not_attempted"
+    },
+    {
+      "id": "reject-exists-values",
+      "status": "not_attempted"
+    },
+    {
+      "id": "reject-exists-bind",
+      "status": "refused",
+      "refusal": "arithmetic expression ?n + \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> is not yet supported by the query method"
+    },
+    {
+      "id": "reject-exists-subquery",
+      "status": "not_attempted"
+    },
+    {
+      "id": "reject-exists-aggregate",
+      "status": "refused",
+      "refusal": "correlated GROUP BY / aggregate substitution is not yet supported by the query method"
+    },
+    {
+      "id": "reject-exists-ordered-slice",
+      "status": "refused",
+      "refusal": "ORDER BY is not yet supported by the query method"
+    },
+    {
+      "id": "reject-exists-nullable-path",
+      "status": "refused",
+      "refusal": "property path is not yet supported by the query method"
+    },
+    {
+      "id": "reject-exists-residual-path",
+      "status": "refused",
+      "refusal": "property path is not yet supported by the query method"
+    },
+    {
+      "id": "reject-exists-nested-exists",
+      "status": "not_attempted"
+    },
+    {
+      "id": "reject-exists-nested-not-exists",
+      "status": "not_attempted"
+    },
+    {
+      "id": "reject-exists-nested-in-function",
+      "status": "refused",
+      "refusal": "EXISTS in a value expression is not yet supported by the query method"
+    },
+    {
+      "id": "nullable-path-alternative-absent-constant",
+      "status": "refused",
+      "refusal": "property path is not yet supported by the query method"
+    },
+    {
+      "id": "reject-nullable-path-lowered-sequence",
+      "status": "refused",
+      "refusal": "property path is not yet supported by the query method"
+    },
+    {
+      "id": "reject-nullable-path-nested-quantifier",
+      "status": "refused",
+      "refusal": "property path is not yet supported by the query method"
+    },
+    {
+      "id": "path-negated-duplicate-forward",
+      "status": "refused",
+      "refusal": "property path is not yet supported by the query method"
+    },
+    {
+      "id": "path-negated-duplicate-reverse",
+      "status": "refused",
+      "refusal": "property path is not yet supported by the query method"
+    },
+    {
+      "id": "path-negated-both-orientations",
+      "status": "refused",
+      "refusal": "property path is not yet supported by the query method"
+    }
+  ],
+  "isolated_extensions": [
+    {
+      "id": "closed_existence_boolean_bind",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "noir:ops_closed_bind_tests::existence_can_feed_boolean_bind",
+        "noir:ops_closed_bind_tests::empty_min_error_and_false_releases_false"
+      ],
+      "rejection_cases": [
+        "noir:ops_closed_bind_tests::existence_hidden_matching_right_fails_before_binding"
+      ],
+      "evidence": {
+        "layer": "isolated_gadget_execution",
+        "corpus": "core/src/ops_closed_bind_tests.nr",
+        "runner": "nargo test --program-dir zk/noir-query/core",
+        "guest_proof_coverage": "not_asserted",
+        "full_w3c_conformance": "not_asserted",
+        "negative_cases_are_feature_support": false
+      },
+      "guest_proof_evidence": "not_asserted"
+    }
+  ]
+}

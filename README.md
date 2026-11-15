@@ -183,6 +183,8 @@ standard it implements.
   result is correct without revealing the data ([guide](skills/zk-query-proofs/SKILL.md), [Node package](skills/zk-result-javascript/SKILL.md)). The v1
   verifier provides **no** soundness guarantee to a relying party pending external audit — see the
   [security caveat](SECURITY.md#scope-and-a-critical-caveat-research-scaffolds-with-no-security-guarantee).
+  The separate [Merkle credential suite](skills/merkle-credentials/SKILL.md) adds
+  native issuance and Noir credential openings; research grade and externally unaudited.
 - **Federated MPC** *(research scaffold — no security guarantee yet)* — model evaluating SPARQL
   across parties with multi-party computation ([guide](skills/mpc/SKILL.md)); honest-majority
   semi-honest, **not** maliciously secure ([SECURITY.md](SECURITY.md)). <!-- privacy-claims-allow: negative caveat ("not maliciously secure"); sq-toze.35 -->

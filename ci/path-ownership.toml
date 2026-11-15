@@ -485,3 +485,52 @@ safe = true
 [[map]]
 pattern = "ci/formal-verification.toml"
 safe = true
+
+# The Noir query method library. sparq-zk-query compiles generated programs against
+# it (statement layout pin, native execution and proof tests) and sparq-merkle-suite
+# pins the suite constants it declares, so a change re-runs both.
+[[map]]
+pattern = "zk/noir-query/**"
+crates = ["sparq-zk-query", "sparq-merkle-suite"]
+
+# The conformance corpus the query method's coverage manifest is ratcheted against.
+[[map]]
+pattern = "zk/sparql-evaluator/fixtures/conformance/cases.json"
+crates = ["sparq-zk-query"]
+
+# The closed operators also execute the corpus's core dataset
+# (tests/closed_operators.rs, tests/closed_plan_group.rs).
+[[map]]
+pattern = "zk/sparql-evaluator/fixtures/conformance/core.nt"
+crates = ["sparq-zk-query"]
+
+# sparq-zk-query's native tests copy the Noir library roots they compile against
+# (zk/noir-query/core, zk/compose/compose_core, zk/dual-leaf-v2) from the zk root.
+[[map]]
+pattern = "zk"
+crates = ["sparq-zk-query"]
+
+[[map]]
+pattern = "zk/compose/compose_core/**"
+readers = ["sparq-zk-query", "sparq-merkle-suite"]
+
+[[map]]
+pattern = "zk/dual-leaf-v2/**"
+readers = ["sparq-zk-query"]
+
+# sparq-merkle-suite's parity test compiles the frozen zkVM model's SHA-256 suite
+# source and reads its vectors, so a change to either re-runs the parity test.
+[[map]]
+pattern = "zk/sparql-evaluator/model/src/merkle_suite.rs"
+crates = ["sparq-merkle-suite"]
+
+[[map]]
+pattern = "zk/sparql-evaluator/model/tests/merkle_suite.rs"
+crates = ["sparq-merkle-suite"]
+
+# sparq-merkle-suite's and sparq-zk-query's live tests compile generated programs
+# against compose_core and pass its root to nargo as a path dependency. The directory entry attributes the library root the tests name; the shared readers
+# entry above unions the crate into the run set for every file beneath it.
+[[map]]
+pattern = "zk/compose/compose_core"
+crates = ["sparq-zk-query", "sparq-merkle-suite"]

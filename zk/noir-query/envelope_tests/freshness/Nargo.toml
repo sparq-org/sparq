@@ -1,0 +1,9 @@
+[package]
+name = "envelope_freshness"
+type = "bin"
+authors = ["sparq"]
+compiler_version = ">=1.0.0"
+
+[dependencies]
+envelope_core = { path = "../../core" }
+envelope_support = { path = "../support" }

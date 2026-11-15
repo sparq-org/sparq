@@ -35,7 +35,7 @@ pub(crate) fn pinned_version_output(tool: &str, stdout: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{PINNED_TOOLS, pinned_version_output as ok};
+    use super::{pinned_version_output as ok, PINNED_TOOLS};
 
     const N: &str = "1.0.0-beta.21";
     const B: &str = "5.0.0-nightly.20260324";

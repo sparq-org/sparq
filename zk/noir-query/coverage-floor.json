@@ -1,0 +1,22 @@
+{
+  "passing_cases": [
+    "ask-false",
+    "ask-true",
+    "bgp-projection-bag",
+    "date-comparison",
+    "distinct-projection",
+    "empty-group-one-empty-mapping",
+    "error-and-false",
+    "error-or-true",
+    "filter-error-removes-only-error-row",
+    "in-match-survives-error",
+    "join-shared-variable",
+    "limit-zero",
+    "not-in-absent",
+    "numeric-unary",
+    "path-inverse",
+    "rdf-graph-deduplicates-source",
+    "repeated-variable-no-match",
+    "values-tuple-compatible-join"
+  ]
+}

@@ -109,6 +109,24 @@
     "proofValue": {
       "@id": "sec:proofValue",
       "@type": "sec:multibase"
+    },
+    "verifiedIssuer": {
+      "@id": "vcq:verifiedIssuer",
+      "@type": "@id"
+    },
+    "holderBinding": {
+      "@id": "vcq:holderBinding",
+      "@context": {
+        "issuer": {
+          "@id": "vcq:issuer",
+          "@type": "@id",
+          "@container": "@list"
+        }
+      }
+    },
+    "earliestCreated": {
+      "@id": "vcq:earliestCreated",
+      "@type": "xsd:dateTime"
     }
   }
 }

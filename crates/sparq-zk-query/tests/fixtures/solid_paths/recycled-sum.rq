@@ -1,0 +1,14 @@
+PREFIX vcq: <https://w3id.org/sparq/vcq#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+# 3b. SUM form
+SELECT DISTINCT ?result WHERE {
+  { SELECT (SUM(?mass) AS ?total) (COUNT(DISTINCT ?iss) AS ?n) (COUNT(?mass) AS ?k) WHERE {
+      ?g vcq:verifiedIssuer ?iss .
+      FILTER(?iss IN (<urn:fictional:recycled-content:tier>,
+                      <urn:fictional:recycled-content:tier-2>,
+                      <urn:fictional:recycled-content:tier-3>))
+      GRAPH ?g { <urn:fictional:recycled-content:lot> <urn:claim:material.recycled-mass> ?mass . }
+  } }
+  BIND((?total >= 500 && ?n = 3 && ?k = 3) AS ?result)
+}

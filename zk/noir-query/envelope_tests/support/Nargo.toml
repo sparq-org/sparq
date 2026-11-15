@@ -1,0 +1,8 @@
+[package]
+name = "envelope_support"
+type = "lib"
+authors = ["sparq"]
+compiler_version = ">=1.0.0"
+
+[dependencies]
+envelope_core = { path = "../../core" }
