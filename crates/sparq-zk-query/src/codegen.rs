@@ -461,7 +461,10 @@ fn constant_profile(parameter: Option<&Parameter>) -> u32 {
     }
     match l.datatype().as_str().strip_prefix(XSD) {
         Some("integer" | "decimal") => 2 | 4,
-        Some("date" | "dateTime") => 8 | 16,
+        // Temporal constants admit their own datatype; mixed date/dateTime data is a
+        // profile refusal rather than a cross-type comparison.
+        Some("date") => 8,
+        Some("dateTime") => 16,
         Some("boolean") => 32,
         Some("string") => READ_STRING,
         _ => READ_ALL,

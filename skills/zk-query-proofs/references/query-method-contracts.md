@@ -198,9 +198,9 @@ The existing parameter enum and envelope group order are unchanged.
 Value reads carry a datatype profile per column, a limit of the same kind as
 capacity. The compiler derives each profile from the hashed plan alone. A
 variable compared only with constants gets the datatypes comparable with them:
-integer or decimal constants admit `{integer, decimal}`, date or dateTime
-constants admit `{date, dateTime}`, boolean admits `{boolean}`, and a plain
-string admits `{string}`. Any other use admits every supported datatype.
+integer or decimal constants admit `{integer, decimal}`, a date constant admits
+`{date}`, a dateTime constant admits `{dateTime}`, boolean admits `{boolean}`,
+and a plain string admits `{string}`. Any other use admits every supported datatype.
 Identity-mode sites never value-check plain strings. A value outside its
 column's profile has no proof, never a different answer: the host refuses it
 before proving with the named `value datatype outside the column's profile`
