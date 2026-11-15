@@ -11,8 +11,10 @@ Separate public quad limits choose the ordered credential-slot buckets. `Opening
 The request stores selected opening bounds and optional envelope consumers; the plan hash commits both.
 
 Constants are public parameters. Canonical plan encodings include parameter kinds,
-operator wiring, schemas, orders and capacities, while excluding parameter values
-and variable names. Constant membership lists use a fixed parameter block and public
+operator wiring, schemas, orders, capacities, the generation mode and the datatype
+class of every constant an expression reads (the class selects typed-read checks),
+while excluding parameter values and variable names. Equal plan hashes generate
+identical programs. Constant membership lists use a fixed parameter block and public
 active length, so values and list lengths preserve the shape within the profile.
 Rows are ordered lexicographically by term encoding in schema order; duplicates
 remain unless DISTINCT is requested. Scans check canonical bindings directly,

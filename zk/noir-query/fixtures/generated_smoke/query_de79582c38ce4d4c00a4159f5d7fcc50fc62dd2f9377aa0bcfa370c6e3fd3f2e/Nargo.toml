@@ -1,5 +1,5 @@
 [package]
-name = "query_27e521d950174bd4fae262ec24439b6c8b8aea8009d2b8a3f2e0c57190bf7520"
+name = "query_de79582c38ce4d4c00a4159f5d7fcc50fc62dd2f9377aa0bcfa370c6e3fd3f2e"
 type = "bin"
 authors = ["sparq"]
 compiler_version = ">=1.0.0"

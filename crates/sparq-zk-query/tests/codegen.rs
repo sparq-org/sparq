@@ -388,3 +388,124 @@ fn status_slot_count_matches_the_noir_consumer() {
     );
     assert!(source.contains(&expected), "{expected}");
 }
+
+/// The plan hash names exactly one program: every admitted corpus plan, in every
+/// generation mode, generates the same source as every other plan with that name.
+#[test]
+fn equal_plan_hashes_generate_identical_programs() {
+    use sparq_zk_query::codegen::{generate_operator_fixture, generate_suite_fixture};
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+    let corpus: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(root.join("zk/sparql-evaluator/fixtures/conformance/cases.json"))
+            .unwrap(),
+    )
+    .unwrap();
+    let mut queries: Vec<String> = corpus["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["query"].as_str().unwrap().to_owned())
+        .collect();
+    // One shape with a constant of every class, plus same-class variants.
+    for (constant, _) in CONSTANTS {
+        queries.push(compared(constant));
+        queries.push(format!(
+            "SELECT ?s WHERE {{?s <urn:p> ?x FILTER(?x IN ({constant}, {constant}))}}"
+        ));
+    }
+    let mut programs = std::collections::BTreeMap::new();
+    let mut plans = 0;
+    for query in &queries {
+        let Ok(plan) = lower(query, B) else { continue };
+        plans += 1;
+        let packages = [
+            generate(&plan),
+            generate_suite_fixture(&plan),
+            generate_operator_fixture(&plan),
+        ];
+        for package in packages.into_iter().flatten() {
+            let (first, files) = programs
+                .entry(package.name.clone())
+                .or_insert_with(|| (query.clone(), package.files.clone()));
+            assert_eq!(
+                *files, package.files,
+                "{first} and {query} share a plan hash"
+            );
+        }
+    }
+    assert!(plans > 50, "only {plans} corpus plans lowered");
+}
+
+/// Compared constants, each with the class the generator reads from it.
+const CONSTANTS: &[(&str, sparq_zk_query::plan::ConstantClass)] = {
+    use sparq_zk_query::plan::ConstantClass::*;
+    &[
+        ("<urn:o>", NonLiteral),
+        ("<urn:other>", NonLiteral),
+        ("18", Numeric),
+        ("19", Numeric),
+        ("1.5", Numeric),
+        (
+            "\"2026-01-01\"^^<http://www.w3.org/2001/XMLSchema#date>",
+            Date,
+        ),
+        (
+            "\"2027-02-02\"^^<http://www.w3.org/2001/XMLSchema#date>",
+            Date,
+        ),
+        (
+            "\"2026-01-01T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>",
+            DateTime,
+        ),
+        ("true", Boolean),
+        ("false", Boolean),
+        ("\"a\"", String),
+        ("\"b\"", String),
+        ("\"a\"@en", OtherLiteral),
+        (
+            "\"1\"^^<http://www.w3.org/2001/XMLSchema#double>",
+            OtherLiteral,
+        ),
+    ]
+};
+
+fn compared(constant: &str) -> String {
+    format!("SELECT ?s WHERE {{?s <urn:p> ?x FILTER(?x >= {constant})}}")
+}
+
+/// Changing only a compared constant's datatype family changes the plan hash; a constant
+/// of the same family keeps the hash and the program. The generation mode is in the hash.
+#[test]
+fn constant_classes_and_generation_modes_change_the_plan_hash() {
+    use sparq_zk_query::plan::{ConstantClass, GenerationMode, Parameter};
+    let plan = |c: &str| lower(&compared(c), B).unwrap();
+    for (a, class_a) in CONSTANTS {
+        let plan_a = plan(a);
+        let Some(Parameter::Term(constant)) = plan_a.parameters().last() else {
+            panic!("{a}: the compared constant is the last parameter");
+        };
+        assert_eq!(ConstantClass::of(constant), *class_a, "{a}");
+        for (b, class_b) in CONSTANTS {
+            let same_hash = plan_a.hash() == plan(b).hash();
+            assert_eq!(same_hash, class_a == class_b, "{a} and {b}");
+            if class_a == class_b {
+                assert_eq!(generate(&plan_a).unwrap(), generate(&plan(b)).unwrap());
+            }
+        }
+    }
+    let p = plan("18");
+    let modes = [
+        GenerationMode::Operator,
+        GenerationMode::Suite,
+        GenerationMode::CanonicalEnvelope,
+    ]
+    .map(|m| p.hash_for(m));
+    assert_eq!(
+        modes
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        3
+    );
+    assert_eq!(p.hash(), modes[2]);
+}

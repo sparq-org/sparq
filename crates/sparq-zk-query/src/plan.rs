@@ -1,4 +1,6 @@
-//! Typed, bounded algebra. The shape encoding excludes parameter values and variable names.
+//! Typed, bounded algebra. The shape encoding excludes parameter values and variable names,
+//! but includes every property of a parameter that the generator reads (its [`ConstantClass`])
+//! and the [`GenerationMode`], so the plan hash names exactly one program.
 
 use crate::capacity::{Bounds, Capacity, OpeningProfile};
 use oxrdf::Term;
@@ -41,6 +43,66 @@ pub enum Expr {
         start: ParameterId,
         count: ParameterId,
     },
+}
+
+/// The datatype family the generator reads from a public term constant in an expression.
+/// Two constants of one class generate the same program; this is the only parameter
+/// property in the hash.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConstantClass {
+    NonLiteral = 0,
+    /// `xsd:integer` or `xsd:decimal`.
+    Numeric = 1,
+    Date = 2,
+    DateTime = 3,
+    Boolean = 4,
+    /// `xsd:string` without a language tag.
+    String = 5,
+    /// Any other literal, including language-tagged strings.
+    OtherLiteral = 6,
+}
+
+impl ConstantClass {
+    pub fn of(term: &Term) -> Self {
+        let Term::Literal(l) = term else {
+            return Self::NonLiteral;
+        };
+        if l.language().is_some() {
+            return Self::OtherLiteral;
+        }
+        match l
+            .datatype()
+            .as_str()
+            .strip_prefix("http://www.w3.org/2001/XMLSchema#")
+        {
+            Some("integer" | "decimal") => Self::Numeric,
+            Some("date") => Self::Date,
+            Some("dateTime") => Self::DateTime,
+            Some("boolean") => Self::Boolean,
+            Some("string") => Self::String,
+            _ => Self::OtherLiteral,
+        }
+    }
+}
+
+/// The class byte an expression occurrence of parameter `p` encodes.
+pub(crate) fn class_byte(parameters: &[Parameter], p: ParameterId) -> u8 {
+    match parameters.get(p as usize) {
+        Some(Parameter::Term(t)) => ConstantClass::of(t) as u8,
+        _ => u8::MAX,
+    }
+}
+
+/// Which program the generator emits for a plan. Each mode hashes differently, so one
+/// hash never names two programs. Production preparation uses `CanonicalEnvelope`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GenerationMode {
+    /// Operator relation over supplied cells; authenticates nothing.
+    Operator = 0,
+    /// Issuer-authenticated suite opening without the canonical envelope.
+    Suite = 1,
+    /// Issuer authentication and the canonical envelope consumer.
+    CanonicalEnvelope = 2,
 }
 
 /// Public parameters are separate from the circuit shape.
@@ -256,10 +318,19 @@ impl Plan {
         &self.nodes[self.result as usize].output
     }
 
-    /// Length-prefixed, tagged, little-endian shape encoding. No serializer defaults.
-    /// Parameter kinds and occurrence positions are encoded; their values are not.
+    /// The canonical-envelope encoding: [`Self::canonical_bytes_for`] in production mode.
     pub fn canonical_bytes(&self) -> Vec<u8> {
-        let mut w = Encoding(b"sparq.noir-query.plan\0\x04".to_vec());
+        self.canonical_bytes_for(GenerationMode::CanonicalEnvelope)
+    }
+
+    /// Length-prefixed, tagged, little-endian shape encoding. No serializer defaults.
+    /// Parameter kinds, occurrence positions, the generation mode and the class of every
+    /// constant an expression reads are encoded; parameter values are not, and neither are
+    /// the classes of public list members or pattern constants, which the generator never
+    /// reads.
+    pub fn canonical_bytes_for(&self, mode: GenerationMode) -> Vec<u8> {
+        let mut w = Encoding(b"sparq.noir-query.plan\0\x05".to_vec(), &self.parameters);
+        w.u8(mode as u8);
         for n in [
             self.capacity.credentials,
             self.capacity.quads_per_credential,
@@ -312,7 +383,7 @@ impl Plan {
             match &node.operator {
                 Operator::Closed(op) => {
                     w.u8(8);
-                    let bytes = op.canonical_bytes();
+                    let bytes = op.canonical_bytes(&self.parameters);
                     w.len(bytes.len());
                     w.0.extend(bytes);
                 }
@@ -372,13 +443,20 @@ impl Plan {
         w.0
     }
 
+    /// The plan hash in production (canonical envelope) mode.
     pub fn hash(&self) -> [u8; 32] {
-        *blake3::hash(&self.canonical_bytes()).as_bytes()
+        self.hash_for(GenerationMode::CanonicalEnvelope)
+    }
+
+    /// The hash that names the program generated in `mode`.
+    pub fn hash_for(&self, mode: GenerationMode) -> [u8; 32] {
+        *blake3::hash(&self.canonical_bytes_for(mode)).as_bytes()
     }
 }
 
-struct Encoding(Vec<u8>);
-impl Encoding {
+/// Shape bytes, plus the parameters whose classes expression occurrences encode.
+struct Encoding<'a>(Vec<u8>, &'a [Parameter]);
+impl Encoding<'_> {
     fn u8(&mut self, n: u8) {
         self.0.push(n);
     }
@@ -405,6 +483,9 @@ impl Encoding {
             Expr::Term(s) => {
                 self.u8(0);
                 self.slot(s);
+                if let Slot::Parameter(p) = s {
+                    self.u8(class_byte(self.1, *p));
+                }
             }
             Expr::Compare(op, a, b) => {
                 self.u8(1);

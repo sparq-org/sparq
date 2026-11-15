@@ -169,9 +169,10 @@ impl ClosedOperator {
         }
     }
 
-    /// A tagged, length-prefixed encoding; constants remain public parameter slots.
-    pub(crate) fn canonical_bytes(&self) -> Vec<u8> {
-        let mut w = Writer(vec![]);
+    /// A tagged, length-prefixed encoding; constants remain public parameter slots, and an
+    /// expression occurrence also encodes the constant's class (see `Plan::canonical_bytes`).
+    pub(crate) fn canonical_bytes(&self, parameters: &[crate::plan::Parameter]) -> Vec<u8> {
+        let mut w = Writer(vec![], parameters);
         match self {
             Self::Join { left, right } => {
                 w.byte(16);
@@ -359,8 +360,8 @@ impl Predicate {
         }
     }
 }
-struct Writer(Vec<u8>);
-impl Writer {
+struct Writer<'a>(Vec<u8>, &'a [crate::plan::Parameter]);
+impl Writer<'_> {
     fn byte(&mut self, n: u8) {
         self.0.push(n);
     }
@@ -391,6 +392,9 @@ impl Writer {
             Expr::Term(s) => {
                 self.byte(0);
                 self.slot(s);
+                if let Slot::Parameter(p) = s {
+                    self.byte(crate::plan::class_byte(self.1, *p));
+                }
             }
             Expr::Compare(op, a, b) => {
                 self.byte(1);
