@@ -94,7 +94,7 @@ Host planning, lowering, interpretation, generation, layout, requests and presen
 `method::Prepared`, `method::Presentation`, `Request::plan` and `Answer::release` are portable; Compiler is native.
 Authenticated Node delivery follows the native catalogue and prover-backend decision.
 The agreement ratchet compares native/WebAssembly bytecode and keys for each passing
-operator plan, recording the approved XPath failure; committed manifests load unchanged.
+operator plan, XPath plans included; committed manifests load unchanged.
 Native execution uses the shared live-toolchain gate. Run it with
 `cargo test -p sparq-zk-query --test execution -- --ignored`, or use
 `cargo test -p sparq-zk-query -- --include-ignored` for the full live suite.

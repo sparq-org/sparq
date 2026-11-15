@@ -22,8 +22,21 @@ pub fn check_identity_equalities<let R:u32,let V:u32,let K:u32,let L:u32,let P:u
     input:Table<R,V>,raw:[[BoundedTermOpening<L,41,1>;K];R],columns:[u32;K],parameters:[crate::table::TermCell;P]) {
     check_mode::<R,V,K,L,P,1>(input,raw,columns,parameters);
 }
+/// Reads whose columns carry compile-time datatype profiles (`ops_core_suite::READ_*`).
+pub fn check_profiled<let R:u32,let V:u32,let K:u32,let L:u32,let P:u32>(
+    input:Table<R,V>,raw:[[BoundedTermOpening<L,41,1>;K];R],columns:[u32;K],profiles:[u32;K],parameters:[crate::table::TermCell;P]) {
+    check_profiled_mode::<R,V,K,L,P,0>(input,raw,columns,profiles,parameters);
+}
+pub fn check_identity_profiled<let R:u32,let V:u32,let K:u32,let L:u32,let P:u32>(
+    input:Table<R,V>,raw:[[BoundedTermOpening<L,41,1>;K];R],columns:[u32;K],profiles:[u32;K],parameters:[crate::table::TermCell;P]) {
+    check_profiled_mode::<R,V,K,L,P,1>(input,raw,columns,profiles,parameters);
+}
 fn check_mode<let R:u32,let V:u32,let K:u32,let L:u32,let P:u32,let IDENTITY_STRINGS:u32>(
     input:Table<R,V>,raw:[[BoundedTermOpening<L,41,1>;K];R],columns:[u32;K],parameters:[crate::table::TermCell;P]) {
+    check_profiled_mode::<R,V,K,L,P,IDENTITY_STRINGS>(input,raw,columns,[crate::ops_core_suite::READ_ALL;K],parameters);
+}
+fn check_profiled_mode<let R:u32,let V:u32,let K:u32,let L:u32,let P:u32,let IDENTITY_STRINGS:u32>(
+    input:Table<R,V>,raw:[[BoundedTermOpening<L,41,1>;K];R],columns:[u32;K],profiles:[u32;K],parameters:[crate::table::TermCell;P]) {
     assert(input.len<=R,"read table capacity");
     for k in 0..K {
         assert(columns[k]<V,"read column");
@@ -33,7 +46,11 @@ fn check_mode<let R:u32,let V:u32,let K:u32,let L:u32,let P:u32,let IDENTITY_STR
             for p in 0..P {public=public | equal_cell(cell,parameters[p]);}
             let identity_only=(IDENTITY_STRINGS==1) & (cell.dt==crate::suite_constants::DT_STRING);
             if (r<input.len) & cell.bound & (cell.kind==3) & !public & !identity_only {
-                let checked=crate::ops_core_suite::checked_bounded_literal(cell,raw[r][k]);
+                let checked=if profiles[k]==crate::ops_core_suite::READ_ALL {
+                    crate::ops_core_suite::checked_bounded_literal(cell,raw[r][k])
+                } else {
+                    crate::ops_core_suite::checked_profiled_literal(cell,raw[r][k],profiles[k])
+                };
                 assert(equal_cell(checked,cell),"read opening differs from input cell");
             } else {
                 let opening=raw[r][k];
@@ -140,4 +157,33 @@ fn reads_plain_string_identity_needs_no_value_key() {
 #[test(should_fail_with="key requires literal")]
 fn reads_typed_membership_still_needs_a_value_key() {
     check_identity_equalities(input(),[[crate::ops_core_profile::empty::<65>()];2],[0],[crate::table::unbound()]);
+}
+fn string_raw() -> BoundedTermOpening<65,41,1> {
+    let mut raw=crate::ops_core_profile::empty::<65>();raw.bound=true;raw.kind=3;
+    raw.lexical[0]=55;raw.lexical_len=1;
+    let dt="http://www.w3.org/2001/XMLSchema#string".as_bytes();
+    raw.datatype_len=dt.len();for i in 0..dt.len() {raw.datatype[i]=dt[i];}
+    raw
+}
+#[test]
+fn profiled_reads_check_values_inside_the_column_profile() {
+    let numeric=crate::ops_core_suite::READ_INTEGER+crate::ops_core_suite::READ_DECIMAL;
+    check_profiled(input(),[[integer(1)],[integer(2)]],[0],[numeric],[crate::table::unbound()]);
+}
+#[test(should_fail_with="key disagrees with lexical form")]
+fn profiled_reads_still_check_keys() {
+    let numeric=crate::ops_core_suite::READ_INTEGER;
+    let mut swapped=integer(1);swapped.lexical[0]=50;
+    check_profiled(input(),[[swapped],[integer(2)]],[0],[numeric],[crate::table::unbound()]);
+}
+#[test(should_fail_with="value datatype outside the column's profile")]
+fn profiled_reads_refuse_a_datatype_outside_the_profile() {
+    check_profiled(input(),[[integer(1)],[integer(2)]],[0],[crate::ops_core_suite::READ_DATE],[crate::table::unbound()]);
+}
+#[test(should_fail_with="value datatype outside the column's profile")]
+fn profiled_reads_refuse_a_string_in_a_numeric_column() {
+    let numeric=crate::ops_core_suite::READ_INTEGER+crate::ops_core_suite::READ_DECIMAL;
+    let mut table=input();
+    table.rows[1][0]=crate::table::TermCell {bound:true,kind:3,enc:7,key_class:8,key:0,dt:crate::suite_constants::DT_STRING,lang:0,scope:0};
+    check_profiled(table,[[integer(1)],[string_raw()]],[0],[numeric],[crate::table::unbound()]);
 }

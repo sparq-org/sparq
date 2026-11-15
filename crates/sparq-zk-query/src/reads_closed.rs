@@ -9,12 +9,31 @@ use std::collections::BTreeSet;
 pub(crate) struct ReadSite {
     pub input: NodeId,
     pub columns: Vec<usize>,
+    /// One datatype profile per column (`codegen::READ_*` bits).
+    pub profiles: Vec<u32>,
     pub identity_strings: bool,
 }
 impl ReadSite {
     pub fn name(&self, node: usize) -> String {
         format!("closed_reads_{node}_{}", self.input)
     }
+    pub fn profiled(&self) -> bool {
+        self.profiles.iter().any(|&p| p != crate::codegen::READ_ALL)
+    }
+}
+/// Host-side profile refusal before any proving, matching the circuit assertion.
+pub(crate) fn check_profile(dt: crate::interp::Word, profile: u32) -> Result<(), crate::Error> {
+    use crate::interp::EncodeTerm;
+    for (bit, name) in crate::codegen::READ_DATATYPES.iter().enumerate() {
+        let datatype = oxrdf::NamedNode::new_unchecked(format!("http://www.w3.org/2001/XMLSchema#{name}"));
+        let sample = oxrdf::Literal::new_typed_literal("0", datatype);
+        if profile & (1 << bit) != 0
+            && crate::credential::SuiteEncoder.encode(&sample.into())?.dt == dt
+        {
+            return Ok(());
+        }
+    }
+    Err(crate::Error::Capacity("value datatype outside the column's profile".into()))
 }
 fn arithmetic(e: &Integer, vars: &mut BTreeSet<Var>) {
     match e {
@@ -53,6 +72,18 @@ fn predicate(p: &Predicate, plan: &Plan, vars: &mut BTreeSet<Var>) {
         Predicate::Exists(_) | Predicate::SemiJoin(_) => (),
     }
 }
+fn profiles(p: &Predicate, plan: &Plan, out: &mut std::collections::BTreeMap<Var, u32>) {
+    match p {
+        Predicate::Expression(e) => crate::codegen::read_profiles(e, plan.parameters(), out),
+        Predicate::Not(a) => profiles(a, plan, out),
+        Predicate::And(a, b) | Predicate::Or(a, b) => {
+            profiles(a, plan, out);
+            profiles(b, plan, out);
+        }
+        // Arithmetic operands and every other consumer keep the full profile.
+        _ => (),
+    }
+}
 fn identity_strings(p: &Predicate) -> bool {
     match p {
         Predicate::Expression(e) => crate::codegen::identity_string_reads(e),
@@ -66,6 +97,7 @@ pub(crate) fn sites(plan: &Plan, node: usize) -> Vec<ReadSite> {
     let mut vars = BTreeSet::new();
     let mut inputs = vec![];
     let mut identities = false;
+    let mut typed = std::collections::BTreeMap::new();
     match &plan.nodes()[node].operator {
         Operator::Closed(
             C::Filter {
@@ -81,6 +113,7 @@ pub(crate) fn sites(plan: &Plan, node: usize) -> Vec<ReadSite> {
             },
         ) => {
             predicate(p, plan, &mut vars);
+            profiles(p, plan, &mut typed);
             identities = identity_strings(p);
             inputs.push(*input);
             inputs.extend(context);
@@ -92,6 +125,7 @@ pub(crate) fn sites(plan: &Plan, node: usize) -> Vec<ReadSite> {
             context,
         }) => {
             expression(e, plan, &mut vars);
+            crate::codegen::read_profiles(e, plan.parameters(), &mut typed);
             identities = crate::codegen::identity_string_reads(e);
             inputs.extend([*left, *right]);
             inputs.extend(context);
@@ -122,9 +156,23 @@ pub(crate) fn sites(plan: &Plan, node: usize) -> Vec<ReadSite> {
                 .enumerate()
                 .filter_map(|(i, v)| vars.contains(v).then_some(i))
                 .collect::<Vec<_>>();
+            let profiles = columns
+                .iter()
+                .map(|&i| {
+                    let v = plan.nodes()[input as usize].output.variables[i];
+                    let profile = typed.get(&v).copied().unwrap_or(crate::codegen::READ_ALL);
+                    // Identity-mode strings never reach a value check.
+                    if identities {
+                        profile & !crate::codegen::READ_STRING
+                    } else {
+                        profile
+                    }
+                })
+                .collect();
             (!columns.is_empty()).then_some(ReadSite {
                 input,
                 columns,
+                profiles,
                 identity_strings: identities,
             })
         })

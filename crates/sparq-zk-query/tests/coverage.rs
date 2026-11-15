@@ -520,68 +520,33 @@ fn compiler_agreement_for_every_passing_plan() {
         let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
         let artifact = driver.compile().unwrap();
         let cache = workspace.0.join("wasm-cache");
-        let check = |key: &std::path::Path, known: bool| {
+        let check = |key: &std::path::Path| {
             let output = support::live_tool(&gate, "node")
                 .arg(root().join("zk/noir-query/compiler-agreement/check.mjs"))
                 .arg(workspace.0.join(&package.name))
                 .arg(&artifact)
                 .arg(key)
                 .arg(&cache)
-                .args(known.then_some("--record-known-failures"))
                 .output()
                 .unwrap();
-            if output.status.code() == Some(2) {
-                assert!(known);
-                assert!(
-                    String::from_utf8_lossy(&output.stderr).contains("xpath-vendored-sha-alias")
-                );
-            } else {
-                assert!(
-                    output.status.success(),
-                    "{}{}",
-                    String::from_utf8_lossy(&output.stdout),
-                    String::from_utf8_lossy(&output.stderr)
-                );
-            }
-            output
-        };
-        let compile = check(std::path::Path::new("--compile-only"), true);
-        let record = if compile.status.code() == Some(2) {
-            assert!(String::from_utf8_lossy(&compile.stderr).contains("xpath-vendored-sha-alias"));
-            let record: Value = serde_json::from_slice(
-                &std::fs::read(cache.join("compiler-agreement.json")).unwrap(),
-            )
-            .unwrap();
-            assert_eq!(record["status"], "known_failure");
-            assert_eq!(record["id"], "xpath-vendored-sha-alias");
-            assert_eq!(record["bytecode"], "not_compared");
-            assert_eq!(record["key"], "not_compared");
-            record
-        } else {
             assert!(
-                compile.status.success(),
-                "bytecode agreement: {}{}",
-                String::from_utf8_lossy(&compile.stdout),
-                String::from_utf8_lossy(&compile.stderr)
+                output.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
             );
-            let key_file = workspace.0.join("agreement.vk");
-            std::fs::write(&key_file, driver.canonical_vk(&workspace.0).unwrap()).unwrap();
-            let key = check(&key_file, false);
-            assert!(
-                key.status.success(),
-                "key agreement: {}{}",
-                String::from_utf8_lossy(&key.stdout),
-                String::from_utf8_lossy(&key.stderr)
-            );
-            let record: Value = serde_json::from_slice(
-                &std::fs::read(cache.join("compiler-agreement.json")).unwrap(),
-            )
-            .unwrap();
-            assert_eq!(record["status"], "passing");
-            assert_eq!(record["bytecode"], "identical");
-            assert_eq!(record["key"], "identical");
-            record
         };
+        // Every passing plan, XPath plans included, needs bytecode and key agreement.
+        check(std::path::Path::new("--compile-only"));
+        let key_file = workspace.0.join("agreement.vk");
+        std::fs::write(&key_file, driver.canonical_vk(&workspace.0).unwrap()).unwrap();
+        check(&key_file);
+        let record: Value =
+            serde_json::from_slice(&std::fs::read(cache.join("compiler-agreement.json")).unwrap())
+                .unwrap();
+        assert_eq!(record["status"], "passing");
+        assert_eq!(record["bytecode"], "identical");
+        assert_eq!(record["key"], "identical");
         assert_eq!(record["program"], package.name);
         use sha2::{Digest, Sha256};
         let digest = Sha256::digest(std::fs::read(&artifact).unwrap())

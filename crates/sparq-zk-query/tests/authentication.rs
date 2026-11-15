@@ -527,7 +527,7 @@ fn signed_key_witness(
                     .unwrap()
                     .files
                     .values()
-                    .any(|source| source.contains("ops_core_reads::check_identity_equalities("))
+                    .any(|source| source.contains("ops_core_reads::check_identity_"))
                     && value.dt
                         == SuiteEncoder
                             .encode(&oxrdf::Literal::new_simple_literal("").into())
