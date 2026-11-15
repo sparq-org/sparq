@@ -56,3 +56,4 @@ live tests/solid_paths.rs::recycled_having_authenticated
 live tests/solid_paths.rs::required_closed_value_reads_fail_at_actual_query_sites
 live tests/solid_paths.rs::canonical_renderer_executes_all_six_solid_targets
 live tests/solid_paths.rs::canonical_membership_matches_only_the_same_term
+live tests/solid_paths.rs::membership_controls_with_a_typed_column

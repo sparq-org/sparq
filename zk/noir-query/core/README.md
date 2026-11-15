@@ -178,6 +178,13 @@ are computed inside the gadget.
 Plain-string equality classifies its operands from the authenticated datatype
 before value-key guards; identity-only comparison does not inspect unused keys.
 
+Closed FILTER membership (`ops_closed_expr::membership`) is separate from those
+identity-string reads: at a FILTER's top-level AND/OR only, `?v = c` and
+`?v IN (c...)` over IRI or simple-literal constants test bound plus `same_term`
+against public constants. Error and false both reject there, so it opens no
+value and has no read site. NOT, BIND and released booleans keep the value
+comparison.
+
 The converted operator view exposes `rows()`, `active()`, `message()` and `graph()`.
 Its private construction marker excludes it from entry-point witnesses and external
 struct construction. Generated slots return that view after their envelope checks.

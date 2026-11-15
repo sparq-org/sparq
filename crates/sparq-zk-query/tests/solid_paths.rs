@@ -792,15 +792,133 @@ fn canonical_membership_matches_only_the_same_term() {
     }
     support::complete(gate);
 }
+/// Review controls: an integer column against a plain-string and an IRI
+/// constant. A FILTER rejects the row; NOT of it also rejects (a membership
+/// lowering under NOT would accept); BIND leaves the boolean unbound.
+#[test]
+fn membership_controls_with_a_typed_column() {
+    let Some(gate) = support::gate("membership_controls_with_a_typed_column", &["nargo"]) else {
+        return;
+    };
+    let data = vec![sign(fact("urn:s", "urn:p", &lit(5, "integer")), 0, 0)];
+    let plan = |text: &str| {
+        let p = graphs::lower(
+            text,
+            Bounds {
+                credentials: 1,
+                quads_per_credential: 8,
+                rows_per_table: 2,
+            },
+        )
+        .unwrap();
+        graphs::bind_issuer_registry(p, &registry()).unwrap()
+    };
+    let engine_rows = |text: &str| {
+        let mut rdf = String::new();
+        for q in oxttl::NQuadsParser::new().for_slice(data[0].credential.document.as_bytes()) {
+            let q = q.unwrap();
+            rdf += &format!("{} {} {} _:g0 .\n", q.subject, q.predicate, q.object);
+        }
+        let graph = sparq_core::Graph::load_dataset(&rdf, "nquads").unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&sparq_engine::query_json(&graph, text).unwrap()).unwrap();
+        json["results"]["bindings"].as_array().unwrap().clone()
+    };
+    let unfiltered = "SELECT ?s WHERE { GRAPH ?g { ?s <urn:p> ?v } }";
+    for test in [r#"?v IN ("5", <urn:x>)"#, r#"?v = "5""#, "?v = <urn:x>"] {
+        let filter = format!("SELECT ?s WHERE {{ GRAPH ?g {{ ?s <urn:p> ?v FILTER({test}) }} }}");
+        let negated =
+            format!("SELECT ?s WHERE {{ GRAPH ?g {{ ?s <urn:p> ?v FILTER(!({test})) }} }}");
+        let bind = format!("SELECT ?b WHERE {{ GRAPH ?g {{ ?s <urn:p> ?v }} BIND({test} AS ?b) }}");
+        for (text, uses_membership) in [(&filter, true), (&negated, false), (&bind, false)] {
+            let p = plan(text);
+            assert_eq!(
+                predicates(&p).into_iter().any(membership),
+                uses_membership,
+                "{text}"
+            );
+            let trace = graphs::evaluate_for_request(&p, &data, DIGEST).unwrap();
+            let ResultValue::Select { rows, .. } = &trace.result else {
+                panic!("SELECT result")
+            };
+            let expected = engine_rows(text);
+            assert_eq!(rows.len(), expected.len(), "{text}");
+            if text == &bind {
+                assert_eq!(rows.len(), 1, "{text}");
+                if test.contains('"') {
+                    // Against a string the comparison errors: ?b stays unbound.
+                    assert!(!rows[0][0].bound, "{text}");
+                    assert!(expected[0].get("b").is_none(), "{text}");
+                }
+            } else if text == &filter || test.contains('"') {
+                // A FILTER rejects an integer against a constant; against a
+                // string the comparison errors, so NOT of it rejects too.
+                // (Against an IRI, `=` is false, so NOT of it keeps the row.)
+                assert!(rows.is_empty(), "{text}");
+            }
+            let released = !rows.is_empty();
+            let honest =
+                witness_closed::prover_toml(&p, &data, &trace, DIGEST, [3; 32], issuer_root());
+            if !uses_membership {
+                if let Err(e) = &honest {
+                    // The value read's profile excludes the integer, so the
+                    // prover refuses before proving; nothing is released.
+                    assert!(
+                        e.to_string()
+                            .contains("value datatype outside the column's profile"),
+                        "{text}: {e}"
+                    );
+                    eprintln!("{text}: refused before proving ({e})");
+                    continue;
+                }
+            }
+            let package = codegen::generate_suite_fixture(&p).unwrap();
+            let workspace = closed_native::Workspace::new(&package);
+            let root = workspace.0.path();
+            execute(&gate, root, &package.name, &honest.unwrap(), "membership")
+                .unwrap_or_else(|e| panic!("{text}: {e}"));
+            if text != &bind && !released {
+                // Releasing the rejected row (what a lowering that accepted it
+                // would release) must not prove.
+                let mut forged = trace.clone();
+                forged.result = graphs::evaluate_for_request(&plan(unfiltered), &data, DIGEST)
+                    .unwrap()
+                    .result;
+                assert!(
+                    execute(
+                        &gate,
+                        root,
+                        &package.name,
+                        &render(&p, &data, &forged, true),
+                        "membership_forged"
+                    )
+                    .is_err(),
+                    "{text}"
+                );
+            }
+        }
+    }
+    support::complete(gate);
+}
 #[test]
 fn filter_constant_membership_compares_identity_only_in_filters() {
     let p = prepare("trial-eligibility", true);
     assert!(predicates(&p).into_iter().any(membership));
-    // BIND and NOT can observe error versus false, so they keep the comparison.
+    // A closed FILTER's top-level AND/OR rejects on error and false alike.
     for text in [
-        r#"SELECT ?r WHERE { ?s <urn:p> ?m BIND(?m IN ("x", "y") AS ?r) }"#,
-        r#"ASK { ?s <urn:p> ?m FILTER(!(?m = "x")) }"#,
-        r#"ASK { ?s <urn:p> ?m FILTER(?m = "x"@en) }"#,
+        r#"ASK { GRAPH ?g { ?s <urn:p> ?m FILTER(?m = "x" || ?m = <urn:y>) } }"#,
+        r#"ASK { GRAPH ?g { ?s <urn:p> ?m FILTER(?m IN ("x", "y") && ?s = <urn:s>) } }"#,
+    ] {
+        let p = graphs::lower(text, bounds()).unwrap();
+        assert!(predicates(&p).into_iter().any(membership), "{text}");
+    }
+    // NOT, BIND and a released boolean can observe error versus false, and a
+    // tagged constant is not term-equal, so these keep the value comparison.
+    for text in [
+        r#"ASK { GRAPH ?g { ?s <urn:p> ?m FILTER(!(?m = "x")) } }"#,
+        r#"SELECT ?r WHERE { GRAPH ?g { ?s <urn:p> ?m } BIND(?m IN ("x", "y") AS ?r) }"#,
+        r#"SELECT (?m = "x" AS ?r) WHERE { GRAPH ?g { ?s <urn:p> ?m } }"#,
+        r#"ASK { GRAPH ?g { ?s <urn:p> ?m FILTER(?m = "x"@en) } }"#,
     ] {
         let p = graphs::lower(text, bounds()).unwrap();
         assert!(!predicates(&p).into_iter().any(membership), "{text}");
