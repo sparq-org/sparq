@@ -38,7 +38,8 @@ test('Solid targets prove with full envelopes; revoked, stale, expired and missi
     assert.equal(checked.verified, true, checked.reason);
     assert.deepEqual(checked.released, evidence.result);
     assert.equal(evidence.result.rows.length, 1, `${target} honest answer`);
-    assert.match(String(evidence.result.rows[0][0]), /^"true"/);
+    // The HAVING form releases its qualifying group; the others release a boolean.
+    assert.match(String(evidence.result.rows[0][0]), target === '3-having' ? /^<urn:fictional:recycled-content:lot>$/ : /^"true"/);
     const issuers = fixture.policy.trustMembers.map(m => m.issuer).sort();
     assert.deepEqual([...checked.report.subject].sort(), fixture.holder ? issuers : []);
     assert.equal(checked.report.validityTime, instant); assert.equal(checked.report.earliestCreated, instant);

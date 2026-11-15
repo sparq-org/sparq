@@ -2133,3 +2133,17 @@ pinning = "suite constants pinned between Rust and Noir"
 records_to = "stdout"
 status = "diagnostic"
 featured = false
+
+[[benchmark]]
+id = "zk-query-node-contract"
+name = "Authenticated query Node contract — registry stub"
+category = "zk"
+measures = "Research grade, not externally audited: proof acceptance, deterministic issuance and refusal controls"
+invoke = "cd js/zk-query && npm test"
+source = "crates/sparq-zk-query-wasm/src/lib.rs, js/zk-query/test/api.test.js"
+dataset = "Synthetic signed graphs and stored requests"
+quiet_box_sensitive = false
+pinning = "Package lock, catalogue, binary and CRS digests"
+records_to = "Node test output"
+featured = false
+status = "ok"

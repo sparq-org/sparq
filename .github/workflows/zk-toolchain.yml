@@ -175,7 +175,9 @@ jobs:
     name: Noir query Node package contracts
     if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Rebuilds the whole catalogue (including the Solid targets) and runs every live
+    # Node contract, the WebAssembly proofs and compiler agreement serially.
+    timeout-minutes: 240
     env:
       CARGO_BUILD_JOBS: "3"
       CARGO_PROFILE_DEV_DEBUG: "0"
@@ -183,7 +185,6 @@ jobs:
       CARGO_PROFILE_RELEASE_DEBUG: "0"
       CARGO_INCREMENTAL: "0"
       SPARQ_ZK_LIVE_LEDGER: ${{ github.workspace }}/.zk-query-package-${{ github.run_id }}-${{ github.run_attempt }}.txt
-      SPARQ_QUERY_TEST_DIR: ${{ runner.temp }}/query-package-evidence
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
@@ -210,6 +211,8 @@ jobs:
           set -euo pipefail
           export SPARQ_NARGO="$(command -v nargo)"
           export SPARQ_BB="$(command -v bb)"
+          # The runner context is unavailable in job-level env.
+          export SPARQ_QUERY_TEST_DIR="$RUNNER_TEMP/query-package-evidence"
           bindgen_version="$(python3 -c 'import tomllib; print(next(p["version"] for p in tomllib.load(open("Cargo.lock", "rb"))["package"] if p["name"] == "wasm-bindgen"))')"
           cargo install wasm-bindgen-cli --version "=$bindgen_version" --locked -j 2
           npm ci --prefix js/zk-query --ignore-scripts
