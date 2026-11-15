@@ -120,6 +120,42 @@ pub(crate) fn open_credential_bounded_quads<let N: u32, let L: u32, let D: u32, 
     quads
 }
 
+/// A subject, predicate or graph name held as its framed term digest
+/// (`TERM_DOMAIN` sponge over the typed byte frame) instead of its bytes.
+pub struct ResourceDigest {
+    pub bound: bool,
+    pub kind: u8,
+    pub framed: Field,
+}
+/// Quad opening whose resources enter by digest; the object keeps its bytes.
+pub struct DigestQuadOpening<let L: u32, let D: u32, let G: u32> {
+    pub subject: ResourceDigest,
+    pub predicate: ResourceDigest,
+    pub object: BoundedTermOpening<L, D, G>,
+    pub graph: ResourceDigest,
+}
+fn open_resource_cell<let P: u32>(raw: ResourceDigest, credential: u32) -> TermCell {
+    if raw.bound {
+        let kind = if P == 1 { assert(raw.kind == 1, "predicate kind"); 1 } else { raw.kind };
+        crate::term::open_resource_digest::<P>(kind, raw.framed, credential)
+    } else {
+        assert((raw.kind == 0) & (raw.framed == 0), "non-zero padding");
+        padding()
+    }
+}
+pub(crate) fn open_credential_digest_quads<let N: u32, let L: u32, let D: u32, let G: u32>(
+    raw: [DigestQuadOpening<L, D, G>; N], credential: u32,
+) -> [[TermCell; 4]; N] {
+    let mut quads = [[padding(); 4]; N];
+    for i in 0..N {
+        let row = raw[i];
+        let quad = [open_resource_cell::<0>(row.subject, credential), open_resource_cell::<1>(row.predicate, credential),
+            open_bounded_cell(row.object, credential), open_resource_cell::<3>(row.graph, credential)];
+        quads[i] = quad;
+    }
+    quads
+}
+
 /// Merge K long-bound rows into S short-bound rows in tree order. Long indices
 /// strictly increase below N; short rows fill the other indices in their order.
 /// That makes the placement a bijection onto the N leaves, so the root is unchanged.

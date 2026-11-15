@@ -171,6 +171,14 @@ the trailing indices. Short rows fill the remaining tree positions in order, so 
 leaves, root and returned `OpenedCredential<N>` equal the uniform opening. A quad
 too long for the short bound needs a long slot; otherwise no proof exists.
 
+To skip resource bytes, call `suite::{open_digest_credential_hidden,
+open_digest_credential_revealed}` or their `_mixed_` forms with
+`DigestQuadOpening<L, D, G>` rows: subject, predicate and graph are
+`ResourceDigest { bound, kind, framed }`, where `framed` is the term's
+`TERM_DOMAIN` hash over its typed byte frame; the object keeps its bytes. The
+signed root binds `P(kind, framed, 0)`, so leaves, root and identities equal the
+byte opening. Reopen a resource's bytes with `term::open_lexical` if a read needs them.
+
 Both fixture entry points expose the issuer-key coordinates and verifier-agreed
 configuration digest halves. Hidden mode returns nothing; revealed mode releases
 only the salted signed message. Raw metadata, terms, keys, count, root, salts and

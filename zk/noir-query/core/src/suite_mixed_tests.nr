@@ -102,3 +102,25 @@ fn mixed_absent_long_slot_cannot_precede_counted_rows() {
     let s = ordered::<32>();
     let _o = mixed([s[0], s[1], pad()], [pad()], [0]);
 }
+
+fn digest_of<let L: u32>(cell: BoundedTermOpening<L, 64, 8>) -> crate::suite_entry::ResourceDigest {
+    let framed = if cell.bound & (cell.kind > 0) {
+        crate::term_bytes::nonliteral_hash(cell.kind, std::collections::bounded_vec::BoundedVec::from_parts_unchecked(cell.lexical, cell.lexical_len))
+    } else { 0 };
+    crate::suite_entry::ResourceDigest { bound: cell.bound, kind: cell.kind, framed }
+}
+fn digest_row<let L: u32>(row: [BoundedTermOpening<L, 64, 8>; 4]) -> crate::suite_entry::DigestQuadOpening<L, 64, 8> {
+    crate::suite_entry::DigestQuadOpening { subject: digest_of(row[0]), predicate: digest_of(row[1]), object: row[2], graph: digest_of(row[3]) }
+}
+#[test]
+fn digest_openings_match_the_byte_opening() {
+    let (s, l) = (ordered::<32>(), ordered::<64>());
+    let uniform_digest = crate::suite::open_digest_credential_revealed(
+        [digest_row(l[0]), digest_row(l[1]), digest_row(pad()), digest_row(pad())], salts(), 7, 2,
+        [0x09090909090909090909090909090909; 2], created::<32>(), method::<32>(), pk(), 0);
+    same(uniform_digest, uniform());
+    let mixed_digest = crate::suite::open_digest_credential_mixed_revealed(
+        [digest_row(s[0]), digest_row(pad()), digest_row(pad())], [digest_row(l[1])], [1], salts(), 7, 2,
+        [0x09090909090909090909090909090909; 2], created::<32>(), method::<32>(), pk(), 0);
+    same(mixed_digest, uniform());
+}

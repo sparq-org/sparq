@@ -177,6 +177,16 @@ pub fn term_identity(term: &Term) -> Result<Fr, Error> {
     Ok(term_cell(term, 0)?.identity)
 }
 
+/// The framed digest a digest opening supplies for a subject, predicate or
+/// named graph: `hash_bytes(TERM_DOMAIN, framed_bytes)`. The default graph uses
+/// zero. Literals keep their bytes in the opening and are refused here.
+pub fn resource_digest(term: &Term) -> Result<Fr, Error> {
+    if matches!(term, Term::Literal(_)) {
+        return Err(Error("literals are opened by bytes"));
+    }
+    Ok(hash_bytes(TERM_DOMAIN, &term_cell(term, 0)?.bytes))
+}
+
 /// The default graph's bound cell. This is distinct from an unbound table cell.
 pub fn default_graph() -> TermCell {
     cell(vec![0], [0; KEY_BYTES], Fr::from(0u64), Fr::from(0u64), 0)

@@ -240,6 +240,21 @@ pub(crate) fn open_nonliteral_term<let L: u32, let D: u32, let G: u32, let P: u3
         credential: if kind == KIND_BLANK_NODE { credential } else { 0 } }
 }
 
+/// Credential-only resource cell from its framed term digest, without bytes.
+/// The signed root binds enc = P(kind, framed, 0), so collision resistance fixes
+/// both kind and framed; identity is then the same value the bytes would give.
+pub(crate) fn open_resource_digest<let P: u32>(kind: u8, framed: Field, credential: u32) -> TermCell {
+    std::static_assert((P == 0) | (P == 1) | (P == 3), "nonliteral RDF position");
+    assert(kind < KIND_LITERAL, "nonliteral position");
+    if P != 3 { assert(kind > KIND_DEFAULT_GRAPH, "subject kind"); }
+    let default_graph = (P == 3) & (kind == KIND_DEFAULT_GRAPH);
+    if default_graph { assert(framed == 0, "default graph digest"); }
+    let (enc, identity) = if default_graph { (DEFAULT_GRAPH_ENC, DEFAULT_GRAPH_ENC) } else {
+        (Poseidon2::hash([kind as Field, framed, 0], 3), Poseidon2::hash([kind as Field, framed], 2))
+    };
+    TermCell { constructed: [], bound: true, kind, enc, identity, key_class: 0, key: 0, dt: 0, lang: 0,
+        credential: if kind == KIND_BLANK_NODE { credential } else { 0 } }
+}
 
 #[test]
 fn field_order_is_canonical_across_limb_and_modulus_boundaries() {

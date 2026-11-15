@@ -59,6 +59,23 @@ fn rdf_identity_binds_kind_lexical_datatype_and_language() {
 }
 
 #[test]
+fn resource_digest_rebuilds_the_signed_encoding_and_identity() {
+    use oxrdf::{BlankNode, Term};
+    use sparq_zk::poseidon2::hash;
+    for term in [
+        Term::NamedNode(NamedNode::new_unchecked("http://ex/balance")),
+        Term::BlankNode(BlankNode::new_unchecked("c14n0")),
+    ] {
+        let cell = p::term_cell(&term, 0).unwrap();
+        let framed = p::resource_digest(&term).unwrap();
+        let kind = sparq_merkle_suite::Fr::from(u64::from(cell.kind));
+        assert_eq!(hash(&[kind, framed, 0u64.into()]), cell.enc);
+        assert_eq!(hash(&[kind, framed]), cell.identity);
+    }
+    assert!(p::resource_digest(&Term::Literal(Literal::new_simple_literal("x"))).is_err());
+}
+
+#[test]
 fn issuer_signed_keys_do_not_change_term_identity() {
     use oxrdf::Term;
     use sparq_zk::poseidon2;
