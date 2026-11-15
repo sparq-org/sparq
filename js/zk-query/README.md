@@ -111,6 +111,19 @@ preparation. Allocation errors reported by that backend become refusals. The sam
 internal interface exercises supplied-cell operator fixtures without an issuer
 or credential-authentication claim.
 
+The catalogue route is a trust assumption. In Node, neither party compiles: holder
+and verifier both rely on the published package for the mapping from a plan to its
+program and verification key. That mapping is pinned by digest inside the host
+bindings and rebuilt in CI from the native compiler. Only catalogued query shapes
+are accepted; any other query refuses with `missing catalogue plan`. A party with
+the native toolchain can check any entry independently by compiling the plan
+itself and comparing the program and key digests.
+
+Proofs exist only when every intermediate table fits its row bucket, so a verifier
+that could choose buckets freely could learn an unreleased intermediate count from
+which requests succeed. In Node the catalogue fixes the buckets for each query
+shape and acts as the holder's allow-list; callers cannot pick other buckets.
+
 [The catalogue](assets/catalogue.json) is addressed by the Rust-derived plan hash.
 Keys, artifacts, library sources and CRS are pinned and checked before use.
 Unknown plans and keys differing from the catalogue refuse. Native compilation

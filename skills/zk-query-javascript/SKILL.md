@@ -89,6 +89,12 @@ The toolchain workflow's package job rebuilds the catalogue, runs the offline
 live bridge and verifies its own completion ledger. The fast JavaScript job
 checks pinned native proof verification and the portable operator prover.
 
+The catalogue route is a trust assumption: in Node, holder and verifier both rely
+on the package's digest-pinned mapping from plan to program and key, rebuilt in CI
+from the native compiler. Only catalogued query shapes work, and the catalogue
+fixes each shape's row buckets (the holder's allow-list). A native party can check
+any entry by compiling the plan itself.
+
 For a verifier-agreed `inputCommitment`, the holder passes the existing commitment's
 salt as `backend: { type: 'native', presentationSaltHex }` (or the corresponding
 WebAssembly option). The salt is a full hexadecimal byte string, goes only into
