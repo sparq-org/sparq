@@ -176,14 +176,86 @@ fn profiled_reads_still_check_keys() {
     let mut swapped=integer(1);swapped.lexical[0]=50;
     check_profiled(input(),[[swapped],[integer(2)]],[0],[numeric],[crate::table::unbound()]);
 }
-#[test(should_fail_with="value datatype outside the column's profile")]
-fn profiled_reads_refuse_a_datatype_outside_the_profile() {
-    check_profiled(input(),[[integer(1)],[integer(2)]],[0],[crate::ops_core_suite::READ_DATE],[crate::table::unbound()]);
+// A supported datatype outside the profile is not key-checked: the comparison with the
+// column's constants is a type error, so the row's result is exact without its key.
+#[test]
+fn profiled_reads_leave_a_supported_datatype_outside_the_profile_unchecked() {
+    let mut forged=integer(1);forged.lexical[0]=57;
+    check_profiled(input(),[[forged],[integer(2)]],[0],[crate::ops_core_suite::READ_DATE],[crate::table::unbound()]);
 }
-#[test(should_fail_with="value datatype outside the column's profile")]
-fn profiled_reads_refuse_a_string_in_a_numeric_column() {
+#[test]
+fn profiled_reads_leave_a_string_in_a_numeric_column_unchecked() {
     let numeric=crate::ops_core_suite::READ_INTEGER+crate::ops_core_suite::READ_DECIMAL;
     let mut table=input();
-    table.rows[1][0]=crate::table::TermCell {bound:true,kind:3,enc:7,key_class:8,key:0,dt:crate::suite_constants::DT_STRING,lang:0,scope:0};
+    table.rows[1][0]=crate::table::TermCell {bound:true,kind:3,enc:7,key_class:6,key:0,dt:crate::suite_constants::DT_STRING,lang:0,scope:0};
     check_profiled(table,[[integer(1)],[string_raw()]],[0],[numeric],[crate::table::unbound()]);
+}
+#[test(should_fail_with="N0 credential literal datatype")]
+fn profiled_reads_refuse_an_unsupported_datatype() {
+    let numeric=crate::ops_core_suite::READ_INTEGER+crate::ops_core_suite::READ_DECIMAL;
+    let mut table=input();
+    table.rows[1][0].dt=crate::suite_constants::DT_LONG;
+    check_profiled(table,[[integer(1)],[integer(2)]],[0],[numeric],[crate::table::unbound()]);
+}
+// F1 exactness: a supported datatype outside the profile compares with the column's
+// constants as a type error, whatever its unchecked key says. FILTER drops the row,
+// `!` keeps the error, and a BIND would leave its variable unbound.
+#[test]
+fn unchecked_out_of_profile_cells_compare_as_type_errors_whatever_their_key() {
+    let step=|op:u8,a:u32,b:u32,parameter:u32,comparison:u8| crate::ops_core_expr::Step {op,a,b,parameter,comparison};
+    for key in [6*0x1000000000000000000000000000000000000000000000000000000000000,
+        6*0x1000000000000000000000000000000000000000000000000000000000000+0x3100000000000000000000000000000000000000000000000000000000] {
+        // A plain string in a column compared only with an integer constant.
+        let mut table=input();
+        table.rows[0][0]=crate::table::TermCell {bound:true,kind:3,enc:7,key_class:6,key,dt:crate::suite_constants::DT_STRING,lang:0,scope:0};
+        let integer_constant=[cell(integer(1))];
+        for comparison in [0,1,2,3,4] {
+            let compared=crate::ops_core_expr::evaluate(table,integer_constant,[step(0,0,0,0,0),step(1,0,0,0,0),step(2,0,1,0,comparison)]);
+            assert(!compared[0].value & compared[0].is_error);
+            let negated=crate::ops_core_expr::evaluate(table,integer_constant,[step(0,0,0,0,0),step(1,0,0,0,0),step(2,0,1,0,comparison),step(5,2,2,0,0)]);
+            assert(!negated[0].value & negated[0].is_error);
+        }
+    }
+    for forged in [1,2] {
+        // An integer with an unchecked key in a column compared only with a plain string.
+        let mut table=input();
+        table.rows[0][0].key=table.rows[0][0].key+forged;
+        let string_constant=[crate::table::TermCell {bound:true,kind:3,enc:9,key_class:6,
+            key:6*0x1000000000000000000000000000000000000000000000000000000000000,dt:crate::suite_constants::DT_STRING,lang:0,scope:0}];
+        for comparison in [0,1,2,3,4] {
+            let compared=crate::ops_core_expr::evaluate(table,string_constant,[step(0,0,0,0,0),step(1,0,0,0,0),step(2,0,1,0,comparison)]);
+            assert(!compared[0].value & compared[0].is_error);
+        }
+    }
+}
+fn date_constant() -> crate::table::TermCell {
+    crate::table::TermCell {bound:true,kind:3,enc:11,key_class:8,
+        key:8*0x1000000000000000000000000000000000000000000000000000000000000+0x100000000000000000000000000000000000000000000,
+        dt:crate::suite_constants::DT_DATE,lang:0,scope:0}
+}
+fn date_time_cell(key_class:u8) -> crate::table::TermCell {
+    crate::table::TermCell {bound:true,kind:3,enc:13,key_class,
+        key:key_class as Field*0x1000000000000000000000000000000000000000000000000000000000000,
+        dt:crate::suite_constants::DT_DATETIME,lang:0,scope:0}
+}
+// Date-compared columns admit only xsd:date, so a dateTime cell there keeps an unchecked
+// key. Exact only while the comparator never orders date against dateTime: with no key
+// class an ordering is a type error (equality is a refusal), and with a temporal key
+// class every comparison is a refusal.
+#[test]
+fn unchecked_other_temporal_cells_never_compare_with_a_date() {
+    let step=|op:u8,a:u32,b:u32,parameter:u32,comparison:u8| crate::ops_core_expr::Step {op,a,b,parameter,comparison};
+    let mut table=input();
+    table.rows[0][0]=date_time_cell(0);
+    for comparison in [1,2,3,4] {
+        let compared=crate::ops_core_expr::evaluate(table,[date_constant()],[step(0,0,0,0,0),step(1,0,0,0,0),step(2,0,1,0,comparison)]);
+        assert(!compared[0].value & compared[0].is_error);
+    }
+}
+#[test(should_fail_with="mixed temporal datatypes not yet supported")]
+fn unchecked_zoned_date_times_are_refused_against_a_date() {
+    let step=|op:u8,a:u32,b:u32,parameter:u32,comparison:u8| crate::ops_core_expr::Step {op,a,b,parameter,comparison};
+    let mut table=input();
+    table.rows[0][0]=date_time_cell(3);
+    let _=crate::ops_core_expr::evaluate(table,[date_constant()],[step(0,0,0,0,0),step(1,0,0,0,0),step(2,0,1,0,4)]);
 }

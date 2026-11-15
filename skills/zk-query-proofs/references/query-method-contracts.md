@@ -195,24 +195,30 @@ index, so changing their contents or admitted length preserves plan hash and
 program source. Oversized lists receive the named `IN list` capacity refusal.
 The existing parameter enum and envelope group order are unchanged.
 
-Value reads carry a datatype profile per column, a limit of the same kind as
-capacity. The compiler derives each profile from the hashed plan alone: the plan
-encoding carries the datatype class of every constant an expression reads
-(non-literal, numeric, date, dateTime, boolean, string, other literal) and the
-generation mode (operator fixture, suite fixture, canonical envelope), so equal
-plan hashes generate identical programs. Values and list members stay outside
-the hash: a public membership list reads every supported datatype and compares at
-run time, so a member's class changes neither the mask nor the program. A variable compared only with constants gets the datatypes comparable with them:
+Value reads carry a datatype profile per column. The compiler derives each
+profile from the hashed plan alone: the plan encoding carries the datatype class
+of every constant an expression reads (non-literal, numeric, date, dateTime,
+boolean, string, other literal) and the generation mode (operator fixture, suite
+fixture, canonical envelope), so equal plan hashes generate identical programs.
+Values and list members stay outside the hash: a public membership list reads
+every supported datatype and compares at run time, so a member's class changes
+neither the mask nor the program.
+
+A variable compared only with constants gets the datatypes comparable with them:
 integer or decimal constants admit `{integer, decimal}`, a date constant admits
 `{date}`, a dateTime constant admits `{dateTime}`, boolean admits `{boolean}`,
-and a plain string admits `{string}`. Any other use admits every supported datatype.
-Identity-mode sites never value-check plain strings. A value outside its
-column's profile has no proof, never a different answer: the host refuses it
-before proving with the named `value datatype outside the column's profile`
-capacity error, and the circuit asserts the same. A datatype outside every
-profile keeps the read path's own unsupported-datatype refusal. For example, a string in a
-numeric-compared column is refused, while a decimal in an `{integer, decimal}`
-column proves.
+and a plain string admits `{string}`. Any other use admits every supported
+datatype. Identity-mode sites never value-check plain strings. The read site
+recomputes the key only for a value inside the profile. A supported value outside
+it keeps its unchecked key, and that is exact: the column's consumers compare it
+only with constants of another class, and the comparator dispatches such a pair
+from the authenticated datatype and key class to a type error (date against
+dateTime is a type error or a capacity refusal, never an order). So a FILTER
+drops the row, also under `!`, and a BIND leaves its variable unbound, exactly as
+SPARQL. For example, a string in a numeric-compared column is simply not
+selected, and a decimal in an `{integer, decimal}` column is key-checked and
+compared. An unsupported datatype has no proof (the read path's named
+unsupported-datatype refusal).
 
 For the closed-world integration, `credential::assemble_dataset` takes complete
 opened credential cells, envelope-authenticated issuer cells and the request

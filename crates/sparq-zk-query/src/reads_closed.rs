@@ -21,27 +21,6 @@ impl ReadSite {
         self.profiles.iter().any(|&p| p != crate::codegen::READ_ALL)
     }
 }
-/// Host-side profile refusal before any proving, matching the circuit assertion. A
-/// datatype no profile admits keeps the read path's own named refusal.
-pub(crate) fn check_profile(dt: crate::interp::Word, profile: u32) -> Result<(), crate::Error> {
-    use crate::interp::EncodeTerm;
-    let mut known = false;
-    for (bit, name) in crate::codegen::READ_DATATYPES.iter().enumerate() {
-        let datatype = oxrdf::NamedNode::new_unchecked(format!("http://www.w3.org/2001/XMLSchema#{name}"));
-        let sample = oxrdf::Literal::new_typed_literal("0", datatype);
-        if crate::credential::SuiteEncoder.encode(&sample.into())?.dt == dt {
-            if profile & (1 << bit) != 0 {
-                return Ok(());
-            }
-            known = true;
-        }
-    }
-    if known {
-        Err(crate::Error::Capacity("value datatype outside the column's profile".into()))
-    } else {
-        Ok(())
-    }
-}
 fn arithmetic(e: &Integer, vars: &mut BTreeSet<Var>) {
     match e {
         Integer::Term(Slot::Variable(v)) => {

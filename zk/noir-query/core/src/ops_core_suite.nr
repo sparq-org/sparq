@@ -264,12 +264,14 @@ pub global READ_DATETIME:u32=16;
 pub global READ_BOOLEAN:u32=32;
 pub global READ_ALL:u32=63;
 /// `checked_bounded_literal` restricted to a compile-time datatype profile. Key checks
-/// outside the profile are not compiled; a cell outside it has no proof.
+/// outside the profile are not compiled. A supported datatype outside the profile keeps
+/// its unchecked key: every consumer of a profiled column compares it only with
+/// constants whose class differs, and the comparator dispatches such a pair to a type
+/// error from the authenticated datatype and key class, never from the key payload.
+/// An unsupported datatype has no proof.
 pub fn checked_profiled_literal<let L:u32>(cell:TermCell,raw:BoundedTermOpening<L,41,1>,profile:u32) -> TermCell {
-    let has=|bit:u32,dt:Field| ((profile & bit)!=0) & (cell.dt==dt);
-    assert(has(READ_STRING,DT_STRING)|has(READ_INTEGER,DT_INTEGER)|has(READ_DECIMAL,DT_DECIMAL)
-        |has(READ_DATE,DT_DATE)|has(READ_DATETIME,DT_DATETIME)|has(READ_BOOLEAN,DT_BOOLEAN),
-        "value datatype outside the column's profile");
+    assert((cell.dt==DT_STRING)|(cell.dt==DT_INTEGER)|(cell.dt==DT_DECIMAL)|(cell.dt==DT_DATE)
+        |(cell.dt==DT_DATETIME)|(cell.dt==DT_BOOLEAN),"N0 credential literal datatype");
     let mut checked=cell;
     if (profile & READ_STRING)!=0 {
         if cell.dt==DT_STRING {checked=table_cell(crate::term::open_key_checked(raw,0,DT_STRING).cell());}

@@ -575,11 +575,10 @@ fn prover_toml_authenticated_mode(
             if columns.is_empty() {
                 continue;
             }
-            let profiles = crate::codegen::filter_read_profiles(plan, input as crate::plan::NodeId, expr, &columns);
             let mut reads = Vec::new();
             for r in 0..plan.nodes()[input].output.capacity as usize {
                 let mut row = Vec::new();
-                for (&column, &profile) in columns.iter().zip(&profiles) {
+                for &column in &columns {
                     let cell = trace.tables[input].rows.get(r).map(|row| row[column]);
                     let term = if let Some(cell) = cell.filter(|c| {
                         c.bound
@@ -588,7 +587,6 @@ fn prover_toml_authenticated_mode(
                             && !(crate::codegen::identity_string_reads(expr)
                                 && c.dt == string_datatype)
                     }) {
-                        crate::reads_closed::check_profile(cell.dt, profile)?;
                         Some(match literals.iter().find(|(c, _)| *c == cell) {
                             Some((_, term)) => term.clone(),
                             None => crate::witness_closed::computed(cell).map_err(|e| match e {
