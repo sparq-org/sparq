@@ -264,3 +264,53 @@ fn numeric_key_tail_is_zero() {
  let mut key=[0;31];key[0]=2;key[1]=128;key[30]=1;
  let _cell=crate::term::open_term(3,BoundedVec::<u8,1>::from_array("0".as_bytes()),BoundedVec::<u8,64>::from_array("http://www.w3.org/2001/XMLSchema#double".as_bytes()),BoundedVec::<u8,1>::new(),key,0);
 }
+
+// Resources by digest: same signed tree, no resource bytes.
+fn digest(kind: u8, framed: Field) -> crate::suite_entry::ResourceDigest { crate::suite_entry::ResourceDigest { bound: true, kind, framed } }
+fn framed<let L: u32>(kind: u8, lex: [u8; L]) -> Field { crate::term_bytes::nonliteral_hash(kind, BoundedVec::<u8, L>::from_array(lex)) }
+fn digest_row(subject: crate::suite_entry::ResourceDigest, predicate: crate::suite_entry::ResourceDigest,
+    graph: crate::suite_entry::ResourceDigest) -> [crate::suite_entry::DigestQuadOpening<32,64,1>;1] {
+    [crate::suite_entry::DigestQuadOpening { subject, predicate, object: compact_quads()[0][2], graph }]
+}
+fn honest_digest_row() -> [crate::suite_entry::DigestQuadOpening<32,64,1>;1] {
+    digest_row(digest(2, framed(2, "c14n0".as_bytes())), digest(1, framed(1, "http://ex/balance".as_bytes())), digest(0, 0))
+}
+fn digest_fixture(raw: [crate::suite_entry::DigestQuadOpening<32,64,1>;1]) -> OpenedCredential<1> {
+    crate::suite::open_digest_credential_hidden(raw,[crate::suite::leaf_salt(7,0)],7,1,
+        [0x09090909090909090909090909090909;2],compact(created()),compact(method()),pk(),0,
+        Point {x:0x270d497e79fbe3b7574d1fc62b211e0009ba391e1c8e12c1175632f2fb5afdba,y:0x164b448b1476688eeddfc1359220d79e0c2ed96a694bdd84114fcc63d0a01d0b},
+        0x03203196df02ebfe53e3fa449595f2c334699ac289cb3597b8a1dade2f18df0f,
+        0x03b86d67c45349ac68136ab7c56ee819e85f3c2e4a60f2f1150c18ab98ade013,4)
+}
+#[test]
+fn digest_opening_authenticates_the_same_signed_tree() {
+    let (a, b) = (digest_fixture(honest_digest_row()), bounded_fixture(compact(created()),pk()));
+    same_opening(a, b);
+    for j in 0..4 { assert(a.quads()[0][j].identity() == b.quads()[0][j].identity()); }
+}
+#[test(should_fail_with="challenge reduction not bound to its preimage")]
+fn digest_opening_cannot_change_a_term_kind() {
+    let _o = digest_fixture(digest_row(digest(1, framed(2, "c14n0".as_bytes())), digest(1, framed(1, "http://ex/balance".as_bytes())), digest(0, 0)));
+}
+#[test(should_fail_with="challenge reduction not bound to its preimage")]
+fn digest_opening_cannot_change_a_term() {
+    let _o = digest_fixture(digest_row(digest(2, framed(2, "c14n1".as_bytes())), digest(1, framed(1, "http://ex/balance".as_bytes())), digest(0, 0)));
+}
+#[test(should_fail_with="predicate kind")]
+fn digest_predicate_must_be_an_iri() {
+    let _o = digest_fixture(digest_row(digest(2, framed(2, "c14n0".as_bytes())), digest(2, framed(2, "http://ex/balance".as_bytes())), digest(0, 0)));
+}
+#[test(should_fail_with="subject kind")]
+fn digest_subject_cannot_be_the_default_graph() {
+    let _o = digest_fixture(digest_row(digest(0, 0), digest(1, framed(1, "http://ex/balance".as_bytes())), digest(0, 0)));
+}
+#[test(should_fail_with="default graph digest")]
+fn digest_default_graph_is_canonical() {
+    let _o = digest_fixture(digest_row(digest(2, framed(2, "c14n0".as_bytes())), digest(1, framed(1, "http://ex/balance".as_bytes())), digest(0, 1)));
+}
+#[test(should_fail_with="non-zero padding")]
+fn digest_padding_row_is_canonical() {
+    let mut row = honest_digest_row()[0];
+    row.subject = crate::suite_entry::ResourceDigest { bound: false, kind: 0, framed: 1 };
+    let _cells = crate::suite_entry::open_credential_digest_quads([row], 1);
+}
