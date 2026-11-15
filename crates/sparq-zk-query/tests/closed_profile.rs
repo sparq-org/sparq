@@ -420,8 +420,8 @@ fn compact_profile_credential_executes() {
         .find(|line| line.starts_with("credential_0 = "))
         .unwrap();
     for (field, label) in [("subject", "nonliteral position"),("predicate", "predicate kind")] {
-        let marker=format!("{field} = {{ kind = 1");
-        let position=raw_line.find(&marker).expect("bounded resource opening")+marker.len()-8;
+        let start = raw_line.find(&format!("{field} = {{")).expect("resource digest opening");
+        let position = start + raw_line[start..].find("kind = 1").expect("resource kind");
         let mut raw = raw_line.to_owned();
         raw.replace_range(position..position + 8, "kind = 3");
         let changed = witness.replace(raw_line, &raw);

@@ -470,22 +470,31 @@ fn mixed_string_classes_execute_and_refuse_rebound_wrong_traces() {
             (plan, trace)
         })
         .collect::<Vec<_>>();
-    let package = generate(&traces[0].0).unwrap();
-    let workspace = Workspace::new(&package);
-    let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+    // Constant datatype classes are part of the program identity, so cases share a
+    // program only when their constants have the same classes in the same order.
+    let mut programs: Vec<(_, Workspace, ProgramProver)> = vec![];
+    let mut rebound = 0;
     for (i, (plan, trace)) in traces.iter().enumerate() {
-        assert_eq!(generate(plan).unwrap(), package);
+        let package = generate(plan).unwrap();
+        if !programs.iter().any(|(p, _, _)| *p == package) {
+            let workspace = Workspace::new(&package);
+            let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+            programs.push((package.clone(), workspace, driver));
+        }
+        let driver = &programs.iter().find(|(p, _, _)| *p == package).unwrap().2;
         let input = prover_toml(plan, &[], &FixtureEncoder, trace, [7; 32], [3; 32]).unwrap();
         driver.execute(&input, &format!("honest_{i}")).unwrap();
-        let wrong = &traces
-            .iter()
-            .find(|(_, other)| other.result != trace.result)
-            .unwrap()
-            .1;
+        let Some((_, wrong)) = traces.iter().find(|(other_plan, other)| {
+            other.result != trace.result && generate(other_plan).unwrap() == package
+        }) else {
+            continue;
+        };
         let input = prover_toml(plan, &[], &FixtureEncoder, wrong, [7; 32], [3; 32]).unwrap();
         let error = driver.execute(&input, &format!("wrong_{i}")).unwrap_err();
         assert!(error.to_string().contains("operator length"), "{error}");
+        rebound += 1;
     }
+    assert!(rebound > 0, "no program had traces with both results");
     support::complete(gate);
 }
 
