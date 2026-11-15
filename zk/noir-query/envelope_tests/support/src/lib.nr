@@ -2,7 +2,7 @@
 use envelope_core::envelope::{
     CredentialOpening, Membership, OpenedCredential, Snapshot, StatusEvidence,
 };
-use envelope_core::ops_core_profile::{ObjectOpening, QuadOpening, ResourceOpening};
+use envelope_core::ops_core_profile::{digest, ObjectOpening, QuadOpening, ResourceOpening};
 use envelope_core::ops_core_suite::{
     authenticate_profile_bounded, BoundedCredentialProof, from_authenticated_bounded,
 };
@@ -48,8 +48,8 @@ fn quad<let L: u32>(raw: [TermOpening<L>; 4]) -> QuadOpening<L, L> {
     assert((raw[3].lexical == [0; L]) & (raw[3].lexical_len == 0), "graph padding");
     let _graph = resource(raw[3]);
     QuadOpening {
-        subject: resource(raw[0]),
-        predicate: resource(raw[1]),
+        subject: digest(resource(raw[0])),
+        predicate: digest(resource(raw[1])),
         object: ObjectOpening {
             kind: object.kind,
             lexical: object.lexical,

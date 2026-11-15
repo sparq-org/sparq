@@ -218,7 +218,9 @@ drops the row, also under `!`, and a BIND leaves its variable unbound, exactly a
 SPARQL. For example, a string in a numeric-compared column is simply not
 selected, and a decimal in an `{integer, decimal}` column is key-checked and
 compared. An unsupported datatype has no proof (the read path's named
-unsupported-datatype refusal).
+unsupported-datatype refusal). Ordering date against dateTime is likewise a
+named profile limit (`mixed temporal datatypes`), listed with capacity: SPARQL
+gives a type error there, and the method refuses rather than answer.
 
 For the closed-world integration, `credential::assemble_dataset` takes complete
 opened credential cells, envelope-authenticated issuer cells and the request
@@ -247,14 +249,17 @@ they were absent from the source vocabulary. Other result terms use the supplied
 vocabulary or the plan's public constants.
 
 The circuit library's `ops_core_profile` contains raw witness structs and
-resource normalization only. Generated credential openings call
+normalization only. Generated credential openings call
 `ops_core_suite::open_profile_one`, delegating the complete signed opening to
-`suite::open_bounded_credential_hidden` once per credential. Resource datatype,
-language and key bytes are zero; the default graph and active flags are derived.
-Scans, joins, GRAPH and DISTINCT compare authenticated term identity, retaining
-blank-node scope. Value consumers call `term::open_key_checked` with fixed datatype
-identifiers. Raw lexical backing is separately bounded for resources, objects
-and scalars. Shape encoding includes all these capacities.
+`suite::open_digest_credential_hidden` once per credential. Subjects and
+predicates enter as `ResourceDigestOpening {kind, framed}`, the framed term
+digest the signed root binds, so no resource bytes are opened; objects keep their
+bytes because their datatype dispatches value reads. The default graph and
+active flags are derived. Scans, joins, GRAPH and DISTINCT compare authenticated
+term identity, retaining blank-node scope. Value consumers call
+`term::open_key_checked` with fixed datatype identifiers. Raw lexical backing is
+bounded for objects and scalars; the resource limit remains a host admission
+bound. Shape encoding includes all these capacities.
 The verifier selects `capacity::OpeningProfile::{Solid, LongObjects, Extended}`. Its
 `limits()` reports the compiled resource, object, scalar, datatype, language,
 creation and verification-method bounds. `Solid` is the default. Choose

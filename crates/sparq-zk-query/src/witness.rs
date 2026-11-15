@@ -402,8 +402,8 @@ fn prover_toml_authenticated_mode(
                     term_opening_with_capacity(Some(&q.object), opening.object as usize)?;
                 object.as_object_mut().unwrap().remove("bound");
                 quads.push(serde_json::json!({
-                    "subject":resource_opening(Some(&oxrdf::Term::from(q.subject)), opening.resource as usize)?,
-                    "predicate":resource_opening(Some(&oxrdf::Term::NamedNode(q.predicate)), opening.resource as usize)?,
+                    "subject":resource_digest(Some(&oxrdf::Term::from(q.subject)))?,
+                    "predicate":resource_digest(Some(&oxrdf::Term::NamedNode(q.predicate)))?,
                     "object":object,
                 }));
             }
@@ -454,7 +454,7 @@ fn prover_toml_authenticated_mode(
         }
         let mut object = term_opening_with_capacity(None, opening.object as usize)?;
         object.as_object_mut().unwrap().remove("bound");
-        let resource = resource_opening(None, opening.resource as usize)?;
+        let resource = resource_digest(None)?;
         quads.resize(
             capacity as usize,
             serde_json::json!({"subject":resource,"predicate":resource,"object":object}),
@@ -636,6 +636,21 @@ fn value_read_opening(
     term_opening_with_capacity(term, capacity)
 }
 
+/// A credential subject or predicate as `{kind, framed}`: the suite's framed term
+/// digest, which the signed root binds; padding is all zero.
+fn resource_digest(term: Option<&oxrdf::Term>) -> Result<serde_json::Value, Error> {
+    let Some(term) = term else {
+        return Ok(serde_json::json!({"kind":0,"framed":"0"}));
+    };
+    let kind = match term {
+        oxrdf::Term::NamedNode(_) => 1,
+        oxrdf::Term::BlankNode(_) => 2,
+        _ => return Err(Error::Invalid("credential resource term".into())),
+    };
+    let framed = sparq_merkle_suite::poseidon::resource_digest(term)
+        .map_err(|_| Error::Invalid("credential resource digest".into()))?;
+    Ok(serde_json::json!({"kind":kind,"framed":sparq_zk::field::field_to_hex(&framed)}))
+}
 fn resource_opening(
     term: Option<&oxrdf::Term>,
     capacity: usize,

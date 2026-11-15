@@ -123,9 +123,10 @@ the public active-length index. Canonical policy consumption uses the envelope m
 dispatch retains its own admission contract.
 
 The `ops_core_profile` adapter holds raw witness structs and normalization only.
-It constructs zero resource datatype, language and key fields and derives bound
-flags and the default graph. `ops_core_suite::open_bounded_one` delegates the
-complete signed opening once to `suite::open_bounded_credential_hidden`.
+Its `QuadOpening` carries subjects and predicates as `ResourceDigestOpening`
+digests and objects as bytes; normalization derives bound flags and the default
+graph. `ops_core_suite::open_bounded_one` delegates the complete signed opening
+once to `suite::open_digest_credential_hidden`.
 Value consumers use fixed datatype `term::open_key_checked` calls with separate
 scalar bounds. Envelope wiring can share `authenticate_bounded`'s opaque suite
 object and convert it through `from_authenticated_bounded` after policy checks.

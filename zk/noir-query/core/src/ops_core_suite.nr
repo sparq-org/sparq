@@ -1,7 +1,7 @@
 //! Suite authentication and conversion into the operator table vocabulary.
 use std::collections::bounded_vec::BoundedVec;
 use compose::issuer::{Point, key_set_membership};
-use crate::suite_entry::{TermOpening, BoundedTermOpening, open_quads, open_bounded_quads};
+use crate::suite_entry::{TermOpening, BoundedTermOpening, open_quads};
 use crate::suite::open_credential_hidden;
 use crate::suite_constants::{DT_INTEGER, DT_DECIMAL, DT_DATE, DT_DATETIME, DT_BOOLEAN, DT_STRING};
 use crate::table::{TermCell, unbound};
@@ -303,7 +303,7 @@ pub fn authenticate_profile_bounded<let N:u32,let R:u32,let L:u32,let M:u32>(
     count:u32,quad_bound:u32,credential_index:u32) -> crate::suite_metadata::OpenedCredential<N> {
     check_limits::<N>(count,quad_bound);
     let raw=crate::ops_core_profile::normalize(credentials,count);
-    crate::suite::open_bounded_credential_hidden(raw,proof.salts,proof.salt,count,proof.config,
+    crate::suite::open_digest_credential_hidden(raw,proof.salts,proof.salt,count,proof.config,
         proof.created,crate::ops_core_profile::method::<M>(proof.method),proof.pk,credential_index,
         proof.r,proof.s,proof.e,proof.e_k)
 }
@@ -315,8 +315,8 @@ pub fn from_authenticated_bounded<let N:u32,let R:u32,let L:u32,let CHECK:u32>(
     let quads=authenticated.quads();
     for n in 0..N {if (n < authenticated.count()) & (quads[n][2].kind()==3) {
         if CHECK==1 {
-            literal_profile(quads[n][2],raw[n][2]);
-            let _checked=checked_bounded_literal(table_cell(quads[n][2]),raw[n][2]);
+            literal_profile(quads[n][2],raw[n].object);
+            let _checked=checked_bounded_literal(table_cell(quads[n][2]),raw[n].object);
         }
     }}
     convert_authenticated(authenticated,credential_index,request_digest)
@@ -325,7 +325,7 @@ fn check_inactive_bounded<let N:u32,let R:u32,let L:u32>(
     credentials:[crate::ops_core_profile::QuadOpening<R,L>;N],proof:BoundedCredentialProof<N>,count:u32,credential_index:u32) {
     assert(count==0,"credential padding count");
     assert(credential_index < 0xffffffff,"credential scope capacity");
-    let quads=open_bounded_quads(crate::ops_core_profile::normalize(credentials,0),credential_index+1);
+    let quads=crate::suite_entry::open_credential_digest_quads(crate::ops_core_profile::normalize(credentials,0),credential_index+1);
     for n in 0..N {for p in 0..4 {quads[n][p].assert_padding();}}
     crate::suite_entry::open_bounded_cell(proof.created,0).assert_padding();
     crate::suite_entry::open_bounded_cell(crate::ops_core_profile::optional_resource(proof.method),0).assert_padding();
@@ -372,7 +372,7 @@ pub fn authenticate_profile_bounded_mode<let N:u32,let R:u32,let L:u32,let M:u32
     assert(signature_mode<=1,"suite signature mode");
     check_limits::<N>(count,quad_bound);
     let raw=crate::ops_core_profile::normalize(credentials,count);
-    let authenticated=crate::suite::open_bounded_credential_revealed(raw,proof.salts,proof.salt,count,proof.config,
+    let authenticated=crate::suite::open_digest_credential_revealed(raw,proof.salts,proof.salt,count,proof.config,
         proof.created,crate::ops_core_profile::method::<M>(proof.method),proof.pk,credential_index);
     if signature_mode==1 {
         assert((revealed_message==0)&(revealed_key==0),"revealed input padding");
@@ -565,8 +565,8 @@ fn bounded_empty_proof<let N:u32>() -> BoundedCredentialProof<N> {
 }
 fn bounded_empty_quad() -> crate::ops_core_profile::QuadOpening<4,32> {
     crate::ops_core_profile::QuadOpening {
-        subject:crate::ops_core_profile::ResourceOpening {kind:0,lexical:[0;4],lexical_len:0},
-        predicate:crate::ops_core_profile::ResourceOpening {kind:0,lexical:[0;4],lexical_len:0},
+        subject:crate::ops_core_profile::ResourceDigestOpening {kind:0,framed:0},
+        predicate:crate::ops_core_profile::ResourceDigestOpening {kind:0,framed:0},
         object:crate::ops_core_profile::ObjectOpening {kind:0,lexical:[0;32],lexical_len:0,
             datatype:[0;41],datatype_len:0,language:[0;1],language_len:0,key:[0;31]}}
 }
@@ -586,8 +586,8 @@ fn bounded_inactive_signature_is_zero() {
     let _opened=open_bounded_one::<1,4,32,1>([bounded_empty_quad()],proof,0,false,0,0,0,[0;32]);
 }
 #[test(should_fail_with="non-zero padding")]
-fn bounded_inactive_resource_bytes_are_zero() {
-    let mut raw=bounded_empty_quad();raw.subject.lexical[0]=1;
+fn bounded_inactive_resource_digests_are_zero() {
+    let mut raw=bounded_empty_quad();raw.subject.framed=1;
     let _opened=open_bounded_one::<1,4,32,1>([raw],bounded_empty_proof(),0,false,0,0,0,[0;32]);
 }
 fn checked_bounded_test<let T:u32>(byte:u8,datatype:[u8;T],key_class:u8) {
@@ -637,8 +637,9 @@ fn bounded_converted_fixture<let T:u32>(predicate:[u8;T]) -> OpenedCredential<1>
         datatype:[0;41],datatype_len:0,language:[0;1],language_len:0,key:[0;31]};
     let bytes="urn:o".as_bytes();for i in 0..5 {object.lexical[i]=bytes[i];}
     let raw=[crate::ops_core_profile::QuadOpening {
-        subject:bounded_resource_fixture("urn:s".as_bytes()),predicate:bounded_resource_fixture(predicate),object}];
-    let authenticated=crate::suite::open_bounded_credential_revealed(
+        subject:crate::ops_core_profile::digest(bounded_resource_fixture("urn:s".as_bytes())),
+        predicate:crate::ops_core_profile::digest(bounded_resource_fixture(predicate)),object}];
+    let authenticated=crate::suite::open_digest_credential_revealed(
         crate::ops_core_profile::normalize(raw,1),[crate::suite::leaf_salt(7,0)],7,1,[0;2],
         crate::ops_core_profile::empty::<32>(),crate::ops_core_profile::empty::<128>(),
         Point {x:0x1bb873421a895ca8c8d9fc0b44dd35be1d65592564942523f49590264f03d5a9,
@@ -659,12 +660,12 @@ fn bounded_suite_conversion_refuses_the_reserved_input_predicate() {
 
 fn index_fixture() -> ([crate::ops_core_profile::QuadOpening<8,32>;1],crate::suite_metadata::OpenedCredential<1>) {
     let raw=[QuadOpening {
-        subject:ResourceOpening {kind:2,lexical:[98,0,0,0,0,0,0,0],lexical_len:1},
-        predicate:ResourceOpening {kind:1,lexical:[117,114,110,58,112,0,0,0],lexical_len:5},
+        subject:crate::ops_core_profile::digest(ResourceOpening {kind:2,lexical:[98,0,0,0,0,0,0,0],lexical_len:1}),
+        predicate:crate::ops_core_profile::digest(ResourceOpening {kind:1,lexical:[117,114,110,58,112,0,0,0],lexical_len:5}),
         object:ObjectOpening {kind:1,lexical:[117,114,110,58,111,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],lexical_len:5,
             datatype:[0;41],datatype_len:0,language:[0;1],language_len:0,key:[0;31]},
     }];
-    let opened=crate::suite::open_bounded_credential_revealed(crate::ops_core_profile::normalize(raw,1),
+    let opened=crate::suite::open_digest_credential_revealed(crate::ops_core_profile::normalize(raw,1),
         [crate::suite::leaf_salt(7,0)],7,1,[0;2],crate::ops_core_profile::empty::<32>(),
         crate::ops_core_profile::empty::<32>(),Point{x:compose::issuer::BJJ_GX,y:compose::issuer::BJJ_GY},0);
     (raw,opened)
