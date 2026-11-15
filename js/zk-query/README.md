@@ -135,9 +135,14 @@ child output is bounded and untrusted, and temporary files are removed afterward
 
 Catalogue entries marked `wasmProving` admit the opt-in WebAssembly backend and
 run the same successful-proof and refusal contracts in the live suite, including
-queries spanning credentials. Native remains the default pending measurement of
-the full generated consumer queries against the agreed gate budget.
-Consumer-limit profiles are not yet catalogued and refuse.
+queries spanning credentials. Native remains the default.
+
+The six Solid App Suite target queries (insurance 1a and 1b, trial eligibility,
+and the recycled-content MIN, SUM and HAVING forms) are catalogued with their full
+credential envelopes: issuer trust, status, validity and freshness on all six,
+holder binding on the insurance and trial targets, and per-node row bounds. They
+prove with the native backend only; the live suite proves and verifies each one
+from Node and checks the envelope refusals.
 
 `backend: 'wasm'` selects the in-process witness and prover implementation for
 catalogue entries that admit it. Other entries return a refusal before witness

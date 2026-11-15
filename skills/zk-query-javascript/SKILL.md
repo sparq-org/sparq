@@ -32,7 +32,8 @@ removes them afterwards. It does not send credentials to a proving service.
 `backend: 'wasm'` is opt-in and refuses entries outside its supported catalogue.
 Measured authenticated entries admit it and run the same proof and refusal
 contracts in the live suite, including queries spanning credentials. Native
-remains the default pending the full generated consumer-query measurements.
+remains the default. The six Solid App Suite targets are catalogued with full
+envelopes (holder binding on insurance and trial) and prove natively only.
 
 `issuerKeygen()` uses system randomness and accepts no seed. Keep its opaque
 `secretKeyHex` private. `testIssuerKeygen(seedHex)` is deterministic and test-only.

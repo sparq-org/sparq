@@ -33,7 +33,8 @@ test('stored request derives its plan and refuses uncatalogued plans and unsuppo
   const r = fixture.request;
   assert.deepEqual(request({ query: r.query, policy: r.policy, nonce: r.nonce }), r);
   assert.throws(() => request({ query: 'SELECT ?s WHERE { ?s <urn:uncatalogued> ?o }', policy: r.policy, nonce: r.nonce }), /missing catalogue plan/);
-  assert.throws(() => request({ query: r.query, policy: { ...r.policy, holderBinding: {} }, nonce: r.nonce }), /unavailable/);
+  // Envelope policy selects a different program; an uncatalogued combination refuses.
+  assert.throws(() => request({ query: r.query, policy: { ...r.policy, holderBinding: {} }, nonce: r.nonce }), /missing catalogue plan/);
 });
 test('holder refuses a key mismatch before decoding credentials', async () => {
   const r = clone(fixture.request); r.verificationKey = '00';

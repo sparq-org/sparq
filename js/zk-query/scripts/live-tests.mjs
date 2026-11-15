@@ -1,7 +1,7 @@
 // Research grade and not externally audited. Invoked only through the live gate.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -12,6 +12,8 @@ import { canonicalGraph, issueFixture, trustMembers } from './test-credentials.m
 import { sha256 } from '../internal/runtime.mjs';
 import { agreement } from './compiler-agreement.mjs';
 import { proofContract } from './proof-contract.mjs';
+import { liveRuntimeHash } from './live-runtime.mjs';
+import './targets-live.mjs';
 import '../test/binary.live.js';
 test('split prover, seeded issuance and compiler agreement live contracts', async () => {
 const root = fileURLToPath(new URL('../../../', import.meta.url));
@@ -23,14 +25,7 @@ const table = JSON.parse(readFileSync(new URL('../assets/catalogue.json', import
 const cases = JSON.parse(readFileSync(new URL('../test/fixtures/n0.json', import.meta.url)));
 const issuer = testIssuerKeygen('00'.repeat(32));
 const profiles = [{ name: 'authenticated-smoke', query: 'ASK {}', bounds: { credentials: 1, quadsPerCredential: 2, rowsPerTable: 1 }, sources: [canonicalGraph('')] }, ...cases];
-function rustSources(path) {
-  return readdirSync(path, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)).flatMap(entry => entry.isDirectory() ? rustSources(join(path, entry.name)) : entry.name.endsWith('.rs') ? [readFileSync(join(path, entry.name))] : []);
-}
-const runtimeHash = sha256(Buffer.concat([
-  ...['../index.js', '../native.mjs', '../wasm-prover.mjs', '../internal/runtime.mjs', '../package-lock.json'].map(name => readFileSync(new URL(name, import.meta.url))),
-  ...['sparq-zk-query-wasm', 'sparq-zk-query', 'sparq-merkle-suite'].flatMap(name => rustSources(join(root, 'crates', name, 'src'))),
-  readFileSync(join(root, 'Cargo.lock')),
-]));
+const runtimeHash = liveRuntimeHash(root);
 const pending = [];
 for (const [index, sample] of profiles.entries()) {
   const path = join(directory, sample.name + '.json');

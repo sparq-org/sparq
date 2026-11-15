@@ -18,6 +18,7 @@ export function examplePolicy(example, issuer, audience) {
 }
 /** The fields a catalogue entry records for its example. */
 export const exampleRecord = example => ({
+  ...(example.name === undefined ? {} : { name: example.name }),
   query: example.query, bounds: example.bounds,
   ...(example.credentialQuadBounds === undefined ? {} : { credentialQuadBounds: example.credentialQuadBounds }),
   ...(example.envelope === undefined ? {} : { envelope: example.envelope }),

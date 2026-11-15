@@ -1,4 +1,5 @@
 {
+  "name": "bgp",
   "query": "SELECT ?s ?x WHERE {?s <urn:p> ?x}",
   "bounds": {
     "credentials": 1,
@@ -401,7 +402,7 @@
                 "name": "subject",
                 "type": {
                   "kind": "struct",
-                  "path": "core::ops_core_profile::ResourceOpening",
+                  "path": "core::ops_core_profile::ResourceDigestOpening",
                   "fields": [
                     {
                       "name": "kind",
@@ -412,23 +413,9 @@
                       }
                     },
                     {
-                      "name": "lexical",
+                      "name": "framed",
                       "type": {
-                        "kind": "array",
-                        "length": 64,
-                        "type": {
-                          "kind": "integer",
-                          "sign": "unsigned",
-                          "width": 8
-                        }
-                      }
-                    },
-                    {
-                      "name": "lexical_len",
-                      "type": {
-                        "kind": "integer",
-                        "sign": "unsigned",
-                        "width": 32
+                        "kind": "field"
                       }
                     }
                   ]
@@ -438,7 +425,7 @@
                 "name": "predicate",
                 "type": {
                   "kind": "struct",
-                  "path": "core::ops_core_profile::ResourceOpening",
+                  "path": "core::ops_core_profile::ResourceDigestOpening",
                   "fields": [
                     {
                       "name": "kind",
@@ -449,23 +436,9 @@
                       }
                     },
                     {
-                      "name": "lexical",
+                      "name": "framed",
                       "type": {
-                        "kind": "array",
-                        "length": 64,
-                        "type": {
-                          "kind": "integer",
-                          "sign": "unsigned",
-                          "width": 8
-                        }
-                      }
-                    },
-                    {
-                      "name": "lexical_len",
-                      "type": {
-                        "kind": "integer",
-                        "sign": "unsigned",
-                        "width": 32
+                        "kind": "field"
                       }
                     }
                   ]
