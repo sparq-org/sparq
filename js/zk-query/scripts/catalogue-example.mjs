@@ -9,7 +9,7 @@ export function examplePolicy(example, issuer, audience) {
     ...(example.credentialQuadBounds === undefined ? {} : { credentialQuadBounds: example.credentialQuadBounds }),
     trustedIssuers: [issuer.publicKey], trustMembers: trustMembers(issuer), audience,
     ...(holder ? { holderBinding: {} } : {}),
-    ...(status ? { acceptedSnapshots: { digests: ['00'.repeat(32)] } } : {}),
+    ...(status ? { acceptedSnapshots: { digests: ['01'.repeat(32)] } } : {}),
     ...(validity ? { validityTime: 0 } : {}),
     ...(freshness ? { earliestCreated: 0 } : {}),
     ...(tableRowBounds ? { tableRowBounds } : {}),
