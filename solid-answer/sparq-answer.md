@@ -24,6 +24,7 @@ gh api -H "Accept: application/vnd.github.raw" "repos/sparq-org/sparq/contents/<
 | 3 | General evaluator (RISC Zero) | **Dropped** at your request. insurance-quote, trial-eligibility and recycled-content move to the Noir query method (target 23 Nov for proofs, 4 Dec for the Node package; plan dates). | none | |
 | 4 | `xsd:date` comparison | **In item 2's package**: one hidden date comparison per proof, `xsd:date` without a timezone. | as item 2 | |
 | 5 | Issuer per fact, holder binding | Result package: one issuer per proof (below). Per-fact binding across issuers, holder binding and absence: the Noir query method. | | |
+| 6 | Noir query method from Node (insurance-quote, trial-eligibility, recycled-content) | **Built and merged** (#7402), ahead of the 4 Dec plan date. All six target queries are catalogued with full credential envelopes and prove natively, then verify from Node. Native proving needs the pinned linux-x64 nargo and bb; see `solid-answer/reply-zk-query-95c7b325-20261116.md`. | `sparq-zk-query-95c7b325.tgz` (five parts) | `d01ad664fcac41d918309f19bbd900a54a66feb5f67e977b7b589523c65543f3` |
 
 What the result package gives you now:
 - `issuerKeygen()` from OS entropy and `issue({...})` with a fresh salt. `testIssue({...})` is test-only, and its salt is reproducible from a seed.
