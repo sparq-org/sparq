@@ -5,6 +5,7 @@ Each file name carries the sparq commit it was built from. Check every download 
 
 | File | Source | Status |
 |---|---|---|
+| sparq-zk-query-95c7b325.tgz (in five parts, `.part-00` to `.part-04`) | js/zk-query from main at 95c7b325 (PR #7402, merged) | current |
 | sparq-verifiable-aggregate-c832012a.tgz | proof-methods/aggregate from main at c832012a (PR #7400, merged) | current |
 | sparq-verifiable-aggregate-61989f5.tgz | proof-methods/aggregate (PR #7389, merged) | superseded |
 | sparq-zk-result-23d2f3db.tgz | js/zk-result from main at 23d2f3db (adds PR #7403, merged) | current |
@@ -25,5 +26,10 @@ It was built from the PR head 7ce9843, whose package sources, Cargo.lock and LIC
 
 sparq-zk-result-23d2f3db.tgz also accepts the query package's `trustMembers: [{ issuer, verificationMethod, publicKey }]` policy
 entries, so one policy object serves both packages; `report.trustMembers` echoes the roster.
+
+sparq-zk-query-95c7b325.tgz is the Noir query package (the six Solid targets, per-fact issuer binding, holder binding,
+absence and totals). It is over GitHub's 100 MB file limit, so join the parts first:
+`cat sparq-zk-query-95c7b325.tgz.part-0* > sparq-zk-query-95c7b325.tgz` and check it against SHA256SUMS.
+Native proving needs the pinned linux-x64 nargo and bb (see solid-answer/reply-zk-query-95c7b325-20261116.md).
 
 Install: `npm install --offline ./<file>.tgz`
