@@ -196,6 +196,7 @@ jobs:
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
         with:
           key: zk-query-package
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install package gate dependencies
         run: python3 -m pip install --require-hashes -r .github/requirements/docs-quality.txt
       - uses: ./.github/actions/noir-toolchain
