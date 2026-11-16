@@ -1,0 +1,15 @@
+{
+  "expected": {
+    "count": 1,
+    "graphNQuads": "<urn:person> <urn:age> \"42\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n",
+    "proofConfigNQuads": "_:c14n0 <http://purl.org/dc/terms/created> \"2026-11-13T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n_:c14n0 <https://w3id.org/security#cryptosuite> \"schnorr-poseidon2-merkle-2026\" .\n_:c14n0 <https://w3id.org/security#verificationMethod> <urn:issuer:key> .\n",
+    "publicKey": "bb97b90730c69547a4f49b707d032ed1503592b7eeb649b83f47800d400434b0",
+    "rootHex": "037816e81e154b6420ba0e702e2051aaa2de8847e9702cc209f9f2e7e48e43dc",
+    "saltHex": "1e63ff3c98906e96056d757c5ff2ef1971a3e738e19ec3f09c690e1c93a459af",
+    "signatureHex": "d2b4bf384f0d31ae60b1a42946e90f14fe13858b7616fd88843a1189606e9d8b308f9024a64c4ed750ca80853881d529cfb506fe9c6574020b921e56d66cd603"
+  },
+  "graphNQuads": "<urn:person> <urn:age> \"42\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n",
+  "issuerSeedHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "proofConfigNQuads": "_:proof <https://w3id.org/security#cryptosuite> \"schnorr-poseidon2-merkle-2026\" .\n_:proof <http://purl.org/dc/terms/created> \"2026-11-13T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n_:proof <https://w3id.org/security#verificationMethod> <urn:issuer:key> .\n",
+  "seedHex": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f"
+}

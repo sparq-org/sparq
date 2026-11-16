@@ -180,7 +180,7 @@ standard it implements.
   ([guide](skills/rdf-canon/SKILL.md)).
 <!-- ANCHOR_END: features-core -->
 - **Zero-knowledge query proofs** *(research scaffold — NOT yet sound)* — model proving a query
-  result is correct without revealing the data ([guide](skills/zk-query-proofs/SKILL.md), [Node package](skills/zk-result-javascript/SKILL.md)). The v1
+  result is correct without revealing the data ([guide](skills/zk-query-proofs/SKILL.md), [successful-result Node package](skills/zk-result-javascript/SKILL.md), [authenticated-query Node package](skills/zk-query-javascript/SKILL.md)). The v1
   verifier provides **no** soundness guarantee to a relying party pending external audit — see the
   [security caveat](SECURITY.md#scope-and-a-critical-caveat-research-scaffolds-with-no-security-guarantee).
   The separate [Merkle credential suite](skills/merkle-credentials/SKILL.md) adds

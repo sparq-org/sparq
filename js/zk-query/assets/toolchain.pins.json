@@ -1,0 +1,14 @@
+{
+  "platform": "linux",
+  "arch": "x64",
+  "binaries": {
+    "nargo": {
+      "version": "nargo version = 1.0.0-beta.21",
+      "sha256": "0852cd5631ac5ca25f744f25c931e3cff16351d9bcdbfb03cebb48a4494a0fe3"
+    },
+    "bb": {
+      "version": "5.0.0-nightly.20260324",
+      "sha256": "d7621dfb151f55c23fb04bf274f366a6a1e0516b85a3cf0ae9165a9952509793"
+    }
+  }
+}

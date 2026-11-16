@@ -1,0 +1,462 @@
+{
+  "profile": "authenticated-query",
+  "compilerAgreement": {
+    "operator": "required",
+    "authenticated": {
+      "status": "skipped-by-design",
+      "reason": "Authenticated catalogue programs are compiled natively; holders derive the plan from the query and check pinned artifacts and keys."
+    }
+  },
+  "entries": [
+    {
+      "planHash": "de79582c38ce4d4c00a4159f5d7fcc50fc62dd2f9377aa0bcfa370c6e3fd3f2e",
+      "packageName": "query_de79582c38ce4d4c00a4159f5d7fcc50fc62dd2f9377aa0bcfa370c6e3fd3f2e",
+      "acir": "de79582c38ce4d4c00a4159f5d7fcc50fc62dd2f9377aa0bcfa370c6e3fd3f2e.json",
+      "vk": "de79582c38ce4d4c00a4159f5d7fcc50fc62dd2f9377aa0bcfa370c6e3fd3f2e.vk.hex",
+      "acirSha256": "05d7cac27315ccb752aa731317e9eea0a4533c21394b101df84cee2615be458d",
+      "vkSha256": "2c30c23982d48a84a39b908e5a001fc2c984a5bd86077f0b1a348437b4594695",
+      "wasmProving": true,
+      "example": {
+        "name": "authenticated-smoke",
+        "query": "ASK {}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 2,
+          "rowsPerTable": 1
+        }
+      }
+    },
+    {
+      "planHash": "054fc173ecd02fb8084fc3fb81c996586be45aeeb8feec71e3f75093c61f9662",
+      "packageName": "query_054fc173ecd02fb8084fc3fb81c996586be45aeeb8feec71e3f75093c61f9662",
+      "acir": "054fc173ecd02fb8084fc3fb81c996586be45aeeb8feec71e3f75093c61f9662.json",
+      "vk": "054fc173ecd02fb8084fc3fb81c996586be45aeeb8feec71e3f75093c61f9662.vk.hex",
+      "acirSha256": "f6511f48605452ac5f5f994dc7a81c92d92ba68217eb1cfa421680e026266b9d",
+      "vkSha256": "8f12a3c95250247879c6e59ed11b45184e8f421fb13660cafe4ff66cdfba2fb0",
+      "wasmProving": true,
+      "example": {
+        "name": "bgp",
+        "query": "SELECT ?s ?x WHERE {?s <urn:p> ?x}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "06d1d14af6cc4a47f12cef2bdde0d5b26d19847166ebac7c3675ed7969b7e29d",
+      "packageName": "query_06d1d14af6cc4a47f12cef2bdde0d5b26d19847166ebac7c3675ed7969b7e29d",
+      "acir": "06d1d14af6cc4a47f12cef2bdde0d5b26d19847166ebac7c3675ed7969b7e29d.json",
+      "vk": "06d1d14af6cc4a47f12cef2bdde0d5b26d19847166ebac7c3675ed7969b7e29d.vk.hex",
+      "acirSha256": "e33e9732e8626a8f44341963f665100038db0d41b306cbda3f2b8e3387cffba7",
+      "vkSha256": "74d72d25f316f1d76454aea24177d7354a971f847fdecd662abe40d5d3da3dc0",
+      "wasmProving": true,
+      "example": {
+        "name": "join-one-credential",
+        "query": "SELECT ?s WHERE {?s <urn:p> ?x . ?s <urn:q> ?y}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 8,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "b7e7a830a7cea9df1502763d7cdde19a6634a3ed592ced17b8e47d882f679475",
+      "packageName": "query_b7e7a830a7cea9df1502763d7cdde19a6634a3ed592ced17b8e47d882f679475",
+      "acir": "b7e7a830a7cea9df1502763d7cdde19a6634a3ed592ced17b8e47d882f679475.json",
+      "vk": "b7e7a830a7cea9df1502763d7cdde19a6634a3ed592ced17b8e47d882f679475.vk.hex",
+      "acirSha256": "3b1413264c1b3b9a8897bfcf7fb00e3e867768b53dc39414295a1d39c10a16ac",
+      "vkSha256": "8a71a80cdca8906b58ee64b3b0ae7c41ad370066fb0eecd24583939211ea8974",
+      "wasmProving": true,
+      "example": {
+        "name": "join-two-credentials",
+        "query": "SELECT ?s WHERE {?s <urn:p> ?x . ?s <urn:q> ?y}",
+        "bounds": {
+          "credentials": 2,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "9db87b5bcdd52564a9ddb1f874646c00d5519731752d3aed70b0b370decaaa5d",
+      "packageName": "query_9db87b5bcdd52564a9ddb1f874646c00d5519731752d3aed70b0b370decaaa5d",
+      "acir": "9db87b5bcdd52564a9ddb1f874646c00d5519731752d3aed70b0b370decaaa5d.json",
+      "vk": "9db87b5bcdd52564a9ddb1f874646c00d5519731752d3aed70b0b370decaaa5d.vk.hex",
+      "acirSha256": "41bc5ad33c0fe2dcb1cd8ac0a4997fc947cf4629906d94354c75f6dac0c9c9ef",
+      "vkSha256": "a643975c2a88b3e8862220e51a4877d918ef30198f55ad03bea7cac68ce24881",
+      "wasmProving": true,
+      "example": {
+        "name": "integer-range",
+        "query": "SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x >= 1 && ?x < 2)}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "2b074a324c733fa1b2fae66ae06a76d43c1df9e4776717596a944636e61fbace",
+      "packageName": "query_2b074a324c733fa1b2fae66ae06a76d43c1df9e4776717596a944636e61fbace",
+      "acir": "2b074a324c733fa1b2fae66ae06a76d43c1df9e4776717596a944636e61fbace.json",
+      "vk": "2b074a324c733fa1b2fae66ae06a76d43c1df9e4776717596a944636e61fbace.vk.hex",
+      "acirSha256": "25335db3215ed14463a4039a5339ecaad19814669f84e59dcce7b8beac13e3d6",
+      "vkSha256": "e70d0bcc79f0b2d6e8999b01f905723af12704330150c5726fd16f5802fd479f",
+      "wasmProving": true,
+      "example": {
+        "name": "date-range",
+        "query": "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x >= \"2024-01-01\"^^xsd:date && ?x < \"2024-02-01\"^^xsd:date)}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "5751fc5086df1dba0b0042f9fed0a55b662572940bad1417534150b1a0fab732",
+      "packageName": "query_5751fc5086df1dba0b0042f9fed0a55b662572940bad1417534150b1a0fab732",
+      "acir": "5751fc5086df1dba0b0042f9fed0a55b662572940bad1417534150b1a0fab732.json",
+      "vk": "5751fc5086df1dba0b0042f9fed0a55b662572940bad1417534150b1a0fab732.vk.hex",
+      "acirSha256": "dfd206cfe38f595cbcc07b13fe503b5bd282b044a9e95ab96314428221fd77ab",
+      "vkSha256": "ae312b971a051ecd9968f447855d43f878d9b183969362e1ea87ce185509126c",
+      "wasmProving": true,
+      "example": {
+        "name": "membership",
+        "query": "SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x IN (1,3))}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "2facc4d27c257fbace0b9a605a63d7a3b751799830f4c17ff073475d69528e59",
+      "packageName": "query_2facc4d27c257fbace0b9a605a63d7a3b751799830f4c17ff073475d69528e59",
+      "acir": "2facc4d27c257fbace0b9a605a63d7a3b751799830f4c17ff073475d69528e59.json",
+      "vk": "2facc4d27c257fbace0b9a605a63d7a3b751799830f4c17ff073475d69528e59.vk.hex",
+      "acirSha256": "7c53c1642aca7601301dcd21f18704096d7f6447381b8b95ed8fd04aa2aed7b6",
+      "vkSha256": "a71ec9bdbb4314d975190a487376939c79f0e77c89ea0518007e33ab08e4429f",
+      "wasmProving": true,
+      "example": {
+        "name": "values",
+        "query": "SELECT ?s WHERE {?s <urn:p> ?x VALUES ?x {1 UNDEF}}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "035732d9c54a9c4cf1f85c3850ea7105524716e7f56d2818e4acb2775b9c39ef",
+      "packageName": "query_035732d9c54a9c4cf1f85c3850ea7105524716e7f56d2818e4acb2775b9c39ef",
+      "acir": "035732d9c54a9c4cf1f85c3850ea7105524716e7f56d2818e4acb2775b9c39ef.json",
+      "vk": "035732d9c54a9c4cf1f85c3850ea7105524716e7f56d2818e4acb2775b9c39ef.vk.hex",
+      "acirSha256": "2ed6b78cb61dd30d446d10a6ddafc842550c6370c2bb6f32cde58060bc159d47",
+      "vkSha256": "2e681d210106d0ae341d68014ec762930fb4e8114f86ba0a3e78226217f8b715",
+      "wasmProving": true,
+      "example": {
+        "name": "projection-bag",
+        "query": "SELECT ?p WHERE {?s ?p ?o}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 8
+        }
+      }
+    },
+    {
+      "planHash": "25715fddc10bc10fd0ea6d70fef6174f135c6054ebfefe2cb85427f915d0820a",
+      "packageName": "query_25715fddc10bc10fd0ea6d70fef6174f135c6054ebfefe2cb85427f915d0820a",
+      "acir": "25715fddc10bc10fd0ea6d70fef6174f135c6054ebfefe2cb85427f915d0820a.json",
+      "vk": "25715fddc10bc10fd0ea6d70fef6174f135c6054ebfefe2cb85427f915d0820a.vk.hex",
+      "acirSha256": "3fcc000e5186bbda863758a812b937d83bd7eedef146daccfc9acedb64246c41",
+      "vkSha256": "0dc248d33697ff6ad954b9aa8a4832c7342228ae15aaca0567c4ce7dbfc3b9c1",
+      "wasmProving": true,
+      "example": {
+        "name": "distinct",
+        "query": "SELECT DISTINCT ?p WHERE {?s ?p ?o}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 8
+        }
+      }
+    },
+    {
+      "planHash": "0c2bb71f84c10bbbac9b8b2178d680c2fb216d226a12e7fc97e2df2f5f830b06",
+      "packageName": "query_0c2bb71f84c10bbbac9b8b2178d680c2fb216d226a12e7fc97e2df2f5f830b06",
+      "acir": "0c2bb71f84c10bbbac9b8b2178d680c2fb216d226a12e7fc97e2df2f5f830b06.json",
+      "vk": "0c2bb71f84c10bbbac9b8b2178d680c2fb216d226a12e7fc97e2df2f5f830b06.vk.hex",
+      "acirSha256": "2c8e584f2eb8e918d23d612bf616bb0a16bbacb8f0514cd8418cd691c3fed975",
+      "vkSha256": "cf447002c50a1b1b9c3bb284f8f40b471004b846ecfcf0972eb2e978023906ce",
+      "wasmProving": true,
+      "example": {
+        "name": "slice",
+        "query": "SELECT ?s WHERE {?s <urn:p> ?x} LIMIT 1 OFFSET 1",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "6b22856101a6abe928b1b43cb1c3c7e04c2a883a278be5a9c8e1dd4d35a53f47",
+      "packageName": "query_6b22856101a6abe928b1b43cb1c3c7e04c2a883a278be5a9c8e1dd4d35a53f47",
+      "acir": "6b22856101a6abe928b1b43cb1c3c7e04c2a883a278be5a9c8e1dd4d35a53f47.json",
+      "vk": "6b22856101a6abe928b1b43cb1c3c7e04c2a883a278be5a9c8e1dd4d35a53f47.vk.hex",
+      "acirSha256": "904e0bf801a842ee8fbae27784bf090097fa513293ae8103f698f29fc09d8037",
+      "vkSha256": "ba716197adfb0b72ea0ffd68c892317a5594a4f298b9793aeff0f22105f0f386",
+      "wasmProving": true,
+      "example": {
+        "name": "ask-true",
+        "query": "ASK {?s <urn:p> ?x}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "3b1b08f69ebe383092c3bebf3f9c77af78f8f8019e94deed1b3832a1b291bcab",
+      "packageName": "query_3b1b08f69ebe383092c3bebf3f9c77af78f8f8019e94deed1b3832a1b291bcab",
+      "acir": "3b1b08f69ebe383092c3bebf3f9c77af78f8f8019e94deed1b3832a1b291bcab.json",
+      "vk": "3b1b08f69ebe383092c3bebf3f9c77af78f8f8019e94deed1b3832a1b291bcab.vk.hex",
+      "acirSha256": "07aa9f5fc14383f168f01ebf8379099412827f855645aa5604ca245fbdca044f",
+      "vkSha256": "1e4c85b16e9351478cff050bd10bab7db427927cfbeda1c028e77737c72b5875",
+      "wasmProving": true,
+      "example": {
+        "name": "ask-false",
+        "query": "ASK {?s <urn:p> ?x FILTER(?x > 8)}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 4,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "ad9b76a67978f50927234ce587f3ca800a16c42ced0bb67d5b6e340c2818d324",
+      "packageName": "query_ad9b76a67978f50927234ce587f3ca800a16c42ced0bb67d5b6e340c2818d324",
+      "acir": "ad9b76a67978f50927234ce587f3ca800a16c42ced0bb67d5b6e340c2818d324.json",
+      "vk": "ad9b76a67978f50927234ce587f3ca800a16c42ced0bb67d5b6e340c2818d324.vk.hex",
+      "acirSha256": "d0b743de20d5692515f9914d02aaf132b8948b241ef80c81af3106f5074297da",
+      "vkSha256": "359f30d4d7f75691a25cfc7ec0c8f843959585888d230252311525f4bfae9ff3",
+      "wasmProving": false,
+      "example": {
+        "name": "target-insurance-1a",
+        "query": "PREFIX vcq: <https://w3id.org/sparq/vcq#>\nPREFIX xsd: <http://www.w3.org/2001/XMLSchema#>\nSELECT DISTINCT ?result WHERE {\n  ?lic vcq:verifiedIssuer <urn:fictional:insurance-quote:licensing> .\n  ?reg vcq:verifiedIssuer <urn:fictional:insurance-quote:claims-register> .\n  GRAPH ?lic { ?subject <urn:claim:licence.years> ?v0 ;\n                        <urn:claim:licence.points> ?v1 . }\n  GRAPH ?reg { ?subject <urn:claim:claims.five-year-count> ?v2 ;\n                        <urn:claim:claims.five-year-complete> ?v3 . }\n  BIND((?v0 >= 5 && ?v1 <= 3 && ?v2 = 0 && ?v3 = true) AS ?result)\n}\n",
+        "bounds": {
+          "credentials": 2,
+          "quadsPerCredential": 64,
+          "rowsPerTable": 4
+        },
+        "credentialQuadBounds": [
+          16,
+          64
+        ],
+        "envelope": {
+          "holder": true,
+          "status": true,
+          "validity": true,
+          "freshness": true,
+          "openingProfile": "long-objects"
+        }
+      }
+    },
+    {
+      "planHash": "08ee621df5cd63cfc785135fb1d62fdcabd049d9e0f0bdf59938895fb01ed2c4",
+      "packageName": "query_08ee621df5cd63cfc785135fb1d62fdcabd049d9e0f0bdf59938895fb01ed2c4",
+      "acir": "08ee621df5cd63cfc785135fb1d62fdcabd049d9e0f0bdf59938895fb01ed2c4.json",
+      "vk": "08ee621df5cd63cfc785135fb1d62fdcabd049d9e0f0bdf59938895fb01ed2c4.vk.hex",
+      "acirSha256": "86be943d2253381628971e5f6bd00a6ffd74652f207ea51f8984c8d5620d3786",
+      "vkSha256": "99a31d5b71c766d128d88081c14aa0e1a1d863800cb7969d0203ef5d4f8d46cd",
+      "wasmProving": false,
+      "example": {
+        "name": "target-insurance-1b",
+        "query": "PREFIX vcq: <https://w3id.org/sparq/vcq#>\nPREFIX xsd: <http://www.w3.org/2001/XMLSchema#>\nSELECT DISTINCT ?result WHERE {\n  ?lic vcq:verifiedIssuer <urn:fictional:insurance-quote:licensing> .\n  ?reg vcq:verifiedIssuer <urn:fictional:insurance-quote:claims-register> .\n  GRAPH ?lic { ?subject <urn:claim:licence.years> ?v0 ;\n                        <urn:claim:licence.points> ?v1 . }\n  GRAPH ?reg { ?subject <https://w3id.org/jeswr/awp#periodStart> ?from ;\n                        <https://w3id.org/jeswr/awp#periodEnd> ?to . }\n  BIND((?v0 >= 5 && ?v1 <= 3 &&\n        ?from <= \"2021-11-13\"^^xsd:date && ?to >= \"2026-11-13\"^^xsd:date &&\n        NOT EXISTS { GRAPH ?reg { ?subject <urn:claim:claims.claim> ?c .\n                                  ?c <urn:claim:claims.date> ?d .\n                                  FILTER(?d >= \"2021-11-13\"^^xsd:date) } }) AS ?result)\n}\n",
+        "bounds": {
+          "credentials": 2,
+          "quadsPerCredential": 64,
+          "rowsPerTable": 16
+        },
+        "credentialQuadBounds": [
+          16,
+          64
+        ],
+        "envelope": {
+          "holder": true,
+          "status": true,
+          "validity": true,
+          "freshness": true,
+          "openingProfile": "long-objects",
+          "tableRowBounds": [
+            4,
+            4,
+            4,
+            4,
+            4,
+            4,
+            4,
+            4,
+            4,
+            4,
+            4,
+            16,
+            16,
+            16,
+            16,
+            4,
+            4,
+            4
+          ]
+        }
+      }
+    },
+    {
+      "planHash": "1d5a9938503746fbe77ab56f8cff2a549207ec273ea2817d9a51154c90e22f20",
+      "packageName": "query_1d5a9938503746fbe77ab56f8cff2a549207ec273ea2817d9a51154c90e22f20",
+      "acir": "1d5a9938503746fbe77ab56f8cff2a549207ec273ea2817d9a51154c90e22f20.json",
+      "vk": "1d5a9938503746fbe77ab56f8cff2a549207ec273ea2817d9a51154c90e22f20.vk.hex",
+      "acirSha256": "85a937c8cb50152a64a0fd52b188191276ded15bf1109db3bb3742e7426e3198",
+      "vkSha256": "6acae8a702f5db5561c21b24e7fb1fe4b9c50f77fd809f6c10aa219db0285f49",
+      "wasmProving": false,
+      "example": {
+        "name": "target-trial",
+        "query": "PREFIX vcq: <https://w3id.org/sparq/vcq#>\nPREFIX xsd: <http://www.w3.org/2001/XMLSchema#>\nSELECT DISTINCT ?result WHERE {\n  ?prac vcq:verifiedIssuer <urn:fictional:trial-eligibility:practice> .\n  GRAPH ?prac { ?subject <urn:claim:trial.age> ?age ;\n                         <urn:claim:trial.diagnosis> ?dx ;\n                         <https://w3id.org/jeswr/awp#periodStart> ?from ;\n                         <https://w3id.org/jeswr/awp#periodEnd> ?to . }\n  BIND((?age >= 18 && ?age <= 65 && ?dx = \"condition-a\" &&\n        ?from <= \"2026-11-01\"^^xsd:date && ?to >= \"2026-11-13\"^^xsd:date &&\n        NOT EXISTS { GRAPH ?prac { ?subject <urn:claim:trial.medications> ?m .\n                                   FILTER(?m IN (\"excluded-x\", \"excluded-y\")) } }) AS ?result)\n}\n",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 64,
+          "rowsPerTable": 32
+        },
+        "credentialQuadBounds": [
+          64
+        ],
+        "envelope": {
+          "holder": true,
+          "status": true,
+          "validity": true,
+          "freshness": true,
+          "openingProfile": "long-objects",
+          "tableRowBounds": [
+            4,
+            4,
+            4,
+            4,
+            4,
+            4,
+            4,
+            4,
+            4,
+            32,
+            32,
+            4,
+            4,
+            4
+          ]
+        }
+      }
+    },
+    {
+      "planHash": "0d7ea5d20eb11852b83d805d8775588f8ea8a89fb9327fb022eaa051f4ec070d",
+      "packageName": "query_0d7ea5d20eb11852b83d805d8775588f8ea8a89fb9327fb022eaa051f4ec070d",
+      "acir": "0d7ea5d20eb11852b83d805d8775588f8ea8a89fb9327fb022eaa051f4ec070d.json",
+      "vk": "0d7ea5d20eb11852b83d805d8775588f8ea8a89fb9327fb022eaa051f4ec070d.vk.hex",
+      "acirSha256": "8ad9915e7c0826ac94b0c790733fe0d649d6c0a94d523d3c1c4962eccb00396e",
+      "vkSha256": "3b58cbe4ce08b9bf6f2fdeed414ebfd2172055aa398ce46448cfe425918dc1ba",
+      "wasmProving": false,
+      "example": {
+        "name": "target-recycled-min",
+        "query": "PREFIX vcq: <https://w3id.org/sparq/vcq#>\nPREFIX xsd: <http://www.w3.org/2001/XMLSchema#>\nSELECT DISTINCT ((MIN(?value) >= 0.3 && COUNT(DISTINCT ?iss) = 3 && COUNT(?value) = 3)\n                 AS ?result) WHERE {\n  ?g vcq:verifiedIssuer ?iss .\n  FILTER(?iss IN (<urn:fictional:recycled-content:tier>,\n                  <urn:fictional:recycled-content:tier-2>,\n                  <urn:fictional:recycled-content:tier-3>))\n  GRAPH ?g { <urn:fictional:recycled-content:lot>\n               <urn:claim:material.recycled-fraction> ?value . }\n}\n",
+        "bounds": {
+          "credentials": 4,
+          "quadsPerCredential": 16,
+          "rowsPerTable": 4
+        },
+        "credentialQuadBounds": [
+          16,
+          16,
+          16,
+          16
+        ],
+        "envelope": {
+          "holder": false,
+          "status": true,
+          "validity": true,
+          "freshness": true
+        }
+      }
+    },
+    {
+      "planHash": "a206e8ae7a95059f578f290580e0cbcc1f691088a28ccfc35632e007c83e6801",
+      "packageName": "query_a206e8ae7a95059f578f290580e0cbcc1f691088a28ccfc35632e007c83e6801",
+      "acir": "a206e8ae7a95059f578f290580e0cbcc1f691088a28ccfc35632e007c83e6801.json",
+      "vk": "a206e8ae7a95059f578f290580e0cbcc1f691088a28ccfc35632e007c83e6801.vk.hex",
+      "acirSha256": "acdfac9a4d084df34b3a14951bab233c497665a3133004e512331f7b27dabb5f",
+      "vkSha256": "2b16325de8fdd8543b701267d0128729f0e4ba0ee817ada8ebf83cccf27cde73",
+      "wasmProving": false,
+      "example": {
+        "name": "target-recycled-sum",
+        "query": "PREFIX vcq: <https://w3id.org/sparq/vcq#>\nPREFIX xsd: <http://www.w3.org/2001/XMLSchema#>\nSELECT DISTINCT ?result WHERE {\n  { SELECT (SUM(?mass) AS ?total) (COUNT(DISTINCT ?iss) AS ?n) (COUNT(?mass) AS ?k) WHERE {\n      ?g vcq:verifiedIssuer ?iss .\n      FILTER(?iss IN (<urn:fictional:recycled-content:tier>,\n                      <urn:fictional:recycled-content:tier-2>,\n                      <urn:fictional:recycled-content:tier-3>))\n      GRAPH ?g { <urn:fictional:recycled-content:lot> <urn:claim:material.recycled-mass> ?mass . }\n  } }\n  BIND((?total >= 500 && ?n = 3 && ?k = 3) AS ?result)\n}\n",
+        "bounds": {
+          "credentials": 4,
+          "quadsPerCredential": 16,
+          "rowsPerTable": 4
+        },
+        "credentialQuadBounds": [
+          16,
+          16,
+          16,
+          16
+        ],
+        "envelope": {
+          "holder": false,
+          "status": true,
+          "validity": true,
+          "freshness": true
+        }
+      }
+    },
+    {
+      "planHash": "7a28394e6cf1b32c0e9171977734b3acf32b988f670474b4351d04323541c0f7",
+      "packageName": "query_7a28394e6cf1b32c0e9171977734b3acf32b988f670474b4351d04323541c0f7",
+      "acir": "7a28394e6cf1b32c0e9171977734b3acf32b988f670474b4351d04323541c0f7.json",
+      "vk": "7a28394e6cf1b32c0e9171977734b3acf32b988f670474b4351d04323541c0f7.vk.hex",
+      "acirSha256": "040b8f6b087fcc10fe6145b28fdfa60d784ac5284c94bf23f81514a4452fc29a",
+      "vkSha256": "c3c600fe177a857060a246b15c8b669082f354597e7764e0fc10f6f69b54e32b",
+      "wasmProving": false,
+      "example": {
+        "name": "target-recycled-having",
+        "query": "PREFIX vcq: <https://w3id.org/sparq/vcq#>\nPREFIX xsd: <http://www.w3.org/2001/XMLSchema#>\nSELECT ?lot WHERE {\n  ?g vcq:verifiedIssuer ?iss .\n  FILTER(?iss IN (<urn:fictional:recycled-content:tier>,\n                  <urn:fictional:recycled-content:tier-2>,\n                  <urn:fictional:recycled-content:tier-3>))\n  GRAPH ?g { ?lot <urn:claim:material.recycled-mass> ?mass . }\n  FILTER(?lot = <urn:fictional:recycled-content:lot>)\n}\nGROUP BY ?lot\nHAVING (SUM(?mass) >= 500 && COUNT(DISTINCT ?iss) = 3 && COUNT(?mass) = 3)\n",
+        "bounds": {
+          "credentials": 4,
+          "quadsPerCredential": 16,
+          "rowsPerTable": 4
+        },
+        "credentialQuadBounds": [
+          16,
+          16,
+          16,
+          16
+        ],
+        "envelope": {
+          "holder": false,
+          "status": true,
+          "validity": true,
+          "freshness": true
+        }
+      }
+    }
+  ],
+  "sourceBundleSha256": "8aa2d6dc7ec4556dbb3b3531b74b65d89da65fd5cb1c393fa7e16e6f54c8fe8e",
+  "crsPinsSha256": "b31eedd906f0f02d8e940af834a239694c9ef9790909e7c8b77d0065d819c41d",
+  "notYetCatalogued": [],
+  "nativeKnownFailures": []
+}

@@ -1,0 +1,185 @@
+[
+  {
+    "bounds": {
+      "credentials": 1,
+      "quadsPerCredential": 4,
+      "rowsPerTable": 4
+    },
+    "name": "bgp",
+    "packageName": "query_054fc173ecd02fb8084fc3fb81c996586be45aeeb8feec71e3f75093c61f9662",
+    "planHash": "054fc173ecd02fb8084fc3fb81c996586be45aeeb8feec71e3f75093c61f9662",
+    "query": "SELECT ?s ?x WHERE {?s <urn:p> ?x}",
+    "sources": [
+      "<urn:vc> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://www.w3.org/2018/credentials#VerifiableCredential> .\n<urn:vc> <https://www.w3.org/2018/credentials#issuer> <urn:issuer> .\n<urn:a> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:b> <urn:p> \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n"
+    ]
+  },
+  {
+    "bounds": {
+      "credentials": 1,
+      "quadsPerCredential": 8,
+      "rowsPerTable": 4
+    },
+    "name": "join-one-credential",
+    "packageName": "query_06d1d14af6cc4a47f12cef2bdde0d5b26d19847166ebac7c3675ed7969b7e29d",
+    "planHash": "06d1d14af6cc4a47f12cef2bdde0d5b26d19847166ebac7c3675ed7969b7e29d",
+    "query": "SELECT ?s WHERE {?s <urn:p> ?x . ?s <urn:q> ?y}",
+    "sources": [
+      "<urn:vc> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://www.w3.org/2018/credentials#VerifiableCredential> .\n<urn:vc> <https://www.w3.org/2018/credentials#issuer> <urn:issuer> .\n<urn:a> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:b> <urn:p> \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:a> <urn:q> <urn:g> .\n<urn:b> <urn:q> <urn:h> .\n"
+    ]
+  },
+  {
+    "bounds": {
+      "credentials": 2,
+      "quadsPerCredential": 4,
+      "rowsPerTable": 4
+    },
+    "name": "join-two-credentials",
+    "packageName": "query_b7e7a830a7cea9df1502763d7cdde19a6634a3ed592ced17b8e47d882f679475",
+    "planHash": "b7e7a830a7cea9df1502763d7cdde19a6634a3ed592ced17b8e47d882f679475",
+    "query": "SELECT ?s WHERE {?s <urn:p> ?x . ?s <urn:q> ?y}",
+    "sources": [
+      "<urn:vc> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://www.w3.org/2018/credentials#VerifiableCredential> .\n<urn:vc> <https://www.w3.org/2018/credentials#issuer> <urn:issuer> .\n<urn:a> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:b> <urn:p> \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n",
+      "<urn:vc> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://www.w3.org/2018/credentials#VerifiableCredential> .\n<urn:vc> <https://www.w3.org/2018/credentials#issuer> <urn:issuer> .\n<urn:a> <urn:q> <urn:g> .\n<urn:b> <urn:q> <urn:h> .\n"
+    ]
+  },
+  {
+    "bounds": {
+      "credentials": 1,
+      "quadsPerCredential": 4,
+      "rowsPerTable": 4
+    },
+    "name": "integer-range",
+    "packageName": "query_9db87b5bcdd52564a9ddb1f874646c00d5519731752d3aed70b0b370decaaa5d",
+    "planHash": "9db87b5bcdd52564a9ddb1f874646c00d5519731752d3aed70b0b370decaaa5d",
+    "query": "SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x >= 1 && ?x < 2)}",
+    "sources": [
+      "<urn:vc> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://www.w3.org/2018/credentials#VerifiableCredential> .\n<urn:vc> <https://www.w3.org/2018/credentials#issuer> <urn:issuer> .\n<urn:a> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:b> <urn:p> \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n"
+    ]
+  },
+  {
+    "bounds": {
+      "credentials": 1,
+      "quadsPerCredential": 4,
+      "rowsPerTable": 4
+    },
+    "name": "decimal-range",
+    "packageName": "query_9db87b5bcdd52564a9ddb1f874646c00d5519731752d3aed70b0b370decaaa5d",
+    "planHash": "9db87b5bcdd52564a9ddb1f874646c00d5519731752d3aed70b0b370decaaa5d",
+    "query": "SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x >= 1.25 && ?x < 2.5)}",
+    "sources": [
+      "<urn:vc> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://www.w3.org/2018/credentials#VerifiableCredential> .\n<urn:vc> <https://www.w3.org/2018/credentials#issuer> <urn:issuer> .\n<urn:a> <urn:p> \"1.25\"^^<http://www.w3.org/2001/XMLSchema#decimal> .\n<urn:b> <urn:p> \"2.5\"^^<http://www.w3.org/2001/XMLSchema#decimal> .\n"
+    ]
+  },
+  {
+    "bounds": {
+      "credentials": 1,
+      "quadsPerCredential": 4,
+      "rowsPerTable": 4
+    },
+    "name": "date-range",
+    "packageName": "query_2b074a324c733fa1b2fae66ae06a76d43c1df9e4776717596a944636e61fbace",
+    "planHash": "2b074a324c733fa1b2fae66ae06a76d43c1df9e4776717596a944636e61fbace",
+    "query": "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x >= \"2024-01-01\"^^xsd:date && ?x < \"2024-02-01\"^^xsd:date)}",
+    "sources": [
+      "<urn:vc> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://www.w3.org/2018/credentials#VerifiableCredential> .\n<urn:vc> <https://www.w3.org/2018/credentials#issuer> <urn:issuer> .\n<urn:a> <urn:p> \"2024-01-01\"^^<http://www.w3.org/2001/XMLSchema#date> .\n<urn:b> <urn:p> \"2024-02-01\"^^<http://www.w3.org/2001/XMLSchema#date> .\n"
+    ]
+  },
+  {
+    "bounds": {
+      "credentials": 1,
+      "quadsPerCredential": 4,
+      "rowsPerTable": 4
+    },
+    "name": "membership",
+    "packageName": "query_5751fc5086df1dba0b0042f9fed0a55b662572940bad1417534150b1a0fab732",
+    "planHash": "5751fc5086df1dba0b0042f9fed0a55b662572940bad1417534150b1a0fab732",
+    "query": "SELECT ?s WHERE {?s <urn:p> ?x FILTER(?x IN (1,3))}",
+    "sources": [
+      "<urn:vc> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://www.w3.org/2018/credentials#VerifiableCredential> .\n<urn:vc> <https://www.w3.org/2018/credentials#issuer> <urn:issuer> .\n<urn:a> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:b> <urn:p> \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n"
+    ]
+  },
+  {
+    "bounds": {
+      "credentials": 1,
+      "quadsPerCredential": 4,
+      "rowsPerTable": 4
+    },
+    "name": "values",
+    "packageName": "query_2facc4d27c257fbace0b9a605a63d7a3b751799830f4c17ff073475d69528e59",
+    "planHash": "2facc4d27c257fbace0b9a605a63d7a3b751799830f4c17ff073475d69528e59",
+    "query": "SELECT ?s WHERE {?s <urn:p> ?x VALUES ?x {1 UNDEF}}",
+    "sources": [
+      "<urn:vc> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://www.w3.org/2018/credentials#VerifiableCredential> .\n<urn:vc> <https://www.w3.org/2018/credentials#issuer> <urn:issuer> .\n<urn:a> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:b> <urn:p> \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n"
+    ]
+  },
+  {
+    "bounds": {
+      "credentials": 1,
+      "quadsPerCredential": 4,
+      "rowsPerTable": 8
+    },
+    "name": "projection-bag",
+    "packageName": "query_035732d9c54a9c4cf1f85c3850ea7105524716e7f56d2818e4acb2775b9c39ef",
+    "planHash": "035732d9c54a9c4cf1f85c3850ea7105524716e7f56d2818e4acb2775b9c39ef",
+    "query": "SELECT ?p WHERE {?s ?p ?o}",
+    "sources": [
+      "<urn:vc> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://www.w3.org/2018/credentials#VerifiableCredential> .\n<urn:vc> <https://www.w3.org/2018/credentials#issuer> <urn:issuer> .\n<urn:a> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:b> <urn:p> \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n"
+    ]
+  },
+  {
+    "bounds": {
+      "credentials": 1,
+      "quadsPerCredential": 4,
+      "rowsPerTable": 8
+    },
+    "name": "distinct",
+    "packageName": "query_25715fddc10bc10fd0ea6d70fef6174f135c6054ebfefe2cb85427f915d0820a",
+    "planHash": "25715fddc10bc10fd0ea6d70fef6174f135c6054ebfefe2cb85427f915d0820a",
+    "query": "SELECT DISTINCT ?p WHERE {?s ?p ?o}",
+    "sources": [
+      "<urn:vc> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://www.w3.org/2018/credentials#VerifiableCredential> .\n<urn:vc> <https://www.w3.org/2018/credentials#issuer> <urn:issuer> .\n<urn:a> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:b> <urn:p> \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n"
+    ]
+  },
+  {
+    "bounds": {
+      "credentials": 1,
+      "quadsPerCredential": 4,
+      "rowsPerTable": 4
+    },
+    "name": "slice",
+    "packageName": "query_0c2bb71f84c10bbbac9b8b2178d680c2fb216d226a12e7fc97e2df2f5f830b06",
+    "planHash": "0c2bb71f84c10bbbac9b8b2178d680c2fb216d226a12e7fc97e2df2f5f830b06",
+    "query": "SELECT ?s WHERE {?s <urn:p> ?x} LIMIT 1 OFFSET 1",
+    "sources": [
+      "<urn:vc> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://www.w3.org/2018/credentials#VerifiableCredential> .\n<urn:vc> <https://www.w3.org/2018/credentials#issuer> <urn:issuer> .\n<urn:a> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:b> <urn:p> \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n"
+    ]
+  },
+  {
+    "bounds": {
+      "credentials": 1,
+      "quadsPerCredential": 4,
+      "rowsPerTable": 4
+    },
+    "name": "ask-true",
+    "packageName": "query_6b22856101a6abe928b1b43cb1c3c7e04c2a883a278be5a9c8e1dd4d35a53f47",
+    "planHash": "6b22856101a6abe928b1b43cb1c3c7e04c2a883a278be5a9c8e1dd4d35a53f47",
+    "query": "ASK {?s <urn:p> ?x}",
+    "sources": [
+      "<urn:vc> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://www.w3.org/2018/credentials#VerifiableCredential> .\n<urn:vc> <https://www.w3.org/2018/credentials#issuer> <urn:issuer> .\n<urn:a> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:b> <urn:p> \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n"
+    ]
+  },
+  {
+    "bounds": {
+      "credentials": 1,
+      "quadsPerCredential": 4,
+      "rowsPerTable": 4
+    },
+    "name": "ask-false",
+    "packageName": "query_3b1b08f69ebe383092c3bebf3f9c77af78f8f8019e94deed1b3832a1b291bcab",
+    "planHash": "3b1b08f69ebe383092c3bebf3f9c77af78f8f8019e94deed1b3832a1b291bcab",
+    "query": "ASK {?s <urn:p> ?x FILTER(?x > 8)}",
+    "sources": [
+      "<urn:vc> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://www.w3.org/2018/credentials#VerifiableCredential> .\n<urn:vc> <https://www.w3.org/2018/credentials#issuer> <urn:issuer> .\n<urn:a> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<urn:b> <urn:p> \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n"
+    ]
+  }
+]
