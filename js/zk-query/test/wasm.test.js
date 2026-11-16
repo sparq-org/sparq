@@ -22,6 +22,6 @@ test('WebAssembly backend proves a Rust-generated operator witness and verifies 
 
 test('reported WebAssembly allocation failures become named refusals', async () => {
   for (const error of [new WebAssembly.RuntimeError('unreachable'), new RangeError('allocation failed'), new Error('out of memory')]) assert.match(proverFailure(error).message, /allocation refused/);
-  await assert.rejects(prove(null, null, { createBackend: async () => { throw new WebAssembly.RuntimeError('unreachable'); } }), /allocation refused/);
+  await assert.rejects(prove(null, null, { expectedKey: Buffer.concat([Buffer.alloc(31), Buffer.from([10])]), createBackend: async () => { throw new WebAssembly.RuntimeError('unreachable'); } }), /allocation refused/);
   const invalid = new Error('invalid witness'); assert.equal(proverFailure(invalid), invalid);
 });

@@ -8,7 +8,21 @@ export function proverFailure(error) {
   }
   return error;
 }
+/**
+ * The largest dyadic circuit size the 32-bit WebAssembly prover can key and prove within
+ * its four-gibibyte memory (measured: a 2^21 program keys, a 2^22 program aborts).
+ */
+export const WASM_PROVER_DYADIC_LIMIT = 1 << 21;
+/** Whether a program of this dyadic size fits the WebAssembly prover. */
+export const wasmProverFits = dyadicSize => dyadicSize > 0 && dyadicSize <= WASM_PROVER_DYADIC_LIMIT;
+/** The dyadic circuit size a verification key's header declares. */
+export function keyDyadicSize(key) {
+  if (key.length < 32) throw new Error('verification key header rejected');
+  return 2 ** Number(BigInt('0x' + Buffer.from(key.subarray(0, 32)).toString('hex')));
+}
 export async function prove(artifact, inputs, options) {
+  // Refuse up front: past this size the prover aborts rather than refusing.
+  if (!wasmProverFits(keyDyadicSize(options.expectedKey))) throw new Error('program exceeds the WebAssembly prover memory bound');
   let api;
   try {
     api = options.createBackend ? await options.createBackend() : await createBackend(options.crsDirectory, options.crsPins, 'prove', srsPointsForKey(options.expectedKey, options.crsPins));

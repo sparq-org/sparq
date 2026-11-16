@@ -146,7 +146,9 @@ from Node and checks the envelope refusals.
 
 `backend: 'wasm'` selects the in-process witness and prover implementation for
 catalogue entries that admit it. Other entries return a refusal before witness
-preparation. Allocation errors reported by that backend become refusals. The same
+preparation. The 32-bit WebAssembly prover handles programs up to a dyadic
+circuit size of 2^21 within its four-gibibyte memory; it refuses larger programs
+up front, and no catalogue entry above that size admits it. Allocation errors reported by that backend become refusals. The same
 internal interface exercises supplied-cell operator fixtures without an issuer
 or credential-authentication claim.
 
@@ -169,8 +171,9 @@ Unknown plans and keys differing from the catalogue refuse. Native compilation
 and key creation belong to the separate maintainer `scripts/build-circuits.mjs`
 step; authenticated compilation follows the catalogue's compiler-agreement policy.
 Operator compiler agreement is a live-toolchain ratchet: every passing operator
-program, including those that pull in the XPath library, must reach ABI, bytecode
-and key agreement. The maintainer source
+program, including those that pull in the XPath library, must reach ABI and
+bytecode agreement. Key agreement is claimed only up to the WebAssembly prover
+bound below; a larger program is recorded separately with its native key. The maintainer source
 snapshot carries the query core and tagged dependencies as local files, so native
 witness execution needs no network or warmed user dependency cache.
 

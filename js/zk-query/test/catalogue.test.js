@@ -9,6 +9,7 @@ import { createRequire } from 'node:module';
 import { request, testIssuerKeygen } from '../index.js';
 import { canonicalGraph, issueFixture } from '../scripts/test-credentials.mjs';
 import { examplePolicy } from '../scripts/catalogue-example.mjs';
+import { wasmProverFits, keyDyadicSize } from '../wasm-prover.mjs';
 test('every catalogue example derives its pinned plan and leaves no stale assets', () => {
   const directory = new URL('../assets/', import.meta.url);
   const table = JSON.parse(readFileSync(new URL('catalogue.json', directory)));
@@ -17,6 +18,7 @@ test('every catalogue example derives its pinned plan and leaves no stale assets
     const stored = request({ query: entry.example.query, policy: examplePolicy(entry.example, issuer, 'urn:sparq:test:catalogue'), nonce: '09'.repeat(32) });
     assert.equal(stored.planHash, entry.planHash);
     assert.equal(stored.verificationKey, readFileSync(new URL(entry.vk, directory), 'utf8').trim());
+    if (entry.wasmProving) assert(wasmProverFits(keyDyadicSize(Buffer.from(stored.verificationKey, 'hex'))), `${entry.planHash} admits WebAssembly beyond its bound`);
   }
   const keys = readdirSync(directory).filter(name => /^[a-f0-9]{64}\.vk\.hex$/.test(name));
   assert.deepEqual(keys.sort(), table.entries.map(entry => entry.vk).sort());

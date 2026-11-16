@@ -34,6 +34,8 @@ Measured authenticated entries admit it and run the same proof and refusal
 contracts in the live suite, including queries spanning credentials. Native
 remains the default. The six Solid App Suite targets are catalogued with full
 envelopes (holder binding on insurance and trial) and prove natively only.
+The WebAssembly prover is bounded at a dyadic circuit size of 2^21 and refuses
+larger programs up front; compiler key agreement is claimed up to that bound.
 
 `issuerKeygen()` uses system randomness and accepts no seed. Keep its opaque
 `secretKeyHex` private. `testIssuerKeygen(seedHex)` is deterministic and test-only.
