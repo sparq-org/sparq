@@ -1,0 +1,269 @@
+# Manual insurance campaign; records describe their hosted environment as indicative.
+# Each proof has its own job; repeats are combined only when analysing artifacts.
+# Hidden four-credential cells emit deferred records until separately calibrated.
+# Other cells retain independent attempt budgets and partial artifacts.
+# This workflow is not a required check.
+name: zk-paper-timing-hosted
+
+on:
+  workflow_dispatch:
+    inputs:
+      freeze_commit:
+        description: Full freeze commit SHA (empty uses this dispatch's commit)
+        type: string
+        default: ''
+      prove_runs:
+        description: Repetitions per case (positive integer, at most six)
+        type: number
+        default: 5
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zk-paper-timing-hosted
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_TARGET_DIR: ${{ github.workspace }}/zk/sparql-evaluator/target
+  RISC0_BUILD_LOCKED: 1
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      commit: ${{ steps.plan.outputs.commit }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+      build_artifact: ${{ steps.plan.outputs.build_artifact }}
+    steps:
+      - name: Validate dispatch inputs
+        env:
+          FREEZE_COMMIT: ${{ inputs.freeze_commit }}
+          PROVE_RUNS: ${{ inputs.prove_runs }}
+        run: |
+          set -euo pipefail
+          [[ -z "$FREEZE_COMMIT" || "$FREEZE_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]]
+          [[ "$PROVE_RUNS" =~ ^[1-6]$ ]]
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.freeze_commit || github.sha }}
+          persist-credentials: false
+
+      - name: Plan independent proof jobs
+        id: plan
+        env:
+          PROVE_RUNS: ${{ inputs.prove_runs }}
+        run: |
+          set -euo pipefail
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "build_artifact=paper-timing-build-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import itertools, json, os
+          queries = ["q1-ask-payment-returned", "q2-select-bag-amounts",
+                     "q3-construct-amounts", "q4-numeric-filter", "q5-string-filter"]
+          jobs = [dict(suite=suite, mode=mode, n=n, query=query, repetition=repeat)
+                  for suite, mode, n, query, repeat in itertools.product(
+                      ["eddsa", "merkle"], ["hidden", "revealed"], [1, 4],
+                      queries, range(1, int(os.environ["PROVE_RUNS"]) + 1))]
+          print("matrix=" + json.dumps({"include": jobs}, separators=(",", ":")))
+          PY
+
+      - name: Install checksum-pinned RISC Zero binaries and guest Rust
+        run: |
+          set -euo pipefail
+          tool_root="$RUNNER_TEMP/sparq-risc0-3.0.6"
+          mkdir -p "$tool_root/bin" "$tool_root/home/toolchains/v1.97.0-rust-x86_64-unknown-linux-gnu"
+          curl --fail --location --retry 3 https://github.com/risc0/risc0/releases/download/v3.0.6/cargo-risczero-x86_64-unknown-linux-gnu.tgz -o "$tool_root/cli.tgz"
+          curl --fail --location --retry 3 https://github.com/risc0/rust/releases/download/r0.1.97.0/rust-toolchain-x86_64-unknown-linux-gnu.tar.gz -o "$tool_root/rust.tar.gz"
+          echo "615d961bfb81d318db5071d7548389c850e324ac7f421c075176daf26082a60a  $tool_root/cli.tgz" | sha256sum --check --strict
+          echo "100b597d605b706bec94e1d32bfaaf5851df8d75173f986d4b56a3e90916be53  $tool_root/rust.tar.gz" | sha256sum --check --strict
+          tar -xzf "$tool_root/cli.tgz" -C "$tool_root/bin"
+          tar -xzf "$tool_root/rust.tar.gz" -C "$tool_root/home/toolchains/v1.97.0-rust-x86_64-unknown-linux-gnu"
+          printf '[default_versions]\nrust = "1.97.0"\n' > "$tool_root/home/settings.toml"
+          "$tool_root/bin/r0vm" --version
+          echo "$tool_root/bin" >> "$GITHUB_PATH"
+          echo "RISC0_HOME=$tool_root/home" >> "$GITHUB_ENV"
+          echo "RISC0_SERVER_PATH=$tool_root/bin/r0vm" >> "$GITHUB_ENV"
+
+      - name: Build the release harness and export its guest pin
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/paper-build"
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess
+          def output(*args):
+              return subprocess.check_output(args, text=True).strip()
+          machine = dict(environment="indicative", commit=output("git", "rev-parse", "HEAD"),
+                         cpu=output("lscpu", "--json"), core_count=os.cpu_count(),
+                         memory=pathlib.Path("/proc/meminfo").read_text(),
+                         rustc=output("rustc", "-Vv"), r0vm=output(os.environ["RISC0_SERVER_PATH"], "--version"))
+          pathlib.Path(os.environ["RUNNER_TEMP"], "paper-build/build-machine.json").write_text(json.dumps(machine, indent=2) + "\n")
+          PY
+          m=zk/sparql-evaluator/Cargo.toml
+          cargo build --locked --release --manifest-path "$m" -p sparq-proved-evaluator --features authenticated-rdf --example paper_sweep
+          cargo run --locked --release --manifest-path "$m" -p sparq-proved-evaluator --features authenticated-rdf --example export_authrdf_guest -- "$RUNNER_TEMP/paper-build/guest"
+          cp "$CARGO_TARGET_DIR/release/examples/paper_sweep" "$RUNNER_TEMP/paper-build/"
+          rustc -Vv > "$RUNNER_TEMP/paper-build/build-rustc.txt"
+          git rev-parse HEAD > "$RUNNER_TEMP/paper-build/commit.txt"
+          (cd "$RUNNER_TEMP/paper-build" && sha256sum paper_sweep > binary.sha256)
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.plan.outputs.build_artifact }}
+          path: ${{ runner.temp }}/paper-build
+          if-no-files-found: error
+          retention-days: 90
+
+  prove:
+    needs: prepare
+    name: ${{ matrix.suite }}-${{ matrix.mode }}-n${{ matrix.n }}-${{ matrix.query }}-r${{ matrix.repetition }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        timeout-minutes: 5
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        timeout-minutes: 5
+        with:
+          name: ${{ needs.prepare.outputs.build_artifact }}
+          path: ${{ runner.temp }}/paper-build
+
+      - name: Install checksum-pinned RISC Zero binaries and guest Rust
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          tool_root="$RUNNER_TEMP/sparq-risc0-3.0.6"
+          mkdir -p "$tool_root/bin" "$tool_root/home/toolchains/v1.97.0-rust-x86_64-unknown-linux-gnu"
+          curl --fail --location --retry 3 https://github.com/risc0/risc0/releases/download/v3.0.6/cargo-risczero-x86_64-unknown-linux-gnu.tgz -o "$tool_root/cli.tgz"
+          curl --fail --location --retry 3 https://github.com/risc0/rust/releases/download/r0.1.97.0/rust-toolchain-x86_64-unknown-linux-gnu.tar.gz -o "$tool_root/rust.tar.gz"
+          echo "615d961bfb81d318db5071d7548389c850e324ac7f421c075176daf26082a60a  $tool_root/cli.tgz" | sha256sum --check --strict
+          echo "100b597d605b706bec94e1d32bfaaf5851df8d75173f986d4b56a3e90916be53  $tool_root/rust.tar.gz" | sha256sum --check --strict
+          tar -xzf "$tool_root/cli.tgz" -C "$tool_root/bin"
+          tar -xzf "$tool_root/rust.tar.gz" -C "$tool_root/home/toolchains/v1.97.0-rust-x86_64-unknown-linux-gnu"
+          printf '[default_versions]\nrust = "1.97.0"\n' > "$tool_root/home/settings.toml"
+          "$tool_root/bin/r0vm" --version
+          echo "$tool_root/bin" >> "$GITHUB_PATH"
+          echo "RISC0_HOME=$tool_root/home" >> "$GITHUB_ENV"
+          echo "RISC0_SERVER_PATH=$tool_root/bin/r0vm" >> "$GITHUB_ENV"
+
+      - name: Record the machine and exact build
+        timeout-minutes: 5
+        env:
+          FREEZE_COMMIT: ${{ needs.prepare.outputs.commit }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/paper-evidence"
+          test -x /usr/bin/time
+          cd "$RUNNER_TEMP/paper-build"
+          sha256sum --check --strict binary.sha256
+          test "$(cat commit.txt)" = "$FREEZE_COMMIT"
+          chmod +x paper_sweep
+          python3 - "$GITHUB_WORKSPACE/research/zk-paper-evidence/paper-executor-main-audit.json" guest/pin.json <<'PY_PIN'
+          import json, os, pathlib, struct, sys
+          expected = json.loads(pathlib.Path(sys.argv[1]).read_text())["guest_image_id"]
+          observed = struct.pack("<8I", *json.loads(pathlib.Path(sys.argv[2]).read_text())["image_id"]).hex()
+          validation = dict(expected_guest_image_id=expected, observed_guest_image_id=observed,
+                            status="matched" if observed == expected else "mismatched")
+          pathlib.Path(os.environ["RUNNER_TEMP"], "paper-evidence/guest-validation.json").write_text(json.dumps(validation) + "\n")
+          assert observed == expected, "guest differs from committed expected image"
+          PY_PIN
+          python3 - <<'PY'
+          import datetime, hashlib, json, os, pathlib, platform, subprocess
+          root = pathlib.Path(os.environ["RUNNER_TEMP"])
+          build = root / "paper-build"
+          def output(*args):
+              return subprocess.check_output(args, text=True).strip()
+          meta = {
+              "environment": "indicative", "commit": os.environ["FREEZE_COMMIT"],
+              "workflow_commit": os.environ["GITHUB_SHA"],
+              "run_id": os.environ["GITHUB_RUN_ID"], "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "runner_name": os.environ.get("RUNNER_NAME"),
+              "recorded_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              "cpu": output("lscpu", "--json"), "core_count": os.cpu_count(),
+              "memory": pathlib.Path("/proc/meminfo").read_text(),
+              "os": platform.platform(), "os_release": pathlib.Path("/etc/os-release").read_text(),
+              "rustc": output("rustc", "-Vv"), "build_rustc": (build / "build-rustc.txt").read_text(),
+              "r0vm": output(os.environ["RISC0_SERVER_PATH"], "--version"),
+              "r0vm_sha256": hashlib.sha256(pathlib.Path(os.environ["RISC0_SERVER_PATH"]).read_bytes()).hexdigest(),
+              "binary_sha256": hashlib.sha256((build / "paper_sweep").read_bytes()).hexdigest(),
+              "guest_pin": json.loads((build / "guest/pin.json").read_text()),
+              "resource_scope": "time-v covers one harness invocation and its subprocesses; maximum RSS is the command-reported value, not a sampled aggregate of the process tree",
+          }
+          (root / "paper-evidence/machine.json").write_text(json.dumps(meta, indent=2) + "\n")
+          PY
+
+      - name: Prove one case and retain raw output
+        timeout-minutes: 185
+        env:
+          SUITE: ${{ matrix.suite }}
+          MODE: ${{ matrix.mode }}
+          N: ${{ matrix.n }}
+          QUERY: ${{ matrix.query }}
+          REPETITION: ${{ matrix.repetition }}
+        run: |
+          set -euo pipefail
+          unset RISC0_DEV_MODE
+          out="$RUNNER_TEMP/paper-evidence"
+          # A single proof cannot be split by this harness. Preserve an explicit
+          # coverage record for cells awaiting a separate completion calibration.
+          if [[ "$MODE" == hidden && "$N" == 4 ]]; then
+            python3 - <<'PY_BOUND'
+          import json, os, pathlib
+          out = pathlib.Path(os.environ["RUNNER_TEMP"]) / "paper-evidence"
+          row = dict(environment="indicative", status="deferred_pending_calibration",
+                     reason="indivisible proof exceeds the planned completion budget",
+                     suite=os.environ["SUITE"], mode=os.environ["MODE"], n=int(os.environ["N"]),
+                     query=os.environ["QUERY"], repetition=int(os.environ["REPETITION"]),
+                     machine=json.loads((out / "machine.json").read_text()))
+          (out / "coverage.jsonl").write_text(json.dumps(row) + "\n")
+          PY_BOUND
+            exit 0
+          fi
+          set +e
+          /usr/bin/time -v -o "$out/time-v.txt" \
+            timeout --signal=TERM --kill-after=60s 180m \
+            "$RUNNER_TEMP/paper-build/paper_sweep" --set main --execute --prove 1 \
+              --suite "$SUITE" --mode "$MODE" --n "$N" --only "$QUERY" \
+              > "$out/raw.jsonl" 2> "$out/prover.stderr"
+          status=$?
+          set -e
+          echo "$status" > "$out/exit-status.txt"
+          test "$status" -eq 0
+          python3 - <<'PY'
+          import json, os, pathlib
+          out = pathlib.Path(os.environ["RUNNER_TEMP"]) / "paper-evidence"
+          records = [json.loads(line) for line in (out / "raw.jsonl").read_text().splitlines()]
+          assert len(records) == 1, "expected exactly one case"
+          record = records[0]
+          suite = {"eddsa": "eddsa-rdfc-2022", "merkle": "eddsa-sha256-merkle-2026"}[os.environ["SUITE"]]
+          assert (record["set"], record["id"], record["suite"], record["mode"], record["n"]) == (
+              "main", os.environ["QUERY"], suite, os.environ["MODE"], int(os.environ["N"]))
+          assert record["admitted"] and record["query_profile"] == "accepted"
+          assert record["execution"]["segments"] > 0 and "error" not in record["execution"]
+          assert len(record["proofs"]) == 1 and record["proofs"][0]["prove_ns"] > 0
+          assert record["proofs"][0]["receipt_kind"] == "succinct"
+          record.update(environment="indicative", repetition=int(os.environ["REPETITION"]),
+                        machine=json.loads((out / "machine.json").read_text()))
+          (out / "records.jsonl").write_text(json.dumps(record, separators=(",", ":")) + "\n")
+          PY
+
+      - name: Upload evidence, including partial output
+        if: always()
+        timeout-minutes: 5
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: paper-timing-${{ matrix.suite }}-${{ matrix.mode }}-n${{ matrix.n }}-${{ matrix.query }}-r${{ matrix.repetition }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/paper-evidence
+          if-no-files-found: error
+          retention-days: 90
