@@ -834,21 +834,6 @@ pub(super) fn eval_compiled_exact_lexical(graph: &Graph, local: &LocalVocab, row
 // Keep existing callers on the substrate's single exact decimal comparator.
 pub(super) use sparq_substrate::numeric::cmp_plain_decimal as cmp_decimal_str;
 
-/// Significant decimal digits in a numeric lexical — used to decide whether the f64
-/// sargable path is precision-safe (<= 15 digits round-trips through f64 unambiguously).
-pub(super) fn sig_digits(s: &str) -> usize {
-    let (_, int, frac) = match split_decimal(s) {
-        Some(p) => p,
-        None => return usize::MAX,
-    };
-    if int.is_empty() {
-        // 0.00123 -> significant digits start at the first non-zero fraction digit.
-        frac.trim_start_matches('0').len()
-    } else {
-        int.len() + frac.len()
-    }
-}
-
 /// `true` if the expression performs arithmetic (`+ - * /`, possibly under a unary sign), so a
 /// comparison over it must not use the untyped f64 fast path: integer/decimal arithmetic is
 /// decided exactly, and float/double arithmetic in its promoted tier by the typed evaluator
