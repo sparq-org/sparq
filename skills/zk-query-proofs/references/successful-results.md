@@ -301,11 +301,15 @@ different IRIs reject `per-fact-issuer-binding-needs-query-method`, even if thei
 policy keys coincide. Multiple graph variables may use separate credentials with
 that issuer's key; they do not identify individual credentials.
 
-`planner::lower_issuer_scope(query)` returns `(flat_query, optional_issuer_iri)`
-after shared syntax admission, preserving original text for admitted unscoped
-queries. It authenticates no issuer by itself. The Node Rust adapter resolves
-the IRI through the policy map (`issuer-not-in-policy` if unknown), restricts
-proving credentials to that key, reconstructs the flat relation independently,
+`planner::AdmittedIssuerQuery::parse(query)` applies the text budget to the
+receiver query and retains its admitted algebra. The adapter evaluates
+`flat()` over the issuer-restricted graph and uses
+`result::prepare_admitted_result` and
+`result::reconstruct_admitted_result_public_inputs` for the same algebra.
+`planner::lower_issuer_scope` returns the flat text and optional issuer IRI for
+callers that need those values. The Node Rust adapter resolves the IRI through
+the policy map (`issuer-not-in-policy` if unknown), restricts proving
+credentials to that key, reconstructs the flat relation independently,
 and checks every authenticated public issuer slot for that key
 (`issuer-scope-mismatch` before nonce-store access). The outer presentation retains
 the exact receiver request. This binds all supporting facts to **one issuer per

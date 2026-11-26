@@ -68,6 +68,22 @@ test('Solid consumer queries have pinned catalogue examples and native artifacts
   }
 });
 
+test('scoped degree requests pin both typed projections and share a plan across integer and date constants', () => {
+  const issuer = testIssuerKeygen('00'.repeat(32));
+  for (const suffix of ['', '-hidden']) {
+    const sample = consumerCases.find(e => e.name === 'consumer-degree' + suffix);
+    const policy = examplePolicy(sample, issuer, 'urn:sparq:test:catalogue');
+    const withList = list => request({
+      query: sample.query.replace('"BSc", "MSc"', list), policy, nonce: '09'.repeat(32),
+    });
+    const integers = withList('1, 2');
+    const dates = withList('"2026-11-12"^^xsd:date, "2026-11-13"^^xsd:date');
+    assert.equal(integers.planHash, dates.planHash);
+    assert.notEqual(integers.digest, dates.digest);
+    assert.notEqual(integers.planHash, withList('"BSc", "MSc"').planHash);
+  }
+});
+
 test('the consumer trial plan admits the full exclusion list capacity', () => {
   const sample = consumerCases.find(e => e.name === 'consumer-trial');
   const issuer = testIssuerKeygen('00'.repeat(32));

@@ -22,8 +22,8 @@ use crate::driver::{CircuitProver, DriverError};
 use crate::manifest::{DisclosedTerm, FieldHex, StatusListSnapshot};
 use crate::planner::signed::{NumericProfile, SignedDisclosureQuery};
 use crate::planner::{
-    optimize_disclosure_admitted, plan_disclosure_admitted, DisclosureQuery, MembershipRef,
-    OptimizationCompletion, OptimizationLimits, PlannerLimits, QueryKind, QuerySlot,
+    optimize_disclosure_admitted, plan_disclosure_admitted, AdmittedIssuerQuery, DisclosureQuery,
+    MembershipRef, OptimizationCompletion, OptimizationLimits, PlannerLimits, QueryKind, QuerySlot,
 };
 use crate::revocation::{
     accepted_set_root, accepted_set_witness, merkle_root, merkle_witness, AcceptedStatusEntry,
@@ -864,6 +864,15 @@ fn public_statement(
     policy: &ResultPolicy,
     nonce: &VerifierNonce,
 ) -> Result<PublicStatement, ResultError> {
+    public_statement_with_admission(p, policy, nonce, None)
+}
+
+fn public_statement_with_admission(
+    p: &ResultPresentation,
+    policy: &ResultPolicy,
+    nonce: &VerifierNonce,
+    admitted: Option<DisclosureQuery>,
+) -> Result<PublicStatement, ResultError> {
     if matches!(p.version, 1 | 2) && !policy.admit_unbound_legacy {
         return Err(reject(
             "no method-bound successful-result member verifies a method-unbound legacy presentation; \
@@ -878,19 +887,33 @@ use ResultPolicy::admit_unbound_legacy for already-issued material",
         }
         NumericContract::PublicPattern
     } else {
-        unsigned_contract(
-            p.integer_capacity,
-            &DisclosureQuery::parse(&p.query).map_err(|e| reject(e.to_string()))?,
-        )?
+        match &admitted {
+            Some(query) => unsigned_contract(p.integer_capacity, query)?,
+            None => unsigned_contract(
+                p.integer_capacity,
+                &DisclosureQuery::parse(&p.query).map_err(|e| reject(e.to_string()))?,
+            )?,
+        }
     };
-    public_statement_for(p.into(), contract, policy, nonce)
+    public_statement_for_admitted(p.into(), contract, policy, nonce, admitted)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn public_statement_for(
     p: PresentationView<'_>,
     contract: NumericContract,
     policy: &ResultPolicy,
     nonce: &VerifierNonce,
+) -> Result<PublicStatement, ResultError> {
+    public_statement_for_admitted(p, contract, policy, nonce, None)
+}
+
+fn public_statement_for_admitted(
+    p: PresentationView<'_>,
+    contract: NumericContract,
+    policy: &ResultPolicy,
+    nonce: &VerifierNonce,
+    admitted: Option<DisclosureQuery>,
 ) -> Result<PublicStatement, ResultError> {
     if !contract.accepts_version(p.version) || p.challenge != &nonce.as_field_hex() {
         return Err(reject("version or challenge mismatch"));
@@ -898,7 +921,11 @@ fn public_statement_for(
     if p.issuer_slots.is_empty() || p.issuer_slots.len() > MAX_CREDENTIALS {
         return Err(reject("unsupported credential capacity bucket"));
     }
-    let query = contract.parse(p.query)?;
+    let query = match (admitted, contract) {
+        (Some(query), NumericContract::PublicPattern) => public_prefix(query)?,
+        (Some(query), _) => query,
+        (None, _) => contract.parse(p.query)?,
+    };
     // Keep ASK out of this first wire contract; no accidental false/absence claim.
     if query.kind != QueryKind::SelectDistinct {
         return Err(reject("only SELECT DISTINCT is supported"));
@@ -1240,6 +1267,33 @@ pub fn prepare_result_with_options(
     )
 }
 
+/// Prepares a result for an adapter-admitted query.
+///
+/// The adapter must resolve [AdmittedIssuerQuery::issuer] through receiver policy
+/// and supply only credentials signed by that key when a scope is present.
+///
+/// # Errors
+/// Returns the same witness and capacity errors as [prepare_result_with_options].
+pub fn prepare_admitted_result(
+    query: &AdmittedIssuerQuery<'_>,
+    credentials: &[ResultCredential],
+    rows: &[BTreeMap<String, Term>],
+    policy: &ResultPolicy,
+    nonce: &VerifierNonce,
+    options: ResultOptions,
+) -> Result<PreparedResult, ResultError> {
+    prepare_result_contract(
+        (query.original(), Some(query.disclosure().clone())),
+        credentials,
+        rows,
+        policy,
+        nonce,
+        options,
+        NumericProfile::Unsigned,
+        false,
+    )
+}
+
 // beadzkp-15.1: explicit opt-in; ResultOptions is unchanged so
 // existing struct literals and default dispatch keep their behavior.
 /// Prepares a version-four result whose first public pattern skips typed openings.
@@ -1266,7 +1320,7 @@ pub fn prepare_result_public_pattern(
     options: ResultOptions,
 ) -> Result<PreparedResult, ResultError> {
     prepare_result_contract(
-        query,
+        (query, None),
         credentials,
         rows,
         policy,
@@ -1287,7 +1341,7 @@ fn prepare_result_numeric(
     profile: NumericProfile,
 ) -> Result<PreparedResult, ResultError> {
     prepare_result_contract(
-        query,
+        (query, None),
         credentials,
         rows,
         policy,
@@ -1300,7 +1354,7 @@ fn prepare_result_numeric(
 
 #[allow(clippy::too_many_arguments)]
 fn prepare_result_contract(
-    query: &str,
+    (query, admitted): (&str, Option<DisclosureQuery>),
     credentials: &[ResultCredential],
     rows: &[BTreeMap<String, Term>],
     policy: &ResultPolicy,
@@ -1314,7 +1368,10 @@ fn prepare_result_contract(
     if credentials.len() > crate::planner::MAX_DISCLOSURE_CREDENTIALS {
         return Err(reject("input credentials exceed disclosure planning limit"));
     }
-    let mut parsed = parse_numeric_query(query, profile)?;
+    let mut parsed = match admitted {
+        Some(query) => query,
+        None => parse_numeric_query(query, profile)?,
+    };
     let hidden_date =
         crate::planner::date::hidden_date(&parsed).map_err(|e| reject(e.to_string()))?;
     let entries = policy.entries()?;
@@ -1569,7 +1626,13 @@ fn prepare_result_contract(
             .collect(),
         proof: Vec::new(),
     };
-    let statement = public_statement_for((&presentation).into(), contract, policy, nonce)?;
+    let statement = public_statement_for_admitted(
+        (&presentation).into(),
+        contract,
+        policy,
+        nonce,
+        Some(parsed),
+    )?;
     let public_inputs = public_bytes(&statement.fields)?;
     let mut fields = statement.fields.clone();
     let zero = field_to_hex(&Fr::from(0u64));
@@ -1745,6 +1808,7 @@ fn prepare_result_contract(
         .iter()
         .map(|(name, value)| format!("{name} = {}\n", toml_witness_value(value)))
         .collect();
+    let parsed = &statement.query;
     let work = ResultWork {
         selected_credentials,
         shared_memberships: memberships.len(),
@@ -1896,6 +1960,35 @@ pub fn reconstruct_result_public_inputs(
     nonce: &VerifierNonce,
 ) -> Result<ReconstructedResult, ResultError> {
     let statement = expected_statement(expected_query, presentation, policy, nonce)?;
+    Ok(ReconstructedResult {
+        member: statement.package,
+        public_inputs: public_bytes(&statement.fields)?,
+        released: statement.rows,
+    })
+}
+
+/// Reconstructs a result statement from the adapter-admitted receiver query.
+///
+/// The adapter must resolve [AdmittedIssuerQuery::issuer] through receiver policy
+/// and check the authenticated issuer slots before accepting the proof.
+///
+/// # Errors
+/// Returns the same statement errors as [reconstruct_result_public_inputs].
+pub fn reconstruct_admitted_result_public_inputs(
+    expected_query: &AdmittedIssuerQuery<'_>,
+    presentation: &ResultPresentation,
+    policy: &ResultPolicy,
+    nonce: &VerifierNonce,
+) -> Result<ReconstructedResult, ResultError> {
+    if presentation.query != expected_query.original() {
+        return Err(reject("query differs from relying-party request"));
+    }
+    let statement = public_statement_with_admission(
+        presentation,
+        policy,
+        nonce,
+        Some(expected_query.disclosure().clone()),
+    )?;
     Ok(ReconstructedResult {
         member: statement.package,
         public_inputs: public_bytes(&statement.fields)?,

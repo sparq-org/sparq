@@ -641,6 +641,42 @@
           "rowsPerTable": 4
         }
       }
+    },
+    {
+      "planHash": "46062bec7997c80ccd8156cdac5af0418414677ccb1a7d77cafa8e92a9236fd6",
+      "packageName": "query_46062bec7997c80ccd8156cdac5af0418414677ccb1a7d77cafa8e92a9236fd6",
+      "acir": "46062bec7997c80ccd8156cdac5af0418414677ccb1a7d77cafa8e92a9236fd6.json",
+      "vk": "46062bec7997c80ccd8156cdac5af0418414677ccb1a7d77cafa8e92a9236fd6.vk.hex",
+      "acirSha256": "c5dec25561c9bb07834492df3c04ef0c1e9d64595edf0eda3383f4d680e32f2b",
+      "vkSha256": "ab2beaa29e3d55e5a961b1b8208e1e7e17c1ceda0e67855618aaa7400c0cc279",
+      "wasmProving": false,
+      "example": {
+        "name": "consumer-degree-typed",
+        "query": "PREFIX vcq: <https://w3id.org/sparq/vcq#>\nPREFIX xsd: <http://www.w3.org/2001/XMLSchema#>\nSELECT DISTINCT ?value WHERE {\n  ?g vcq:verifiedIssuer <urn:fictional:degree-recognition:university> .\n  GRAPH ?g { ?subject <urn:claim:degree.level> ?value . FILTER(?value IN (1, 2)) }\n}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 16,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "4401b17f7f4d698f860cd264cd3d3f56a59a533ef5bef347c37c2aeec3837ae2",
+      "packageName": "query_4401b17f7f4d698f860cd264cd3d3f56a59a533ef5bef347c37c2aeec3837ae2",
+      "acir": "4401b17f7f4d698f860cd264cd3d3f56a59a533ef5bef347c37c2aeec3837ae2.json",
+      "vk": "4401b17f7f4d698f860cd264cd3d3f56a59a533ef5bef347c37c2aeec3837ae2.vk.hex",
+      "acirSha256": "9f42bb3d4d81e55a4d1b4e17bef12f47f439634a87dc3da909c476b5cff760ef",
+      "vkSha256": "e046c51134db9a48b5c60d36055f98f6078554e4be4d95c501663dcefd1580db",
+      "wasmProving": false,
+      "example": {
+        "name": "consumer-degree-typed-hidden",
+        "query": "PREFIX vcq: <https://w3id.org/sparq/vcq#>\nPREFIX xsd: <http://www.w3.org/2001/XMLSchema#>\nSELECT DISTINCT ?subject WHERE {\n  ?g vcq:verifiedIssuer <urn:fictional:degree-recognition:university> .\n  GRAPH ?g { ?subject <urn:claim:degree.level> ?value . FILTER(?value IN (1, 2)) }\n}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 16,
+          "rowsPerTable": 4
+        }
+      }
     }
   ],
   "sourceBundleSha256": "8aa2d6dc7ec4556dbb3b3531b74b65d89da65fd5cb1c393fa7e16e6f54c8fe8e",

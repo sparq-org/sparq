@@ -65,4 +65,13 @@ export const consumerCases = [
     name: 'consumer-degree-hidden', query: degreeQuery.replace('DISTINCT ?value', 'DISTINCT ?subject'),
     bounds: { credentials: 1, quadsPerCredential: 16, rowsPerTable: 4 },
   },
+  {
+    name: 'consumer-degree-typed', query: degreeQuery.replace('"BSc", "MSc"', '1, 2'),
+    bounds: { credentials: 1, quadsPerCredential: 16, rowsPerTable: 4 },
+  },
+  {
+    name: 'consumer-degree-typed-hidden',
+    query: degreeQuery.replace('DISTINCT ?value', 'DISTINCT ?subject').replace('"BSc", "MSc"', '1, 2'),
+    bounds: { credentials: 1, quadsPerCredential: 16, rowsPerTable: 4 },
+  },
 ];

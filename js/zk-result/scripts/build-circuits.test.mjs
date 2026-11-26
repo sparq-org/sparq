@@ -52,20 +52,46 @@ test('circuit regeneration uses the caller cache and records its committed input
   `);
   command('git', `
     const assert = require('node:assert/strict');
+    const fs = require('node:fs');
     const args = process.argv.slice(2);
     if (args[0] === 'rev-parse') { console.log('f'.repeat(40)); process.exit(0); }
     assert.ok(args.includes('--'));
     assert.ok(args.includes('zk/compose'));
     assert.ok(args.includes('zk/dual-leaf-v2'));
-    assert.equal(require('node:fs').existsSync('js/zk-result/assets/example.json'), false);
+    const pathspecs = args.slice(args.indexOf('--') + 1);
+    const changed = JSON.parse(fs.readFileSync('changed.json'));
+    for (const path of changed) {
+      if (pathspecs.some(spec => path === spec || path.startsWith(spec + '/'))) console.log(' M ' + path);
+    }
   `);
-  execFileSync(process.execPath, ['js/zk-result/scripts/build-circuits.mjs'], {
-    cwd: root, env: { ...process.env, PATH: join(root, 'bin'), SPARQ_RESULT_COMPILER_HOME: 'caller-cache' },
-  });
-  const provenance = JSON.parse(readFileSync(join(root, assets, 'provenance.json')));
+  const builder = 'js/zk-result/scripts/build-circuits.mjs';
+  const rebuild = changed => {
+    write('changed.json', JSON.stringify(changed));
+    execFileSync(process.execPath, [builder], {
+      cwd: root, env: { ...process.env, PATH: join(root, 'bin'), SPARQ_RESULT_COMPILER_HOME: 'caller-cache' },
+    });
+    return JSON.parse(readFileSync(join(root, assets, 'provenance.json')));
+  };
+  const provenance = rebuild([]);
   assert.equal(provenance.sourceCommit, 'f'.repeat(40));
   assert.equal(provenance.uncommittedSourceChanges, false);
   assert.equal(provenance.members[0].acirSha256, digest('{"abi":{},"bytecode":"compiled"}\n'));
   assert.equal(provenance.members[0].vkSha256, digest('key'));
   assert.equal(readFileSync(join(root, 'caller-cache/nargo/pinned-dependency'), 'utf8'), 'cached');
+
+  const outputs = [member.acir, member.vk, 'provenance.json'].map(name => assets + '/' + name);
+  assert.equal(rebuild(outputs).uncommittedSourceChanges, false);
+  const original = readFileSync(join(root, builder), 'utf8');
+  const modified = original.replace('JSON.stringify(runtime)', 'JSON.stringify(runtime, null, 2)');
+  assert.notEqual(modified, original);
+  write(builder, modified);
+  const dirty = rebuild([...outputs, builder]);
+  assert.equal(dirty.uncommittedSourceChanges, true);
+  assert.notEqual(dirty.members[0].acirSha256, provenance.members[0].acirSha256);
+  assert.equal(dirty.members[0].vkSha256, provenance.members[0].vkSha256);
+
+  write(builder, original);
+  const dependency = 'js/zk-shared/crs.mjs';
+  write(dependency, readFileSync(join(root, dependency), 'utf8') + '\n');
+  assert.equal(rebuild([...outputs, dependency]).uncommittedSourceChanges, true);
 });

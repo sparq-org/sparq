@@ -623,7 +623,8 @@ The [Node package and host seam](references/successful-results.md#node-package-a
 use the same private preparation and independent statement reconstruction.
 
 The Node policy's optional `issuers` map admits GRAPH queries naming one issuer
-per proof. `planner::lower_issuer_scope` shares syntax lowering; the adapter checks
+per proof. The adapter parses the request with `planner::AdmittedIssuerQuery::parse`
+and carries its admitted algebra through preparation and reconstruction. It checks
 the policy key against credentials and every authenticated public issuer slot.
 Per-fact binding across issuers belongs to the query method. See the contract for
 named refusals and report semantics. Research grade, not externally audited.

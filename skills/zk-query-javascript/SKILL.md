@@ -116,7 +116,9 @@ The consumer catalogue examples in
 [`consumer-cases.mjs`](../../js/zk-query/scripts/consumer-cases.mjs) include the
 sequential insurance count/completeness query, insurance NOT EXISTS without
 period checks, trial with its medication-complete flag, the original unscoped
-MIN comparison, and single-issuer degree IN with either the degree or only the subject projected. The first three preserve
+MIN comparison, and single-issuer degree IN with either the degree or only the
+subject projected. The degree policy has plans for strings, canonical integers
+and timezone-free dates. The first three preserve
 the consumer expressions while adding verifiedIssuer declarations and GRAPH
 scopes. Trial retains both age bindings and admits the full medication list.
 Native tests prove true and false releases, including a recycled fraction of

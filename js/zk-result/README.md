@@ -50,6 +50,9 @@ IRI and a typed boolean are supported; unsupported cases reject.
 including inside an issuer-scoped GRAPH block. The list contains up to sixteen
 constant IRIs, strings, canonical unsigned integers or timezone-free dates.
 Scoped IN queries admit one triple pattern per graph variable.
+The raw query text must fit the admission budget. Admitted lists can contain up
+to sixteen constants under a single issuer's GRAPH scope, including compact
+integer syntax and prefixed timezone-free dates.
 Verification checks membership against the authenticated released RDF term.
 IN can be conjoined with the existing numeric filters; their datatype and lexical
 rules still apply. Dedicated method-bound members support one hidden IN operand

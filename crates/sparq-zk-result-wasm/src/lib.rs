@@ -16,6 +16,7 @@ use sparq_zk::{
 };
 use sparq_zk_compose::{
     manifest::StatusListSnapshot,
+    planner::AdmittedIssuerQuery,
     result::{
         self, CredentialCapacity, IntegerCapacityPolicy, ResultCredential, ResultOptions,
         ResultPolicy, ResultPresentation, WitnessSelection,
@@ -153,23 +154,27 @@ struct IssuerScope {
 
 // Shared by preparation and independent reconstruction. Scope is receiver policy,
 // never presentation metadata, and the native unscoped verifier stays unchanged.
-fn admit_query(
-    query: &str,
+fn admit_query<'a>(
+    query: &'a str,
     policy_json: &str,
-) -> Result<(String, Option<IssuerScope>, HostPolicy), String> {
-    let (flat, issuer) = sparq_zk_compose::planner::lower_issuer_scope(query).map_err(err)?;
+) -> Result<(AdmittedIssuerQuery<'a>, Option<IssuerScope>, HostPolicy), String> {
+    let query = AdmittedIssuerQuery::parse(query).map_err(err)?;
     let policy = host_policy(policy_json)?;
-    let scope = issuer
+    let scope = query
+        .issuer()
         .map(|iri| {
-            let keys = policy.issuers.get(&iri).ok_or("issuer-not-in-policy")?;
+            let keys = policy.issuers.get(iri).ok_or("issuer-not-in-policy")?;
             let [key] = keys.as_slice() else {
                 return Err("issuer-scope-ambiguous-key".into());
             };
             let key = *key;
-            Ok::<_, String>(IssuerScope { iri, key })
+            Ok::<_, String>(IssuerScope {
+                iri: iri.to_owned(),
+                key,
+            })
         })
         .transpose()?;
-    Ok((flat, scope, policy))
+    Ok((query, scope, policy))
 }
 
 #[cfg(test)]
@@ -420,7 +425,7 @@ pub fn prepare(
     if credentials_json.len() > sparq_zk_compose::planner::MAX_DISCLOSURE_CREDENTIALS {
         return Err("wallet exceeds disclosure credential limit".into());
     }
-    let (flat, scope, p) = admit_query(query_text, policy_json)?;
+    let (query, scope, p) = admit_query(query_text, policy_json)?;
     let credentials = credentials_json
         .iter()
         .map(|s| credential(s))
@@ -439,7 +444,7 @@ pub fn prepare(
     for t in triples {
         graph.insert_triple(t.subject, t.predicate, t.object)?;
     }
-    let evaluated = sparq_engine::query(&graph, &flat)?;
+    let evaluated = sparq_engine::query(&graph, query.flat())?;
     let rows = evaluated
         .rows
         .iter()
@@ -455,8 +460,8 @@ pub fn prepare(
         })
         .collect::<Vec<_>>();
     let defaults = ResultOptions::default();
-    let prepared = result::prepare_result_with_options(
-        &flat,
+    let prepared = result::prepare_admitted_result(
+        &query,
         &credentials,
         &rows,
         &p.native,
@@ -484,8 +489,7 @@ pub fn prepare(
     )
     .map_err(err)?;
     canonical_vk_hash(prepared.member())?;
-    let mut skeleton = prepared.presentation_skeleton().clone();
-    skeleton.query = query_text.to_owned();
+    let skeleton = prepared.presentation_skeleton();
     Ok(json!({"member":prepared.member(),"witnessInputs":noir_numbers(serde_json::to_value(prepared.witness_inputs()).map_err(err)?),"presentationSkeleton":skeleton}).to_string())
 }
 
@@ -498,15 +502,14 @@ pub fn reconstruct_public_inputs(
     policy_json: &str,
     nonce_hex: &str,
 ) -> Result<String, String> {
-    let mut presentation: ResultPresentation = parse(presentation_json)?;
+    let presentation: ResultPresentation = parse(presentation_json)?;
     if presentation.query != expected_query_text {
         return Err("query differs from relying-party request".into());
     }
-    let (flat, scope, p) = admit_query(expected_query_text, policy_json)?;
-    presentation.query = flat.clone();
+    let (query, scope, p) = admit_query(expected_query_text, policy_json)?;
     let n = nonce(nonce_hex)?;
     let reconstructed =
-        result::reconstruct_result_public_inputs(&flat, &presentation, &p.native, &n)
+        result::reconstruct_admitted_result_public_inputs(&query, &presentation, &p.native, &n)
             .map_err(err)?;
     let report = reconstructed_report(expected_query_text, &reconstructed, &p, scope.as_ref(), &n)?;
     Ok(json!({"member":reconstructed.member,"publicInputs":inputs(&reconstructed.public_inputs),"released":presentation.rows,"nonce":n.as_field_hex().0,"report":report}).to_string())
@@ -611,6 +614,64 @@ mod tests {
 
     fn scoped_query(iri: &str) -> String {
         format!("PREFIX vcq: <https://w3id.org/sparq/vcq#> SELECT DISTINCT ?p WHERE {{ ?g vcq:verifiedIssuer <{iri}> . GRAPH ?g {{ ?p <https://example.org/degree> <https://example.org/BSc> }} }}")
+    }
+
+    #[test]
+    fn scoped_typed_in_boundary_prepares_and_reconstructs() {
+        let (issuer, _, base) = fixture();
+        let mut policy: Value = parse(&base).unwrap();
+        let key = parse::<Value>(&issuer).unwrap()["publicKey"].clone();
+        policy["issuers"] = json!({"urn:issuer:a": key});
+        let policy = policy.to_string();
+        let prefix = "PREFIX vcq: <https://w3id.org/sparq/vcq#> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>";
+        for datatype in ["integer", "date"] {
+            let literal = |n: u32| match datatype {
+                "integer" => n.to_string(),
+                _ => format!("\"2026-11-{n:02}\"^^xsd:date"),
+            };
+            let list = |count| (1u32..=count).map(literal).collect::<Vec<_>>().join(", ");
+            let graph = match datatype {
+                "integer" => r#"<urn:subject> <urn:degree> "16"^^<http://www.w3.org/2001/XMLSchema#integer> ."#,
+                _ => r#"<urn:subject> <urn:degree> "2026-11-16"^^<http://www.w3.org/2001/XMLSchema#date> ."#,
+            };
+            let credential = issue(&issuer, graph, STATUS).unwrap();
+            for projection in ["?value", "?subject"] {
+                let scoped = |count| {
+                    format!("{prefix} SELECT DISTINCT {projection} WHERE {{ ?g vcq:verifiedIssuer <urn:issuer:a> . GRAPH ?g {{ ?subject <urn:degree> ?value . FILTER(?value IN ({})) }} }}", list(count))
+                };
+                let flat = format!("{prefix} SELECT DISTINCT {projection} WHERE {{ ?subject <urn:degree> ?value . FILTER(?value IN ({})) }}", list(16));
+                let run = |query: &str| {
+                    let prepared: Value =
+                        parse(&prepare(query, vec![credential.clone()], &policy, "0x1234", "{}")?)?;
+                    let checked: Value = parse(&reconstruct_public_inputs(
+                        query,
+                        &prepared["presentationSkeleton"].to_string(),
+                        &policy,
+                        "0x1234",
+                    )?)?;
+                    assert_eq!(prepared["presentationSkeleton"]["query"], query);
+                    assert_eq!(checked["released"], prepared["presentationSkeleton"]["rows"]);
+                    Ok::<_, String>((
+                        prepared["member"].clone(),
+                        checked["publicInputs"].clone(),
+                        prepared["presentationSkeleton"].clone(),
+                    ))
+                };
+                let (member, inputs, mut presentation) = run(&scoped(16)).unwrap();
+                let (flat_member, flat_inputs, _) = run(&flat).unwrap();
+                assert_eq!((member, inputs), (flat_member, flat_inputs));
+
+                let too_many = scoped(17);
+                let refusal = prepare(&too_many, vec![credential.clone()], &policy, "0x1234", "{}")
+                    .unwrap_err();
+                assert!(refusal.contains("IN constant list capacity"), "{refusal}");
+                presentation["query"] = json!(too_many);
+                let refusal =
+                    reconstruct_public_inputs(&too_many, &presentation.to_string(), &policy, "0x1234")
+                        .unwrap_err();
+                assert!(refusal.contains("IN constant list capacity"), "{refusal}");
+            }
+        }
     }
 
     fn member(issuer: &str, method: &str, key: &Value) -> Value {

@@ -282,6 +282,8 @@ against the catalogue by the package tests and packaging gate.
 | `consumer-recycled-min` | The exact original unscoped MIN comparison, including a proved false release below the threshold. |
 | `consumer-degree` | Projected degree IN ("BSc", "MSc") inside one university's GRAPH scope. |
 | `consumer-degree-hidden` | The same membership with only the subject projected. |
+| `consumer-degree-typed` | Projected degree IN over canonical integer or timezone-free date constants in the same issuer scope and policy. |
+| `consumer-degree-typed-hidden` | The same typed membership with only the subject projected. |
 
 The insurance and trial variants add issuer declarations and GRAPH scopes to the
 original consumer expressions. They do not replace completeness flags with
@@ -300,8 +302,11 @@ node --test js/zk-query/scripts/consumer-live.mjs
 ```
 
 Set `SPARQ_NARGO` and `SPARQ_BB` to the pinned binaries. The live toolchain gate
-also runs this suite. It checks both degree alternatives, boolean false branches,
-changed results and non-catalogue query refusals. Research grade, not externally audited.
+also runs this suite. It checks matching and nonmatching degree credentials for
+both projections, boolean false branches, changed results and non-catalogue
+query refusals. Standalone runs use a private temporary evidence directory.
+Set `SPARQ_QUERY_TEST_DIR` to reuse completed evidence across runs.
+Research grade, not externally audited.
 
 Native witness execution gives the pinned compiler a private process home under
 its temporary work directory, including its dependency-cache lock. Catalogue

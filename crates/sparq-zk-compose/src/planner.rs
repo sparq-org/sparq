@@ -31,7 +31,7 @@ mod issuer_scope;
 mod optimize;
 mod term_in;
 pub use term_in::TermInFilter;
-pub use issuer_scope::lower_issuer_scope;
+pub use issuer_scope::{lower_issuer_scope, AdmittedIssuerQuery};
 /// Separately admitted canonical signed-integer disclosure planning.
 pub mod signed;
 #[doc(inline)]
@@ -156,6 +156,11 @@ impl DisclosureQuery {
         {
             return Err(PlanError::LimitExceeded("query punctuation fuel"));
         }
+        Self::parse_algebra(sparql, numeric)
+    }
+
+    // Callers pass budgeted input or a serialization of its admitted algebra.
+    fn parse_algebra(sparql: &str, numeric: NumericProfile) -> Result<Self, PlanError> {
         // The vendored parser additionally guards actual syntactic nesting.
         let parsed = spargebra::SparqlParser::new()
             .parse_query(sparql)

@@ -18,6 +18,7 @@ const sourceCommit = git('rev-parse', 'HEAD');
 const uncommittedSourceChanges = Boolean(git('status', '--porcelain', '--untracked-files=all', '--',
   'zk/compose', 'zk/dual-leaf-v2', '.github/workflows/zk-toolchain.yml',
   'crates/sparq-zk-compose/tests/result_method_keys.json',
+  'js/zk-result/scripts/build-circuits.mjs', 'js/zk-shared/crs.mjs',
   'js/zk-result/assets/members.json', 'js/zk-result/assets/crs.pins.json'));
 if (execFileSync('nargo', ['--version'], { encoding: 'utf8' }).split('\n')[0] !== `nargo version = ${nargoVersion}` ||
     execFileSync('bb', ['--version'], { encoding: 'utf8' }).trim() !== bbVersion) {
