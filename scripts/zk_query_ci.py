@@ -107,13 +107,28 @@ POLICY_CONTRACTS = (
     'selected_policy_refuses_an_unknown_feature_tag',
     'selected_holder_refuses_an_unknown_feature_tag',
 )
+OPENING_AND_EXPRESSION_CONTRACTS = (
+    "suite_metadata_tests::digest_default_graph_is_canonical",
+    "suite_metadata_tests::digest_opening_authenticates_the_same_signed_tree",
+    "suite_metadata_tests::digest_opening_cannot_change_a_term",
+    "suite_metadata_tests::digest_opening_cannot_change_a_term_kind",
+    "suite_metadata_tests::digest_padding_row_is_canonical",
+    "suite_metadata_tests::digest_predicate_must_be_an_iri",
+    "suite_metadata_tests::digest_subject_cannot_be_the_default_graph",
+    "expr_tests::capacity_and_error_channels_remain_distinct",
+    "expr_tests::conditional_and_coalesce",
+    "expr_tests::empty_membership_capacity_root_rejected",
+    "expr_tests::literal_dispatch_matches_recommendation",
+    "expr_binding_tests::bind_error_is_unbound",
+    "expr_binding_tests::computed_numeric_canonical_lexical",
+)
 NOIR_FILTERS = tuple(f"ops_core_tests::{op}_" for op in OPERATORS) + (
     "ops_core_tests::rows_", "ops_core_reads::", "ops_core_suite::table_identity_", "ops_core_tests::identity_",
     "ops_core_tests::expression_temporal_key_",
     "ops_core_tests::expression_same_type_strings_compare_authenticated_identity",
     "ops_core_tests::expression_string_ordering_keeps_checked_payloads",
     "ops_core_envelope::",
-)
+) + OPENING_AND_EXPRESSION_CONTRACTS
 
 
 def live_tests(root: Path) -> set[str]:
@@ -175,6 +190,7 @@ def check_noir_listing(output: str) -> int:
     required = {f"ops_core_tests::{op}_{case}" for op in OPERATORS
                 for case in ("honest", "missing", "extra", "reordered", "padding", "overflow")}
     required |= {f"ops_core_tests::{name}" for name in ROWS_CONTRACTS}
+    required.update(OPENING_AND_EXPRESSION_CONTRACTS)
     if not required <= names or not any(n.startswith("ops_core_reads::") for n in names):
         raise ValueError("hosted Noir contract inventory is incomplete")
     return len(names)

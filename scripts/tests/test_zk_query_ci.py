@@ -15,6 +15,22 @@ gate = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = gate
 spec.loader.exec_module(gate)
 
+OPENING_AND_EXPRESSION_TESTS = (
+    "suite_metadata_tests::digest_default_graph_is_canonical",
+    "suite_metadata_tests::digest_opening_authenticates_the_same_signed_tree",
+    "suite_metadata_tests::digest_opening_cannot_change_a_term",
+    "suite_metadata_tests::digest_opening_cannot_change_a_term_kind",
+    "suite_metadata_tests::digest_padding_row_is_canonical",
+    "suite_metadata_tests::digest_predicate_must_be_an_iri",
+    "suite_metadata_tests::digest_subject_cannot_be_the_default_graph",
+    "expr_tests::capacity_and_error_channels_remain_distinct",
+    "expr_tests::conditional_and_coalesce",
+    "expr_tests::empty_membership_capacity_root_rejected",
+    "expr_tests::literal_dispatch_matches_recommendation",
+    "expr_binding_tests::bind_error_is_unbound",
+    "expr_binding_tests::computed_numeric_canonical_lexical",
+)
+
 
 class QueryProfiles(unittest.TestCase):
     def test_hosted_keeps_agreement_authentication_and_native_verification(self):
@@ -66,12 +82,21 @@ class QueryProfiles(unittest.TestCase):
                  for case in ("honest", "missing", "extra", "reordered", "padding", "overflow")]
         names += ["sparq_noir_query_core ops_core_reads::reads_check_every_active_input_row"]
         names += [f"sparq_noir_query_core ops_core_tests::{name}" for name in profile.ROWS_CONTRACTS]
+        names += [f"sparq_noir_query_core {name}" for name in OPENING_AND_EXPRESSION_TESTS]
         self.assertEqual(profile.check_noir_listing("\n".join(names)), len(names))
-        for missing in (0, len(names) - 1, names.index("sparq_noir_query_core ops_core_reads::reads_check_every_active_input_row")):
+        for missing in range(len(names)):
             with self.subTest(missing=missing), self.assertRaises(ValueError):
                 profile.check_noir_listing("\n".join(names[:missing] + names[missing + 1:] ))
         with self.assertRaises(ValueError):
             profile.check_noir_listing("")
+
+    def test_hosted_core_runs_opening_and_expression_controls(self):
+        core = ROOT / "zk/noir-query/core"
+        command, = (cmd for cmd, cwd in profile.steps(ROOT, "hosted")
+                    if cwd == core and cmd[:2] == ["nargo", "test"])
+        for name in OPENING_AND_EXPRESSION_TESTS:
+            with self.subTest(name=name):
+                self.assertTrue(any(selected in name for selected in command[4:]), command)
 
     def test_hosted_noir_filters_reach_every_declared_contract(self):
         names = {f"ops_core_tests::{op}_{case}" for op in profile.OPERATORS
@@ -186,6 +211,7 @@ class QueryPolicyFeatures(unittest.TestCase):
                  for case in ("honest", "missing", "extra", "reordered", "padding", "overflow")]
         names += ["sparq_noir_query_core ops_core_reads::reads_check_every_active_input_row"]
         names += [f"sparq_noir_query_core ops_core_tests::{name}" for name in profile.ROWS_CONTRACTS]
+        names += [f"sparq_noir_query_core {name}" for name in OPENING_AND_EXPRESSION_TESTS]
         names += self.policy_listing()
         core = ROOT / "zk/noir-query/core"
         for complete in (True, False):
