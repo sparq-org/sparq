@@ -53,7 +53,7 @@ function fixture(t) {
 
   let callsPath;
   const calls = () => readFileSync(callsPath, 'utf8').trim().split('\n').filter(Boolean);
-  const command = (script, args, failPlan, preload) => {
+  const command = (script, args, { failPlan, keyWrite, preload } = {}) => {
     callsPath = join(mkdtempSync(join(directory, 'run-')), 'calls');
     writeFileSync(callsPath, '');
     const imports = preload ? ['--import', preload] : [];
@@ -67,6 +67,7 @@ function fixture(t) {
         CARGO_BUILD_JOBS: '1',
         CATALOGUE_TEST_CALLS: callsPath,
         CATALOGUE_TEST_FAIL_PLAN: failPlan ? `query_${planHash(failPlan)}` : '',
+        CATALOGUE_TEST_KEY_WRITE: keyWrite ?? '',
       },
     }];
   };
@@ -75,7 +76,7 @@ function fixture(t) {
     assert.ifError(result.error);
     return result;
   };
-  const buildCommand = ({ update = false, selected = cases, failPlan, rejectCatalogueRename = false, preload, cache = 'cache' } = {}) => {
+  const buildCommand = ({ update = false, selected = cases, failPlan, keyWrite, rejectCatalogueRename = false, preload, cache = 'cache' } = {}) => {
     const selection = join(mkdtempSync(join(directory, 'selection-')), 'cases.json');
     writeFileSync(selection, JSON.stringify(selected));
     if (rejectCatalogueRename) {
@@ -95,7 +96,7 @@ syncBuiltinESMExports();
     return ['build-circuits.mjs', [
       '--cache', join(directory, cache), '--cases', selection,
       ...(update ? ['--write-pins'] : []),
-    ], failPlan, preload];
+    ], { failPlan, keyWrite, preload }];
   };
   const build = options => run(...buildCommand(options));
   const pauseBuild = ({ pauseAt, ...options }) => {
@@ -105,7 +106,7 @@ syncBuiltinESMExports();
     writeFileSync(preload, `
 import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
-import { basename } from 'node:path';
+import { basename, dirname } from 'node:path';
 const read = fs.readFileSync, rename = fs.renameSync;
 function pause() {
   if (fs.existsSync(${JSON.stringify(ready)})) return;
@@ -125,6 +126,7 @@ if (${JSON.stringify(pauseAt)} === 'read') {
 } else {
   fs.renameSync = (from, to) => {
     const catalogue = basename(to) === 'catalogue.json';
+    if (${JSON.stringify(pauseAt)} === 'cache' && dirname(to) === ${JSON.stringify(join(directory, options.cache ?? 'cache'))}) pause();
     if (catalogue && ${JSON.stringify(pauseAt)} === 'rename') pause();
     rename(from, to);
     if (catalogue && ${JSON.stringify(pauseAt)} === 'published') pause();
@@ -161,7 +163,7 @@ syncBuiltinESMExports();
   assertPass(build({ update: true }));
   writeFileSync(join(host, 'approved-catalogue'), sha256(readAsset('catalogue.json')));
   return {
-    abi, build, calls, source, readAsset, pauseBuild,
+    abi, build, calls, directory, source, readAsset, pauseBuild,
     table: () => JSON.parse(readAsset('catalogue.json')),
     snapshot: () => Object.fromEntries(readdirSync(assets).map(name => [name, readAsset(name)])),
     hasAsset: name => existsSync(join(assets, name)),
@@ -312,6 +314,52 @@ test('a failed second build leaves the previous catalogue loadable', async t => 
   assert.deepEqual(f.calls(), []);
 });
 
+test('retry rebuilds the program and key after an incomplete key write', async t => {
+  for (const [keyWrite, failure] of [['partial', /native catalogue command failed/], ['empty', /produced an empty key/]]) {
+    await t.test(keyWrite, t => {
+      const f = fixture(t);
+      const previous = f.snapshot();
+      const [example] = cases;
+      const plan = `query_${planHash(example)}`;
+      const refresh = { update: true, selected: [example] };
+      f.abi(indexedAbi, example);
+
+      const refused = f.build({ ...refresh, keyWrite });
+      assert.notEqual(refused.status, 0);
+      assert.match(refused.stderr, failure);
+      assert.deepEqual(f.calls(), [`compile ${plan}`, `write_vk ${plan}`]);
+      assert.deepEqual(f.snapshot(), previous);
+
+      assertPass(f.build(refresh));
+      const [entry] = f.table().entries;
+      const program = f.readAsset(entry.acir);
+      const key = Buffer.from(f.readAsset(entry.vk).toString().trim(), 'hex');
+      assert.deepEqual(JSON.parse(program).abi, indexedAbi);
+      assert.equal(key.toString('hex'), sha256(program));
+      assert.equal(entry.vkSha256, sha256(key));
+      assert.deepEqual(f.calls(), [`compile ${plan}`, `write_vk ${plan}`]);
+    });
+  }
+});
+
+test('concurrent repairs can publish the same cache entry', async t => {
+  const f = fixture(t);
+  const previous = f.snapshot();
+  const [entry] = f.table().entries;
+  const repair = { selected: [cases[0]], cache: 'repair-cache' };
+  f.removeAsset(entry.vk);
+  const first = f.pauseBuild({ ...repair, pauseAt: 'cache' });
+  try {
+    await first.wait();
+    assertPass(f.build(repair));
+    assert.deepEqual(f.calls(), [`compile ${entry.packageName}`, `write_vk ${entry.packageName}`]);
+    assert.deepEqual(f.snapshot(), previous);
+  } finally {
+    assertPass(await first.resume());
+  }
+  assert.deepEqual(f.snapshot(), previous);
+});
+
 test('retry rolls back an interrupted publication before checking the published pins', async t => {
   for (const [pauseAt, expectedCount] of [['rename', 2], ['published', 3]]) {
     await t.test(`pause at ${pauseAt}`, async t => {
@@ -373,6 +421,20 @@ test('the builder bypasses a warm program and key when the SCAN ABI changes', t 
   assert.deepEqual(f.calls(), []);
   assert.deepEqual(f.readAsset(entry.acir), program);
   assert.equal(f.readAsset(entry.vk).toString().trim(), key.toString('hex'));
+});
+
+test('repair rebuilds a legacy cache entry containing a partial key', t => {
+  const f = fixture(t);
+  const previous = f.snapshot();
+  const [entry] = f.table().entries;
+  const work = join(f.directory, 'cache', entry.buildInputSha256);
+  mkdirSync(join(work, 'target'), { recursive: true });
+  writeFileSync(join(work, 'target', `${entry.packageName}.json`), f.readAsset(entry.acir));
+  writeFileSync(join(work, 'vk'), Buffer.from(f.readAsset(entry.vk).toString().slice(0, 10), 'hex'));
+  f.removeAsset(entry.vk);
+
+  assertPass(f.build({ selected: [cases[0]] }));
+  assert.deepEqual(f.snapshot(), previous);
 });
 
 test('standalone source regeneration preserves the published bundle on a pin mismatch', t => {

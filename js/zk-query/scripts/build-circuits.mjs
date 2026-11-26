@@ -1,6 +1,6 @@
 // Research grade and not externally audited. Maintainer-only native compilation.
 import { spawn } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, mkdtempSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, mkdtempSync, lstatSync, statSync, renameSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -69,13 +69,33 @@ async function build({ plan, example }, staging, nargo, bb) {
   if (!update && entry.buildInputSha256 !== buildInputSha256) throw new Error('catalogue build inputs differ from their pin');
   const acir = `${plan.planHash}.json`, vk = `${plan.planHash}.vk.hex`;
   if (entry?.buildInputSha256 === buildInputSha256 && existsSync(join(assets, acir)) && sha256(readFileSync(join(assets, acir))) === entry.acirSha256 && existsSync(join(assets, vk)) && sha256(Buffer.from(readFileSync(join(assets, vk), 'utf8').trim(), 'hex')) === entry.vkSha256) return;
-  const work = join(cache, buildInputSha256); mkdirSync(work, { recursive: true, mode: 0o700 });
-  for (const [name, text] of Object.entries({ ...sources, ...plan.files })) stageSource(work, name, text);
-  const nativeArtifact = join(work, 'target', `${plan.packageName}.json`);
-  if (!existsSync(nativeArtifact)) await run(nargo, ['compile'], { cwd: work, env: { ...process.env, RAYON_NUM_THREADS: '1' } });
-  const bytes = canonicalArtifact(readFileSync(nativeArtifact));
-  if (!update && sha256(bytes) !== entry.acirSha256) throw new Error('cached catalogue program differs from its pin');
-  if (!existsSync(join(work, 'vk'))) await run(bb, ['write_vk', '-b', nativeArtifact, '-o', work, '-t', 'noir-recursive', '--crs_path', join(assets, 'crs')], { cwd: work, env: { ...process.env, HARDWARE_CONCURRENCY: '1' } });
+  const work = join(cache, `complete-${buildInputSha256}`);
+  const artifactPath = root => join(root, 'target', `${plan.packageName}.json`);
+  const readProgram = path => {
+    const bytes = canonicalArtifact(readFileSync(path));
+    if (!update && sha256(bytes) !== entry.acirSha256) throw new Error('cached catalogue program differs from its pin');
+    return bytes;
+  };
+  const cached = lstatSync(work, { throwIfNoEntry: false });
+  if (cached?.isSymbolicLink()) throw new Error('catalogue cache symbolic link rejected');
+  if (!cached) {
+    const scratch = mkdtempSync(join(cache, '.build-'));
+    try {
+      for (const [name, text] of Object.entries({ ...sources, ...plan.files })) stageSource(scratch, name, text);
+      const nativeArtifact = artifactPath(scratch);
+      await run(nargo, ['compile'], { cwd: scratch, env: { ...process.env, RAYON_NUM_THREADS: '1' } });
+      readProgram(nativeArtifact);
+      await run(bb, ['write_vk', '-b', nativeArtifact, '-o', scratch, '-t', 'noir-recursive', '--crs_path', join(assets, 'crs')], { cwd: scratch, env: { ...process.env, HARDWARE_CONCURRENCY: '1' } });
+      if (!statSync(join(scratch, 'vk')).size) throw new Error('native catalogue build produced an empty key');
+      try {
+        renameSync(scratch, work);
+      } catch (error) {
+        // A concurrent build may already have published the same cache entry.
+        if (error.code !== 'EEXIST' && error.code !== 'ENOTEMPTY') throw error;
+      }
+    } finally { rmSync(scratch, { recursive: true, force: true }); }
+  }
+  const bytes = readProgram(artifactPath(work));
   const key = readFileSync(join(work, 'vk'));
   const acirSha256 = sha256(bytes), vkSha256 = sha256(key);
   const candidate = { planHash: plan.planHash, packageName: plan.packageName, acir, vk, acirSha256, vkSha256, buildInputSha256, wasmProving: Boolean(entry?.wasmProving && entry.acirSha256 === acirSha256 && entry.vkSha256 === vkSha256), example: exampleRecord(example) };

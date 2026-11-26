@@ -232,8 +232,9 @@ the existing catalogue pin.
 when unset. Duplicate plan hashes share a build and must generate identical sources.
 The build-input pin covers the generated files, the library bundle and the
 toolchain pins. It also selects the cache directory for the program and key.
-Cached source paths through symbolic links are refused; staging replaces ordinary
-cached files without modifying another hard link's contents.
+The builder stages each native build in a temporary directory and renames it
+into the cache after both commands succeed and the key is nonempty. It
+regenerates cache entries from older versions on demand.
 Catalogue checks derive each example's plan again through Rust and reject stale
 key or program files left over from a rebuild. An example's optional `envelope`
 (`holder`, `status`, `validity`, `freshness`, `tableRowBounds`, `openingProfile`)

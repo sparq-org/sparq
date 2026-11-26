@@ -18,8 +18,16 @@ if (command === '--version') {
   writeFileSync(join('target', `${plan}.json`), JSON.stringify({ abi, bytecode, file_map: {} }) + '\n');
 } else if (name === 'bb' && command === 'write_vk') {
   const artifact = args[args.indexOf('-b') + 1];
-  appendFileSync(process.env.CATALOGUE_TEST_CALLS, `write_vk ${basename(artifact, '.json')}\n`);
-  writeFileSync(join(args[args.indexOf('-o') + 1], 'vk'), createHash('sha256').update(readFileSync(artifact)).digest());
+  const plan = basename(artifact, '.json');
+  appendFileSync(process.env.CATALOGUE_TEST_CALLS, `write_vk ${plan}\n`);
+  const key = createHash('sha256').update(readFileSync(artifact)).digest();
+  const keyPath = join(args[args.indexOf('-o') + 1], 'vk');
+  const keyWrite = process.env.CATALOGUE_TEST_KEY_WRITE;
+  if (keyWrite === 'partial') {
+    writeFileSync(keyPath, key.subarray(0, 5));
+    process.exit(1);
+  }
+  writeFileSync(keyPath, keyWrite === 'empty' ? Buffer.alloc(0) : key);
 } else {
   throw new Error(`unexpected fixture command ${name} ${command}`);
 }
