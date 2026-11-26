@@ -249,6 +249,7 @@ class QueryPolicyFeatures(unittest.TestCase):
                 if missing is None:
                     execution_call = core_calls[1]
                     self.assertEqual(listing_call.args[0], [*execution_call.args[0], "--list-tests"])
+                    self.assertNotIn("--no-run", execution_call.args[0])
                     self.assertTrue(execution_call.kwargs["check"])
                 else:
                     self.assertEqual(run.call_args, listing_call)
