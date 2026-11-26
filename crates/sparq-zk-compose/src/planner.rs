@@ -144,6 +144,11 @@ impl DisclosureQuery {
 
     // Signed bounds use a private typed wrapper; unsigned admission is unchanged.
     fn parse_numeric(sparql: &str, numeric: NumericProfile) -> Result<Self, PlanError> {
+        Self::check_text_budget(sparql)?;
+        Self::parse_algebra(sparql, numeric)
+    }
+
+    fn check_text_budget(sparql: &str) -> Result<(), PlanError> {
         if sparql.len() > MAX_DISCLOSURE_QUERY_BYTES {
             return Err(PlanError::LimitExceeded("query text bytes"));
         }
@@ -156,7 +161,7 @@ impl DisclosureQuery {
         {
             return Err(PlanError::LimitExceeded("query punctuation fuel"));
         }
-        Self::parse_algebra(sparql, numeric)
+        Ok(())
     }
 
     // Callers pass budgeted input or a serialization of its admitted algebra.

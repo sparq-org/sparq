@@ -28,8 +28,12 @@ for (const two of [false, true]) {
     await noir.execute(prepared.witnessInputs);
     const fullList = structuredClone(prepared.witnessInputs);
     fullList.in_filter_count = 16;
-    fullList.in_filter_constants.fill(fullList.in_filter_constants[0], 2);
+    const [match, miss] = fullList.in_filter_constants;
+    fullList.in_filter_constants.fill(miss);
+    fullList.in_filter_constants[15] = match;
     await noir.execute(fullList);
+    fullList.in_filter_constants[15] = miss;
+    await assert.rejects(noir.execute(fullList), /IN membership is false/);
     for (const [change, reason] of [
       [w => { w.in_filter_constants[0] = w.in_filter_constants[1]; }, /IN membership is false/],
       [w => { w.values[0][Number(w.in_filter_var) - 1] = w.in_filter_constants[1]; }, /joined variable mismatch/],

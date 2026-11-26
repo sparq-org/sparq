@@ -51,9 +51,9 @@ impl<'a> AdmittedIssuerQuery<'a> {
 /// Returns the original text for ordinary admitted queries. Scoped SELECT DISTINCT
 /// queries may contain only issuer declarations and GRAPH blocks with positive
 /// BGP/JOIN/FILTER bodies. Graph variables must be declared, used only as graph
-/// names, and all name the same issuer IRI. Queries with IN admit one triple
-/// pattern per graph variable. This is syntax admission, not issuer
-/// authentication: callers must resolve that IRI in their policy, restrict proving
+/// names, and all name the same issuer IRI. Queries with IN or whose lowered text
+/// exceeds the text budget admit one triple pattern per graph variable.
+/// Callers must resolve that IRI in their policy, restrict proving
 /// credentials, and check every authenticated public issuer slot when verifying.
 /// Native result verification does not call this helper or change its contract.
 /// Use [AdmittedIssuerQuery] to carry admission into result preparation and
@@ -158,11 +158,16 @@ fn admit_query(sparql: &str) -> Result<AdmittedIssuerQuery<'_>, PlanError> {
     }
     **inner = body;
     let lowered = parsed.to_string();
-    // Keep the algebra of the query the adapter will evaluate. Serialization
-    // can expand prefixed terms, so only the request text pays the raw budget.
+    // Serialization can expand prefixed terms. Check the scope before allowing
+    // a query whose lowered text exceeds the original admission budget.
     let query = DisclosureQuery::parse_algebra(&lowered, NumericProfile::Unsigned)?;
-    if !query.in_filters.is_empty() && query.patterns.len() != names.len() {
-        return Err(unsupported("scoped IN requires one triple pattern per graph variable"));
+    if query.patterns.len() != names.len() {
+        if !query.in_filters.is_empty() {
+            return Err(unsupported("scoped IN requires one triple pattern per graph variable"));
+        }
+        DisclosureQuery::check_text_budget(&lowered).map_err(|_| {
+            unsupported("scoped query expansion requires one triple pattern per graph variable")
+        })?;
     }
     Ok(AdmittedIssuerQuery {
         original: sparql,

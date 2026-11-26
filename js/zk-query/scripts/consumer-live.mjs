@@ -57,6 +57,9 @@ for (const sample of consumerCases) {
       : ['honest', sample.name === 'consumer-insurance-absence' ? 'claim' : sample.name === 'consumer-insurance-count' ? 'incomplete' : 'threshold'];
     const variants = sample.name.startsWith('consumer-degree') ? degreeCases(sample)
       : booleanCases.map((name, index) => ({ name, query: sample.query, expectedRows: [[`"${index === 0}"^^<${xsd}boolean>`]] }));
+    if (sample.name === 'consumer-insurance-count') {
+      variants.push({ name: 'wrong-issuer', query: sample.query, expectedRows: [] });
+    }
     for (const [index, kase] of variants.entries()) {
       const f = fixture(sample, kase);
       const policy = { ...examplePolicy(entry.example, { publicKey: f.policy.trustedIssuers[0] }, 'urn:consumer'), ...f.policy, notBefore: 0, notAfter: 32503680000 };

@@ -36,9 +36,8 @@ Projected operands also admit `FILTER(?value IN ("BSc", "MSc"))`, inside a
 scoped GRAPH block or in a flat query. Lists contain one to sixteen constant
 IRIs, strings, canonical unsigned integers or timezone-free dates. A scoped
 list within the raw input budget supports the same sixteen-constant limit.
-Scoped IN
-queries admit one triple pattern per graph variable. Independent reconstruction
-checks projected membership against authenticated released terms. AND
+Scoped IN queries admit one triple pattern per graph variable. Independent
+reconstruction checks projected membership against authenticated released terms. AND
 with existing numeric comparisons is supported. A single hidden IN uses its dedicated
 method-bound member at status depth ten with the default integer capacity and
 without hidden numeric comparisons in that proof. Its operand stays private. NOT IN, OR,
@@ -63,6 +62,8 @@ declarations and GRAPH blocks over the admitted BGP/JOIN/FILTER fragment.
 Each graph variable must be declared, used as a graph name, and occur nowhere
 else; FILTERs stay inside GRAPH blocks. Every declaration must name the same IRI,
 resolved through the policy map or members, or admission rejects `issuer-not-in-policy`.
+When the lowered text exceeds the query budget, each graph variable must have
+exactly one triple pattern.
 Multiple member keys for a scoped issuer IRI reject `issuer-scope-ambiguous-key`,
 even when only one key is used in the proof. Unscoped queries allow that roster;
 multiple verification methods with the same key remain unambiguous.

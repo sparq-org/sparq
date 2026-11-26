@@ -12,13 +12,16 @@ const date = (p, v) => `<urn:subject> <${p}> "${v}"^^<${XSD}date> .\n`;
 /** [issuer IRI, claim N-Quads] per credential, in slot order. */
 export function facts(target, kase = 'honest') {
   if (target === '1a' || target === '1b') {
-    const licence = integer('urn:claim:licence.years', kase === 'threshold' ? 4 : 5) + integer('urn:claim:licence.points', kase === 'points' ? 4 : 3);
+    const years = integer('urn:claim:licence.years', kase === 'threshold' ? 4 : 5);
+    let licence = integer('urn:claim:licence.points', kase === 'points' ? 4 : 3);
     let register;
     if (target === '1a') register = integer('urn:claim:claims.five-year-count', kase === 'claim' ? 1 : 0) + `<urn:subject> <urn:claim:claims.five-year-complete> "${kase !== 'incomplete'}"^^<${XSD}boolean> .\n`;
     else {
       register = date('https://w3id.org/jeswr/awp#periodStart', kase === 'start' ? '2021-11-14' : '2021-11-13') + date('https://w3id.org/jeswr/awp#periodEnd', kase === 'period' ? '2026-11-12' : '2026-11-13');
       if (kase === 'claim' || kase === 'old-claim') register += `<urn:subject> <urn:claim:claims.claim> <urn:claim:entry> .\n<urn:claim:entry> <urn:claim:claims.date> "${kase === 'old-claim' ? '2020-01-01' : '2026-11-01'}"^^<${XSD}date> .\n`;
     }
+    if (kase === 'wrong-issuer') register += years;
+    else licence = years + licence;
     return [['urn:fictional:insurance-quote:licensing', licence], ['urn:fictional:insurance-quote:claims-register', register]];
   }
   if (target === '2') {

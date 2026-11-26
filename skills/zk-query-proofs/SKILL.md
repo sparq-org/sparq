@@ -400,7 +400,10 @@ from `verify_manifest`: only nonempty positive `SELECT DISTINCT` answers, select
 IRIs/literals, private canonical nonnegative integer predicates, and canonical
 timezone-free `xsd:date` comparisons are admitted. `ResultOptions::integer_capacity` selects the default
 range policy or explicit `IntegerCapacityPolicy::HideInU64`; method-bound hidden
-integers always use the full-width family and keep decimal length private.
+integer comparisons use the full-width family and keep decimal length private.
+Hidden `IN` membership requires the default capacity policy. The result adapter
+admits one triple pattern per graph variable for scoped queries with `IN` or with
+lowered text that exceeds the query budget.
 Status capacity is independently derived from all freshness-accepted snapshots.
 Public predicates run in the verifier and select the member without numeric
 circuitry. Roots/salts/status indices and intermediate encodings are private;

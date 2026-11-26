@@ -142,6 +142,8 @@ All declarations must name the same issuer IRI. Multiple graph variables with
 that IRI may draw facts from separate credentials of that issuer; graph variables
 do not identify individual credentials. FILTERs belong inside their GRAPH block
 and must reference variables bound by that block's own input.
+If prefix expansion puts the lowered text over the query budget, each graph
+variable must have exactly one triple pattern.
 
 The Rust adapter shares admission and lowering between proving and verification.
 It lowers the scoped query to the existing flat relation, proves using only

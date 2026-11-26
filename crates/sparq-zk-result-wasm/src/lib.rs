@@ -617,6 +617,104 @@ mod tests {
     }
 
     #[test]
+    fn expanded_scoped_graph_requires_one_pattern_per_variable() {
+        let (issuer, _, base) = fixture();
+        let mut policy: Value = parse(&base).unwrap();
+        policy["issuers"] = json!({"urn:issuer:a": parse::<Value>(&issuer).unwrap()["publicKey"]});
+        let policy = policy.to_string();
+        let namespace = format!("urn:fixture:{}:", "-".repeat(140));
+        let credentials = [
+            issue(
+                &issuer,
+                &format!("<urn:alice> <{namespace}degree> <urn:bsc> ."),
+                STATUS,
+            )
+            .unwrap(),
+            issue(
+                &issuer,
+                &format!("<urn:alice> <{namespace}approved> <urn:yes> ."),
+                STATUS,
+            )
+            .unwrap(),
+        ];
+        let prefix = format!("PREFIX vcq: <https://w3id.org/sparq/vcq#> PREFIX p: <{namespace}>");
+        let g = "?g vcq:verifiedIssuer <urn:issuer:a> .";
+        let h = "?h vcq:verifiedIssuer <urn:issuer:a> .";
+        let degree = "?person p:degree <urn:bsc> .";
+        let approved = "?person p:approved <urn:yes> .";
+        let query = |body: &str| format!("{prefix} SELECT DISTINCT ?person WHERE {{ {body} }}");
+        let separate = query(&format!(
+            "{g} {h} GRAPH ?g {{ {degree} }} GRAPH ?h {{ {approved} }}"
+        ));
+        let prepare_query =
+            |query: &str| prepare(query, credentials.to_vec(), &policy, "0x1234", "{}");
+        let reconstruct = |query: &str, skeleton: &Value| {
+            reconstruct_public_inputs(query, &skeleton.to_string(), &policy, "0x1234")
+        };
+        let prepared: Value = parse(&prepare_query(&separate).unwrap()).unwrap();
+        assert_eq!(prepared["member"], "result_v5_k2_n16_p3_r4_f0_d10");
+        let skeleton = &prepared["presentationSkeleton"];
+        let checked: Value = parse(&reconstruct(&separate, skeleton).unwrap()).unwrap();
+        assert_eq!(
+            checked["released"],
+            json!([{"person": {"kind": "iri", "value": "urn:alice"}}])
+        );
+        assert_eq!(checked["member"], prepared["member"]);
+
+        for same in [
+            query(&format!("{g} GRAPH ?g {{ {degree} {approved} }}")),
+            query(&format!(
+                "{g} GRAPH ?g {{ {degree} }} GRAPH ?g {{ {approved} }}"
+            )),
+        ] {
+            let reason = "scoped query expansion requires one triple pattern per graph variable";
+            let mut presentation = skeleton.clone();
+            presentation["query"] = json!(same);
+            for (operation, result) in [
+                ("preparation", prepare_query(&same)),
+                ("reconstruction", reconstruct(&same, &presentation)),
+            ] {
+                let Err(refusal) = result else {
+                    panic!("{operation} accepted one graph variable");
+                };
+                assert!(refusal.contains(reason), "{refusal}");
+            }
+        }
+    }
+
+    #[test]
+    fn scoped_hidden_integer_in_refuses_explicit_full_capacity() {
+        let (issuer, _, base) = fixture();
+        let mut policy: Value = parse(&base).unwrap();
+        policy["issuers"] = json!({"urn:issuer:a": parse::<Value>(&issuer).unwrap()["publicKey"]});
+        let policy = policy.to_string();
+        let graph =
+            r#"<urn:subject> <urn:degree> "6"^^<http://www.w3.org/2001/XMLSchema#integer> ."#;
+        let credential = issue(&issuer, graph, STATUS).unwrap();
+        let query = "PREFIX vcq: <https://w3id.org/sparq/vcq#> SELECT DISTINCT ?subject WHERE { ?g vcq:verifiedIssuer <urn:issuer:a> . GRAPH ?g { ?subject <urn:degree> ?value . FILTER(?value IN (6, 7)) } }";
+        let run = |query: &str, options: &str| {
+            prepare(query, vec![credential.clone()], &policy, "0x1234", options)
+        };
+        let prepared: Value = parse(&run(query, "{}").unwrap()).unwrap();
+        assert_eq!(prepared["member"], "result_v5_k1_n16_p3_r4_f1_in_d10");
+        assert!(prepared["presentationSkeleton"]
+            .get("integer_capacity")
+            .is_none());
+
+        let options = r#"{"hideInU64":true}"#;
+        let Err(refusal) = run(query, options) else {
+            panic!("full capacity accepted for hidden IN");
+        };
+        assert!(
+            refusal.contains("hidden IN requires the default integer capacity"),
+            "{refusal}"
+        );
+        let projected = query.replace("DISTINCT ?subject", "DISTINCT ?value");
+        let prepared: Value = parse(&run(&projected, options).unwrap()).unwrap();
+        assert_eq!(prepared["member"], "result_v5_k1_n16_p3_r4_f0_d10");
+    }
+
+    #[test]
     fn scoped_typed_in_boundary_prepares_and_reconstructs() {
         let (issuer, _, base) = fixture();
         let mut policy: Value = parse(&base).unwrap();

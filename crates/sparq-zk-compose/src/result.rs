@@ -1191,7 +1191,8 @@ pub enum IntegerCapacityPolicy {
     /// use full width, while legacy opt-in issuance retains its small bucket.
     #[default]
     Smallest,
-    /// Use the full-u64 member for any private predicate, hiding the small bucket.
+    /// Use the full-u64 member for hidden integer comparisons, hiding the small bucket.
+    /// Hidden IN requires the default capacity policy.
     HideInU64,
 }
 
@@ -1372,6 +1373,14 @@ fn prepare_result_contract(
         Some(query) => query,
         None => parse_numeric_query(query, profile)?,
     };
+    if options.integer_capacity == IntegerCapacityPolicy::HideInU64
+        && parsed
+            .in_filters
+            .iter()
+            .any(|filter| !parsed.projection.contains(&filter.variable))
+    {
+        return Err(reject("hidden IN requires the default integer capacity"));
+    }
     let hidden_date =
         crate::planner::date::hidden_date(&parsed).map_err(|e| reject(e.to_string()))?;
     let entries = policy.entries()?;
