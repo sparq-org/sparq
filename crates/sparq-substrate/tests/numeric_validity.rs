@@ -2,8 +2,43 @@
 #![cfg(feature = "numeric")]
 
 use oxrdf::{Literal, NamedNode};
-use sparq_core::{exact_numeric_literal_valid, numeric_cache_value, numeric_literal_valid};
-use sparq_substrate::numeric::Num;
+use sparq_core::{
+    decimal_needs_exact_comparison, exact_numeric_literal_valid, numeric_cache_value,
+    numeric_literal_valid,
+};
+use sparq_substrate::numeric::{cmp_decimal_parts, split_decimal, Num};
+
+proptest::proptest! {
+    #![proptest_config(proptest::test_runner::Config::with_cases(256))]
+    #[test]
+    fn admitted_decimal_comparisons_preserve_decimal_round_trip(
+        coefficient in 1_u64..1_000_000_000_000_000,
+        exponent in -1100_i32..=310,
+        negative in proptest::bool::ANY,
+    ) {
+        let digits = coefficient.to_string();
+        let magnitude = if exponent >= 0 {
+            format!("{digits}{}", "0".repeat(exponent as usize))
+        } else {
+            let scale = (-exponent) as usize;
+            if scale < digits.len() {
+                format!("{}.{}", &digits[..digits.len() - scale], &digits[digits.len() - scale..])
+            } else {
+                format!("0.{}{digits}", "0".repeat(scale - digits.len()))
+            }
+        };
+        let lexical = format!("{}{magnitude}", if negative { "-" } else { "" });
+        if !decimal_needs_exact_comparison(&lexical) {
+            // This oracle uses arbitrary-scale lexical comparison, independently
+            // of the numeric tower's bounded mantissa and the guard's digit count.
+            let round_trip = lexical.parse::<f64>().unwrap().to_string();
+            proptest::prop_assert_eq!(
+                cmp_decimal_parts(split_decimal(&lexical).unwrap(), split_decimal(&round_trip).unwrap()),
+                std::cmp::Ordering::Equal,
+            );
+        }
+    }
+}
 
 #[test]
 fn numeric_facets_and_lexicals_agree_across_cache_and_arithmetic() {

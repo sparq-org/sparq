@@ -133,7 +133,7 @@ pub struct Graph {
     /// even while another reader initializes the memo. A safe memo checks only appended
     /// IDs on growth; an unsafe verdict is sticky because terms are never removed.
     /// Interior-mutable so a shared `&Graph` can populate this correctness gate.
-    high_precision_decimal: std::sync::atomic::AtomicU64,
+    decimal_needs_exact_comparison: std::sync::atomic::AtomicU64,
     /// Whether the graph holds any `xsd:float` literal (`0` = not computed,
     /// `1` = absent, `2` = present); reset on dictionary growth. Filled lazily by
     /// [`has_float_literal`](Self::has_float_literal).
@@ -952,37 +952,50 @@ fn numeric_of(term: &Term) -> f64 {
     }
 }
 
-/// (sq-lr2ii) `true` iff dict id `id` is an `xsd:decimal` literal whose lexical
-/// form carries MORE than 15 significant digits — i.e. its f64 image may be inexact, so the
-/// engine's f64 sargable FILTER fast path is unsafe for it. Only `xsd:decimal` is checked:
-/// integer exactness is handled by the engine's constant-side guard and float/double values
-/// are their own f64. See [`Graph::has_high_precision_decimal`].
-fn is_high_precision_decimal(dict: &Dict, id: Id) -> bool {
+/// Whether a cached decimal term needs the exact comparison path.
+fn is_decimal_needing_exact_comparison(dict: &Dict, id: Id, image: f64) -> bool {
     matches!(dict.term_parts(id),
         dict::TermParts::Lit { value, datatype, lang: None }
-            if datatype == xsd::DECIMAL.as_str() && decimal_significant_digits(value) > 15)
+            if datatype == xsd::DECIMAL.as_str()
+                && decimal_needs_exact_comparison_with_image(value, || image))
 }
 
-/// Significant decimal digits of a plain decimal lexical `[+-]?digits(.digits)?`: leading
-/// integer zeros and leading fractional zeros (for a value `< 1`) are not significant, e.g.
-/// `007.50` -> 3, `0.00123` -> 3, `1.000000000000000001` -> 19. `usize::MAX` for a lexical that
-/// is not a plain decimal (treated as unsafe by the `> 15` guard). Kept LOCAL to sparq-core:
-/// this crate is the leanest tier and cannot depend on `sparq-substrate`; the count mirrors the
-/// engine's `sig_digits` (constant-side guard) so the two round-trip decisions stay consistent.
-fn decimal_significant_digits(s: &str) -> usize {
-    let s = s.trim();
-    let s = s.strip_prefix(['+', '-']).unwrap_or(s);
-    let (int, frac) = s.split_once('.').unwrap_or((s, ""));
-    if (int.is_empty() && frac.is_empty()) || !int.bytes().chain(frac.bytes()).all(|c| c.is_ascii_digit()) {
-        return usize::MAX;
+/// Whether a plain decimal lexical must bypass comparison through its cached `f64`.
+///
+/// Conservatively rejects more than [`f64::DIGITS`] significant decimal digits and
+/// nonzero values whose `f64` image is zero or subnormal. Normal binary64 values
+/// retain at least 15 decimal digits; subnormals lose that guarantee below
+/// [`f64::MIN_POSITIVE`] = 2^(MIN_EXP - 1) = 2^-1022. Zero is safe at any scale.
+/// This is decimal round-trip safety, not exact binary representation (`0.1` is safe).
+/// The large end needs no extra bound: an overflowing plain decimal already has
+/// more than 15 integer digits, including its trailing integer zeros.
+///
+/// Invalid plain decimal lexicals also return `true`. This does not validate a
+/// datatype or change numeric-cache acceptance; callers validate those separately.
+pub fn decimal_needs_exact_comparison(value: &str) -> bool {
+    decimal_needs_exact_comparison_with_image(value, || value.parse::<f64>().unwrap_or(f64::NAN))
+}
+
+// One lexical decision for cached terms and constants. The image is lazy so
+// unsafe precision, invalid lexicals and lexical zero never need a float parse.
+// Cached terms supply their existing image without parsing the lexical again.
+fn decimal_needs_exact_comparison_with_image(value: &str, image: impl FnOnce() -> f64) -> bool {
+    let body = value.strip_prefix(['+', '-']).unwrap_or(value);
+    let (int, frac) = body.split_once('.').unwrap_or((body, ""));
+    if (int.is_empty() && frac.is_empty())
+        || !int.bytes().chain(frac.bytes()).all(|c| c.is_ascii_digit())
+    {
+        return true;
     }
     let int = int.trim_start_matches('0');
     let frac = frac.trim_end_matches('0');
-    if int.is_empty() {
+    let digits = if int.is_empty() {
         frac.trim_start_matches('0').len()
     } else {
         int.len() + frac.len()
-    }
+    };
+    // Test lexical nonzero: a nonzero decimal can have a zero cached image.
+    digits > f64::DIGITS as usize || (digits != 0 && !image().is_normal())
 }
 
 /// True for `xsd:integer` and its derived integer subtypes (NOT decimal/double/float) —
@@ -2109,7 +2122,7 @@ impl Graph {
             numerics,
             temporals,
             exact_temporals: std::sync::OnceLock::new(),
-            high_precision_decimal: std::sync::atomic::AtomicU64::new(0),
+            decimal_needs_exact_comparison: std::sync::atomic::AtomicU64::new(0),
             float_literal: std::sync::atomic::AtomicU8::new(0),
             named: Vec::new(),
             named_index: named_index::NamedIndex::default(),
@@ -2159,7 +2172,7 @@ impl Graph {
             temporals: self.temporals.into_sparse_if_worthwhile(),
             // sq-lr2ii: re-encoding keeps the same values; recompute the guard lazily.
             exact_temporals: std::sync::OnceLock::new(),
-            high_precision_decimal: std::sync::atomic::AtomicU64::new(0),
+            decimal_needs_exact_comparison: std::sync::atomic::AtomicU64::new(0),
             float_literal: std::sync::atomic::AtomicU8::new(0),
             named: self.named,
             named_index: self.named_index,
@@ -2612,7 +2625,7 @@ impl Graph {
             numerics,
             temporals,
             exact_temporals: std::sync::OnceLock::new(),
-            high_precision_decimal: std::sync::atomic::AtomicU64::new(0),
+            decimal_needs_exact_comparison: std::sync::atomic::AtomicU64::new(0),
             float_literal: std::sync::atomic::AtomicU8::new(0),
             named_index: named_index::NamedIndex::from_named(&named),
             named,
@@ -3494,55 +3507,63 @@ impl Graph {
         }
     }
 
-    /// `true` if the graph holds a valid integer/decimal literal missing from the
-    /// numeric cache, or a cached `xsd:decimal` with more than 15 significant digits.
-    /// Missing entries include valid values beyond the arithmetic tower: a cache-only
-    /// scan would drop them before the exact evaluator can compare their lexicals.
-    /// A high-precision decimal is a value the f64 `numerics` cache cannot represent exactly,
-    /// so the engine's f64-based sargable FILTER fast path could decide `=`/`<`/`>`/`<=`/`>=`
-    /// WRONGLY for it (e.g. `"1.000000000000000001"^^xsd:decimal` shares the f64 `1.0` with the
-    /// constant `1`, yet is not equal to it). The engine consults this at the sargable-decision
-    /// point to DECLINE that fast path and fall back to the exact general evaluator; a graph
-    /// without any such literal keeps the fast path (a decimal of `<= 15` significant digits
-    /// round-trips through f64 unambiguously, and a large-integer collision needs a `> 15`-digit
-    /// CONSTANT, which the engine already declines). Cached integers are exempt: their
-    /// exactness is the constant-side guard's job. Float/double values are their own f64;
-    /// ill-typed exact literals do not set this flag.
+    /// Whether numeric pushdown needs exact evaluation: a cached decimal has
+    /// unsafe precision or magnitude, or a valid integer/decimal is uncached.
+    /// Cached decimals share the decision of [`decimal_needs_exact_comparison`]
+    /// with FILTER constants, using their existing images without reparsing.
+    /// Cache misses require fallback even for values that round-trip, so valid
+    /// terms beyond arithmetic capacity are compared by their exact lexicals.
+    /// Ill-typed literals and float/double values do not set the guard.
     ///
-    /// Memoised (see `high_precision_decimal`): the first call scans the graph's dictionary
-    /// once (short-circuiting on the first offender); later calls are an atomic load. Forks
-    /// inherit the memo. When a delta appends terms to a graph proved safe, only the new IDs
-    /// are checked, retaining the scanned-prefix watermark. This is
-    /// a conservative, graph-wide gate — one offending literal declines the numeric fast path for
-    /// every comparison on the graph — chosen for safety (correctness is never at risk; only the
-    /// pushdown optimisation is skipped for affected graphs).
+    /// The packed atomic holds both the verdict and the scanned dictionary prefix.
+    /// Forks inherit one consistent snapshot. A safe graph eagerly checks only new
+    /// dictionary IDs after a write; unknown memos stay lazy and unsafe verdicts
+    /// stay sticky. Warm reads load one atomic without inspecting the dictionary.
+    /// One unsafe term disables numeric pushdown across the graph.
     #[inline]
-    pub fn has_high_precision_decimal(&self) -> bool {
+    pub fn has_decimal_needing_exact_comparison(&self) -> bool {
         use std::sync::atomic::Ordering::Relaxed;
-        match self.high_precision_decimal.load(Relaxed) & 3 {
+        match self.decimal_needs_exact_comparison.load(Relaxed) & 3 {
             2 => true,
             1 => false,
-            _ => self.compute_high_precision_decimal(),
+            _ => self.compute_decimal_needing_exact_comparison(),
         }
+    }
+
+    /// Deprecated alias for [`Self::has_decimal_needing_exact_comparison`].
+    #[deprecated(note = "renamed to has_decimal_needing_exact_comparison")]
+    pub fn has_high_precision_decimal(&self) -> bool {
+        self.has_decimal_needing_exact_comparison()
     }
 
     // Keep dictionary inspection out of the warmed numeric scan eligibility path.
     #[cold]
-    fn compute_high_precision_decimal(&self) -> bool {
+    fn compute_decimal_needing_exact_comparison(&self) -> bool {
         use std::sync::atomic::Ordering::Relaxed;
-        let scanned = (self.high_precision_decimal.load(Relaxed) >> 2) as Id;
+        let scanned = (self.decimal_needs_exact_comparison.load(Relaxed) >> 2) as Id;
         let len = self.dict.len() as Id;
         let found = (scanned + 1..=len).any(|id| {
             #[cfg(test)]
             precision_gate_cost::SCANNED.with(|count| count.set(count.get() + 1));
-            if self.numerics.lookup(id).is_some() {
-                return is_high_precision_decimal(&self.dict, id);
+            let image = self.numerics.lookup(id);
+            if let Some(image) = image {
+                return is_decimal_needing_exact_comparison(&self.dict, id, image);
             }
-            matches!(self.dict.term_parts(id),
-                dict::TermParts::Lit { value, datatype, lang: None }
-                    if exact_numeric_literal_valid(value, datatype))
+            match self.dict.term_parts(id) {
+                dict::TermParts::Lit {
+                    value,
+                    datatype,
+                    lang: None,
+                } if exact_numeric_literal_valid(value, datatype) => {
+                    // Use the lexical classifier when no image is available. A cache
+                    // miss also requires general evaluation even if the value itself
+                    // round-trips (e.g. a zero-padded mantissa beyond cache capacity).
+                    decimal_needs_exact_comparison(value) || image.is_none()
+                }
+                _ => false,
+            }
         });
-        self.high_precision_decimal
+        self.decimal_needs_exact_comparison
             .store(if found { 2 } else { (u64::from(len) << 2) | 1 }, Relaxed);
         found
     }
@@ -3553,7 +3574,7 @@ impl Graph {
     /// constant rounded to `f32`): `"0.1"^^xsd:float = 0.1` is true although the two `f64`
     /// images differ. The engine consults this to decline that fast path for a constant the
     /// float tier would round (one not exactly an `f32`). Memoised and reset when the
-    /// dictionary grows; unlike [`has_high_precision_decimal`](Self::has_high_precision_decimal),
+    /// dictionary grows; unlike [`has_decimal_needing_exact_comparison`](Self::has_decimal_needing_exact_comparison),
     /// this guard recomputes over the whole dictionary.
     pub fn has_float_literal(&self) -> bool {
         use std::sync::atomic::Ordering::Relaxed;
@@ -3740,8 +3761,8 @@ impl Graph {
             temporals: self.temporals.fork(),
             // The fork shares values and the precision memo; exact temporal keys stay lazy.
             exact_temporals: std::sync::OnceLock::new(),
-            high_precision_decimal: std::sync::atomic::AtomicU64::new(
-                self.high_precision_decimal.load(std::sync::atomic::Ordering::Relaxed),
+            decimal_needs_exact_comparison: std::sync::atomic::AtomicU64::new(
+                self.decimal_needs_exact_comparison.load(std::sync::atomic::Ordering::Relaxed),
             ),
             float_literal: std::sync::atomic::AtomicU8::new(0),
             named_index: named_index::NamedIndex::from_named(&named),
@@ -4643,8 +4664,8 @@ impl Graph {
         // exclusive Graph borrow prevents queries from observing a stale safe verdict.
         // Unknown memos stay lazy; unsafe verdicts stay sticky even after deletion.
         if self.dict.len() != old_len {
-            if self.high_precision_decimal.load(std::sync::atomic::Ordering::Relaxed) & 3 == 1 {
-                self.compute_high_precision_decimal();
+            if self.decimal_needs_exact_comparison.load(std::sync::atomic::Ordering::Relaxed) & 3 == 1 {
+                self.compute_decimal_needing_exact_comparison();
             }
             let _ = self.float_literal.compare_exchange(
                 1,
@@ -14500,28 +14521,180 @@ mod tests {
         assert_eq!(g.exact_numeric_lexical(g.id_of(&Term::NamedNode(NamedNode::new_unchecked("http://ex/s"))).unwrap()), None);
     }
 
-    /// sq-lr2ii — `decimal_significant_digits` counts significant digits, ignoring
-    /// leading integer zeros and leading fractional zeros, and rejects non-decimals.
     #[test]
-    fn decimal_significant_digits_counts() {
-        assert_eq!(decimal_significant_digits("1"), 1);
-        assert_eq!(decimal_significant_digits("1.5"), 2);
-        assert_eq!(decimal_significant_digits("007.50"), 2, "leading int zeros + trailing frac zeros dropped: 7.5");
-        assert_eq!(decimal_significant_digits("0.00123"), 3, "leading fractional zeros are not significant");
-        assert_eq!(decimal_significant_digits("-1.000000000000000001"), 19, "sign stripped; 19 sig digits");
-        assert_eq!(decimal_significant_digits("+2.5"), 2);
-        assert_eq!(decimal_significant_digits("0.0"), 0, "zero has no significant digits");
-        // Non-decimal lexicals are treated as unsafe (usize::MAX > 15).
-        assert_eq!(decimal_significant_digits("1e5"), usize::MAX);
-        assert_eq!(decimal_significant_digits(""), usize::MAX);
-        assert_eq!(decimal_significant_digits("abc"), usize::MAX);
+    fn decimal_comparison_precision_and_magnitude() {
+        for safe in [
+            "1",
+            "1.5",
+            "007.50",
+            "0.00123",
+            "+2.5",
+            "0.0",
+            "-0",
+            "123456789012345",
+        ] {
+            assert!(!decimal_needs_exact_comparison(safe), "{safe}");
+        }
+        for unsafe_lexical in [
+            "-1.000000000000000001",
+            "9007199254740992",
+            "1e5",
+            "",
+            "abc",
+            ".",
+            " 1 ",
+        ] {
+            assert!(
+                decimal_needs_exact_comparison(unsafe_lexical),
+                "{unsafe_lexical}"
+            );
+        }
+        let tiny = format!("0.{}1", "0".repeat(324));
+        assert!(decimal_needs_exact_comparison(&tiny));
+        assert!(decimal_needs_exact_comparison(&format!("-{tiny}")));
+        assert!(!decimal_needs_exact_comparison(&format!(
+            "-0.{}",
+            "0".repeat(400)
+        )));
+        // Overflow is already excluded by the significant-digit guard.
+        assert!(decimal_needs_exact_comparison(&format!(
+            "1{}",
+            "0".repeat(309)
+        )));
     }
 
-    /// sq-lr2ii — `has_high_precision_decimal` is the engine's sargable-safety gate:
-    /// Cached `xsd:decimal` values with > 15 significant digits set the guard.
-    /// Cached integers past 2^53, floats/doubles, and <=15-digit decimals do not.
     #[test]
-    fn has_high_precision_decimal_flags_only_inexact_decimals() {
+    fn decimal_comparison_binary64_normal_boundary() {
+        assert_eq!(f64::MIN_POSITIVE, 2.0_f64.powi(f64::MIN_EXP - 1));
+        // Adjacent 15-digit decimal values bracketing 2^-1022. The first normal
+        // one is the boundary for this decimal grid; check it and either neighbor.
+        for (digits, unsafe_value) in [
+            ("222507385850720", true),
+            ("222507385850721", false),
+            ("222507385850722", false),
+        ] {
+            let lexical = format!("0.{}{digits}", "0".repeat(307));
+            let cached = lexical.parse::<f64>().unwrap();
+            assert_eq!(cached < f64::MIN_POSITIVE, unsafe_value);
+            for sign in ["", "-"] {
+                assert_eq!(
+                    decimal_needs_exact_comparison(&format!("{sign}{lexical}")),
+                    unsafe_value
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn decimal_comparison_gate_uses_cached_image() {
+        let tiny = format!("0.{}1", "0".repeat(324));
+        for (lexical, image, expected) in [("1.5", 0.0, true), (tiny.as_str(), 1.0, false)] {
+            let mut graph = Graph::load_str(
+                &format!("<urn:s> <urn:v> \"{lexical}\"^^<http://www.w3.org/2001/XMLSchema#decimal> ."),
+                "ntriples",
+            )
+            .unwrap();
+            let term = Term::Literal(Literal::new_typed_literal(lexical, xsd::DECIMAL));
+            let id = graph.id_of(&term).unwrap();
+            // Controlled images pin the source of both normal and zero decisions.
+            // Reparsing either lexical would give the opposite answer. Real cache
+            // construction always supplies the correctly rounded image.
+            graph.numerics = NumData::Sparse([(id, image)].into_iter().collect());
+            assert_eq!(
+                graph.has_decimal_needing_exact_comparison(),
+                expected,
+                "{lexical}"
+            );
+        }
+    }
+
+    #[test]
+    fn decimal_comparison_cached_and_parsed_images_agree() {
+        let mut cases = vec![
+            ("1.5".to_string(), false),
+            ("007.50".to_string(), false),
+            (".5".to_string(), false),
+            ("5.".to_string(), false),
+            ("0.0".to_string(), false),
+            ("1.000000000000000001".to_string(), true),
+            (format!("0.{}1", "0".repeat(324)), true),
+            (format!("0.{}1", "0".repeat(309)), true),
+            (format!("0.{}0", "0".repeat(400)), false),
+        ];
+        for (digits, expected) in [
+            ("222507385850720", true),
+            ("222507385850721", false),
+            ("222507385850722", false),
+        ] {
+            cases.push((format!("0.{}{digits}", "0".repeat(307)), expected));
+        }
+        for (lexical, expected) in cases {
+            for sign in ["", "+", "-"] {
+                let lexical = format!("{sign}{lexical}");
+                let image = numeric_cache_value(&lexical, xsd::DECIMAL.as_str()).unwrap();
+                assert_eq!(
+                    decimal_needs_exact_comparison_with_image(&lexical, || image),
+                    expected,
+                    "cached {lexical}"
+                );
+                assert_eq!(
+                    decimal_needs_exact_comparison(&lexical),
+                    expected,
+                    "parsed {lexical}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn deprecated_decimal_comparison_alias_forwards_memo() {
+        let tiny = format!("0.{}1", "0".repeat(324));
+        let fresh = Graph::load_str(
+            &format!("<urn:s> <urn:v> \"{tiny}\"^^<http://www.w3.org/2001/XMLSchema#decimal> ."),
+            "ntriples",
+        )
+        .unwrap();
+        assert!(
+            fresh.has_high_precision_decimal(),
+            "legacy alias must compute an unknown unsafe memo"
+        );
+        let mut graph = Graph::load_str("<urn:s> <urn:v> 1.5 .", "turtle").unwrap();
+        assert!(!graph.has_high_precision_decimal());
+        assert_eq!(
+            graph.has_high_precision_decimal(),
+            graph.has_decimal_needing_exact_comparison()
+        );
+        let before = graph.dict.len();
+        precision_gate_cost::SCANNED.with(|count| count.set(0));
+        graph
+            .apply_delta(
+                &[[
+                    Term::NamedNode(NamedNode::new_unchecked("urn:tiny")),
+                    Term::NamedNode(NamedNode::new_unchecked("urn:v")),
+                    Term::Literal(Literal::new_typed_literal(tiny, xsd::DECIMAL)),
+                ]],
+                &[],
+            )
+            .unwrap();
+        // Only the new subject and decimal object are appended; the predicate exists.
+        assert_eq!(graph.dict.len(), before + 2);
+        assert_eq!(
+            precision_gate_cost::SCANNED.with(|count| count.replace(0)),
+            2
+        );
+        assert!(graph.has_high_precision_decimal());
+        assert_eq!(
+            graph.has_high_precision_decimal(),
+            graph.has_decimal_needing_exact_comparison()
+        );
+    }
+
+    /// sq-lr2ii — `has_decimal_needing_exact_comparison` is the engine's sargable-safety gate:
+    /// Cached decimals with unsafe precision or magnitude set the guard.
+    /// Cached integers, floats/doubles, and ordinary decimals do not.
+    #[test]
+    fn has_decimal_needing_exact_comparison_flags_only_inexact_decimals() {
         let xsd_ = |ty: &str| format!("http://www.w3.org/2001/XMLSchema#{ty}");
         let build = |obj: &str| {
             let nt = format!("<http://ex/s> <http://ex/p> {obj} .\n");
@@ -14529,24 +14702,24 @@ mod tests {
         };
 
         // The bug value: 19-sig-digit decimal collapsing onto f64 1.0.
-        assert!(build(&format!("\"1.000000000000000001\"^^<{}>", xsd_("decimal"))).has_high_precision_decimal());
+        assert!(build(&format!("\"1.000000000000000001\"^^<{}>", xsd_("decimal"))).has_decimal_needing_exact_comparison());
         // A <1 high-precision decimal.
-        assert!(build(&format!("\"0.1234567890123456789\"^^<{}>", xsd_("decimal"))).has_high_precision_decimal());
+        assert!(build(&format!("\"0.1234567890123456789\"^^<{}>", xsd_("decimal"))).has_decimal_needing_exact_comparison());
 
         // NOT flagged: an exactly-representable decimal (<=15 sig digits).
-        assert!(!build(&format!("\"1.5\"^^<{}>", xsd_("decimal"))).has_high_precision_decimal());
-        assert!(!build(&format!("\"123456789012345\"^^<{}>", xsd_("decimal"))).has_high_precision_decimal(), "15 sig digits round-trips");
+        assert!(!build(&format!("\"1.5\"^^<{}>", xsd_("decimal"))).has_decimal_needing_exact_comparison());
+        assert!(!build(&format!("\"123456789012345\"^^<{}>", xsd_("decimal"))).has_decimal_needing_exact_comparison(), "15 sig digits round-trips");
         // NOT flagged: a big integer (constant-side guard's job, not this one).
-        assert!(!build(&format!("\"9007199254740993\"^^<{}>", xsd_("integer"))).has_high_precision_decimal());
+        assert!(!build(&format!("\"9007199254740993\"^^<{}>", xsd_("integer"))).has_decimal_needing_exact_comparison());
         // NOT flagged: a high-precision double — its value IS its f64.
-        assert!(!build(&format!("\"1.000000000000000001\"^^<{}>", xsd_("double"))).has_high_precision_decimal());
+        assert!(!build(&format!("\"1.000000000000000001\"^^<{}>", xsd_("double"))).has_decimal_needing_exact_comparison());
         // NOT flagged: an empty / non-numeric graph.
-        assert!(!build("\"hello\"").has_high_precision_decimal());
-        assert!(!Graph::new().has_high_precision_decimal());
+        assert!(!build("\"hello\"").has_decimal_needing_exact_comparison());
+        assert!(!Graph::new().has_decimal_needing_exact_comparison());
     }
 
     #[test]
-    fn has_high_precision_decimal_detects_uncached_exact_values() {
+    fn has_decimal_needing_exact_comparison_detects_uncached_exact_values() {
         let huge = "340282366920938463463374607431768211456001";
         for (value, datatype, expected) in [
             (huge.to_owned(), "integer", true),
@@ -14569,29 +14742,90 @@ mod tests {
             let graph = Graph::load_str(&data, "ntriples").unwrap();
             let id = graph.iter_ids().next().unwrap()[2];
             assert!(graph.numeric_value(id).is_none(), "fixture must miss the numeric cache");
-            assert_eq!(graph.has_high_precision_decimal(), expected, "{value}^^{datatype}");
-            assert_eq!(graph.has_high_precision_decimal(), expected, "memoised {value}^^{datatype}");
+            assert_eq!(graph.has_decimal_needing_exact_comparison(), expected, "{value}^^{datatype}");
+            assert_eq!(graph.has_decimal_needing_exact_comparison(), expected, "memoised {value}^^{datatype}");
         }
     }
 
     /// sq-lr2ii — the memoised flag must NOT go stale: inserting an f64-inexact
     /// decimal via a delta AFTER the flag was computed as `false` must flip it to `true`.
     #[test]
-    fn has_high_precision_decimal_memo_survives_delta_insert() {
+    fn has_decimal_needing_exact_comparison_memo_survives_delta_insert() {
         let mut g = Graph::load_str("<http://ex/s> <http://ex/p> \"3\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n", "ntriples").unwrap();
         // Compute (and memoise) the flag as false over the integer-only graph.
-        assert!(!g.has_high_precision_decimal());
+        assert!(!g.has_decimal_needing_exact_comparison());
         // Insert a high-precision decimal; the memo must be invalidated + recomputed to true.
         let s = Term::NamedNode(NamedNode::new_unchecked("http://ex/s"));
         let p = Term::NamedNode(NamedNode::new_unchecked("http://ex/d"));
         let o = Term::Literal(Literal::new_typed_literal("2.000000000000000003", xsd::DECIMAL));
         g.apply_delta(&[[s, p, o]], &[]).unwrap();
-        assert!(g.has_high_precision_decimal(), "delta-inserted inexact decimal must flip the memo");
+        assert!(g.has_decimal_needing_exact_comparison(), "delta-inserted inexact decimal must flip the memo");
+    }
+
+    #[test]
+    fn decimal_magnitude_memo_delta_and_reopen() {
+        let tiny = format!("0.{}1", "0".repeat(324));
+        let mut g = Graph::load_str("<urn:s> <urn:v> 1.5 .", "turtle").unwrap();
+        assert!(!g.has_decimal_needing_exact_comparison());
+        assert_eq!(
+            g.decimal_needs_exact_comparison
+                .load(std::sync::atomic::Ordering::Relaxed)
+                & 3,
+            1
+        );
+        let object = Term::Literal(Literal::new_typed_literal(tiny, xsd::DECIMAL));
+        let triple = [
+            Term::NamedNode(NamedNode::new_unchecked("urn:s")),
+            Term::NamedNode(NamedNode::new_unchecked("urn:v")),
+            object.clone(),
+        ];
+        let before = g.dict.len();
+        precision_gate_cost::SCANNED.with(|count| count.set(0));
+        g.apply_delta(&[triple], &[]).unwrap();
+        assert_eq!(g.dict.len(), before + 1);
+        assert_eq!(
+            precision_gate_cost::SCANNED.with(|count| count.replace(0)),
+            1
+        );
+        assert_eq!(
+            g.decimal_needs_exact_comparison
+                .load(std::sync::atomic::Ordering::Relaxed)
+                & 3,
+            2
+        );
+        assert!(g.has_decimal_needing_exact_comparison());
+        assert_eq!(
+            g.numeric_value(g.id_of(&object).unwrap()),
+            Some(0.0),
+            "cache acceptance is unchanged"
+        );
+        #[cfg(feature = "mmap")]
+        {
+            let directory =
+                std::env::temp_dir().join(format!("sparq_decimal_magnitude_{}", std::process::id()));
+            std::fs::remove_dir_all(&directory).ok();
+            g.save(&directory).unwrap();
+            let reopened = Graph::open(&directory).unwrap();
+            assert!(
+                reopened.has_decimal_needing_exact_comparison(),
+                "current caches gain the guard on open"
+            );
+            assert!(
+                reopened.has_decimal_needing_exact_comparison(),
+                "memoised result stays true"
+            );
+            assert_eq!(
+                reopened.numeric_value(reopened.id_of(&object).unwrap()),
+                Some(0.0)
+            );
+            drop(reopened);
+            std::fs::remove_dir_all(directory).unwrap();
+        }
     }
 
     // #6485: observe the memo itself so an unnecessary rescan fails.
     #[test]
-    fn has_high_precision_decimal_memo_preserves_unchanged_dictionary() {
+    fn has_decimal_needing_exact_comparison_memo_preserves_unchanged_dictionary() {
         use std::sync::atomic::Ordering::Relaxed;
         for sparse in [false, true] {
             let mut g = Graph::load_str(
@@ -14614,12 +14848,12 @@ mod tests {
                 ]
             };
             let d = g.dict.len();
-            assert!(!g.has_high_precision_decimal());
+            assert!(!g.has_decimal_needing_exact_comparison());
             let removed = triple("urn:other", 8);
             g.apply_delta(&[], std::slice::from_ref(&removed)).unwrap();
             assert_eq!(g.len(), 2);
             assert_eq!(
-                g.high_precision_decimal.load(Relaxed) & 3,
+                g.decimal_needs_exact_comparison.load(Relaxed) & 3,
                 1,
                 "delete, sparse={sparse}"
             );
@@ -14627,34 +14861,34 @@ mod tests {
             assert!(absent.iter().all(|term| g.id_of(term).is_some()));
             g.apply_delta(&[], &[absent]).unwrap();
             assert_eq!(g.len(), 2);
-            assert_eq!(g.high_precision_decimal.load(Relaxed) & 3, 1, "absent delete");
+            assert_eq!(g.decimal_needs_exact_comparison.load(Relaxed) & 3, 1, "absent delete");
             g.apply_delta(&[removed], &[]).unwrap();
             assert_eq!(g.len(), 3);
             assert_eq!(
-                g.high_precision_decimal.load(Relaxed) & 3,
+                g.decimal_needs_exact_comparison.load(Relaxed) & 3,
                 1,
                 "known reinsertion"
             );
             g.apply_delta(&[], &[]).unwrap();
-            assert_eq!(g.high_precision_decimal.load(Relaxed) & 3, 1, "empty delta");
+            assert_eq!(g.decimal_needs_exact_comparison.load(Relaxed) & 3, 1, "empty delta");
             let inline = triple("urn:s", 999999);
             g.apply_delta(std::slice::from_ref(&inline), &[]).unwrap();
             assert_eq!(g.id_of(&inline[2]), Some(dict::INLINE_BASE + 999999));
             assert_eq!(g.dict.len(), d);
-            assert_eq!(g.high_precision_decimal.load(Relaxed) & 3, 1, "inline integer");
-            assert!(!g.has_high_precision_decimal());
+            assert_eq!(g.decimal_needs_exact_comparison.load(Relaxed) & 3, 1, "inline integer");
+            assert!(!g.has_decimal_needing_exact_comparison());
         }
     }
 
     #[test]
-    fn has_high_precision_decimal_memo_checks_stored_growth() {
+    fn has_decimal_needing_exact_comparison_memo_checks_stored_growth() {
         use std::sync::atomic::Ordering::Relaxed;
         for sparse in [false, true] {
             let mut g = Graph::load_str("@prefix : <urn:> . :s :p 7 .", "turtle").unwrap();
             if sparse {
                 g.numerics = NumData::Sparse(rustc_hash::FxHashMap::default());
             }
-            assert!(!g.has_high_precision_decimal());
+            assert!(!g.has_decimal_needing_exact_comparison());
             for (lexical, datatype, high_precision) in [
                 ("1.5", xsd::DECIMAL, false),
                 ("007", xsd::INTEGER, false),
@@ -14666,28 +14900,38 @@ mod tests {
                     Term::NamedNode(NamedNode::new("urn:p").unwrap()),
                     Term::Literal(Literal::new_typed_literal(lexical, datatype)),
                 ];
+                precision_gate_cost::SCANNED.with(|count| count.set(0));
                 g.apply_delta(std::slice::from_ref(&triple), &[]).unwrap();
-                assert!(g.dict.len() > d, "{lexical}");
+                assert_eq!(g.dict.len(), d + 1, "only the literal is new: {lexical}");
+                assert_eq!(
+                    precision_gate_cost::SCANNED.with(|count| count.replace(0)),
+                    1,
+                    "eager suffix: {lexical}"
+                );
                 let id = g.id_of(&triple[2]).unwrap();
                 assert!(g.numeric_value(id).is_some(), "{lexical}");
                 assert_eq!(g.dict.term(id), triple[2]);
                 assert_eq!(
-                    g.high_precision_decimal.load(Relaxed) & 3,
+                    g.decimal_needs_exact_comparison.load(Relaxed) & 3,
                     if high_precision { 2 } else { 1 },
                     "growth: {lexical}"
                 );
-                assert_eq!(g.has_high_precision_decimal(), high_precision);
+                assert_eq!(g.has_decimal_needing_exact_comparison(), high_precision);
                 if high_precision {
                     g.apply_delta(&[], &[triple]).unwrap();
-                    assert_eq!(g.high_precision_decimal.load(Relaxed) & 3, 2, "sticky found");
-                    assert!(g.has_high_precision_decimal());
+                    assert_eq!(
+                        g.decimal_needs_exact_comparison.load(Relaxed) & 3,
+                        2,
+                        "sticky found"
+                    );
+                    assert!(g.has_decimal_needing_exact_comparison());
                 }
             }
         }
     }
 
     #[test]
-    fn has_high_precision_decimal_memo_scans_only_new_ids() {
+    fn has_decimal_needing_exact_comparison_memo_scans_only_new_ids() {
         for storage in ["dense", "sparse", "compressed"] {
             let mut parent = Graph::load_str("<urn:s> <urn:p> 1.5 .", "turtle").unwrap();
             match storage {
@@ -14702,15 +14946,15 @@ mod tests {
                 _ => {}
             }
             precision_gate_cost::SCANNED.with(|count| count.set(0));
-            assert!(!parent.has_high_precision_decimal());
+            assert!(!parent.has_decimal_needing_exact_comparison());
             assert_eq!(
                 precision_gate_cost::SCANNED.with(|count| count.replace(0)),
                 parent.dict.len(),
                 "initial scan: {storage}"
             );
             let mut child = parent.fork();
-            assert!(!child.has_high_precision_decimal());
-            assert!(!child.snapshot().has_high_precision_decimal());
+            assert!(!child.has_decimal_needing_exact_comparison());
+            assert!(!child.snapshot().has_decimal_needing_exact_comparison());
             assert_eq!(
                 precision_gate_cost::SCANNED.with(|count| count.get()),
                 0,
@@ -14724,15 +14968,15 @@ mod tests {
                     Term::Literal(Literal::new_simple_literal(format!("new-value:{i}"))),
                 ];
                 child.apply_delta(&[triple], &[]).unwrap();
-                assert!(!child.has_high_precision_decimal());
+                assert!(!child.has_decimal_needing_exact_comparison());
                 assert_eq!(child.dict.len(), old_len + 3);
                 assert_eq!(
                     precision_gate_cost::SCANNED.with(|count| count.replace(0)),
                     3,
                     "scan only appended IDs: {storage}, batch {i}"
                 );
-                assert!(!child.fork().has_high_precision_decimal());
-                assert!(!parent.has_high_precision_decimal());
+                assert!(!child.fork().has_decimal_needing_exact_comparison());
+                assert!(!parent.has_decimal_needing_exact_comparison());
                 assert_eq!(precision_gate_cost::SCANNED.with(|count| count.get()), 0);
             }
             let huge = [
@@ -14744,31 +14988,31 @@ mod tests {
                 )),
             ];
             child.apply_delta(std::slice::from_ref(&huge), &[]).unwrap();
-            assert!(child.has_high_precision_decimal());
+            assert!(child.has_decimal_needing_exact_comparison());
             assert_eq!(
                 precision_gate_cost::SCANNED.with(|count| count.replace(0)),
                 1
             );
             let mut unsafe_fork = child.fork();
-            assert!(unsafe_fork.has_high_precision_decimal());
+            assert!(unsafe_fork.has_decimal_needing_exact_comparison());
             unsafe_fork.apply_delta(&[], &[huge]).unwrap();
             unsafe_fork.compact().unwrap();
-            assert!(unsafe_fork.has_high_precision_decimal());
-            assert!(!parent.has_high_precision_decimal());
+            assert!(unsafe_fork.has_decimal_needing_exact_comparison());
+            assert!(!parent.has_decimal_needing_exact_comparison());
             assert_eq!(precision_gate_cost::SCANNED.with(|count| count.get()), 0);
         }
     }
 
     #[test]
-    fn has_high_precision_decimal_memo_fork_compact_isolation() {
+    fn has_decimal_needing_exact_comparison_memo_fork_compact_isolation() {
         use std::sync::atomic::Ordering::Relaxed;
         let mut parent =
             Graph::load_str("@prefix : <urn:> . :s :p 1.5 . :other :p 7 .", "turtle").unwrap();
-        assert!(!parent.has_high_precision_decimal());
+        assert!(!parent.has_decimal_needing_exact_comparison());
         let mut child = parent.fork();
         assert!(matches!(&child.numerics, NumData::Forked { .. }));
-        assert_eq!(child.high_precision_decimal.load(Relaxed) & 3, 1);
-        assert!(!child.has_high_precision_decimal());
+        assert_eq!(child.decimal_needs_exact_comparison.load(Relaxed) & 3, 1);
+        assert!(!child.has_decimal_needing_exact_comparison());
         let d = child.dict.len();
         let removed = [
             Term::NamedNode(NamedNode::new("urn:other").unwrap()),
@@ -14778,17 +15022,17 @@ mod tests {
         child
             .apply_delta(&[], std::slice::from_ref(&removed))
             .unwrap();
-        assert_eq!(child.high_precision_decimal.load(Relaxed) & 3, 1);
+        assert_eq!(child.decimal_needs_exact_comparison.load(Relaxed) & 3, 1);
         assert_eq!(parent.len(), 2);
         assert_eq!(child.len(), 1);
         child.compact().unwrap();
         assert_eq!(child.dict.len(), d);
-        assert_eq!(child.high_precision_decimal.load(Relaxed) & 3, 1);
-        assert!(!child.has_high_precision_decimal());
+        assert_eq!(child.decimal_needs_exact_comparison.load(Relaxed) & 3, 1);
+        assert!(!child.has_decimal_needing_exact_comparison());
         child.apply_delta(&[removed], &[]).unwrap();
-        assert_eq!(child.high_precision_decimal.load(Relaxed) & 3, 1);
+        assert_eq!(child.decimal_needs_exact_comparison.load(Relaxed) & 3, 1);
         let snapshot = child.snapshot();
-        assert!(!snapshot.has_high_precision_decimal());
+        assert!(!snapshot.has_decimal_needing_exact_comparison());
         let inexact = [
             Term::NamedNode(NamedNode::new("urn:s").unwrap()),
             Term::NamedNode(NamedNode::new("urn:p").unwrap()),
@@ -14800,21 +15044,21 @@ mod tests {
         parent
             .apply_delta(std::slice::from_ref(&inexact), &[])
             .unwrap();
-        assert!(parent.has_high_precision_decimal());
+        assert!(parent.has_decimal_needing_exact_comparison());
         assert!(child.id_of(&inexact[2]).is_none());
-        assert!(!child.has_high_precision_decimal());
+        assert!(!child.has_decimal_needing_exact_comparison());
         child
             .apply_delta(std::slice::from_ref(&inexact), &[])
             .unwrap();
-        assert_eq!(child.high_precision_decimal.load(Relaxed) & 3, 2);
-        assert!(child.has_high_precision_decimal());
+        assert_eq!(child.decimal_needs_exact_comparison.load(Relaxed) & 3, 2);
+        assert!(child.has_decimal_needing_exact_comparison());
         assert!(snapshot.id_of(&inexact[2]).is_none());
-        assert!(!snapshot.has_high_precision_decimal());
+        assert!(!snapshot.has_decimal_needing_exact_comparison());
     }
 
     #[cfg(feature = "mmap")]
     #[test]
-    fn has_high_precision_decimal_memo_mapped_wal_precision() {
+    fn has_decimal_needing_exact_comparison_memo_mapped_wal_precision() {
         use std::sync::atomic::Ordering::Relaxed;
         let dir = std::env::temp_dir().join(format!("sparq_numeric_memo_{}", std::process::id()));
         Graph::load_str("@prefix : <urn:> . :s :p 1.5 . :other :p 7 .", "turtle")
@@ -14823,7 +15067,7 @@ mod tests {
             .unwrap();
         let mut g = backing::with_threshold(0, || Graph::open(&dir)).unwrap();
         assert!(matches!(&g.numerics, NumData::Mapped(..)));
-        assert!(!g.has_high_precision_decimal());
+        assert!(!g.has_decimal_needing_exact_comparison());
         let d = g.dict.len();
         let removed = [
             Term::NamedNode(NamedNode::new("urn:other").unwrap()),
@@ -14832,7 +15076,7 @@ mod tests {
         ];
         g.apply_delta(&[], &[removed]).unwrap();
         assert_eq!(g.dict.len(), d);
-        assert_eq!(g.high_precision_decimal.load(Relaxed) & 3, 1);
+        assert_eq!(g.decimal_needs_exact_comparison.load(Relaxed) & 3, 1);
         let inexact = [
             Term::NamedNode(NamedNode::new("urn:s").unwrap()),
             Term::NamedNode(NamedNode::new("urn:p").unwrap()),
@@ -14842,19 +15086,19 @@ mod tests {
             )),
         ];
         g.apply_delta(std::slice::from_ref(&inexact), &[]).unwrap();
-        assert_eq!(g.high_precision_decimal.load(Relaxed) & 3, 2);
+        assert_eq!(g.decimal_needs_exact_comparison.load(Relaxed) & 3, 2);
         assert!(g.numeric_value(g.id_of(&inexact[2]).unwrap()).is_some());
         drop(g); // Reopen must obtain the new term and numeric cache through WAL replay.
         let mut reopened = Graph::open(&dir).unwrap();
-        assert_eq!(reopened.high_precision_decimal.load(Relaxed) & 3, 0);
-        assert!(reopened.has_high_precision_decimal());
+        assert_eq!(reopened.decimal_needs_exact_comparison.load(Relaxed) & 3, 0);
+        assert!(reopened.has_decimal_needing_exact_comparison());
         reopened.apply_delta(&[], &[inexact]).unwrap();
-        assert_eq!(reopened.high_precision_decimal.load(Relaxed) & 3, 2);
+        assert_eq!(reopened.decimal_needs_exact_comparison.load(Relaxed) & 3, 2);
         reopened.compact().unwrap(); // The dictionary retains the now-orphaned decimal.
-        assert!(reopened.has_high_precision_decimal());
+        assert!(reopened.has_decimal_needing_exact_comparison());
         drop(reopened);
         let final_graph = Graph::open(&dir).unwrap();
-        assert!(final_graph.has_high_precision_decimal());
+        assert!(final_graph.has_decimal_needing_exact_comparison());
         drop(final_graph);
         std::fs::remove_dir_all(&dir).unwrap();
     }

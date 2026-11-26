@@ -357,7 +357,7 @@ fn uncached_exact_values_after_update_transaction_and_fork_match_bind() {
             if compressed {
                 graph = graph.into_compressed();
             }
-            assert!(!graph.has_high_precision_decimal());
+            assert!(!graph.has_decimal_needing_exact_comparison());
             let before = graph.snapshot();
             let insert = format!(
                 "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> INSERT DATA {{
@@ -396,7 +396,7 @@ fn uncached_exact_values_after_update_transaction_and_fork_match_bind() {
                 }
                 _ => unreachable!(),
             }
-            assert!(!before.has_high_precision_decimal());
+            assert!(!before.has_decimal_needing_exact_comparison());
             assert_eq!(before.len(), 1);
             for expr in ["?v > 7", "7 < ?v", "?v < 0", "0 > ?v"] {
                 for budget in [QueryBudget::unlimited(), bounded()] {
@@ -410,7 +410,7 @@ fn uncached_exact_values_after_update_transaction_and_fork_match_bind() {
                 }
             }
             assert!(
-                graph.has_high_precision_decimal(),
+                graph.has_decimal_needing_exact_comparison(),
                 "{path}, compressed={compressed}"
             );
         }
