@@ -1,6 +1,63 @@
 //! Public request bounds determine buckets; private cardinalities never select a key.
 
-use crate::Error;
+use crate::{plan::Plan, Error};
+use std::{collections::BTreeSet, sync::OnceLock};
+
+/// Holder-approved plan hashes and their public `rows_per_table` limits.
+/// Each plan hash binds the ordered table buckets. An empty policy refuses all plans.
+#[derive(Clone, Debug, Default)]
+pub struct BucketPolicy {
+    allowed: BTreeSet<([u8; 32], u32)>,
+}
+
+impl BucketPolicy {
+    /// The row policies published in the Node package's pinned catalogue.
+    pub fn catalogue() -> Result<&'static Self, Error> {
+        static POLICY: OnceLock<Result<BucketPolicy, Error>> = OnceLock::new();
+        POLICY
+            .get_or_init(|| {
+                let invalid = || Error::Infrastructure("invalid row bucket catalogue".into());
+                let catalogue: serde_json::Value = serde_json::from_str(include_str!(
+                    "../../../js/zk-query/assets/catalogue.json"
+                ))
+                .map_err(|_| invalid())?;
+                let entries = catalogue["entries"].as_array().ok_or_else(invalid)?;
+                let allowed = entries
+                    .iter()
+                    .map(|entry| {
+                        let hash = entry["planHash"].as_str().ok_or_else(invalid)?;
+                        let hash = blake3::Hash::from_hex(hash).map_err(|_| invalid())?;
+                        let limit = entry["example"]["bounds"]["rowsPerTable"]
+                            .as_u64()
+                            .and_then(|n| u32::try_from(n).ok())
+                            .ok_or_else(invalid)?;
+                        Ok((*hash.as_bytes(), limit))
+                    })
+                    .collect::<Result<_, Error>>()?;
+                Ok(Self { allowed })
+            })
+            .as_ref()
+            .map_err(Clone::clone)
+    }
+
+    /// Approve a plan selected independently by the holder, including its exact row limit.
+    pub fn allow_plan(&mut self, plan: &Plan) {
+        self.allowed
+            .insert((plan.hash(), plan.bounds().rows_per_table));
+    }
+
+    /// Check the request's reconstructed plan before accessing private inputs.
+    pub fn check(&self, plan: &Plan) -> Result<(), Error> {
+        if self
+            .allowed
+            .contains(&(plan.hash(), plan.bounds().rows_per_table))
+        {
+            Ok(())
+        } else {
+            Err(Error::RowBucketsNotAllowed)
+        }
+    }
+}
 
 /// Verifier-selected opening bounds, compiled into the query program.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

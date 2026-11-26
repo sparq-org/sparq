@@ -212,6 +212,14 @@ its plan and result encoding from the stored request and RDF answer and consumes
 the original challenge last. Toolchain pins and verifier target are independent
 of the cache location.
 
+Native holders start with the published Node catalogue's row bucket allow-list.
+For a custom list, start with `capacity::BucketPolicy::default()`, call
+`allow_plan(&plan)` for each independently selected plan and pass the policy to
+`Compiler::with_bucket_policy`. `Compiler::holder_plan(&request)` checks the
+request's plan hash and public row limit. `prove` and `prove_with_envelope`
+return `Error::RowBucketsNotAllowed` on a policy miss before compiling or
+generating a witness. See the [query-method contracts](references/query-method-contracts.md#holder-row-bucket-policy).
+
 The query crate's `envelope_policy::{PolicyInput, derive, public_words}` helper
 prepares the agreed public policy extension from typed stored-policy input.
 `TrustMember` binds issuer, verification method, suite and key; `HolderBinding`

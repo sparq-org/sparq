@@ -37,7 +37,7 @@ pub(crate) fn prepare(input: &str) -> Result<Value> {
         serde_json::from_value(envelope["request"].clone()).map_err(err)?;
     let request = request::restore(&request_wire)?;
     let plan = request.plan().map_err(err)?;
-    request::checked_key(&plan, request.key())?;
+    request::checked_holder_key(&plan, request.key())?;
     let input: Input = serde_json::from_value(envelope).map_err(err)?;
     request::freshness(&request, input.clock)?;
     let policy = request_wire.policy.envelope_policy()?;

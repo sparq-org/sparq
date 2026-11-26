@@ -76,7 +76,9 @@ catalogued combinations prove.
 - `validityTime` (epoch milliseconds) requires `validFrom <= validityTime <= validUntil`.
 - `earliestCreated` (epoch milliseconds) requires the proof configuration's
   `created` instant to be no earlier.
-- `tableRowBounds` gives one row limit per plan node, in plan order; an overflow refuses.
+- `tableRowBounds` gives one row limit per plan node in plan order. The catalogue
+  allow-lists the compiled buckets and exact `rowsPerTable` limit before witness
+  preparation. An intermediate row overflow refuses proving.
 - `openingProfile` selects the lexical opening limits: `solid` (default),
   `long-objects` or `extended`.
 

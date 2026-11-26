@@ -431,6 +431,34 @@ paths constrain unused siblings to zero. The public accepted-snapshot set depth
 is separate. Public policy and roots come from the stored request. Native proving
 remains hidden-signature mode.
 
+### Holder row bucket policy
+
+The public `tableRowBounds` vector gives one bucket per plan node in plan order.
+The plan hash commits to that ordered vector of compiled capacities. The holder
+policy matches the hash together with the request's exact `rows_per_table`
+limit. A request without `tableRowBounds` uses the uniform row limit. Both the
+native compiler and the Node package use the published catalogue by default.
+Native holders can replace it with `Compiler::with_bucket_policy`. Configure the
+policy independently of incoming requests and private inputs. Use
+`BucketPolicy::allow_plan` to register each approved plan with its row limit.
+`Compiler::holder_plan` checks a stored request, and both native proving entry
+points enforce the same check before compilation or witness generation. A miss
+returns `RowBucketsNotAllowed`. Verifier preparation and verification derive
+their plans from the verifier's stored request.
+
+The holder can produce a proof only when each evaluated table fits its public
+bound. This includes intermediate operator outputs before the final result, such as
+scan and join outputs and the evaluated tables of correlated `EXISTS` bodies.
+For repeated requests over the same private inputs and equivalent query
+evaluation, each success bounds every table's cardinality from above. The
+smallest successful bound for a given table gives its tightest upper bound from
+those successes. A refusal known to be due to a row overflow means at least one
+table exceeded its corresponding bound. If every other table is already known
+to fit, that refusal supplies a lower bound for the remaining table. The released
+answer omits these intermediate cardinalities as separate fields. The allow-list
+limits which bucket vectors a holder will evaluate, and the outcomes of approved
+requests can still disclose these bounds.
+
 ### Closed graph fixtures
 
 `credential_graphs` supplies a separate research fixture adapter.

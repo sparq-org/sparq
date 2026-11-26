@@ -11,7 +11,7 @@ use sparq_query_protocol::*;
 use sparq_zk_query::credential::SuiteEncoder as FixtureEncoder;
 use sparq_zk_query::{
     answer::Answer,
-    capacity::Bounds,
+    capacity::{Bounds, BucketPolicy},
     method::{Compiler, Prepared},
     request::{Request, PROFILE},
     Error,
@@ -83,18 +83,21 @@ fn authenticated_request(
     bounds: Bounds,
     key: Vec<u8>,
 ) -> Result<Request, Error> {
-    let mut spec = request_spec(&stored);
-    let mut requirements = requirements_spec(&spec.requirements);
-    requirements.source_evidence = Some(SourceEvidence::IssuerAuthenticated);
-    requirements.accepted_suites = vec![id(sparq_zk_query::request::SUITE)];
-    spec.requirements = QueryRequirements::new(requirements).unwrap();
     Request::new_authenticated_with_envelope(
-        StoredRequest::new(spec).unwrap(),
+        authenticated_stored(&stored),
         bounds,
         key,
         canonical_policy(),
         None,
     )
+}
+fn authenticated_stored(stored: &StoredRequest) -> StoredRequest {
+    let mut spec = request_spec(stored);
+    let mut requirements = requirements_spec(&spec.requirements);
+    requirements.source_evidence = Some(SourceEvidence::IssuerAuthenticated);
+    requirements.accepted_suites = vec![id(sparq_zk_query::request::SUITE)];
+    spec.requirements = QueryRequirements::new(requirements).unwrap();
+    StoredRequest::new(spec).unwrap()
 }
 
 #[derive(Default)]
@@ -125,6 +128,9 @@ fn native_proof_reconstructs_inputs_and_consumes_only_after_acceptance() {
         .with_crs_path(std::env::temp_dir().join("sparq_noir_query_crs"));
     let query = "SELECT ?s WHERE {?s <urn:p> ?x}";
     let prepared = compiler.prepare(query, B).unwrap();
+    let mut buckets = BucketPolicy::default();
+    buckets.allow_plan(&prepared.plan);
+    let compiler = compiler.with_bucket_policy(buckets);
     let prepared_again = compiler.prepare(query, B).unwrap();
     assert_eq!(prepared.verification_key, prepared_again.verification_key);
     let separate = tempfile::tempdir().unwrap();
@@ -426,23 +432,29 @@ fn n0_native_proof_profile_matches_the_engine_and_refuses_altered_answers() {
         Err(std::env::VarError::NotPresent) => None,
         Err(std::env::VarError::NotUnicode(_)) => panic!("invalid native proof profile"),
     };
+    let case_bounds = |case: &fixture_support::N0Case| Bounds {
+        credentials: case.sources.len() as u32,
+        rows_per_table: if matches!(case.name, "projection-bag" | "distinct") {
+            8
+        } else {
+            B.rows_per_table
+        },
+        ..B
+    };
     let cases =
         native_proof_cases(profile.as_deref()).expect("native proof profile is full or smoke");
+    let mut buckets = BucketPolicy::default();
+    for case in &cases {
+        buckets.allow_plan(&sparq_zk_query::lower::lower(case.query, case_bounds(case)).unwrap());
+    }
+    let compiler = compiler.with_bucket_policy(buckets);
     eprintln!(
         "Native proof profile: {}",
         profile.as_deref().unwrap_or("full")
     );
     let store = Store::default();
     for (index, case) in cases.into_iter().enumerate() {
-        let bounds = Bounds {
-            credentials: case.sources.len() as u32,
-            rows_per_table: if matches!(case.name, "projection-bag" | "distinct") {
-                8
-            } else {
-                B.rows_per_table
-            },
-            ..B
-        };
+        let bounds = case_bounds(&case);
         let start = std::time::Instant::now();
         let prepared = compiler.prepare(case.query, bounds).unwrap();
         let prepare_seconds = start.elapsed().as_secs_f64();
@@ -854,6 +866,9 @@ fn shape_cache_reuses_constants_and_invalidates_library_revisions() {
             .count()
     };
     let original = compiler.prepare("ASK {?s <urn:p> ?x}", B).unwrap();
+    let mut buckets = BucketPolicy::default();
+    buckets.allow_plan(&original.plan);
+    let compiler = compiler.with_bucket_policy(buckets);
     assert_eq!(entries(), 1);
     let other_constants = compiler.prepare("ASK {?v <urn:q> ?y}", B).unwrap();
     assert_eq!(original.verification_key, other_constants.verification_key);
@@ -1068,6 +1083,123 @@ fn stored_request_reconstructs_per_table_row_bounds() {
     assert_eq!(
         make(Some(&rows[1..])).unwrap_err(),
         Error::Capacity("per-table row bounds".into())
+    );
+}
+
+#[test]
+fn holder_refuses_unlisted_row_buckets_before_proving() {
+    use sparq_zk_query::{lower::lower, plan_closed::with_row_bounds};
+
+    let query = "SELECT ?s WHERE { ?s <urn:p> ?o }";
+    let make = |query: &str, rows: &[u32]| {
+        let plan = with_row_bounds(lower(query, B).unwrap(), B, rows).unwrap();
+        let key = vec![41; 8];
+        let prepared = Prepared {
+            descriptor: sparq_zk_query::request::descriptor(&plan, &key).unwrap(),
+            plan,
+            verification_key: key.clone(),
+            artifact: serde_json::Value::Null,
+        };
+        Request::new_authenticated_with_envelope_profile_and_table_rows(
+            authenticated_stored(&stored(&prepared, query, 9, "urn:verifier", None)),
+            B,
+            key,
+            canonical_policy(),
+            None,
+            Default::default(),
+            Some(rows),
+        )
+        .unwrap()
+    };
+
+    let allowed = make(query, &[2, 4]);
+    let swapped = make(query, &[4, 2]);
+    let other_shape = make("SELECT ?s WHERE { ?s ?p ?o }", &[2, 4]);
+    let mut buckets = BucketPolicy::default();
+    buckets.allow_plan(&allowed.plan().unwrap());
+
+    // The empty library directory makes any attempt to compile a proving program fail.
+    let library = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let compiler = Compiler::new(work.path(), library.path()).unwrap();
+    assert_eq!(
+        compiler.holder_plan(&allowed).unwrap_err(),
+        Error::RowBucketsNotAllowed
+    );
+    let compiler = compiler.with_bucket_policy(buckets);
+    let approved_plan = compiler.holder_plan(&allowed).unwrap();
+    assert_eq!(
+        approved_plan
+            .nodes()
+            .iter()
+            .map(|node| node.output.capacity)
+            .collect::<Vec<_>>(),
+        [2, 4]
+    );
+    sparq_zk_query::codegen::generate(&approved_plan).unwrap();
+
+    let clock = || panic!("holder refusal must precede the proof clock");
+    for denied in [&swapped, &other_shape] {
+        assert_eq!(
+            compiler
+                .prove(denied, &[], &[], &FixtureEncoder, [3; 32], clock)
+                .unwrap_err(),
+            Error::RowBucketsNotAllowed
+        );
+        assert_eq!(
+            compiler
+                .prove_with_envelope(
+                    denied,
+                    &[],
+                    &[],
+                    [3; 32],
+                    &sparq_zk_query::witness::EnvelopeWitness::default(),
+                    clock,
+                )
+                .unwrap_err(),
+            Error::RowBucketsNotAllowed
+        );
+    }
+    assert_eq!(work.path().read_dir().unwrap().count(), 0);
+
+    assert!(matches!(
+        compiler.prove(&allowed, &[], &[], &FixtureEncoder, [3; 32], clock),
+        Err(Error::Infrastructure(_))
+    ));
+}
+
+#[test]
+fn holder_defaults_to_the_catalogue_row_policy() {
+    let query = "ASK {}";
+    let bounds = Bounds {
+        credentials: 1,
+        quads_per_credential: 2,
+        rows_per_table: 1,
+    };
+    let plan = sparq_zk_query::lower::lower(query, bounds).unwrap();
+    let key = vec![41; 8];
+    let prepared = Prepared {
+        descriptor: sparq_zk_query::request::descriptor(&plan, &key).unwrap(),
+        plan,
+        verification_key: key.clone(),
+        artifact: serde_json::Value::Null,
+    };
+    let request = authenticated_request(
+        stored(&prepared, query, 9, "urn:verifier", None),
+        bounds,
+        key,
+    )
+    .unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let compiler = Compiler::new(work.path(), work.path()).unwrap();
+    assert_eq!(
+        compiler.holder_plan(&request).unwrap().hash(),
+        prepared.plan.hash()
+    );
+    let compiler = compiler.with_bucket_policy(BucketPolicy::default());
+    assert_eq!(
+        compiler.holder_plan(&request).unwrap_err(),
+        Error::RowBucketsNotAllowed
     );
 }
 

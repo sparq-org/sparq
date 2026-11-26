@@ -3,7 +3,7 @@
 
 use crate::{
     answer::Answer,
-    capacity::{Bounds, OpeningProfile},
+    capacity::{Bounds, BucketPolicy, OpeningProfile},
     codegen,
     credential::{Credential, SuiteEncoder},
     interp::{self, EncodeTerm},
@@ -44,6 +44,7 @@ pub struct Compiler {
     root: PathBuf,
     zk: PathBuf,
     crs_path: Option<PathBuf>,
+    bucket_policy: BucketPolicy,
     cache: Mutex<BTreeMap<CacheKey, Arc<Compiled>>>,
 }
 
@@ -51,6 +52,7 @@ impl Compiler {
     /// Both directories are local configuration. `zk` is the repository's trusted
     /// library tree; `root` holds private, isolated generated workspaces.
     /// Choose `root` outside any existing Nargo workspace.
+    /// The holder policy starts with the published catalogue.
     pub fn new(root: impl Into<PathBuf>, zk: impl Into<PathBuf>) -> Result<Self, Error> {
         let root = root.into();
         fs::create_dir_all(&root).map_err(infrastructure)?;
@@ -58,6 +60,7 @@ impl Compiler {
             root,
             zk: zk.into().canonicalize().map_err(infrastructure)?,
             crs_path: None,
+            bucket_policy: BucketPolicy::catalogue()?.clone(),
             cache: Mutex::new(BTreeMap::new()),
         })
     }
@@ -65,6 +68,18 @@ impl Compiler {
     pub fn with_crs_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.crs_path = Some(path.into());
         self
+    }
+    /// Replace the catalogue defaults with the holder's locally configured allow-list.
+    pub fn with_bucket_policy(mut self, policy: BucketPolicy) -> Self {
+        self.bucket_policy = policy;
+        self
+    }
+
+    /// Reconstruct and check the request's plan against the holder's row bucket policy.
+    pub fn holder_plan(&self, request: &Request) -> Result<Plan, Error> {
+        let plan = request.plan()?;
+        self.bucket_policy.check(&plan)?;
+        Ok(plan)
     }
     pub fn prepare(&self, query: &str, bounds: Bounds) -> Result<Prepared, Error> {
         let plan = lower(query, bounds)?;
@@ -221,7 +236,7 @@ impl Compiler {
         now: impl Fn() -> u64,
     ) -> Result<Presentation, Error> {
         let envelope = request.envelope_inputs()?;
-        let plan = request.plan()?;
+        let plan = self.holder_plan(request)?;
         let compiled = self.checked_key(request, &plan)?;
         freshness(request, now())?;
         let authorized;

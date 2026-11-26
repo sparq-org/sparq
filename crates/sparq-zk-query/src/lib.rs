@@ -42,6 +42,8 @@ pub enum Error {
     Unsupported(String),
     /// A request or evaluation exceeds a compiled bound.
     Capacity(String),
+    /// The holder's row bucket policy refuses the requested plan.
+    RowBucketsNotAllowed,
     /// The supplied object does not follow the plan contract.
     Invalid(String),
     /// Native tooling or local artifact storage failed.
@@ -56,6 +58,7 @@ impl std::fmt::Display for Error {
             Self::Excluded(name) => write!(f, "{name} is excluded by the query method"),
             Self::Unsupported(name) => write!(f, "{name} is not yet supported by the query method"),
             Self::Capacity(name) => write!(f, "capacity refusal: {name}"),
+            Self::RowBucketsNotAllowed => write!(f, "row buckets not allowed by holder policy"),
             Self::Invalid(why) => write!(f, "invalid query-method input: {why}"),
             Self::Infrastructure(why) => write!(f, "query-method infrastructure: {why}"),
             Self::Protocol(why) => write!(f, "{why}"),

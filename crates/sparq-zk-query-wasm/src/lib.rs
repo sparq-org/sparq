@@ -71,7 +71,7 @@ pub fn host_call(operation: &str, input: &str) -> std::result::Result<String, St
                 serde_json::from_value(input["request"].clone()).map_err(err)?;
             let r = request::restore(&wire)?;
             let p = r.plan().map_err(err)?;
-            request::checked_key(&p, r.key())?;
+            request::checked_holder_key(&p, r.key())?;
             request::freshness(&r, input["clock"].as_u64().ok_or("clock rejected")?)?;
             value!({"planHash":codec::hex(&p.hash())})
         }

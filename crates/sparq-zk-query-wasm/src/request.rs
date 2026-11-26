@@ -4,8 +4,7 @@ use serde_json::{json, Value};
 use sparq_query_protocol::*;
 use sparq_zk::sig;
 use sparq_zk_query::{
-    capacity::Bounds,
-    capacity::OpeningProfile,
+    capacity::{Bounds, BucketPolicy, OpeningProfile},
     envelope_policy::{AcceptedSnapshots, HolderBinding, PolicyInput, TrustMember},
     lower::lower,
     plan::{EnvelopeFeatures, Plan, ResultForm},
@@ -352,6 +351,12 @@ pub(crate) fn checked_key(plan: &Plan, key: &[u8]) -> Result<()> {
     }
     Ok(())
 }
+pub(crate) fn checked_holder_key(plan: &Plan, key: &[u8]) -> Result<()> {
+    checked_key(plan, key)?;
+    BucketPolicy::catalogue()
+        .and_then(|policy| policy.check(plan))
+        .map_err(err)
+}
 pub(crate) fn create(input: &str) -> Result<RequestWire> {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -373,7 +378,7 @@ pub(crate) fn create(input: &str) -> Result<RequestWire> {
     );
     let key = bytes(&input.verification_key)?;
     let plan = policy.plan(&input.query)?;
-    checked_key(&plan, &key)?;
+    checked_holder_key(&plan, &key)?;
     let nonce = hex(&word(&input.nonce)?);
     let request = native(&input.query, &policy, &nonce, &key)?;
     Ok(RequestWire {
@@ -438,5 +443,51 @@ pub(crate) fn agreement(request: &Request, commitment: [u8; 32]) -> Result<()> {
         Err("dataset commitment agreement".into())
     } else {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn catalogue_checks_public_row_limit_before_witness_preparation() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../js/zk-query/test/fixtures/authenticated.json"
+        ))
+        .unwrap();
+        let mut wire: RequestWire = serde_json::from_value(fixture["request"].clone()).unwrap();
+        let allowed = json!({ "request": wire, "clock": 1 });
+        let admitted = crate::host_call("holder", &allowed.to_string()).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&admitted).unwrap()["planHash"],
+            wire.plan_hash
+        );
+
+        wire.policy.bounds.rows_per_table = 2;
+        let key = bytes(&wire.verification_key).unwrap();
+        let request = native(&wire.query, &wire.policy, &wire.nonce, &key).unwrap();
+        let plan = request.plan().unwrap();
+        assert_eq!(hex(&plan.hash()), wire.plan_hash);
+        wire.digest = hex(&request.digest());
+        wire.request_rdf = request.canonical_rdf().into();
+        let denied = json!({ "request": wire, "clock": 1, "credentials": null });
+
+        let refusal = "row buckets not allowed by holder policy";
+        assert_eq!(checked_holder_key(&plan, &key).unwrap_err(), refusal);
+        for operation in ["holder", "prepareProof"] {
+            assert_eq!(
+                crate::host_call(operation, &denied.to_string()).unwrap_err(),
+                refusal
+            );
+        }
+        let creation = json!({
+            "query": wire.query, "policy": wire.policy, "nonce": wire.nonce,
+            "verificationKey": wire.verification_key, "clock": 1,
+        });
+        assert_eq!(
+            crate::host_call("request", &creation.to_string()).unwrap_err(),
+            refusal
+        );
     }
 }

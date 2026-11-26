@@ -103,8 +103,9 @@ checks pinned native proof verification and the portable operator prover.
 The catalogue route is a trust assumption: in Node, holder and verifier both rely
 on the package's digest-pinned mapping from plan to program and key, rebuilt in CI
 from the native compiler. Only catalogued query shapes work, and the catalogue
-fixes each shape's row buckets (the holder's allow-list). A native party can check
-any entry by compiling the plan itself.
+fixes each shape's `tableRowBounds` and public `rowsPerTable` limit. Node checks
+this allow-list when creating a request and before witness preparation. The native
+holder defaults to the same list. See the [query-method contracts](../zk-query-proofs/references/query-method-contracts.md#holder-row-bucket-policy).
 
 For a verifier-agreed `inputCommitment`, the holder passes the existing commitment's
 salt as `backend: { type: 'native', presentationSaltHex }` (or the corresponding

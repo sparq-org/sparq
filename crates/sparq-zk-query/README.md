@@ -107,8 +107,8 @@ fixtures; authenticated altered-witness controls run separately.
 for native proof-test plans and measurements. Keep the output outside the repository.
 
 A complete answer is relative to the opened dataset. Without a verifier-agreed
-commitment the holder chooses that dataset. Repeated questions can reveal more
-through their answers; the holder service supplies the policy hook.
+commitment the holder chooses that dataset. `Compiler::with_bucket_policy` replaces
+the default Node catalogue allow-list. A row policy miss returns `Error::RowBucketsNotAllowed` before proving.
 
 ## 📚 Architecture
 
