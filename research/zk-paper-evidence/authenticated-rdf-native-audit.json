@@ -1,0 +1,2040 @@
+{
+  "audited_at": "2026-09-26T19:45:48.114688+00:00",
+  "source_head": "8322a6ff4acd7cff074cd91131111a52dee46953",
+  "verdict": "All8 scoped native model steps pass; not a workspace/guest/proof/security gate",
+  "source_identity": {
+    "tracked_files": 7070,
+    "all_match_local_commit": true,
+    "before_after_equal": true,
+    "git_status_clean": true,
+    "lock_count": 29,
+    "lock_hashes": {
+      "Cargo.lock": "183e00ca12ed4b6c6d7697f2cd1171a4457c455c9727cc0c4a3ea717f1e98fef",
+      "bench/ac/Cargo.lock": "2ecaaa1ef32d21f2d449a4000ed767b80300f80b71e3600b88cc850a0193cd19",
+      "bench/ac/live/Cargo.lock": "65aa178871fa2f37224f15d022be8a954be9bbea6b51558985c291df83601f8a",
+      "bench/ac/odre/exporter/Cargo.lock": "664bd92c883637c88c1e01d64810400f000a852dd71ee49f2deec92ea54cca85",
+      "bench/ac/overhead/Cargo.lock": "b80bd4a7c2c731b92a74561a239aa2aa04c53f4560c6d98f1543b5fd98a49c76",
+      "bench/alloc-track/Cargo.lock": "ec3f873a0c2f1d166c539d616a6cdcb554f6845e145a88cba68cd88114fd2545",
+      "bench/jsonld-context/Cargo.lock": "453c75544e36e6b8d0cbec5db9ad824c1d71605cce3a669382a63c76f204426d",
+      "bench/memtier/Cargo.lock": "7f566eab571dfad82ab90ebf453d6feacae50ba479f63b7217e7657ad7da56e3",
+      "bench/overlay-count/Cargo.lock": "b319e3eafeffff389ed020f2213f89dbc0f7041405a3dc9d42facec6e74681bf",
+      "bench/parse/Cargo.lock": "ed7bfa477b8f5e5ba60750f0ae949a2a68c0b179a119e8a455867e7e393faf75",
+      "bench/rsp-window-differential/Cargo.lock": "f2f3ccd5add17c997c3c0e70453a277c9bdf1cd43d9b0c7db22497aeaf26e85a",
+      "bench/serve-throughput/Cargo.lock": "64d12da7d6571ecda4e3159bdcd2cfeca01dae5fb1af730f4272543704394ffd",
+      "bench/serve/Cargo.lock": "b59d11dcb5bc8f3e99f9060b501cae9c6a753d8a557d1b8f027a6390139a9dc5",
+      "bench/service-fed-loopback/Cargo.lock": "d75198d9c8d101d99ba25a503279796c32200d9c3577a321888fcf3f384308f8",
+      "bench/trust-graph/Cargo.lock": "a7106ba355e0f46cd0efa5e48663c7abeb64e2fc3e21165da6802785d8b3a05e",
+      "bench/zk-compose/family_curve/Cargo.lock": "b154a74ec2901822553ac15995cb1c3717e675704819de11cb8160166b1dc5e4",
+      "bench/zk-trace/Cargo.lock": "9ba7d06fd41052ee16c5132818cc089906575cee45c4915b25ef244664c5d478",
+      "bench/zk/Cargo.lock": "54da04233abc9478c8af80c3685154feaac5f52e34e8cc18db36a590da463c64",
+      "examples/Cargo.lock": "f524bbeeade2f703caf62763e8e35133002f3e473d95c179a7c940779a4f5f15",
+      "fuzz/Cargo.lock": "979b4b10f5b5a2d1b4d76e1fa555c0e67ce854a05744c64ea8a04df2df5d5ec4",
+      "gui/src-tauri/Cargo.lock": "e5e4574e9a5403fbee416ce7312eb89a78f376630844f258de78b408cccf4253",
+      "research/hardware/wgpu-spike/Cargo.lock": "882c0eba844dcabe460ec3b198125fca4fc61802d2051f0dff11f474daa9ff9f",
+      "vendor/zk-sdk/risc0-build-3.0.6/Cargo.lock": "74772f8b0b62d2f1e2c2e54b895865185c58748dc186f45416dbbd9139db8dfd",
+      "vendor/zk-sdk/risc0-zkos-v1compat-2.2.3/Cargo.lock": "e0358b27e1cfb7027b89f4599bbaa86c5bda74f46b880584769eb32fa0b6d976",
+      "vendor/zk-sdk/risc0-zkvm-3.0.6/Cargo.lock": "797fdd98e41182bf79b5d4d030606d837bc24925152d1ec6cd724e27d66e57c7",
+      "vendor/zk-sdk/rzup-0.5.2/Cargo.lock": "8281ad0f11bcf268a141bd8d1a4878c63fc45c44f3552879ce9a2ea03144be27",
+      "zk/native-composition/Cargo.lock": "c432f059787cdb1fbeb4af2297d65418dadf7e8b77949dda0bddc4099e3f66e7",
+      "zk/sparql-evaluator/Cargo.lock": "33067be5e4c7fbeceee4608c6bee2b199105ec7e781f9f57e12a9bb87ccf3677",
+      "zk/sparql-evaluator/methods/guest/Cargo.lock": "60cdd9f7f8b251bcc3f442ab13064358f2ed808a3e5e0355625872cfab218329"
+    },
+    "all_locks_identical_to_accepted_c455": true
+  },
+  "commands": [
+    {
+      "name": "fetch-accepted-locked",
+      "argv": [
+        "cargo",
+        "fetch",
+        "--locked",
+        "--manifest-path",
+        "zk/sparql-evaluator/Cargo.toml"
+      ],
+      "exit": 0,
+      "error": null,
+      "seconds": 0.165,
+      "pass": true,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "test_summary_totals": {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      },
+      "test_summary_groups": 0
+    },
+    {
+      "name": "invalidate-model-dev",
+      "argv": [
+        "cargo",
+        "clean",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "zk/sparql-evaluator/Cargo.toml",
+        "-p",
+        "sparq-proved-evaluator-model",
+        "--target-dir",
+        "/home/ubuntu/sparq-zk-runs/exact-host-target"
+      ],
+      "exit": 0,
+      "error": null,
+      "seconds": 0.165,
+      "pass": true,
+      "log_sha256": "21af60758698c38890e38d86c916b6fcacff82534f998ff48999ee4979a09728",
+      "test_summary_totals": {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      },
+      "test_summary_groups": 0
+    },
+    {
+      "name": "authenticated-rdf-tests",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "zk/sparql-evaluator/Cargo.toml",
+        "-p",
+        "sparq-proved-evaluator-model",
+        "--features",
+        "authenticated-rdf",
+        "--all-targets",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit": 0,
+      "error": null,
+      "seconds": 16.912,
+      "pass": true,
+      "log_sha256": "c859ad3f0a7d4ef894534bca9f7a78e219c234650259ab9d198f2beb97069325",
+      "test_summary_totals": {
+        "passed": 115,
+        "failed": 0,
+        "ignored": 0
+      },
+      "test_summary_groups": 27
+    },
+    {
+      "name": "authenticated-rdf-clippy",
+      "argv": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "zk/sparql-evaluator/Cargo.toml",
+        "-p",
+        "sparq-proved-evaluator-model",
+        "--features",
+        "authenticated-rdf",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit": 0,
+      "error": null,
+      "seconds": 5.682,
+      "pass": true,
+      "log_sha256": "efb9714fa62908536701178d7d5b183d509420588bdf7fdf6cebe8f8ea1cfa9c",
+      "test_summary_totals": {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      },
+      "test_summary_groups": 0
+    },
+    {
+      "name": "default-off-tests",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "zk/sparql-evaluator/Cargo.toml",
+        "-p",
+        "sparq-proved-evaluator-model",
+        "--no-default-features",
+        "--all-targets",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit": 0,
+      "error": null,
+      "seconds": 6.482,
+      "pass": true,
+      "log_sha256": "5d310c8a6f2bd50de4cea17f18156ef2f7babbad01f34be70fb854018b6dcd0f",
+      "test_summary_totals": {
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0
+      },
+      "test_summary_groups": 26
+    },
+    {
+      "name": "default-off-clippy",
+      "argv": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "zk/sparql-evaluator/Cargo.toml",
+        "-p",
+        "sparq-proved-evaluator-model",
+        "--no-default-features",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit": 0,
+      "error": null,
+      "seconds": 2.922,
+      "pass": true,
+      "log_sha256": "14fd8a9172cd04da1ba6b9931c7245b7b1a07a006d2387b023276ce81e67f78a",
+      "test_summary_totals": {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      },
+      "test_summary_groups": 0
+    },
+    {
+      "name": "graph-results-tests",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "zk/sparql-evaluator/Cargo.toml",
+        "-p",
+        "sparq-proved-evaluator-model",
+        "--features",
+        "graph-results",
+        "--all-targets",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit": 0,
+      "error": null,
+      "seconds": 8.037,
+      "pass": true,
+      "log_sha256": "2206ec99e76d2579f8d171106c7848ee7475714c2fe88dd3815ddad304a8eb6c",
+      "test_summary_totals": {
+        "passed": 101,
+        "failed": 0,
+        "ignored": 0
+      },
+      "test_summary_groups": 27
+    },
+    {
+      "name": "graph-results-clippy",
+      "argv": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "zk/sparql-evaluator/Cargo.toml",
+        "-p",
+        "sparq-proved-evaluator-model",
+        "--features",
+        "graph-results",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit": 0,
+      "error": null,
+      "seconds": 3.173,
+      "pass": true,
+      "log_sha256": "2550920e4ec5dd80ce99049e8e6c2bcfae6e0f36c9dd8c54f3d94b77092dd680",
+      "test_summary_totals": {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      },
+      "test_summary_groups": 0
+    }
+  ],
+  "native_tests": {
+    "authenticated-rdf": {
+      "passed": 115,
+      "failed": 0,
+      "ignored": 0,
+      "groups": [
+        {
+          "binary": "unittests src/lib.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/sparq_proved_evaluator_model-18ad00bf785e4901)",
+          "counts": {
+            "passed": 5,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "authenticated_rdf::tests::created_profile_separates_supported_unsupported_and_malformed",
+              "result": "ok"
+            },
+            {
+              "name": "v2::tests::both_authorities_bind_version_request_and_provenance",
+              "result": "ok"
+            },
+            {
+              "name": "v2::tests::capacity_source_and_salt_are_bound",
+              "result": "ok"
+            },
+            {
+              "name": "v2::tests::catalog_order_is_irrelevant_but_empty_graph_membership_is_committed",
+              "result": "ok"
+            },
+            {
+              "name": "v2::tests::duplicate_names_and_capacity_exhaustion_fail_before_evaluation",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/aggregate_boundaries.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/aggregate_boundaries-1ed6f8e8d5632ceb)",
+          "counts": {
+            "passed": 2,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "aggregate_profile_rejects_nullable_and_fallible_operands",
+              "result": "ok"
+            },
+            {
+              "name": "v2_aggregate_profile_rejects_nullable_and_fallible_operands",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/authenticated_rdf.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/authenticated_rdf-29bb599c72adb50b)",
+          "counts": {
+            "passed": 13,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "authorization_table_is_validated_and_bound_into_request_and_commitment",
+              "result": "ok"
+            },
+            {
+              "name": "blank_nodes_are_scoped_per_credential_and_never_join",
+              "result": "ok"
+            },
+            {
+              "name": "created_uses_a_declared_restricted_profile_and_rejects_malformed_values",
+              "result": "ok"
+            },
+            {
+              "name": "dataset_commitment_rejects_evaluation_policies_outside_v3_program_ceilings",
+              "result": "ok"
+            },
+            {
+              "name": "document_structure_is_checked_on_the_signed_canonical_bytes",
+              "result": "ok"
+            },
+            {
+              "name": "holder_relabeling_and_reordering_leave_commitment_and_journal_unchanged",
+              "result": "ok"
+            },
+            {
+              "name": "journal_version_request_and_result_substitutions_reject",
+              "result": "ok"
+            },
+            {
+              "name": "published_w3c_vector_verifies_and_maps_exactly_its_canonical_bytes",
+              "result": "ok"
+            },
+            {
+              "name": "select_ask_and_construct_bind_both_authorities_to_the_authenticated_commitment",
+              "result": "ok"
+            },
+            {
+              "name": "signed_lexical_forms_are_preserved_in_the_query_dataset",
+              "result": "ok"
+            },
+            {
+              "name": "unknown_duplicate_and_missing_proof_options_reject",
+              "result": "ok"
+            },
+            {
+              "name": "valid_signatures_do_not_authorize_wrong_issuer_method_purpose_or_suite",
+              "result": "ok"
+            },
+            {
+              "name": "witness_bounds_reject_before_parsing_and_duplicates_after_canonicalization",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/builtin_edges.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/builtin_edges-74445d231adffecd)",
+          "counts": {
+            "passed": 1,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "shared_builtin_goldens_are_admitted_and_evaluated_by_the_native_model",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/conformance.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/conformance-4aaa16388fe9a216)",
+          "counts": {
+            "passed": 5,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "corpus_metadata_and_oracles_are_well_formed",
+              "result": "ok"
+            },
+            {
+              "name": "coverage_manifest_cannot_count_rejections_as_support",
+              "result": "ok"
+            },
+            {
+              "name": "deterministic_query_results_match_normative_expectations",
+              "result": "ok"
+            },
+            {
+              "name": "unsupported_features_fail_at_the_declared_boundary",
+              "result": "ok"
+            },
+            {
+              "name": "v2_default_graph_matches_the_original_normative_expectations",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/datasets.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/datasets-7165ff97e6ab35d9)",
+          "counts": {
+            "passed": 7,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "both_authorities_enforce_catalog_integrity_and_never_strengthen_provenance",
+              "result": "ok"
+            },
+            {
+              "name": "dataset_clauses_merge_only_selected_snapshot_graphs",
+              "result": "ok"
+            },
+            {
+              "name": "default_and_named_graphs_remain_distinct_with_complete_empty_catalog",
+              "result": "ok"
+            },
+            {
+              "name": "named_graph_proof_fixture_has_independent_count_expectations",
+              "result": "ok"
+            },
+            {
+              "name": "nested_graph_uses_the_same_dataset_catalog_and_preserves_bindings",
+              "result": "ok"
+            },
+            {
+              "name": "source_terms_catalog_names_and_total_quad_capacity_are_checked",
+              "result": "ok"
+            },
+            {
+              "name": "v2_admission_enforces_reference_capacity_and_remaining_query_exclusions",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/ebv_dialect.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/ebv_dialect-83ec92e4c9067d3e)",
+          "counts": {
+            "passed": 1,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "proof_profile_pins_rec2013_and_refuses_version_conflicts",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/engine_replay.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/engine_replay-43436450f6e4db14)",
+          "counts": {
+            "passed": 13,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "agreed_omission_fails_its_anchor_but_holder_omission_is_only_an_oracle_mismatch",
+              "result": "ok"
+            },
+            {
+              "name": "blank_node_expectations_use_one_global_bijection",
+              "result": "ok"
+            },
+            {
+              "name": "both_authorities_prepare_the_original_and_match_the_hand_derived_oracle",
+              "result": "ok"
+            },
+            {
+              "name": "conversion_is_deterministic_and_independent_of_source_blank_labels",
+              "result": "ok"
+            },
+            {
+              "name": "converted_bytes_are_bounded_by_the_request_policy_before_expansion_grows",
+              "result": "ok"
+            },
+            {
+              "name": "independent_expected_result_mismatch_is_not_agreement",
+              "result": "ok"
+            },
+            {
+              "name": "malformed_unknown_base_and_blank_graph_names_are_distinct_source_errors",
+              "result": "ok"
+            },
+            {
+              "name": "manifests_reject_unknown_fields_and_other_protocol_versions",
+              "result": "ok"
+            },
+            {
+              "name": "observations_and_record_fields_never_become_input_or_expectations",
+              "result": "ok"
+            },
+            {
+              "name": "original_turtle_converts_to_exact_nquads_without_lexical_normalization",
+              "result": "ok"
+            },
+            {
+              "name": "retained_record_and_file_identity_mismatches_fail_closed",
+              "result": "ok"
+            },
+            {
+              "name": "unsupported_profile_refusal_is_distinct_from_unexpected_failure",
+              "result": "ok"
+            },
+            {
+              "name": "verifier_request_query_and_anchor_mismatches_fail_closed",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/evaluation_causes.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/evaluation_causes-a10b31626e231fde)",
+          "counts": {
+            "passed": 3,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "distinct_errors_and_success_preserve_legacy_outcomes_and_journal_bytes",
+              "result": "ok"
+            },
+            {
+              "name": "numeric_original_capacity_cases_keep_an_actual_typed_cause",
+              "result": "ok"
+            },
+            {
+              "name": "remaining_original_ambiguous_cases_keep_their_actual_domain_cause",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/exact_temporal.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/exact_temporal-48d068f4ede3a3c3)",
+          "counts": {
+            "passed": 4,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "exact_temporal_goldens_are_admitted_and_evaluated_by_the_native_model",
+              "result": "ok"
+            },
+            {
+              "name": "temporal_capacity_rejections_are_global_in_the_model",
+              "result": "ok"
+            },
+            {
+              "name": "v2_exact_temporal_goldens_are_admitted_and_evaluated_by_the_native_model",
+              "result": "ok"
+            },
+            {
+              "name": "v2_temporal_capacity_rejections_are_global_in_the_model",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/exists_bound.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/exists_bound-2ea7e7e5b85bbf21)",
+          "counts": {
+            "passed": 2,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "exists_bound_scope_preserves_local_variables",
+              "result": "ok"
+            },
+            {
+              "name": "native_practical_captured_bound_behavior_is_unchanged",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/exists_minus.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/exists_minus-27953654d35e88f9)",
+          "counts": {
+            "passed": 3,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "false_ask_fixture_discriminates_domain_repair",
+              "result": "ok"
+            },
+            {
+              "name": "minus_does_not_admit_captured_bound_or_nested_binders",
+              "result": "ok"
+            },
+            {
+              "name": "minus_domains_match_published_goldens",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/graph_results.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/graph_results-e31f9a47aeb86b02)",
+          "counts": {
+            "passed": 15,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "both_authorities_bind_source_catalog_query_policy_and_nonce",
+              "result": "ok"
+            },
+            {
+              "name": "captured_bound_profile_is_retained_in_v3_with_blank_free_input",
+              "result": "ok"
+            },
+            {
+              "name": "complete_named_dataset_identity_and_from_separation_are_distinct",
+              "result": "ok"
+            },
+            {
+              "name": "construct_freshness_graph_set_semantics_and_illegal_template_omission",
+              "result": "ok"
+            },
+            {
+              "name": "describe_uses_only_outgoing_blank_closure_of_active_default_graph",
+              "result": "ok"
+            },
+            {
+              "name": "dynamic_domain_failures_abort_every_read_form_instead_of_empty_results",
+              "result": "ok"
+            },
+            {
+              "name": "every_canonicalization_and_graph_output_capacity_fails_without_partial_result",
+              "result": "ok"
+            },
+            {
+              "name": "existing_positive_goldens_run_through_v3_without_changing_expectations",
+              "result": "ok"
+            },
+            {
+              "name": "exists_requires_all_source_graphs_blank_free_but_allows_later_template_nodes",
+              "result": "ok"
+            },
+            {
+              "name": "graph_production_budget_rejects_after_a_single_successful_solution",
+              "result": "ok"
+            },
+            {
+              "name": "sequence_indices_and_outer_bag_boundaries_are_canonicalized_globally",
+              "result": "ok"
+            },
+            {
+              "name": "unsupported_forms_and_terms_do_not_enter_the_v3_relation",
+              "result": "ok"
+            },
+            {
+              "name": "v2_retains_blank_node_and_graph_form_rejections",
+              "result": "ok"
+            },
+            {
+              "name": "version_challenge_and_canonicalization_policy_bounds_fail_before_evaluation",
+              "result": "ok"
+            },
+            {
+              "name": "whole_table_identity_survives_relabeling_bag_duplicates_and_unbound_cells",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/nullable_alternatives.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/nullable_alternatives-9a490746a8c99559)",
+          "counts": {
+            "passed": 1,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "nullable_alternatives_match_rec_and_preserve_restrictions",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/numeric_capacity.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/numeric_capacity-cfb5255c0596d2b1)",
+          "counts": {
+            "passed": 4,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "numeric_capacity_is_rejected_by_the_evaluation_relation",
+              "result": "ok"
+            },
+            {
+              "name": "strict_profile_retains_normative_builtin_goldens_and_rejects_capacity_controls",
+              "result": "ok"
+            },
+            {
+              "name": "v2_checks::v2_numeric_capacity_is_rejected_by_the_evaluation_relation",
+              "result": "ok"
+            },
+            {
+              "name": "v2_checks::v2_strict_profile_retains_normative_builtin_goldens_and_rejects_capacity_controls",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/numeric_ebv.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/numeric_ebv-c8789b1c1b44c67f)",
+          "counts": {
+            "passed": 1,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "numeric_ebv_matches_rec_and_preserves_arithmetic_capacity",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/raw_literal_whitespace.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/raw_literal_whitespace-8948fbdbd84e1175)",
+          "counts": {
+            "passed": 1,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "raw_literal_whitespace_preserves_the_constructor_boundary",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/semantics.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/semantics-95aea9f4ed1d5855)",
+          "counts": {
+            "passed": 16,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "aggregate_empty_input_and_ordered_offset_are_exact",
+              "result": "ok"
+            },
+            {
+              "name": "all_nested_nondeterminism_and_external_dependencies_reject",
+              "result": "ok"
+            },
+            {
+              "name": "byte_nesting_and_materialization_limits_fail_without_partial_results",
+              "result": "ok"
+            },
+            {
+              "name": "canonical_bag_preserves_duplicate_derivations",
+              "result": "ok"
+            },
+            {
+              "name": "combined_optional_minus_count_order_limit_has_exact_bindings",
+              "result": "ok"
+            },
+            {
+              "name": "distinct_removes_duplicates_only_when_requested",
+              "result": "ok"
+            },
+            {
+              "name": "every_request_field_and_policy_is_bound",
+              "result": "ok"
+            },
+            {
+              "name": "fixed_path_intermediates_are_hidden_and_preserve_join_multiplicity",
+              "result": "ok"
+            },
+            {
+              "name": "negation_and_false_ask_evaluate_the_complete_graph",
+              "result": "ok"
+            },
+            {
+              "name": "omitted_or_added_triples_cannot_satisfy_an_accepted_anchor",
+              "result": "ok"
+            },
+            {
+              "name": "optional_unbound_is_not_empty_literal",
+              "result": "ok"
+            },
+            {
+              "name": "private_debug_and_source_validation_do_not_leak",
+              "result": "ok"
+            },
+            {
+              "name": "scope_is_explicit_and_selected_support_never_routes_here",
+              "result": "ok"
+            },
+            {
+              "name": "source_count_is_bounded_before_graph_deduplication",
+              "result": "ok"
+            },
+            {
+              "name": "subquery_order_is_dropped_at_the_outer_multiset_boundary",
+              "result": "ok"
+            },
+            {
+              "name": "values_union_errors_and_numeric_expressions_remain_bound",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/temporal_lexical.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/temporal_lexical-40d71092b97ced5e)",
+          "counts": {
+            "passed": 2,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "temporal_constructor_preprocessing_cannot_bypass_model_capacity",
+              "result": "ok"
+            },
+            {
+              "name": "temporal_lexical_boundaries_are_evaluated_by_the_native_model",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/v2_exists.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/v2_exists-86a628fcb755c941)",
+          "counts": {
+            "passed": 2,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "v2_captured_bound_profile_preserves_every_original_case",
+              "result": "ok"
+            },
+            {
+              "name": "v2_minus_domains_preserve_goldens_and_false_ask",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/v2_nullable_alternatives.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/v2_nullable_alternatives-09b13054f8b6abfc)",
+          "counts": {
+            "passed": 1,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "v2_nullable_alternatives_match_rec_and_preserve_restrictions",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/v2_numeric_ebv.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/v2_numeric_ebv-19cb63a7ac68c283)",
+          "counts": {
+            "passed": 1,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "v2_numeric_ebv_matches_rec_and_preserves_arithmetic_capacity",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/v2_raw_literal_whitespace.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/v2_raw_literal_whitespace-cc09afd4cf18eddb)",
+          "counts": {
+            "passed": 1,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "v2_raw_literal_whitespace_preserves_the_constructor_boundary",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/v2_temporal_lexical.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/v2_temporal_lexical-3eb5b3a650ce9ab3)",
+          "counts": {
+            "passed": 2,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "v2_temporal_constructor_preprocessing_cannot_bypass_model_capacity",
+              "result": "ok"
+            },
+            {
+              "name": "v2_temporal_lexical_boundaries_are_evaluated_by_the_native_model",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/vcq_request_shape.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/vcq_request_shape-0766ccf1f047fdcd)",
+          "counts": {
+            "passed": 3,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "agrees_with_v3_admission_on_accepted_queries",
+              "result": "ok"
+            },
+            {
+              "name": "rejects_before_or_during_admission_with_typed_causes",
+              "result": "ok"
+            },
+            {
+              "name": "reports_the_parsed_form_not_a_label",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/versioned_evaluation_causes.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/versioned_evaluation_causes-871d21578587e6b8)",
+          "counts": {
+            "passed": 4,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "graph_forms_capture_actual_capacity_and_keep_their_legacy_message",
+              "result": "ok"
+            },
+            {
+              "name": "original_29_capacity_ids_keep_typed_causes_in_both_versions_and_authorities",
+              "result": "ok"
+            },
+            {
+              "name": "original_dialect_controls_apply_to_both_versioned_admission_and_execution",
+              "result": "ok"
+            },
+            {
+              "name": "success_journal_bytes_and_parse_resource_categories_remain_distinct",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "unittests examples/proof_bindings.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/examples/proof_bindings-570257d9e5b435d4)",
+          "counts": {
+            "passed": 2,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "only_typed_capacity_and_resource_limits_classify_as_capacity",
+              "result": "ok"
+            },
+            {
+              "name": "unrelated_and_ambiguous_errors_are_not_capacity_evidence",
+              "result": "ok"
+            }
+          ]
+        }
+      ],
+      "zero_test_groups": 0
+    },
+    "default-off": {
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0,
+      "groups": [
+        {
+          "binary": "unittests src/lib.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/sparq_proved_evaluator_model-25d0d32b351e73ae)",
+          "counts": {
+            "passed": 4,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "v2::tests::both_authorities_bind_version_request_and_provenance",
+              "result": "ok"
+            },
+            {
+              "name": "v2::tests::capacity_source_and_salt_are_bound",
+              "result": "ok"
+            },
+            {
+              "name": "v2::tests::catalog_order_is_irrelevant_but_empty_graph_membership_is_committed",
+              "result": "ok"
+            },
+            {
+              "name": "v2::tests::duplicate_names_and_capacity_exhaustion_fail_before_evaluation",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/aggregate_boundaries.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/aggregate_boundaries-c5311bdbb4f0a0c9)",
+          "counts": {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": []
+        },
+        {
+          "binary": "tests/authenticated_rdf.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/authenticated_rdf-408fb1373bf78c2b)",
+          "counts": {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": []
+        },
+        {
+          "binary": "tests/builtin_edges.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/builtin_edges-1b0b515ff15752b3)",
+          "counts": {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": []
+        },
+        {
+          "binary": "tests/conformance.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/conformance-f41ee8d9b09d9337)",
+          "counts": {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": []
+        },
+        {
+          "binary": "tests/datasets.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/datasets-243557cb5aa2650f)",
+          "counts": {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": []
+        },
+        {
+          "binary": "tests/ebv_dialect.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/ebv_dialect-84dd58a2d58d118f)",
+          "counts": {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": []
+        },
+        {
+          "binary": "tests/engine_replay.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/engine_replay-019792102144e142)",
+          "counts": {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": []
+        },
+        {
+          "binary": "tests/evaluation_causes.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/evaluation_causes-331088a03bf81d18)",
+          "counts": {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": []
+        },
+        {
+          "binary": "tests/exact_temporal.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/exact_temporal-569f3b0eab8b63bb)",
+          "counts": {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": []
+        },
+        {
+          "binary": "tests/exists_bound.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/exists_bound-706d461f5f651de4)",
+          "counts": {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": []
+        },
+        {
+          "binary": "tests/exists_minus.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/exists_minus-952ceb7755ceca4c)",
+          "counts": {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": []
+        },
+        {
+          "binary": "tests/graph_results.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/graph_results-39adede022d330d3)",
+          "counts": {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": []
+        },
+        {
+          "binary": "tests/nullable_alternatives.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/nullable_alternatives-2ccd6ce74e9c7c49)",
+          "counts": {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": []
+        },
+        {
+          "binary": "tests/numeric_capacity.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/numeric_capacity-4e6acb45d9e7864a)",
+          "counts": {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": []
+        },
+        {
+          "binary": "tests/numeric_ebv.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/numeric_ebv-4671f0207c1b68bb)",
+          "counts": {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": []
+        },
+        {
+          "binary": "tests/raw_literal_whitespace.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/raw_literal_whitespace-b1cc45511c0e9a11)",
+          "counts": {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": []
+        },
+        {
+          "binary": "tests/semantics.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/semantics-4245c81aaa0e9bdf)",
+          "counts": {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": []
+        },
+        {
+          "binary": "tests/temporal_lexical.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/temporal_lexical-fe3df329e8dae339)",
+          "counts": {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": []
+        },
+        {
+          "binary": "tests/v2_exists.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/v2_exists-860b6df3beb60be7)",
+          "counts": {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": []
+        },
+        {
+          "binary": "tests/v2_nullable_alternatives.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/v2_nullable_alternatives-33af994671083c79)",
+          "counts": {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": []
+        },
+        {
+          "binary": "tests/v2_numeric_ebv.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/v2_numeric_ebv-e89b481a95c82adb)",
+          "counts": {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": []
+        },
+        {
+          "binary": "tests/v2_raw_literal_whitespace.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/v2_raw_literal_whitespace-20c64df85b60d71c)",
+          "counts": {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": []
+        },
+        {
+          "binary": "tests/v2_temporal_lexical.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/v2_temporal_lexical-a54bf322a0a58f0a)",
+          "counts": {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": []
+        },
+        {
+          "binary": "tests/vcq_request_shape.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/vcq_request_shape-82279c061b0430e2)",
+          "counts": {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": []
+        },
+        {
+          "binary": "tests/versioned_evaluation_causes.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/versioned_evaluation_causes-2df121022bf9e528)",
+          "counts": {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": []
+        }
+      ],
+      "zero_test_groups": 25
+    },
+    "graph-results": {
+      "passed": 101,
+      "failed": 0,
+      "ignored": 0,
+      "groups": [
+        {
+          "binary": "unittests src/lib.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/sparq_proved_evaluator_model-e5f37789db799f26)",
+          "counts": {
+            "passed": 4,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "v2::tests::both_authorities_bind_version_request_and_provenance",
+              "result": "ok"
+            },
+            {
+              "name": "v2::tests::capacity_source_and_salt_are_bound",
+              "result": "ok"
+            },
+            {
+              "name": "v2::tests::catalog_order_is_irrelevant_but_empty_graph_membership_is_committed",
+              "result": "ok"
+            },
+            {
+              "name": "v2::tests::duplicate_names_and_capacity_exhaustion_fail_before_evaluation",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/aggregate_boundaries.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/aggregate_boundaries-4f7cad75e1d33088)",
+          "counts": {
+            "passed": 2,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "aggregate_profile_rejects_nullable_and_fallible_operands",
+              "result": "ok"
+            },
+            {
+              "name": "v2_aggregate_profile_rejects_nullable_and_fallible_operands",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/authenticated_rdf.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/authenticated_rdf-be9470b4513fbc09)",
+          "counts": {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": []
+        },
+        {
+          "binary": "tests/builtin_edges.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/builtin_edges-790b425a93610578)",
+          "counts": {
+            "passed": 1,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "shared_builtin_goldens_are_admitted_and_evaluated_by_the_native_model",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/conformance.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/conformance-fcbbff0015248c37)",
+          "counts": {
+            "passed": 5,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "corpus_metadata_and_oracles_are_well_formed",
+              "result": "ok"
+            },
+            {
+              "name": "coverage_manifest_cannot_count_rejections_as_support",
+              "result": "ok"
+            },
+            {
+              "name": "deterministic_query_results_match_normative_expectations",
+              "result": "ok"
+            },
+            {
+              "name": "unsupported_features_fail_at_the_declared_boundary",
+              "result": "ok"
+            },
+            {
+              "name": "v2_default_graph_matches_the_original_normative_expectations",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/datasets.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/datasets-536c04c2cecb3657)",
+          "counts": {
+            "passed": 7,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "both_authorities_enforce_catalog_integrity_and_never_strengthen_provenance",
+              "result": "ok"
+            },
+            {
+              "name": "dataset_clauses_merge_only_selected_snapshot_graphs",
+              "result": "ok"
+            },
+            {
+              "name": "default_and_named_graphs_remain_distinct_with_complete_empty_catalog",
+              "result": "ok"
+            },
+            {
+              "name": "named_graph_proof_fixture_has_independent_count_expectations",
+              "result": "ok"
+            },
+            {
+              "name": "nested_graph_uses_the_same_dataset_catalog_and_preserves_bindings",
+              "result": "ok"
+            },
+            {
+              "name": "source_terms_catalog_names_and_total_quad_capacity_are_checked",
+              "result": "ok"
+            },
+            {
+              "name": "v2_admission_enforces_reference_capacity_and_remaining_query_exclusions",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/ebv_dialect.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/ebv_dialect-a6750d1207a74794)",
+          "counts": {
+            "passed": 1,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "proof_profile_pins_rec2013_and_refuses_version_conflicts",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/engine_replay.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/engine_replay-cec566d37a99ad67)",
+          "counts": {
+            "passed": 13,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "agreed_omission_fails_its_anchor_but_holder_omission_is_only_an_oracle_mismatch",
+              "result": "ok"
+            },
+            {
+              "name": "blank_node_expectations_use_one_global_bijection",
+              "result": "ok"
+            },
+            {
+              "name": "both_authorities_prepare_the_original_and_match_the_hand_derived_oracle",
+              "result": "ok"
+            },
+            {
+              "name": "conversion_is_deterministic_and_independent_of_source_blank_labels",
+              "result": "ok"
+            },
+            {
+              "name": "converted_bytes_are_bounded_by_the_request_policy_before_expansion_grows",
+              "result": "ok"
+            },
+            {
+              "name": "independent_expected_result_mismatch_is_not_agreement",
+              "result": "ok"
+            },
+            {
+              "name": "malformed_unknown_base_and_blank_graph_names_are_distinct_source_errors",
+              "result": "ok"
+            },
+            {
+              "name": "manifests_reject_unknown_fields_and_other_protocol_versions",
+              "result": "ok"
+            },
+            {
+              "name": "observations_and_record_fields_never_become_input_or_expectations",
+              "result": "ok"
+            },
+            {
+              "name": "original_turtle_converts_to_exact_nquads_without_lexical_normalization",
+              "result": "ok"
+            },
+            {
+              "name": "retained_record_and_file_identity_mismatches_fail_closed",
+              "result": "ok"
+            },
+            {
+              "name": "unsupported_profile_refusal_is_distinct_from_unexpected_failure",
+              "result": "ok"
+            },
+            {
+              "name": "verifier_request_query_and_anchor_mismatches_fail_closed",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/evaluation_causes.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/evaluation_causes-2e1cf5967f1e0d6f)",
+          "counts": {
+            "passed": 3,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "distinct_errors_and_success_preserve_legacy_outcomes_and_journal_bytes",
+              "result": "ok"
+            },
+            {
+              "name": "numeric_original_capacity_cases_keep_an_actual_typed_cause",
+              "result": "ok"
+            },
+            {
+              "name": "remaining_original_ambiguous_cases_keep_their_actual_domain_cause",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/exact_temporal.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/exact_temporal-0776c83eb7f5d50e)",
+          "counts": {
+            "passed": 4,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "exact_temporal_goldens_are_admitted_and_evaluated_by_the_native_model",
+              "result": "ok"
+            },
+            {
+              "name": "temporal_capacity_rejections_are_global_in_the_model",
+              "result": "ok"
+            },
+            {
+              "name": "v2_exact_temporal_goldens_are_admitted_and_evaluated_by_the_native_model",
+              "result": "ok"
+            },
+            {
+              "name": "v2_temporal_capacity_rejections_are_global_in_the_model",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/exists_bound.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/exists_bound-5d0c89de3c4386b8)",
+          "counts": {
+            "passed": 2,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "exists_bound_scope_preserves_local_variables",
+              "result": "ok"
+            },
+            {
+              "name": "native_practical_captured_bound_behavior_is_unchanged",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/exists_minus.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/exists_minus-9b089d9c8a622375)",
+          "counts": {
+            "passed": 3,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "false_ask_fixture_discriminates_domain_repair",
+              "result": "ok"
+            },
+            {
+              "name": "minus_does_not_admit_captured_bound_or_nested_binders",
+              "result": "ok"
+            },
+            {
+              "name": "minus_domains_match_published_goldens",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/graph_results.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/graph_results-35fc8f81f80f6ff1)",
+          "counts": {
+            "passed": 15,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "both_authorities_bind_source_catalog_query_policy_and_nonce",
+              "result": "ok"
+            },
+            {
+              "name": "captured_bound_profile_is_retained_in_v3_with_blank_free_input",
+              "result": "ok"
+            },
+            {
+              "name": "complete_named_dataset_identity_and_from_separation_are_distinct",
+              "result": "ok"
+            },
+            {
+              "name": "construct_freshness_graph_set_semantics_and_illegal_template_omission",
+              "result": "ok"
+            },
+            {
+              "name": "describe_uses_only_outgoing_blank_closure_of_active_default_graph",
+              "result": "ok"
+            },
+            {
+              "name": "dynamic_domain_failures_abort_every_read_form_instead_of_empty_results",
+              "result": "ok"
+            },
+            {
+              "name": "every_canonicalization_and_graph_output_capacity_fails_without_partial_result",
+              "result": "ok"
+            },
+            {
+              "name": "existing_positive_goldens_run_through_v3_without_changing_expectations",
+              "result": "ok"
+            },
+            {
+              "name": "exists_requires_all_source_graphs_blank_free_but_allows_later_template_nodes",
+              "result": "ok"
+            },
+            {
+              "name": "graph_production_budget_rejects_after_a_single_successful_solution",
+              "result": "ok"
+            },
+            {
+              "name": "sequence_indices_and_outer_bag_boundaries_are_canonicalized_globally",
+              "result": "ok"
+            },
+            {
+              "name": "unsupported_forms_and_terms_do_not_enter_the_v3_relation",
+              "result": "ok"
+            },
+            {
+              "name": "v2_retains_blank_node_and_graph_form_rejections",
+              "result": "ok"
+            },
+            {
+              "name": "version_challenge_and_canonicalization_policy_bounds_fail_before_evaluation",
+              "result": "ok"
+            },
+            {
+              "name": "whole_table_identity_survives_relabeling_bag_duplicates_and_unbound_cells",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/nullable_alternatives.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/nullable_alternatives-276bbab107fe6864)",
+          "counts": {
+            "passed": 1,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "nullable_alternatives_match_rec_and_preserve_restrictions",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/numeric_capacity.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/numeric_capacity-7d5261db4b05b1cc)",
+          "counts": {
+            "passed": 4,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "numeric_capacity_is_rejected_by_the_evaluation_relation",
+              "result": "ok"
+            },
+            {
+              "name": "strict_profile_retains_normative_builtin_goldens_and_rejects_capacity_controls",
+              "result": "ok"
+            },
+            {
+              "name": "v2_checks::v2_numeric_capacity_is_rejected_by_the_evaluation_relation",
+              "result": "ok"
+            },
+            {
+              "name": "v2_checks::v2_strict_profile_retains_normative_builtin_goldens_and_rejects_capacity_controls",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/numeric_ebv.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/numeric_ebv-2ed7209f14c7280f)",
+          "counts": {
+            "passed": 1,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "numeric_ebv_matches_rec_and_preserves_arithmetic_capacity",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/raw_literal_whitespace.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/raw_literal_whitespace-88fff63faeef06be)",
+          "counts": {
+            "passed": 1,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "raw_literal_whitespace_preserves_the_constructor_boundary",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/semantics.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/semantics-58c90892ba1a1ac7)",
+          "counts": {
+            "passed": 16,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "aggregate_empty_input_and_ordered_offset_are_exact",
+              "result": "ok"
+            },
+            {
+              "name": "all_nested_nondeterminism_and_external_dependencies_reject",
+              "result": "ok"
+            },
+            {
+              "name": "byte_nesting_and_materialization_limits_fail_without_partial_results",
+              "result": "ok"
+            },
+            {
+              "name": "canonical_bag_preserves_duplicate_derivations",
+              "result": "ok"
+            },
+            {
+              "name": "combined_optional_minus_count_order_limit_has_exact_bindings",
+              "result": "ok"
+            },
+            {
+              "name": "distinct_removes_duplicates_only_when_requested",
+              "result": "ok"
+            },
+            {
+              "name": "every_request_field_and_policy_is_bound",
+              "result": "ok"
+            },
+            {
+              "name": "fixed_path_intermediates_are_hidden_and_preserve_join_multiplicity",
+              "result": "ok"
+            },
+            {
+              "name": "negation_and_false_ask_evaluate_the_complete_graph",
+              "result": "ok"
+            },
+            {
+              "name": "omitted_or_added_triples_cannot_satisfy_an_accepted_anchor",
+              "result": "ok"
+            },
+            {
+              "name": "optional_unbound_is_not_empty_literal",
+              "result": "ok"
+            },
+            {
+              "name": "private_debug_and_source_validation_do_not_leak",
+              "result": "ok"
+            },
+            {
+              "name": "scope_is_explicit_and_selected_support_never_routes_here",
+              "result": "ok"
+            },
+            {
+              "name": "source_count_is_bounded_before_graph_deduplication",
+              "result": "ok"
+            },
+            {
+              "name": "subquery_order_is_dropped_at_the_outer_multiset_boundary",
+              "result": "ok"
+            },
+            {
+              "name": "values_union_errors_and_numeric_expressions_remain_bound",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/temporal_lexical.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/temporal_lexical-e04287d0fac837e4)",
+          "counts": {
+            "passed": 2,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "temporal_constructor_preprocessing_cannot_bypass_model_capacity",
+              "result": "ok"
+            },
+            {
+              "name": "temporal_lexical_boundaries_are_evaluated_by_the_native_model",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/v2_exists.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/v2_exists-57fa211d3f2dd202)",
+          "counts": {
+            "passed": 2,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "v2_captured_bound_profile_preserves_every_original_case",
+              "result": "ok"
+            },
+            {
+              "name": "v2_minus_domains_preserve_goldens_and_false_ask",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/v2_nullable_alternatives.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/v2_nullable_alternatives-7d24680aa7d3f6e9)",
+          "counts": {
+            "passed": 1,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "v2_nullable_alternatives_match_rec_and_preserve_restrictions",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/v2_numeric_ebv.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/v2_numeric_ebv-8dd85c5fe6f4685e)",
+          "counts": {
+            "passed": 1,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "v2_numeric_ebv_matches_rec_and_preserves_arithmetic_capacity",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/v2_raw_literal_whitespace.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/v2_raw_literal_whitespace-1d83079f1154d5a4)",
+          "counts": {
+            "passed": 1,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "v2_raw_literal_whitespace_preserves_the_constructor_boundary",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/v2_temporal_lexical.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/v2_temporal_lexical-a01b0b60646c8fe6)",
+          "counts": {
+            "passed": 2,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "v2_temporal_constructor_preprocessing_cannot_bypass_model_capacity",
+              "result": "ok"
+            },
+            {
+              "name": "v2_temporal_lexical_boundaries_are_evaluated_by_the_native_model",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/vcq_request_shape.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/vcq_request_shape-115989c64a7d29a6)",
+          "counts": {
+            "passed": 3,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "agrees_with_v3_admission_on_accepted_queries",
+              "result": "ok"
+            },
+            {
+              "name": "rejects_before_or_during_admission_with_typed_causes",
+              "result": "ok"
+            },
+            {
+              "name": "reports_the_parsed_form_not_a_label",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "tests/versioned_evaluation_causes.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/versioned_evaluation_causes-4e04840f7c25214d)",
+          "counts": {
+            "passed": 4,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "graph_forms_capture_actual_capacity_and_keep_their_legacy_message",
+              "result": "ok"
+            },
+            {
+              "name": "original_29_capacity_ids_keep_typed_causes_in_both_versions_and_authorities",
+              "result": "ok"
+            },
+            {
+              "name": "original_dialect_controls_apply_to_both_versioned_admission_and_execution",
+              "result": "ok"
+            },
+            {
+              "name": "success_journal_bytes_and_parse_resource_categories_remain_distinct",
+              "result": "ok"
+            }
+          ]
+        },
+        {
+          "binary": "unittests examples/proof_bindings.rs (/home/ubuntu/sparq-zk-runs/exact-host-target/debug/examples/proof_bindings-cfbe012ceb9fc168)",
+          "counts": {
+            "passed": 2,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests": [
+            {
+              "name": "only_typed_capacity_and_resource_limits_classify_as_capacity",
+              "result": "ok"
+            },
+            {
+              "name": "unrelated_and_ambiguous_errors_are_not_capacity_evidence",
+              "result": "ok"
+            }
+          ]
+        }
+      ],
+      "zero_test_groups": 1
+    }
+  },
+  "new_authenticated_tests": {
+    "integration": 13,
+    "unit": 1
+  },
+  "scoped_clippy": {
+    "authenticated-rdf": "passed -Dwarnings",
+    "default-off": "passed -Dwarnings",
+    "graph-results": "passed -Dwarnings"
+  },
+  "prior_failure_preserved": {
+    "source": "c4559959cf22a1b186626a645daa68f81f820f7f",
+    "audit_sha256": "bde88264fa5ad4957fd92eee7e92f2730b5a2c22a5a76c0d63b90d087d6d83a2",
+    "lint": "unnecessary_sort_by"
+  },
+  "artifact_invalidation": "Removed 172 files, 380.5MiB total",
+  "tools": {
+    "cargo": {
+      "path": "/home/ubuntu/sparq-zk-tools/rustup/toolchains/1.97.1-x86_64-unknown-linux-gnu/bin/cargo",
+      "sha256": "828980723df339d62434390e9fb8ef8831036583343ae2316b7ab5646b5c1953",
+      "version": "cargo 1.97.1 (c980f4866 2026-06-30)\nrelease: 1.97.1\ncommit-hash: c980f4866141969fab6254a680546a277789d6f0\ncommit-date: 2026-06-30\nhost: x86_64-unknown-linux-gnu\nlibgit2: 1.9.2 (sys:0.20.4 vendored)\nlibcurl: 8.20.0-DEV (sys:0.4.88+curl-8.20.0 vendored ssl:OpenSSL/3.6.2)\nssl: OpenSSL 3.6.2 7 Apr 2026\nos: Ubuntu 24.4.0 (noble) [64-bit]\n"
+    },
+    "rustc": {
+      "path": "/home/ubuntu/sparq-zk-tools/rustup/toolchains/1.97.1-x86_64-unknown-linux-gnu/bin/rustc",
+      "sha256": "d3a664c970a9fd8361b64194861bebc1ae37b9054e5ee3400dc1c9e691797eea",
+      "version": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.97.1\nLLVM version: 22.1.6\n"
+    }
+  },
+  "limits": {
+    "configured_memory_bytes": 8589934592,
+    "configured_swap_bytes": 0,
+    "configured_cpu_quota_percent": 200,
+    "configured_runtime_minutes": 45,
+    "cargo_jobs": 1,
+    "property_caveat": "Successful transientunit was unloaded before observer snapshot; resulting default properties do not measure enforced limits or peakRSS. Exact systemd dispatch is retained."
+  },
+  "scope": {
+    "model_native_only": true,
+    "guest_executions": 0,
+    "proofs": 0,
+    "full_workspace_gate": false,
+    "security_audit": false
+  },
+  "evidence_files": {
+    "active-step.json": "0223e9f5d52d3fbb891be8304cbc550dc4c83477b02b59ad9f5c194e4afe069e",
+    "authenticated-rdf-clippy.log": "efb9714fa62908536701178d7d5b183d509420588bdf7fdf6cebe8f8ea1cfa9c",
+    "authenticated-rdf-tests.log": "c859ad3f0a7d4ef894534bca9f7a78e219c234650259ab9d198f2beb97069325",
+    "default-off-clippy.log": "14fd8a9172cd04da1ba6b9931c7245b7b1a07a006d2387b023276ce81e67f78a",
+    "default-off-tests.log": "5d310c8a6f2bd50de4cea17f18156ef2f7babbad01f34be70fb854018b6dcd0f",
+    "dispatch.json": "402b1f668aad8c754c2dad9064803c729949d44f20f37478e31c10c2bf8de8fd",
+    "fetch-accepted-locked.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "freeze.json": "77dc54dda3387506b8e64cc614783520b57a33ff87975cdf3abfa5b3deaeeb87",
+    "gate.log": "94a567eb7a505910e1785ea44433dc889b03735b3a68c46d07211503ca6041cb",
+    "graph-results-clippy.log": "2550920e4ec5dd80ce99049e8e6c2bcfae6e0f36c9dd8c54f3d94b77092dd680",
+    "graph-results-tests.log": "2206ec99e76d2579f8d171106c7848ee7475714c2fe88dd3815ddad304a8eb6c",
+    "invalidate-model-dev.log": "21af60758698c38890e38d86c916b6fcacff82534f998ff48999ee4979a09728",
+    "invocation.json": "6665a418263d81fe8f6ec82aa7014c4cb3dbe6749a09846033ff13ae0f36cdf7",
+    "packet-manifest.json": "0919546e9879529de10f6180ab67a80eb0806cfc95031bfe0d7b9e38a168b105",
+    "phase_b.py": "2845fad6a644325f06bd3e7d169b76249333f8494f9914a77f38e4b99ef385fa",
+    "prepare.log": "c3f6aaf91693874eecef386eb9a24bfebef805a984acc319f0b6069744f5eecf",
+    "source-after.json": "cee7e6a5d3be0f1d672c119d579b2242d3b026fdca7aa4a7e9436b264ac36efb",
+    "source-before.json": "ea1be7208a417553e65d6de4a0bbb4f625291269469530dcb3ced3222b914aba",
+    "steps.json": "89bd7927c5c2a8b85b57c135b8906289099410e3d42483cb096fa723e16c72ff",
+    "summary.json": "7d813726da41c5127ae1cecdf49004f871b90a6dd4d117c3c9cb3fb505e8910d"
+  },
+  "retrieval": {
+    "retrieved_at": "2026-09-26T19:44:47.843648+00:00",
+    "archive_sha256": "00ba2a22564c7066f3ec128ff04355b54c8b7db56d9c220a1bbe8f83c3a27130",
+    "archive_bytes": 1112477,
+    "files": {
+      "active-step.json": "0223e9f5d52d3fbb891be8304cbc550dc4c83477b02b59ad9f5c194e4afe069e",
+      "authenticated-rdf-clippy.log": "efb9714fa62908536701178d7d5b183d509420588bdf7fdf6cebe8f8ea1cfa9c",
+      "authenticated-rdf-tests.log": "c859ad3f0a7d4ef894534bca9f7a78e219c234650259ab9d198f2beb97069325",
+      "default-off-clippy.log": "14fd8a9172cd04da1ba6b9931c7245b7b1a07a006d2387b023276ce81e67f78a",
+      "default-off-tests.log": "5d310c8a6f2bd50de4cea17f18156ef2f7babbad01f34be70fb854018b6dcd0f",
+      "dispatch.json": "402b1f668aad8c754c2dad9064803c729949d44f20f37478e31c10c2bf8de8fd",
+      "fetch-accepted-locked.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "freeze.json": "77dc54dda3387506b8e64cc614783520b57a33ff87975cdf3abfa5b3deaeeb87",
+      "gate.log": "94a567eb7a505910e1785ea44433dc889b03735b3a68c46d07211503ca6041cb",
+      "graph-results-clippy.log": "2550920e4ec5dd80ce99049e8e6c2bcfae6e0f36c9dd8c54f3d94b77092dd680",
+      "graph-results-tests.log": "2206ec99e76d2579f8d171106c7848ee7475714c2fe88dd3815ddad304a8eb6c",
+      "invalidate-model-dev.log": "21af60758698c38890e38d86c916b6fcacff82534f998ff48999ee4979a09728",
+      "invocation.json": "6665a418263d81fe8f6ec82aa7014c4cb3dbe6749a09846033ff13ae0f36cdf7",
+      "packet-manifest.json": "0919546e9879529de10f6180ab67a80eb0806cfc95031bfe0d7b9e38a168b105",
+      "phase_b.py": "2845fad6a644325f06bd3e7d169b76249333f8494f9914a77f38e4b99ef385fa",
+      "prepare.log": "c3f6aaf91693874eecef386eb9a24bfebef805a984acc319f0b6069744f5eecf",
+      "source-after.json": "cee7e6a5d3be0f1d672c119d579b2242d3b026fdca7aa4a7e9436b264ac36efb",
+      "source-before.json": "ea1be7208a417553e65d6de4a0bbb4f625291269469530dcb3ced3222b914aba",
+      "steps.json": "89bd7927c5c2a8b85b57c135b8906289099410e3d42483cb096fa723e16c72ff",
+      "summary.json": "7d813726da41c5127ae1cecdf49004f871b90a6dd4d117c3c9cb3fb505e8910d"
+    }
+  },
+  "transport": "OneSSHtimeout retained; egress temporarilychanged. Immediatepre-mutation recheckmatchedexistingrule, noSGmutation; oneboundedretry succeeded."
+}

@@ -1,0 +1,186 @@
+{
+  "pr": 6577,
+  "head": "fcb7ad829124b5573ae81bbb1c05b04f27186c2a",
+  "run_id": 36157350735,
+  "job_id": 108145045526,
+  "conclusion": "success",
+  "started_at": "2026-09-25T16:23:23Z",
+  "completed_at": "2026-09-25T16:35:04Z",
+  "elapsed_seconds": 701,
+  "merge_checkout": "2932dc4bdc4c8ff9fe369976b8123417238c52de",
+  "merge_tree": "1892b2f19694074e4dfefb13cecaed6f3b171e25",
+  "merge_tree_equals_head": true,
+  "native_lock_sha256": "abc67b836619ca5bfa96c1a5228ea763a5b3bbf2596d3846ea7a6b7449cce73d",
+  "workflow_sha256": "2bb51573bfdcd10e4f3c243f3d457d64942f0ad87a4725086e208aab13490c6a",
+  "finite": {
+    "plan_sha256": "4963a1ff1aa9a68de9a396432f6163b313587ef20910eb6655d1badde90added",
+    "report_sha256": "2ccfdea7b4e3155cd288389dfd999ea1790562dad889a045d9743312fed550dd",
+    "counts": {
+      "empty_graph_admission": 36,
+      "required_accepted": 72,
+      "weaker_verified_required_rejected": 468
+    },
+    "distinct_proofs": 540,
+    "distinct_nonces": 540,
+    "claim": "This declared finite native domain only; admission exclusions and actual verifier negatives are distinct. The artifact checker does not rerun cryptography.",
+    "artifact_files_verified": 1080,
+    "explicit_other_exclusions": 80,
+    "source_hashes": {
+      "bench/zk-bindings/corpus.py": "d1dc6275741832e7b8f3c75dbcf5ccc453bf5011f3906b12b2ea2c46eaa965ac",
+      "bench/zk-bindings/native_ci.py": "aa0da6384eec7182c4bb509a36b7c40dba13ee3207a9347db6322f77e7ad3fdd",
+      "bench/zk-bindings/protocol.json": "b84e7ec8fab6275e941f68bf73c0cdaa72ba11d363ecd0122bc691e83acf028e",
+      "bench/zk-bindings/run.py": "b0f1fefe6c14a6839781c485b143d94c6b128457c782d0193a9c1e72c65ccb64",
+      "zk/native-composition/Cargo.lock": "abc67b836619ca5bfa96c1a5228ea763a5b3bbf2596d3846ea7a6b7449cce73d",
+      "zk/native-composition/Cargo.toml": "0aac6dc267573a3aeb23f55dc8e80393252ab2917b85b1777624bff94bca5f8a",
+      "zk/native-composition/src/bin/native-bindings.rs": "616c7c5efeb233ba04c3d028f30e86cb8a02c2f0ac160811c35fcc04127cb43e",
+      "zk/native-composition/src/rdf.rs": "24106cebec23da4ace2956562b966a5e27f19903e78cd9ec106944a81bc1eeb0",
+      "zk/native-composition/src/rdf/binding_tests.rs": "e87f0dea1c1f7bcd5fa6b71e7eeadecaecd165fd158b2ebac895bc7cfb12bd1b"
+    },
+    "cargo_build_record": {
+      "cargo_events_sha256": "9822a063b18f20a96684ad71d1f31577a095e2dd73ceab239f5258786a5c82bf",
+      "cargo_fresh": false,
+      "cargo_metadata_sha256": "c97a89354b7bc66075317abcd3a8e0af1fc2655a758578dca260ddfa57452c5f",
+      "cargo_profile": {
+        "debug_assertions": false,
+        "debuginfo": 0,
+        "opt_level": "3",
+        "overflow_checks": false,
+        "test": false
+      },
+      "executable": "/home/runner/work/sparq/sparq/zk/native-composition/target/release/native-bindings",
+      "executable_sha256": "1391a094a5ac380f6435b692bbbafff187abefa5172b71d5b216cf5aff48a409",
+      "independent_or_signed_build_attestation": false,
+      "manifest_path": "/home/runner/work/sparq/sparq/zk/native-composition/Cargo.toml",
+      "package_id": "path+file:///home/runner/work/sparq/sparq/zk/native-composition#sparq-native-composition-spike@0.0.0",
+      "target": {
+        "crate_types": [
+          "bin"
+        ],
+        "doc": true,
+        "doctest": false,
+        "edition": "2021",
+        "kind": [
+          "bin"
+        ],
+        "name": "native-bindings",
+        "required-features": [
+          "native-binding"
+        ],
+        "src_path": "/home/runner/work/sparq/sparq/zk/native-composition/src/bin/native-bindings.rs",
+        "test": true
+      }
+    }
+  },
+  "wasmer": {
+    "functions": 4,
+    "token_comparisons": 6,
+    "compile_fail": {
+      "missing-repr": [
+        "ValueType can only be derived for #[repr(C)] or #[repr(transparent)] structs"
+      ],
+      "enum": [
+        "ValueType can only be derived for structs"
+      ],
+      "union": [
+        "ValueType can only be derived for structs"
+      ],
+      "malformed-repr": [
+        "unexpected end of input, expected literal",
+        "expected a literal (`1u8`, `1.0f32`, `\"string\"`, etc.) here, found `<eof>`"
+      ],
+      "non-value-field": [
+        "the trait bound `Marker: ValueType` is not satisfied"
+      ],
+      "packed-unaligned": [
+        "reference to field of packed struct is unaligned"
+      ]
+    },
+    "mutations": {
+      "repr_guard_removed": "101 expected test assertion failure",
+      "emitter_removed": "invalid missing-repr compiles0/no error, compared to original101"
+    },
+    "restored_all_four_pass": true,
+    "retained_executable_hashes_and_bytes": {
+      "de84cbc026b4c5c6b638816ab5a2a0a229a7ce7d46905be7f4b83cd4d6d08616": 24282576,
+      "78a2a68aeb47663c868e6c37e5915fc4b45a584a7cdc4efbc1cbc3d1a7495f4c": 24278240
+    },
+    "vendor_source_hashes_match": 10,
+    "vendor_archived_hashes_match": 9,
+    "not_archived": [
+      ".cargo_vcs_info.json"
+    ],
+    "record_hashes": {
+      "inputs": "acdc723a86fb5c6646e40144f8d1504dae4a6789bed4ee4c615df7a55ba635ab",
+      "completion": "fb83441ced15c4ab4143cbfe299bf5613add5fb6c3325fbeba0015fe8b7992f2",
+      "valid-layout-and-diagnostics": "bdf210c7f6d4afac979a1fe54502c9a044a9e4b0c3465a27571f4b5019533647",
+      "guard-removal": "ac91850b5b29f634fb535e8f2f5c2ddf4cefeb7498540f2858e146bedd9e61a2",
+      "emitter-removal": "eaf1254645a62cca301681456b9fafade522f8c2ca8e5739fed7366fb8af413a",
+      "final-restored": "050a4af3a68bcbf5b4138246874f41053f38cf8cdb4bb8933596766713bfbb80"
+    },
+    "native_metadata_packages": 300,
+    "exact_vendor_selected": true,
+    "removed_diagnostic_packages_absent": true,
+    "proof_count": 0
+  },
+  "native_test_functions": {
+    "legacy": 2,
+    "ark": 2,
+    "rdf": 20,
+    "binding_library": 1,
+    "adapter": 7
+  },
+  "ignored": 0,
+  "python_functions": {
+    "prior_provenance": 9,
+    "wasmer": 13,
+    "native_guards": 13
+  },
+  "cli_proof": {
+    "retained_proof_count": 1,
+    "proof_bytes": 871,
+    "proof_sha256": "f4f28d71123fada6442e5178db5ef3866a28e35f6536c2d8a0602f7658a2fc2d",
+    "report_sha256": "07d1be09e770882f33e4d7111f7b17a2c8e346b427533a4a4fafaf5cdeb533cb",
+    "public_transcript_json_bytes": 1106,
+    "positive_verification_hosted": true,
+    "typed_rejections": {
+      "issuer": "Verification",
+      "nonce": "Verification",
+      "query": "Verification",
+      "replay": "Replay",
+      "result": "Verification",
+      "revoked": "Status",
+      "status_epoch": "Verification"
+    }
+  },
+  "audit_entries_source_only": {
+    "num-iter": "0.1.45 -> 0.1.46",
+    "cranelift-codegen-shared": "0.110.3"
+  },
+  "artifacts": [
+    {
+      "id": 10876101367,
+      "name": "native-rdf-experiment",
+      "zip_sha256": "414b3357877c4909748f2a034f39efad6d1d723bd3f46b90bf5e575058aa3d0d"
+    },
+    {
+      "id": 10875940403,
+      "name": "wasmer-diagnostic-controls",
+      "zip_sha256": "f680fb984454fbdf60182ac959afac2080abe7c9f57cb4604539051e70e4614a"
+    },
+    {
+      "id": 10875806657,
+      "name": "native-bindings-finite-2932dc4bdc4c8ff9fe369976b8123417238c52de",
+      "zip_sha256": "6bab492887382da7ba5c784751d39cdbfa8c6bbbc95f9f8a9474cbbd389936fb"
+    }
+  ],
+  "raw_log_sha256": "bb83fa95717b66cc3e305de53e7e94064e85bf271a03d9ccb7ab3886abd2fd57",
+  "historical_separation": "This is current combined fcb7 execution; prior1ce9 native576 and standalone6578 Wasmer records remain separate.",
+  "limitations": [
+    "Retained evidence verification only; no local build/Cargo/cryptographic execution.",
+    "Finite540 proofs include72 required positives and468 independently verified weaker proofs rejected by required verifier;36 cells are admission-only and80 other cases explicit exclusions.",
+    "One additional retained CLI proof is separate; internal native test proof totals not enumerated.",
+    "Hidden .cargo_vcs_info.json omitted by artifact upload; completion hash matches source but uploaded bytes unavailable.",
+    "Build-record linkage and observed executable hashes are not independently signed build attestations.",
+    "Two reviewed audit entries are present in source only; no fresh vet/advisory closure inferred. No canonical timing/performance or full upstream unsafe audit claim."
+  ]
+}

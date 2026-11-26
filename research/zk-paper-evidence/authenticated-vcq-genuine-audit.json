@@ -1,0 +1,332 @@
+{
+  "schema": "sparq.independent-genuine-evidence-audit.v1",
+  "at": "2026-09-26T22:08:48.310224+00:00",
+  "source": "7fe889557afcf1497769c1360ef53348980a7bae",
+  "source_files": 7085,
+  "lockfiles": 30,
+  "source_before_after_identical": true,
+  "source_matches_local_git_archive": true,
+  "source_audit_sha256": "4796827c3602ef6e4cfaa3b8aa06ffdb1b0850d68914326619186a56ca6ecbe1",
+  "runner_sha256": "89a899a1798c51f9f75eaa99d88b78a66f7bb861442370724e49e2ad9b99787a",
+  "proof_job_sha256": "8e3dab7f927c43508378418091811c2562380f21047bf69ad23850940e338cfd",
+  "completed_at": "2026-09-26T22:02:51.555687+00:00",
+  "outcome": "pass",
+  "scope": "One synthetic public W3C eddsa-rdfc-2022 vector; generic VCQ authenticated V5 SELECT bag with verifier-agreed anchor. No other declared case, benchmark or external security certification.",
+  "genuine_receipts": 1,
+  "protocol_accepted_receipts": 1,
+  "case": "select-bag-verifier-agreed",
+  "all_defined_cases_run": false,
+  "expected_result": {
+    "Select": {
+      "order": "Bag",
+      "rows": [
+        [
+          "\"Alumni Credential\""
+        ],
+        [
+          "\"Alumni Credential\""
+        ]
+      ],
+      "variables": [
+        "name"
+      ]
+    }
+  },
+  "receipt": {
+    "inner": "Succinct",
+    "seal_words": 55667,
+    "seal_bytes": 222668,
+    "exit_code": "Halted(0)",
+    "dev_mode": false,
+    "receipt_sha256": "1e24b3af5dfd186054040f694135c235def3f28183b8a459df51c8208be50810",
+    "journal_sha256": "d68246c1c14c18927bf09e00db62e1c45921ba07463f165de255acd7d39a94b1",
+    "presentation_file": {
+      "bytes": 584403,
+      "sha256": "7736b137b085b33aa7eacc0211ac595ff5690b6024ad8fa300fff52a168e01b4"
+    },
+    "vcq_transport": {
+      "bytes": 1753605,
+      "sha256": "0ff8dc6073eb40add2bd2b8ee40ff18125ffed6bd0fdc2f1ac14b3779145f19b"
+    },
+    "pin": {
+      "image_id": [
+        2794517044,
+        4278390001,
+        1088095536,
+        53994879,
+        3259643235,
+        835127579,
+        1589380955,
+        3166477348
+      ],
+      "sha256": [
+        195,
+        95,
+        94,
+        75,
+        116,
+        22,
+        154,
+        165,
+        27,
+        36,
+        75,
+        143,
+        238,
+        203,
+        12,
+        142,
+        116,
+        98,
+        150,
+        166,
+        170,
+        5,
+        43,
+        232,
+        197,
+        143,
+        1,
+        144,
+        177,
+        177,
+        11,
+        17
+      ]
+    },
+    "artifact_sha256": "c35f5e4b74169aa51b244b8feecb0c8e746296a6aa052be8c58f0190b1b10b11",
+    "verification": "Actual test completed SDK verification with dev mode disabled under accepted V5 pin, native/manual result comparison and generic protocol checks. Independent audit verifies retained bytes, execution/source provenance and assertions; no extra verification process launched."
+  },
+  "control_count": 28,
+  "controls": [
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "changed_query_same_form"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "wrong_challenge"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "changed_stored_audience_matching_supplied"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "changed_window_containing_now"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-audience-mismatch\")",
+      "control": "wrong_verifier_audience"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-request-expired\")",
+      "control": "expired"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-request-not-yet-valid\")",
+      "control": "not_yet_valid"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-descriptor-digest-mismatch\")",
+      "control": "wrong_descriptor_digest"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "altered_journal_result"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "flipped_journal_byte"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "fake_receipt"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "scope_substitution_agreed_to_holder"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "wrong_agreed_anchor"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "anchor_under_other_salt"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-descriptor-digest-mismatch\")",
+      "control": "policy_other_key_descriptor_digest"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "policy_other_key_spliced"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-descriptor-digest-mismatch\")",
+      "control": "policy_other_issuer_descriptor_digest"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "policy_other_issuer_spliced"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-descriptor-digest-mismatch\")",
+      "control": "policy_other_method_descriptor_digest"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "policy_other_method_spliced"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-descriptor-digest-mismatch\")",
+      "control": "policy_table_widened_descriptor_digest"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "policy_table_widened_spliced"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-descriptor-digest-mismatch\")",
+      "control": "policy_rows_tightened_descriptor_digest"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "policy_rows_tightened_spliced"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "cross_image_exact_guest_spliced"
+    },
+    {
+      "code": "ChallengeReplayed",
+      "control": "replay_same_store",
+      "store_calls": 2
+    },
+    {
+      "class": "Infrastructure",
+      "code": "ChallengeStoreFailure(\"test-broken\")",
+      "control": "broken_store",
+      "store_calls": 1
+    },
+    {
+      "accepted": 1,
+      "control": "concurrent_verifications",
+      "replayed": 1,
+      "store_calls": 2
+    }
+  ],
+  "binding_controls_store_calls": 0,
+  "control_source_assertions": "Frozen 7fe binding_controls checks exact class/stage/code and zero store calls; challenge controls check replay, infrastructure and concurrent one-consumption behavior.",
+  "challenge_store_scope": "In-memory test doubles only, not production durability/concurrency certification.",
+  "exact_cross_image_pin": {
+    "sha256": [
+      232,
+      201,
+      182,
+      182,
+      189,
+      67,
+      194,
+      120,
+      154,
+      221,
+      47,
+      203,
+      217,
+      236,
+      24,
+      145,
+      76,
+      44,
+      72,
+      204,
+      220,
+      209,
+      20,
+      158,
+      139,
+      157,
+      234,
+      111,
+      14,
+      118,
+      6,
+      35
+    ],
+    "image_id": [
+      3002199066,
+      1615302721,
+      2039644206,
+      2826525735,
+      178258819,
+      3880799180,
+      3190314515,
+      791784891
+    ]
+  },
+  "executable": {
+    "/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/vcq_authenticated_genuine-5f784fae22afd3a9": {
+      "sha256": "693c8e36fb69788b01f79a67aef0e187f213423bacf1dbe33c37cdb71d10be07",
+      "bytes": 29149032
+    }
+  },
+  "r0vm": {
+    "sha256": "751b9b188d341e8bec5e02060086b7b1dc3f7289e90f726c38589bb6735dd6d7",
+    "version": "risc0-r0vm 3.0.6\n"
+  },
+  "artifact_archive": {
+    "path": "study-artifacts/zk-resume-2026-09-26/paper-and-auth-continuation/vcq-authrdf-genuine-7fe-select-agreed/terminal-evidence.tar.gz",
+    "bytes": 6095018,
+    "sha256": "4c123dc5c5b4dc94483d77af905940918aa6ad7b527b0943018c4d0a81508b8c",
+    "verified_files": 26
+  },
+  "summary_sha256": "f2bf9ac622453adbed64cfaca47e9f501caffc53086af7726346e0243fceeea0",
+  "record_sha256": "a237a5a09d5210aad7ac76b56cb76dd54e3cdac3aea600058d4ed72cbe79993a",
+  "log_sha256": "45db3b8af8194ec608b66b3e3f94b01e46d8d42e6bbd3c5fc735562e5bd7c397",
+  "resource_scope": {
+    "declared_cpu_allowance": 8,
+    "rayon_threads": 8,
+    "memory_limit_bytes": 27917287424,
+    "swap": 0,
+    "command_max_seconds": 2040,
+    "unit_max_seconds": 2100,
+    "driver_wall_seconds": 1844.8976589920012,
+    "observed_memory_peak_bytes": 10040606720,
+    "terminal_unit_inactive": true,
+    "limits": "Final systemd transient unit already collected; peak is from retained running snapshots. Wall time is noncanonical and not a performance comparison."
+  },
+  "prior_attempt": "42d low-level proof timed out with0 receipts; immutable separate failure evidence retained.",
+  "limitations": [
+    "Only one of seven defined protocol cases proved; other forms/holder authority/row-bound case not covered by this receipt.",
+    "No credential status, holder binding, JSON-LD processing or wallet/world completeness established.",
+    "No new audit/vet closure or external cryptographic review.",
+    "No guest cycle metric was emitted by this proof driver."
+  ]
+}
