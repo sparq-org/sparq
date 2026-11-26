@@ -15,14 +15,12 @@
 
 #intro-section("abstract", "Abstract")[
   This document defines Data Integrity cryptosuites for RDF verifiable credentials
-  in which the issuer signs a salted Merkle root over the credential's quads. Each
-  leaf hashes a typed encoding of one quad. A literal's encoding carries a value
-  comparison key: an order-preserving encoding of its value under the SPARQL
-  relational operators, for numbers, date-times, booleans and `xsd:string`
-  prefixes. A zero-knowledge proof can then authenticate a credential
+  in which the issuer signs a salted message committing to a Merkle root over the
+  credential's quads. The Poseidon2 member also salts each quad leaf. A literal's encoding
+  carries a comparison key for the value types supported by its suite, including numbers,
+  date-times, booleans and `xsd:string` prefixes. A zero-knowledge proof can then authenticate a credential
   without canonicalizing it, and reuse a checked key for typed comparisons.
-  The suite family has three members that share the encoding and the
-  tree shape: `eddsa-sha256-merkle-2026` for hash-accelerated zkVMs,
+  The suite family defines `eddsa-sha256-merkle-2026` for hash-accelerated zkVMs,
   `schnorr-poseidon2-merkle-2026` for arithmetic circuits, and the post-quantum
   `mldsa44-sha256-merkle-2026`.
 ]
@@ -60,12 +58,16 @@ in RFC 2119 #cite("RFC2119") when, and only when, they appear in capitals.
   columns: (auto, auto, auto, 1fr),
   [*Identifier*], [*Tree hash*], [*Signature*], [*Implementation status*],
   [`eddsa-sha256-merkle-2026`], [SHA-256], [Ed25519 #cite("RFC8032")],
-    [Implemented in the sparq zkVM relation and its issuer function],
+    [Native issuance and verification in `sparq-merkle-suite` and a frozen zkVM relation],
   [`schnorr-poseidon2-merkle-2026`], [Poseidon2 over BN254], [Schnorr over Baby Jubjub],
-    [Implemented in the native suite and Noir credential library; research grade and externally unaudited],
+    [Native issuance and verification, Noir credential opening and the authenticated Noir query method],
   [`mldsa44-sha256-merkle-2026`], [SHA-256], [ML-DSA-44 #cite("FIPS204")],
     [Specified here; not yet implemented],
 )
+
+Both implementations are research grade and externally unaudited. The Node successful-result
+method uses its own credential format. Its bundled date and unsigned integer filters belong
+to that method.
 
 = Data model
 
@@ -79,8 +81,9 @@ A credential secured with one of these suites carries a `DataIntegrityProof`
 - `proofValue`: the base58-btc multibase encoding (prefix `z`) of the signature
   bytes followed by the 32-byte tree salt.
 
-The salt is secret to the issuer and the holder. A holder MUST NOT disclose the
-salt to a verifier. For the Poseidon2 member it is the canonical, unsigned
+A hidden- or revealed-mode answer presentation MUST keep the issuance salt private.
+Whole-credential verification uses the salt carried by the credential. For the Poseidon2
+member it is the canonical, unsigned
 32-byte big-endian encoding of a uniformly sampled field element; encodings at
 or above the field modulus MUST be rejected. The SHA-256 members use uniformly
 sampled byte salts.
@@ -120,11 +123,25 @@ compares with one another.
 - A class `0x07` key decides an order only when the two prefixes differ.
 - Keys of class `0x00` or `0x7F` decide nothing.
 - Equal keys do not make two literals the same RDF term. `sameTerm`, joins and
-  `DISTINCT` use the whole term encoding.
+  `DISTINCT` use RDF term identity, including lexical form, datatype and language tag.
 - A function such as `STRSTARTS` that has its own argument compatibility rules
   MUST apply them before it uses a key.
 
 In every other case, a proof uses the lexical form.
+
+The date and derived-integer entries below describe the field-native member. The frozen
+`eddsa-sha256-merkle-2026` encoding gives every `xsd:date` and every built-in integer
+subtype other than `xsd:integer` the all-zero key. Base `xsd:integer`, `xsd:decimal` and
+`xsd:dateTime` retain their existing classes. The examples give the first byte of each key.
+
+#table(
+  columns: (2fr, 1fr, 1fr),
+  table.header[Typed literal][Ed25519/SHA-256][Schnorr/Poseidon2],
+  [`"1970-01-01"^^xsd:date`], [`0x00`], [`0x08`],
+  [`"1970-01-01Z"^^xsd:date`], [`0x00`], [`0x7F`],
+  [`"255"^^xsd:unsignedByte`], [`0x00`], [`0x01`],
+  [`"256"^^xsd:unsignedByte`], [`0x00`], [`0x00`],
+)
 
 #table(
   columns: (auto, 1fr, 1.6fr),
@@ -188,6 +205,10 @@ SHA-256(id || 0x00 || salt || n as u32 big-endian || root || config)
 
 where `id` is the ASCII suite identifier.
 
+Issuing the same canonical quads twice with different salts gives the same SHA-256 leaves
+and root, and different signed messages. For the Poseidon2 member the salt also enters the
+leaf computation, so the corresponding leaves and root change.
+
 = Algorithms
 
 == Proof creation
@@ -239,10 +260,6 @@ one.
   credential, but presentations of the same credential are linkable through the
   message and the signature.
 
-A circuit that compares keys without recomputing them from lexical forms relies
-on the issuer to have computed them correctly. Such a circuit SHOULD recompute
-the keys it compares.
-
 = The Poseidon2 member
 
 `schnorr-poseidon2-merkle-2026` is implemented by the native
@@ -275,8 +292,9 @@ where `enc'(t)` is the typed byte encoding without its comparison key and the
 complete key is one field integer, zero for non-literals. Datatype and language
 identifiers use `B` under their own domains. A term cell MUST bind its kind,
 encoding, key class, key, datatype and language identifiers to the same opening.
-Blank-node cells also carry the credential's dataset position; equality includes
-that scope. Triple terms are not admitted.
+For opened RDF terms the query method uses `P(kind(t), B(term_domain, enc'(t)))` for identity.
+The default-graph marker retains its field encoding. Equality of blank nodes also
+requires the same credential scope. Triple terms are not admitted.
 
 A quad hash is `q = P(quad_domain, encF(s), encF(p), encF(o), encF(g))`.
 The issuer orders quads by their canonical unsigned `q` values, strictly

@@ -33,8 +33,8 @@ Two informative companion documents accompany this one: #emph[Zero-Knowledge SPA
 over OpenID for Verifiable Presentations] (https://sparq.jeswr.org/specs/zksparql-answers-oid4vp)
 shows how OpenID4VP can carry the request and the presentation, and #emph[Zero-Knowledge SPARQL
 Answers: Implementation Status] (https://sparq.jeswr.org/specs/zksparql-answers-implementation)
-lists the proof methods built and proposed and compares this document with the code in
-the sparq repository.
+records earlier implementation stages. The current authenticated query profile is described
+in @sec-envelope-draft.
 
 = Introduction <sec-intro>
 
@@ -101,9 +101,8 @@ This document uses the RDF 1.2 terms #emph[RDF dataset], #emph[graph], #emph[IRI
 / Input dataset: The RDF dataset a holder evaluates the query over, built from credentials as
   the proof method states. The methods in this document use the RDF merge
   #cite("RDF12-SEMANTICS") of the credentials' graphs as the default graph, which keeps each
-  credential's blank nodes apart. A method could instead put each credential in its own named
-  graph, as a verifiable presentation does #cite("VC-DATA-MODEL-2.0"); a query written for one
-  layout does not match the other, so the method states which it uses.
+  credential's blank nodes apart. The credential statement profile also gives each credential
+  a named graph and adds its verified issuer to the default graph (@sec-envelope-draft).
 / Dataset commitment: A digest that fixes the input dataset without revealing it. It includes
   a random salt chosen by the holder, so equal datasets do not give equal commitments unless
   the same salt is reused.
@@ -114,6 +113,8 @@ This document uses the RDF 1.2 terms #emph[RDF dataset], #emph[graph], #emph[IRI
   credentials themselves.
 / Statement: The values a proof is about: the request digest, the dataset commitment, the
   result, the signature mode and, in the revealed mode, the signed messages (@sec-binding).
+  In the credential statement profile the verifier also supplies the public policy derived
+  from the stored request (@sec-envelope-draft).
 / Signed message: The bytes an issuer's signature is computed over, as the cryptosuite defines
   them. For `eddsa-rdfc-2022` #cite("VC-DI-EDDSA") it is the SHA-256 hash of the canonical
   proof configuration followed by the SHA-256 hash of the canonical credential document. The
@@ -121,6 +122,8 @@ This document uses the RDF 1.2 terms #emph[RDF dataset], #emph[graph], #emph[IRI
   `schnorr-poseidon2-merkle-2026` and `mldsa44-sha256-merkle-2026`) sign a digest of the suite
   identifier, a 32-byte salt, the number of quads, the root of a Merkle tree with one leaf per
   canonical quad of the credential, and the digest of the canonical proof configuration.
+  The Poseidon2 member also binds the opened proof metadata for creation, verification
+  method and signing key.
 
 = Vocabulary and serialization <sec-vocab>
 
@@ -302,6 +305,11 @@ $D$, and could leave one out. If it has one, the verifier agreed that dataset co
 beforehand, by means outside this document, and the presentation's `inputCommitment` MUST
 equal it. Where a proof method computes the commitment differently in each signature mode, a
 request with an `inputCommitment` MUST list only the mode it was computed under.
+
+The authenticated Noir query method commits to the ordered signed credential messages with a
+private presentation salt. Its verifier can check a pre-agreed commitment. The Node report's
+`complete` describes evaluation over those presented credentials. A claim that a registry
+supplied every relevant credential for a subject and period requires separate evidence.
 
 == Trust requirements <sec-trust>
 
@@ -545,10 +553,9 @@ circuit or program for the same method, for example a circuit compiled directly 
 instead of from Noir, has a new verification key, and the verifier names that key in
 `verificationKey`.
 
-The proof methods built in the sparq repository, and those proposed, are listed in the
-implementation status companion
-(https://sparq.jeswr.org/specs/zksparql-answers-implementation). None has had an external
-cryptographic audit.
+The implementation status companion records earlier method designs
+(https://sparq.jeswr.org/specs/zksparql-answers-implementation). The implementations described
+here are research grade and externally unaudited.
 
 = Security and privacy considerations <sec-security>
 
@@ -658,12 +665,48 @@ to its description in RDF.
 
 = Draft amendment: credential statements <sec-envelope-draft>
 
-#strong[Draft — authenticated envelope integration of the Noir query programme.]
-This section proposes an opt-in credential statement profile for methods that explicitly
-implement it. It takes precedence over the earlier dataset-layout and bearer-only wording
-only for those methods. The profile is research grade and not externally audited. A method
-with stand-ins is not an available proof method and MUST NOT be admitted for this profile.
-The implementation companion describes the draft method and its current boundary.
+This opt-in profile applies to methods that authenticate the selected credentials and enforce
+the requested conditions. A verifier MUST refuse a method that substitutes supplied values
+for credential authentication or a required policy check. The authenticated
+`urn:sparq:vcq:method:noir-query:v1` method
+implements these checks for bounded ASK and SELECT. Its Node package uses catalogued query
+shapes and keys, a typed request and a method-specific presentation. The JSON-LD exchange in
+@sec-request and @sec-presentation is a proposed wire format. The implementation is research
+grade and externally unaudited.
+
+== Implemented policy in the Node packages
+
+In `@sparq-org/zk-query`, the public request digest binds the exact query, including any
+issuer constraints. The verifier reconstructs the trust root, holder scope, status policy and
+time requirements from its stored request. The generated program checks the corresponding
+private evidence for each active credential. A successful report's `issuers` lists the trusted
+keys and `subject` lists the issuers to which holder binding applies. Fact attribution comes
+from joining the query's graph pattern to the verified issuer of that same graph.
+
+The Node policy maps `trustMembers` to the issuer authorization set,
+`holderBinding.issuers` to the optional issuer scope, and `acceptedSnapshots` to the status
+policy. When holder binding is requested, the holder supplies one key to the Node prover.
+The `allowMissing` option defaults
+to false. The optional `validityTime` and `earliestCreated` instants use Unix milliseconds.
+The request's own acceptance window uses Unix seconds.
+
+The table lists the verifier's policy for the native Solid App Suite examples. Each query
+scopes facts by issuer. “Required” status means every credential must have an entry whose
+bit is clear in a verifier-accepted snapshot.
+
+#table(
+  columns: (2fr, 1fr, 1fr),
+  table.header[Query][Holder binding][Status],
+  [Insurance (count and closed graph)], [All issuers], [Required],
+  [Trial eligibility], [All issuers], [Required],
+  [Recycled content (MIN, SUM and HAVING)], [Omitted], [Required],
+)
+
+The independent `@sparq-org/zk-result` method proves support for selected solutions. Its
+scoped query form requires every authenticated issuer slot to carry the key for one policy
+issuer IRI. A query requiring different issuers for different facts is refused. Its
+`trustMembers` report echoes the verifier's roster. This method checks status against the
+verifier's versioned snapshots and has bearer semantics.
 
 == Dataset and issuer per fact
 
@@ -694,7 +737,7 @@ Authentication and dataset conversion MUST use the same credential-index binding
 consumes the resulting internal view; an independent witnessed view MUST NOT replace it.
 The method makes no additional graph-to-issuer inference. The trust set binds issuer, verification method, cryptosuite,
 assertion authorization and key together. The issuer IRI comes from the opened credential
-subject’s unique `issuer` property; the verification-method IRI and Multikey come from the
+root's unique `issuer` property; the verification-method IRI and Multikey come from the
 suite-authenticated proof metadata. The key coordinates MUST open that Multikey, and the
 authorization term is exactly `https://w3id.org/security#assertionMethod`. Hidden mode proves
 membership in its public digest with the member and membership path private. A query can require an issuer for a particular
@@ -791,10 +834,12 @@ additional presentation flags can turn a required check off. A method MUST docum
 public-input layout and bind the same statement to the result and dataset commitment.
 
 Absence is exact: the evidence checks all of each credential's authenticated quads, not just
-quads used by a matching solution. `credentialStatus`, `validFrom` and `validUntil` are read on
-the credential root. Holder keys are read through its `credentialSubject` relation. All matching
-status entries are checked. This profile requires singleton issuer, credential subject, key,
-status-entry fields and individual validity bounds; every present bound is applied. A method
+quads used by a matching solution. Each credential has one root typed as
+`cred:VerifiableCredential` and one issuer IRI on that root. When holder binding applies, the
+method follows the root's single `credentialSubject` to its confidence-method key. A required
+status check covers every `credentialStatus` entry on the root, with singleton list, purpose
+and index fields. A required validity check applies each present `validFrom` and `validUntil`
+on the root. A method
 MUST refuse ambiguous cardinalities or unsupported shapes rather than select a convenient entry.
 Exact absence still says nothing about other credentials the holder did not include; the
 closed-world qualifications in @sec-cwa and dataset agreement in @sec-input still apply.
@@ -823,7 +868,9 @@ specified algorithms. The method must identify the internal profile and exact by
 in its parameters before wire use.
 
 The snapshot digest is `P(SNAPSHOT, list.enc, purpose.enc, bitLength, D, root)`, where `D` is
-the compiled status-tree depth. A status leaf is `P(STATUS_LEAF, bit, 0)`, with `bit` restricted
+the actual depth of the snapshot's bit tree, bounded by the compiled maximum. Unused path
+siblings are zero. The current query program admits one status entry per credential and
+refuses larger counts. A status leaf is `P(STATUS_LEAF, bit, 0)`, with `bit` restricted
 to zero or one; internal nodes remain `P(left, right)`. `P` is the length-bound Poseidon2 hash.
 The distinct status-leaf tag and arity separate leaves from other envelope hash inputs,
 including internal nodes. The draft tags are `SNAPSHOT = 0x5643515f45534e50` and `STATUS_LEAF =
