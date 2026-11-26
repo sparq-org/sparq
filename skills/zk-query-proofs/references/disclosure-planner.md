@@ -36,6 +36,8 @@ Selection compares authenticated RDF-term identity. The operand can be public
 or hidden, but must be bound in the FILTER's own input. NOT IN, OR and variable
 list items refuse. A backend must enforce these obligations in addition to the
 numeric `filters`; `PlannedRow::filters` records numeric obligations only.
+Both witness-selection routes revalidate the list capacity and constant datatypes
+for caller-constructed `DisclosureQuery` values before searching for witnesses.
 The [successful-result contract](successful-results.md#typed-constant-list-membership)
 describes projected verification and the bounded hidden-membership members.
 

@@ -11,9 +11,10 @@ export function inFixture(two = false, value = 'BSc') {
     query: `PREFIX vcq: <https://w3id.org/sparq/vcq#>
 SELECT DISTINCT ?subject WHERE {
   ?g vcq:verifiedIssuer <${iri}> .
+  ${two ? `?h vcq:verifiedIssuer <${iri}> .` : ''}
   GRAPH ?g { ?subject <urn:claim:degree.level> ?value .
-    ${two ? '?subject <urn:claim:degree.approved> true .' : ''}
     FILTER(?value IN ("BSc", "MSc")) }
+  ${two ? 'GRAPH ?h { ?subject <urn:claim:degree.approved> true . }' : ''}
 }`,
     credentials: two ? [issue(degree, 0), issue(flag, 1)] : [issue(degree, 0)],
     policy: { issuers: { [iri]: issuer.publicKey }, snapshots: [{ status_list: 'urn:list', version: 1, bits: [0] }], minVersion: 1, maxVersion: 1 },

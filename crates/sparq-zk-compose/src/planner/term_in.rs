@@ -16,24 +16,35 @@ impl TermInFilter {
     pub(crate) fn accepts(&self, term: &Term) -> bool {
         self.constants.contains(term)
     }
+
+    pub(super) fn validate(&self) -> Result<(), PlanError> {
+        if self.constants.is_empty() || self.constants.len() > 16 {
+            return Err(unsupported("IN constant list capacity"));
+        }
+        for term in &self.constants {
+            let valid = match term {
+                Term::NamedNode(_) => true,
+                Term::Literal(l) => {
+                    l.datatype().as_str() == "http://www.w3.org/2001/XMLSchema#string"
+                        || canonical_integer(term).is_some()
+                        || date::canonical_date(term).is_some()
+                }
+                _ => false,
+            };
+            if !valid {
+                return Err(unsupported(
+                    "IN constant requires IRI, string, canonical unsigned integer or date",
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 fn constant(expr: &Expression) -> Result<Term, PlanError> {
     match expr {
         Expression::NamedNode(n) => Ok(n.clone().into()),
-        Expression::Literal(l) => {
-            let term = Term::Literal(l.clone());
-            if l.datatype().as_str() == "http://www.w3.org/2001/XMLSchema#string"
-                || canonical_integer(&term).is_some()
-                || date::canonical_date(&term).is_some()
-            {
-                Ok(term)
-            } else {
-                Err(unsupported(
-                    "IN constant requires IRI, string, canonical unsigned integer or date",
-                ))
-            }
-        }
+        Expression::Literal(l) => Ok(l.clone().into()),
         _ => Err(unsupported("IN list requires constant terms")),
     }
 }
@@ -62,10 +73,12 @@ fn expression(
             if list.is_empty() || list.len() > 16 {
                 return Err(unsupported("IN constant list capacity"));
             }
-            out.push(TermInFilter {
+            let filter = TermInFilter {
                 variable: variable.as_str().to_owned(),
                 constants: list.iter().map(constant).collect::<Result<_, _>>()?,
-            });
+            };
+            filter.validate()?;
+            out.push(filter);
             Ok(None)
         }
         _ => Ok(Some(expr.clone())),

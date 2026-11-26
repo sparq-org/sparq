@@ -49,6 +49,7 @@ IRI and a typed boolean are supported; unsupported cases reject.
 `FILTER(?value IN ("BSc", "MSc"))` is accepted when `?value` is projected,
 including inside an issuer-scoped GRAPH block. The list contains up to sixteen
 constant IRIs, strings, canonical unsigned integers or timezone-free dates.
+Scoped IN queries admit one triple pattern per graph variable.
 Verification checks membership against the authenticated released RDF term.
 IN can be conjoined with the existing numeric filters; their datatype and lexical
 rules still apply. One hidden IN operand is supported by dedicated method-bound members at status

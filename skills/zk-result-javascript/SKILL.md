@@ -34,8 +34,9 @@ timezone-free `xsd:date` comparisons. Negative integer constants reject; the
 multiple hidden date comparisons reject.
 Projected operands also admit `FILTER(?value IN ("BSc", "MSc"))`, inside a
 scoped GRAPH block or in a flat query. Lists contain one to sixteen constant
-IRIs, strings, canonical unsigned integers or timezone-free dates. IN is checked
-against authenticated released terms during independent reconstruction. AND
+IRIs, strings, canonical unsigned integers or timezone-free dates. Scoped IN
+queries admit one triple pattern per graph variable. Independent reconstruction
+checks projected membership against authenticated released terms. AND
 with existing numeric comparisons is supported. A single hidden IN uses its dedicated method-bound member at status depth ten,
 without hidden numeric comparisons in that proof. Its operand stays private. NOT IN, OR,
 variable list items and noncanonical or unsupported typed constants refuse.

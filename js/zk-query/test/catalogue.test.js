@@ -67,3 +67,20 @@ test('Solid consumer queries have pinned catalogue examples and native artifacts
     assert.deepEqual(entry.example, sample);
   }
 });
+
+test('the consumer trial plan admits the full exclusion list capacity', () => {
+  const sample = consumerCases.find(e => e.name === 'consumer-trial');
+  const issuer = testIssuerKeygen('00'.repeat(32));
+  const policy = examplePolicy(sample, issuer, 'urn:sparq:test:catalogue');
+  const nonce = '09'.repeat(32);
+  const original = request({ query: sample.query, policy, nonce });
+  const withExclusions = count => {
+    const list = Array.from({ length: count }, (_, i) => JSON.stringify(`excluded-${i}`));
+    const query = sample.query.replace('"excluded-x", "excluded-y"', list.join(', '));
+    return request({ query, policy, nonce });
+  };
+  const expanded = withExclusions(16);
+  assert.equal(expanded.planHash, original.planHash);
+  assert.notEqual(expanded.digest, original.digest);
+  assert.throws(() => withExclusions(17), /capacity refusal: IN list/);
+});

@@ -672,3 +672,66 @@ fn projected_in_keeps_authentication_and_rejects_nonmembers() {
         }
     }
 }
+
+#[test]
+fn constructed_in_lists_obey_the_same_admission_as_parsed_queries() {
+    use sparq_zk_compose::planner::{optimize_disclosure, OptimizationLimits};
+
+    let admitted = query("SELECT DISTINCT ?degree WHERE { ?s ex:degree ?degree FILTER(?degree IN (\"BSc\", \"MSc\")) }");
+    let degree: Term = Literal::new_simple_literal("BSc").into();
+    let graph = credential(&[triple("alice", "degree", degree.clone())], 1);
+    let released = [row(&[("degree", degree.clone())])];
+    let mut full_list = admitted.clone();
+    full_list.in_filters[0].constants = vec![degree.clone(); 16];
+    assert!(plan_disclosure(
+        &full_list,
+        std::slice::from_ref(&graph),
+        &released,
+        PlannerLimits::default()
+    )
+    .is_ok());
+    assert!(optimize_disclosure(
+        &full_list,
+        std::slice::from_ref(&graph),
+        &released,
+        OptimizationLimits::default()
+    )
+    .unwrap()
+    .plan
+    .is_some());
+    for constants in [
+        Vec::new(),
+        vec![degree; 17],
+        vec![integer("01")],
+        vec![Literal::from(true).into()],
+        vec![Literal::new_language_tagged_literal("BSc", "en")
+            .unwrap()
+            .into()],
+        vec![Literal::new_typed_literal(
+            "2000-01-01Z",
+            NamedNode::new("http://www.w3.org/2001/XMLSchema#date").unwrap(),
+        )
+        .into()],
+    ] {
+        let mut q = admitted.clone();
+        q.in_filters[0].constants = constants;
+        assert!(matches!(
+            plan_disclosure(
+                &q,
+                std::slice::from_ref(&graph),
+                &released,
+                PlannerLimits::default()
+            ),
+            Err(PlanError::Unsupported(_))
+        ));
+        assert!(matches!(
+            optimize_disclosure(
+                &q,
+                std::slice::from_ref(&graph),
+                &released,
+                OptimizationLimits::default()
+            ),
+            Err(PlanError::Unsupported(_))
+        ));
+    }
+}

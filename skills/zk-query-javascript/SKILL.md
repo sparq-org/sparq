@@ -132,5 +132,6 @@ process home is unchanged; vendored source dependencies need no shared home cach
 
 The trial catalogue policy assumes one subject with one age, diagnosis and
 completeness value in its credential: its outer tables use the smallest two-row bucket, while the
-medication scan and filter retain their full list capacity. A dataset exceeding
+medication scan and filter retain their full list capacity. The pinned plan
+admits up to sixteen exclusion constants. A dataset exceeding
 any table bucket refuses; the query expressions are unchanged.

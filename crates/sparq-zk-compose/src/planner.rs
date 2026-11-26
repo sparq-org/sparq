@@ -248,6 +248,7 @@ impl DisclosureQuery {
             return Err(unsupported("ASK cannot release bindings"));
         }
         for filter in &self.in_filters {
+            filter.validate()?;
             if !variables.contains(&filter.variable) {
                 return Err(unsupported("IN requires an authenticated bound variable"));
             }

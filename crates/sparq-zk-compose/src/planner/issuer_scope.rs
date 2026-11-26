@@ -8,7 +8,8 @@ const VERIFIED_ISSUER: &str = "https://w3id.org/sparq/vcq#verifiedIssuer";
 /// Returns the original text for ordinary admitted queries. Scoped SELECT DISTINCT
 /// queries may contain only issuer declarations and GRAPH blocks with positive
 /// BGP/JOIN/FILTER bodies. Graph variables must be declared, used only as graph
-/// names, and all name the same issuer IRI. This is syntax admission, not issuer
+/// names, and all name the same issuer IRI. Queries with IN admit one triple
+/// pattern per graph variable. This is syntax admission, not issuer
 /// authentication: callers must resolve that IRI in their policy, restrict proving
 /// credentials, and check every authenticated public issuer slot when verifying.
 /// Native result verification does not call this helper or change its contract.
@@ -100,7 +101,10 @@ pub fn lower_issuer_scope(sparql: &str) -> Result<(String, Option<String>), Plan
     }
     **inner = body;
     let lowered = parsed.to_string();
-    DisclosureQuery::parse(&lowered).map_err(|_| original)?;
+    let query = DisclosureQuery::parse(&lowered).map_err(|_| original)?;
+    if !query.in_filters.is_empty() && query.patterns.len() != names.len() {
+        return Err(unsupported("scoped IN requires one triple pattern per graph variable"));
+    }
     Ok((lowered, declarations.into_values().next()))
 }
 
@@ -110,6 +114,24 @@ mod tests {
 
     fn scoped(body: &str) -> String {
         format!("PREFIX vcq: <https://w3id.org/sparq/vcq#> SELECT DISTINCT ?x WHERE {{ {body} }}")
+    }
+
+    #[test]
+    fn scoped_in_admits_one_pattern_per_graph_variable() {
+        let declaration = "?g vcq:verifiedIssuer <urn:issuer:a> .";
+        let degree = "GRAPH ?g { ?s <urn:degree> ?x . FILTER(?x IN (\"BSc\", \"MSc\")) }";
+        assert!(lower_issuer_scope(&scoped(&format!("{declaration} {degree}"))).is_ok());
+        let separate = format!("{declaration} ?h vcq:verifiedIssuer <urn:issuer:a> . {degree} GRAPH ?h {{ ?s <urn:approved> true }}");
+        assert!(lower_issuer_scope(&scoped(&separate)).is_ok());
+        for body in [
+            format!("{declaration} {degree} GRAPH ?g {{ ?s <urn:approved> true }}"),
+            format!("{declaration} GRAPH ?g {{ ?s <urn:degree> ?x ; <urn:approved> true . FILTER(?x IN (\"BSc\", \"MSc\")) }}"),
+        ] {
+            assert!(matches!(
+                lower_issuer_scope(&scoped(&body)),
+                Err(PlanError::Unsupported(reason)) if reason == "scoped IN requires one triple pattern per graph variable"
+            ));
+        }
     }
 
     #[test]
