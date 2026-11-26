@@ -185,8 +185,17 @@ def steps(root: Path, profile: str) -> list[tuple[list[str], Path]]:
     return result
 
 
+def listed_core_tests(output: str) -> set[str]:
+    names = set()
+    for line in output.splitlines():
+        words = line.split()
+        if len(words) == 2 and words[0] == "sparq_noir_query_core":
+            names.add(words[1])
+    return names
+
+
 def check_noir_listing(output: str) -> int:
-    names = {line.split()[-1] for line in output.splitlines() if len(line.split()) == 2}
+    names = listed_core_tests(output)
     required = {f"ops_core_tests::{op}_{case}" for op in OPERATORS
                 for case in ("honest", "missing", "extra", "reordered", "padding", "overflow")}
     required |= {f"ops_core_tests::{name}" for name in ROWS_CONTRACTS}
@@ -197,7 +206,7 @@ def check_noir_listing(output: str) -> int:
 
 
 def check_policy_listing(output: str) -> None:
-    names = {line.split()[-1] for line in output.splitlines() if len(line.split()) == 2}
+    names = listed_core_tests(output)
     required = {f"ops_core_envelope::{name}" for name in POLICY_CONTRACTS}
     if not required <= names:
         raise ValueError("hosted policy contract inventory is incomplete")
@@ -230,7 +239,7 @@ def main() -> int:
     for command, cwd in commands:
         print("Running", cwd.relative_to(root), *command, flush=True)
         if command[:2] == ["nargo", "test"] and cwd == root / "zk/noir-query/core" and args.profile == "hosted":
-            listing = subprocess.run(["nargo", "test", "--list-tests", *NOIR_FILTERS], cwd=cwd, env=env,
+            listing = subprocess.run([*command, "--list-tests"], cwd=cwd, env=env,
                                      text=True, capture_output=True, check=True)
             check_noir_listing(listing.stdout)
             check_policy_listing(listing.stdout)

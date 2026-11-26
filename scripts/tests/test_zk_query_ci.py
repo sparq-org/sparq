@@ -86,7 +86,7 @@ class QueryProfiles(unittest.TestCase):
         self.assertEqual(profile.check_noir_listing("\n".join(names)), len(names))
         for missing in range(len(names)):
             with self.subTest(missing=missing), self.assertRaises(ValueError):
-                profile.check_noir_listing("\n".join(names[:missing] + names[missing + 1:] ))
+                profile.check_noir_listing("\n".join(names[:missing] + names[missing + 1:]))
         with self.assertRaises(ValueError):
             profile.check_noir_listing("")
 
@@ -203,10 +203,12 @@ class QueryPolicyFeatures(unittest.TestCase):
             qualified = f"ops_core_envelope::{name}"
             self.assertTrue(any(selected in qualified for selected in profile.NOIR_FILTERS), qualified)
 
-    def test_hosted_execution_refuses_an_incomplete_policy_listing(self):
-        from unittest import mock
+    def test_hosted_execution_checks_its_core_listing_before_running(self):
+        from contextlib import redirect_stdout
+        import io
         import os
         import subprocess
+        from unittest import mock
         names = [f"sparq_noir_query_core ops_core_tests::{op}_{case}" for op in profile.OPERATORS
                  for case in ("honest", "missing", "extra", "reordered", "padding", "overflow")]
         names += ["sparq_noir_query_core ops_core_reads::reads_check_every_active_input_row"]
@@ -214,21 +216,42 @@ class QueryPolicyFeatures(unittest.TestCase):
         names += [f"sparq_noir_query_core {name}" for name in OPENING_AND_EXPRESSION_TESTS]
         names += self.policy_listing()
         core = ROOT / "zk/noir-query/core"
-        for complete in (True, False):
-            listing = "\n".join(names if complete else names[:-1])
-            with self.subTest(complete=complete), \
+        for missing, other_package in (
+            (None, False),
+            ("suite_metadata_tests::digest_opening_cannot_change_a_term_kind", False),
+            ("expr_binding_tests::bind_error_is_unbound", False),
+            ("expr_binding_tests::bind_error_is_unbound", True),
+            ("ops_core_envelope::selected_holder_refuses_an_unknown_feature_tag", False),
+            ("ops_core_envelope::selected_holder_refuses_an_unknown_feature_tag", True),
+        ):
+            missing_row = f"sparq_noir_query_core {missing}"
+            listing = [name for name in names if name != missing_row]
+            if other_package:
+                listing.append(f"other_package {missing}")
+            with self.subTest(missing=missing, other_package=other_package), \
+                 redirect_stdout(io.StringIO()), \
                  mock.patch.object(sys, "argv", ["zk_query_ci.py", "hosted", "--root", str(ROOT)]), \
                  mock.patch.dict(os.environ, {"SPARQ_ZK_ALLOW_MISSING_TOOLCHAIN": "0"}), \
                  mock.patch.object(profile.os, "sched_setaffinity"), \
-                 mock.patch.object(profile, "steps", return_value=[(["nargo", "test"], core)]), \
-                 mock.patch.object(profile.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout=listing)) as run:
-                if complete:
+                 mock.patch.object(profile.subprocess, "run", return_value=subprocess.CompletedProcess(
+                     [], 0, stdout="\n".join(listing))) as run:
+                if missing is None:
                     self.assertEqual(profile.main(), 0)
-                    self.assertEqual(run.call_count, 2)
                 else:
-                    with self.assertRaises(ValueError):
+                    with self.assertRaisesRegex(ValueError, "contract inventory is incomplete"):
                         profile.main()
-                    self.assertEqual(run.call_count, 1)
+                core_calls = [call for call in run.call_args_list
+                              if call.kwargs["cwd"] == core and call.args[0][:2] == ["nargo", "test"]]
+                self.assertEqual(len(core_calls), 2 if missing is None else 1)
+                listing_call = core_calls[0]
+                self.assertIn("--list-tests", listing_call.args[0])
+                self.assertTrue(listing_call.kwargs["check"])
+                if missing is None:
+                    execution_call = core_calls[1]
+                    self.assertEqual(listing_call.args[0], [*execution_call.args[0], "--list-tests"])
+                    self.assertTrue(execution_call.kwargs["check"])
+                else:
+                    self.assertEqual(run.call_args, listing_call)
 
 
 if __name__ == "__main__":
