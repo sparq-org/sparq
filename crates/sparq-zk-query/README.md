@@ -53,7 +53,7 @@ and `Request::new_authenticated_with_quad_bounds` select distinct ordered slot
 limits. `Compiler::prove` accepts complete `credential::Credential` inputs with
 private lexical, signature and membership material. Its encoder argument remains
 for compatibility; proof and verification use `credential::SuiteEncoder`.
-Structural requests created with `Request::new` cannot produce an authenticated proof.
+`Request::new_operator_fixture` constructs an unauthenticated fixture request. Proof routes require authentication.
 Use `prepare_with_opening_profile` and
 `Request::new_authenticated_with_opening_profile` with the same profile for larger openings; `new_authenticated_with_envelope_and_profile` retains typed envelope
 properties as well. `prepare_with_envelope_features` selects the optional consumers required by the stored policy; ordinary preparation selects issuer authorization alone. Oversized lexical forms receive a capacity refusal.
@@ -62,7 +62,7 @@ The current suite profile opens complete credentials, checks hidden signatures
 and canonical trust-member membership. Source identities are key-independent; value consumers check complete active inputs, including rejected rows. Released RDF clears value-key metadata. Overflow refuses.
 The verifier reconstructs the plan and constants from its stored request, re-encodes the released RDF answer,
 and consumes the shared challenge after proof verification and a final validity check.
-Supplied-cell programs are isolated operator fixtures.
+Generate supplied-cell programs from a lowered plan with `codegen::generate_operator_fixture(&plan)`.
 
 The request digest is SHA-256 over RDFC canonical N-Quads of this method's request.
 The typed protocol encoding is a named method parameter within that RDF. Public inputs, in order, are request digest, salted input commitment, signature
