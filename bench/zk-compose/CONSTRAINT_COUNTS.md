@@ -59,6 +59,21 @@ Scaling — pairs differing in exactly one parameter:
 | --- | --- | --- | --- | --- | --- |
 | `k` | 1 (44,473) | 2 (71,285) | n=16, p=3, r=4, f=1, d=10 | +26,812 | 1.6029 |
 
+### `result_v5_in`
+
+Method-bound released-result support with one hidden RDF term checked against a public constant list.
+
+| member | parameters | `circuit_size` |
+| --- | --- | --- |
+| `result_v5_k1_n16_p3_r4_f1_in_d10` | k=1, n=16, p=3, r=4, f=1, d=10 | 32,821 |
+| `result_v5_k2_n16_p3_r4_f1_in_d10` | k=2, n=16, p=3, r=4, f=1, d=10 | 59,635 |
+
+Scaling — pairs differing in exactly one parameter:
+
+| parameter | from | to | held fixed | Δ gates | ratio |
+| --- | --- | --- | --- | --- | --- |
+| `k` | 1 (32,821) | 2 (59,635) | n=16, p=3, r=4, f=1, d=10 | +26,814 | 1.8170 |
+
 ### `result_v5`
 
 Version 5 support for released SELECT DISTINCT mappings, identical in capacity and public ABI to the version-1 f=0 profile but folding the METHOD-BOUND presentation message, so the issuer signature attests the string-canonical commitment METHOD and not merely the commitment. The scheme digest is a compile-time constant of the relation, not a public input. f=0 only: no private FILTER. Compiled only for k in {1, 2}, n=16, p=3, r=4, d=10. Does not establish result completeness or holder identity.
@@ -469,4 +484,4 @@ bench/zk-compose/scripts/constraint_pack.py --write
 bench/zk-compose/scripts/constraint_pack.py --check
 ```
 
-Coverage: 82 of 82 snapshot members across 23 families, 88 single-parameter scaling pairs, 3 invariance facts. The generator **fails** on a snapshot member it cannot classify, so a new circuit family cannot silently drop out of this evaluation.
+Coverage: 84 of 84 snapshot members across 24 families, 89 single-parameter scaling pairs, 3 invariance facts. The generator **fails** on a snapshot member it cannot classify, so a new circuit family cannot silently drop out of this evaluation.

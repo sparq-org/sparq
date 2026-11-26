@@ -363,7 +363,8 @@ reconstruction checks projected membership directly.
 Existing numeric FILTER admission and circuit obligations remain in force.
 Projected membership needs no new circuit member. One hidden membership uses
 `result_v5_k{1,2}_n16_p3_r4_f1_in_d10`: its public variable/list fields constrain
-the existing authenticated private binding. Status depth is ten; mixing hidden
-IN with hidden numeric predicates or adding another hidden IN refuses. The Node
+the existing authenticated private binding. These members require status depth
+ten and the default integer capacity. Mixing hidden IN with hidden numeric
+predicates or adding another hidden IN refuses. The Node
 single-issuer scope lowering preserves these obligations and admits one triple
 pattern per graph variable in scoped IN queries.

@@ -674,6 +674,57 @@ fn projected_in_keeps_authentication_and_rejects_nonmembers() {
 }
 
 #[test]
+fn both_planners_record_projected_and_hidden_in_operands() {
+    use sparq_zk_compose::planner::{optimize_disclosure, OptimizationLimits};
+
+    let q = query(
+        r#"SELECT DISTINCT ?age ?degree WHERE {
+            ?s ex:age ?age .
+            ?s ex:degree ?degree .
+            ?s ex:qualification ?qualification .
+            FILTER(?age >= 18 && ?degree IN ("BSc", "MSc") && ?qualification IN ("A", "B"))
+        }"#,
+    );
+    let degree: Term = Literal::new_simple_literal("BSc").into();
+    let graphs = [credential(
+        &[
+            triple("alice", "age", integer("42")),
+            triple("alice", "degree", degree.clone()),
+            triple(
+                "alice",
+                "qualification",
+                Literal::new_simple_literal("A").into(),
+            ),
+        ],
+        1,
+    )];
+    let released = [row(&[("age", integer("42")), ("degree", degree)])];
+    let first = plan_disclosure(&q, &graphs, &released, PlannerLimits::default()).unwrap();
+    let optimized = optimize_disclosure(&q, &graphs, &released, OptimizationLimits::default())
+        .unwrap()
+        .plan
+        .unwrap();
+    for plan in [first, optimized] {
+        assert_eq!(
+            plan.rows[0].filters,
+            [
+                FilterObligation::PublicCheck { filter: 0 },
+                FilterObligation::PublicInCheck {
+                    filter: 0,
+                    operand: SlotRef { pattern: 1, slot: 2 },
+                },
+                FilterObligation::HiddenInPredicate {
+                    filter: 1,
+                    operand: SlotRef { pattern: 2, slot: 2 },
+                },
+            ]
+        );
+        assert_eq!(plan.metrics.public_filter_checks, 2);
+        assert_eq!(plan.metrics.hidden_filter_obligations, 1);
+    }
+}
+
+#[test]
 fn constructed_in_lists_obey_the_same_admission_as_parsed_queries() {
     use sparq_zk_compose::planner::{optimize_disclosure, OptimizationLimits};
 

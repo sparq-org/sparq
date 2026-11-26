@@ -52,9 +52,10 @@ constant IRIs, strings, canonical unsigned integers or timezone-free dates.
 Scoped IN queries admit one triple pattern per graph variable.
 Verification checks membership against the authenticated released RDF term.
 IN can be conjoined with the existing numeric filters; their datatype and lexical
-rules still apply. One hidden IN operand is supported by dedicated method-bound members at status
-depth ten, with no hidden numeric comparisons in the same proof. The selected
-value is not projected. NOT IN, disjunctions, variable list items,
+rules still apply. Dedicated method-bound members support one hidden IN operand
+at status depth ten with the default integer capacity and no hidden numeric
+comparisons in the same proof. The selected value remains private.
+NOT IN, disjunctions, variable list items,
 noncanonical numeric/date constants and other literal datatypes refuse.
 
 The registry bundles these method-bound member families in either credential
@@ -354,6 +355,9 @@ Shared build and runtime support is copied from `js/zk-shared` into the package
 during the maintainer build. The bundled copy keeps installations self-contained;
 drift checks cover the dependency pins, CRS handling and backend settings.
 
-Maintainer circuit regeneration uses a private compiler process home under its
-temporary build directory, including the dependency-cache lock. The parent home
-is unchanged.
+Maintainer circuit regeneration defaults to a private compiler home under its
+temporary build directory. Set `SPARQ_RESULT_COMPILER_HOME` to a writable
+directory to reuse its pinned Git dependency cache, including when GitHub access
+is restricted. The variable applies only to the compiler child process.
+Regenerate checked-in artifacts from committed circuit inputs so that
+`assets/provenance.json` identifies a reproducible source revision.

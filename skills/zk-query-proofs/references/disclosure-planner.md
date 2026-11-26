@@ -34,8 +34,8 @@ suffixes, alternate date spellings and date-time bounds receive named refusals.
 one to sixteen constant IRIs, strings, canonical unsigned integers or dates.
 Selection compares authenticated RDF-term identity. The operand can be public
 or hidden, but must be bound in the FILTER's own input. NOT IN, OR and variable
-list items refuse. A backend must enforce these obligations in addition to the
-numeric `filters`; `PlannedRow::filters` records numeric obligations only.
+list items refuse. Both planners include these obligations alongside numeric
+predicates in `PlannedRow::filters`.
 Both witness-selection routes revalidate the list capacity and constant datatypes
 for caller-constructed `DisclosureQuery` values before searching for witnesses.
 The [successful-result contract](successful-results.md#typed-constant-list-membership)
@@ -105,7 +105,10 @@ authenticate its origin.
 
 `FilterObligation::PublicCheck` allows predicate computation on the authenticated
 released term. `HiddenPredicate` identifies an authenticated operand slot that a
-backend must constrain. `IdentityObligation` connects every repeated hidden
+backend must constrain. `PublicInCheck` and `HiddenInPredicate` index
+`DisclosureQuery::in_filters` and name the first authenticated slot for the
+operand. Verify `PublicInCheck` against the released term and prove
+`HiddenInPredicate` against the hidden slot. `IdentityObligation` connects every repeated hidden
 variable occurrence to its first occurrence, including repetitions within one
 triple. Backends must enforce RDF term identity, including blank-node scope, on
 these links.

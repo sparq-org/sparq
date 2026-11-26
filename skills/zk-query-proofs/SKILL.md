@@ -429,6 +429,9 @@ including the exact datatype and Gregorian calendar validation. Query admission
 refuses timezone suffixes, alternate date spellings and date-time bounds by name.
 `planner::IntegerFilter::datatype` records `PredicateDatatype::{Integer, Date}`;
 planner admission and verification retain this distinction when evaluating keys.
+Both planners record projected and hidden IN obligations in `PlannedRow::filters`.
+Each IN obligation names its `DisclosureQuery::in_filters` index and authenticated
+operand slot. Hidden-IN result members require the default integer capacity.
 Research-stage, not externally
 audited: no complete-answer, absence, wallet-size or holder-identity guarantee.
 

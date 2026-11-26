@@ -588,8 +588,8 @@ fn successful_result_members_only_admit_string_canonical_commitments() {
         .filter(|(member, _)| is_successful_result(member))
         .collect();
     // Retained unsigned/signed and public-pattern profiles, plus method-bound
-    // public, hidden-integer and hidden-date profiles.
-    assert_eq!(members.len(), 42);
+    // public, hidden-integer, hidden-date and hidden-IN profiles.
+    assert_eq!(members.len(), 44);
     let v4: Vec<&str> = members
         .iter()
         .map(|(member, _)| member.as_str())
@@ -612,11 +612,13 @@ fn successful_result_members_only_admit_string_canonical_commitments() {
         [
             "result_v5_k1_n16_p3_r4_f0_d10",
             "result_v5_k1_n16_p3_r4_f1_date_d10",
+            "result_v5_k1_n16_p3_r4_f1_in_d10",
             "result_v5_k1_n16_p3_r4_f2_i64_d10",
             "result_v5_k1_n16_p3_r4_f2_i64_d17",
             "result_v5_k1_n16_p3_r4_f2_i64_d20",
             "result_v5_k2_n16_p3_r4_f0_d10",
             "result_v5_k2_n16_p3_r4_f1_date_d10",
+            "result_v5_k2_n16_p3_r4_f1_in_d10",
             "result_v5_k2_n16_p3_r4_f2_i64_d10",
             "result_v5_k2_n16_p3_r4_f2_i64_d17",
             "result_v5_k2_n16_p3_r4_f2_i64_d20"

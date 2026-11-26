@@ -1313,6 +1313,27 @@
         }
       }
     },
+    "result_v5_k1_n16_p3_r4_f1_in_d10": {
+      "circuit_size": 32821,
+      "lane": "string",
+      "configs": {
+        "string-canonical": {
+          "legal": true
+        },
+        "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf-v2": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "value-only": {
+          "legal": false,
+          "reason": "IllegalPair"
+        }
+      }
+    },
     "result_v5_k1_n16_p3_r4_f2_i64_d10": {
       "circuit_size": 107642,
       "lane": "string",
@@ -1399,6 +1420,27 @@
     },
     "result_v5_k2_n16_p3_r4_f1_date_d10": {
       "circuit_size": 71285,
+      "lane": "string",
+      "configs": {
+        "string-canonical": {
+          "legal": true
+        },
+        "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf-v2": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "value-only": {
+          "legal": false,
+          "reason": "IllegalPair"
+        }
+      }
+    },
+    "result_v5_k2_n16_p3_r4_f1_in_d10": {
+      "circuit_size": 59635,
       "lane": "string",
       "configs": {
         "string-canonical": {
@@ -1737,10 +1779,10 @@
     }
   },
   "summary": {
-    "circuits": 82,
+    "circuits": 84,
     "methods": 4,
-    "configs": 328,
-    "legal_configs": 141,
-    "illegal_configs": 187
+    "configs": 336,
+    "legal_configs": 143,
+    "illegal_configs": 193
   }
 }

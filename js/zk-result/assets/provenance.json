@@ -1,6 +1,6 @@
 {
-  "sourceCommit": "95c7b325476b3b0cf6ae69ca287926d05b6e87cd",
-  "uncommittedSourceChanges": true,
+  "sourceCommit": "fc1fc586a1663ed8fa32bc0d6eecba77b6ed1dc3",
+  "uncommittedSourceChanges": false,
   "toolchain": {
     "nargo": "1.0.0-beta.21",
     "bb": "5.0.0-nightly.20260324"

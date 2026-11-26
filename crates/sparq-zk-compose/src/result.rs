@@ -88,6 +88,12 @@ fn select_package(
     {
         return Err(reject("hidden IN requires one membership predicate, no hidden numeric predicates and status depth ten"));
     }
+    if !matches!(
+        contract,
+        NumericContract::Unsigned(PrivateIntegerCapacity::TwoDigits)
+    ) {
+        return Err(reject("hidden IN requires the default integer capacity"));
+    }
     match credentials {
         1 => Ok(("result_v5_k1_n16_p3_r4_f1_in_d10", BOUND_VERSION)),
         2 => Ok(("result_v5_k2_n16_p3_r4_f1_in_d10", BOUND_VERSION)),
@@ -1987,6 +1993,65 @@ mod tests {
         let mut repeated = query.clone();
         repeated.in_filters.push(query.in_filters[0].clone());
         assert!(select_package(contract, &repeated, 1, 0, 10, false).is_err());
+    }
+
+    #[test]
+    fn reconstruct_hidden_in_requires_the_default_integer_capacity() {
+        let (fixtures, mut policy, nonce, _) = fixture();
+        policy.admit_unbound_legacy = false;
+        let rows = vec![BTreeMap::from([("person".into(), iri("urn:alice").into())])];
+        let credentials = [
+            credential_signed_over(
+                vec![triple(
+                    "urn:alice",
+                    "urn:degree",
+                    Literal::new_simple_literal("BSc").into(),
+                )],
+                1,
+                fixtures[0].status_index,
+                &fixtures[0].status_list,
+                result_presentation_message,
+            ),
+            credential_signed_over(
+                fixtures[1].graph.canonical.triples.clone(),
+                2,
+                fixtures[1].status_index,
+                &fixtures[1].status_list,
+                result_presentation_message,
+            ),
+        ];
+        for (count, member, extra_pattern) in [
+            (1, "result_v5_k1_n16_p3_r4_f1_in_d10", ""),
+            (
+                2,
+                "result_v5_k2_n16_p3_r4_f1_in_d10",
+                "?person <urn:licensed> <urn:yes> .",
+            ),
+        ] {
+            let query = format!(
+                "SELECT DISTINCT ?person WHERE {{ ?person <urn:degree> ?value . {extra_pattern} FILTER(?value IN (\"BSc\", \"MSc\")) }}"
+            );
+            let prepared =
+                prepare_result(&query, &credentials[..count], &rows, &policy, &nonce).unwrap();
+            let mut presentation = prepared.presentation;
+            assert_eq!(
+                presentation.integer_capacity,
+                PrivateIntegerCapacity::TwoDigits
+            );
+            let reconstructed =
+                reconstruct_result_public_inputs(&query, &presentation, &policy, &nonce).unwrap();
+            assert_eq!(reconstructed.member, member);
+            assert_eq!(reconstructed.public_inputs, prepared.public_inputs);
+
+            presentation.integer_capacity = PrivateIntegerCapacity::FullU64;
+            let Err(error) = reconstruct_result_public_inputs(&query, &presentation, &policy, &nonce)
+            else {
+                panic!("nondefault integer capacity accepted for {member}");
+            };
+            assert!(error
+                .to_string()
+                .contains("hidden IN requires the default integer capacity"));
+        }
     }
 
 

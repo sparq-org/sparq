@@ -37,7 +37,8 @@ scoped GRAPH block or in a flat query. Lists contain one to sixteen constant
 IRIs, strings, canonical unsigned integers or timezone-free dates. Scoped IN
 queries admit one triple pattern per graph variable. Independent reconstruction
 checks projected membership against authenticated released terms. AND
-with existing numeric comparisons is supported. A single hidden IN uses its dedicated method-bound member at status depth ten,
+with existing numeric comparisons is supported. A single hidden IN uses its dedicated
+method-bound member at status depth ten with the default integer capacity and
 without hidden numeric comparisons in that proof. Its operand stays private. NOT IN, OR,
 variable list items and noncanonical or unsupported typed constants refuse.
 
@@ -154,5 +155,8 @@ Shared support comes from `js/zk-shared` and is copied into each package by its
 maintainer build. Keep the generated copy aligned before running offline checks
 or packing a tarball. The package remains research grade, not externally audited.
 
-Maintainer circuit regeneration gives nargo a private writable process home under
-its temporary build directory; it does not require the parent home to be writable.
+Maintainer circuit regeneration defaults to a private writable compiler home
+under its temporary build directory. Set `SPARQ_RESULT_COMPILER_HOME` to a
+writable directory with the pinned Git dependencies to reuse its cache.
+Regenerate checked-in artifacts from committed circuit inputs so the artifact
+provenance identifies their source revision.

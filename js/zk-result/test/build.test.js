@@ -7,6 +7,20 @@ import { join } from 'node:path';
 import { installPinnedCrs } from '../scripts/crs.mjs';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
+const asset = name => readFileSync(new URL('../assets/' + name, import.meta.url));
+
+test('bundled circuit provenance covers the registry and exact artifact bytes', () => {
+  const provenance = JSON.parse(asset('provenance.json'));
+  assert.match(provenance.sourceCommit, /^[0-9a-f]{40}$/);
+  assert.equal(provenance.uncommittedSourceChanges, false);
+  const members = JSON.parse(asset('members.json'));
+  assert.deepEqual(provenance.members, members.map(entry => ({
+    ...entry,
+    acirSha256: hash(asset(entry.acir)),
+    vkSha256: hash(asset(entry.vk)),
+  })));
+});
+
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), 'sparq-crs-test-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));

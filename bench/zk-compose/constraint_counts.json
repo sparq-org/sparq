@@ -27,13 +27,14 @@
       "families": [
         "result_v5_integer",
         "result_v5_date",
+        "result_v5_in",
         "result_v5",
         "result_v4",
         "result_v3",
         "result_v2",
         "result_v1"
       ],
-      "members": 42
+      "members": 44
     },
     "query": {
       "families": [
@@ -382,6 +383,67 @@
           "to_circuit_size": 71285,
           "delta_gates": 26812,
           "ratio": 1.6029,
+          "held_fixed": {
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 1,
+            "d": 10
+          }
+        }
+      ],
+      "invariances": []
+    },
+    "result_v5_in": {
+      "layer": "result",
+      "role": "Method-bound released-result support with one hidden RDF term checked against a public constant list.",
+      "parameters": [
+        "k",
+        "n",
+        "p",
+        "r",
+        "f",
+        "d"
+      ],
+      "members": [
+        {
+          "member": "result_v5_k1_n16_p3_r4_f1_in_d10",
+          "params": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 1,
+            "d": 10
+          },
+          "circuit_size": 32821
+        },
+        {
+          "member": "result_v5_k2_n16_p3_r4_f1_in_d10",
+          "params": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 1,
+            "d": 10
+          },
+          "circuit_size": 59635
+        }
+      ],
+      "min_circuit_size": 32821,
+      "max_circuit_size": 59635,
+      "scaling": [
+        {
+          "parameter": "k",
+          "from_member": "result_v5_k1_n16_p3_r4_f1_in_d10",
+          "from_value": 1,
+          "from_circuit_size": 32821,
+          "to_member": "result_v5_k2_n16_p3_r4_f1_in_d10",
+          "to_value": 2,
+          "to_circuit_size": 59635,
+          "delta_gates": 26814,
+          "ratio": 1.817,
           "held_fixed": {
             "n": 16,
             "p": 3,
@@ -2868,10 +2930,10 @@
     ]
   },
   "summary": {
-    "families": 23,
-    "members": 82,
-    "snapshot_members": 82,
-    "scaling_pairs": 88,
+    "families": 24,
+    "members": 84,
+    "snapshot_members": 84,
+    "scaling_pairs": 89,
     "invariance_facts": 3
   }
 }
