@@ -283,7 +283,7 @@ jobs:
       - name: Build host bindings and fetch pinned CRS
         run: node js/zk-result/scripts/build.mjs
       - name: Exercise the bundled package without network access
-        run: python3 js/zk-result/scripts/offline.py node --test --test-concurrency=1 js/zk-result/test/*.test.js
+        run: python3 js/zk-result/scripts/offline.py node --test --test-concurrency=1 js/zk-result/test/*.test.js js/zk-result/scripts/build-circuits.test.mjs
 
   zk-query:
     name: authenticated-query Node package

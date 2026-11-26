@@ -117,6 +117,13 @@ FAMILIES: list[dict] = [
         "layer": "result",
         "role": "Method-bound released-result support with a hidden canonical Gregorian date predicate. The key is derived from the same literal token as its string commitment. Does not establish result completeness or holder identity.",
     },
+    {
+        "key": "result_v5_in",
+        "pattern": r"result_v5_k(?P<k>[12])_n(?P<n>16)_p(?P<p>3)_r(?P<r>4)_f(?P<f>1)_in_d(?P<d>10)",
+        "params": ["k", "n", "p", "r", "f", "d"],
+        "layer": "result",
+        "role": "Method-bound released-result support with one hidden RDF term checked against a public constant list.",
+    },
     # sq-j506: the method-BOUND successful-result members. The regex pins the exact
     # measured profile (K1/K2, N16, P3, R4, F0, D10), so an unmeasured version-5
     # bucket fails classify() instead of joining this family unreviewed.

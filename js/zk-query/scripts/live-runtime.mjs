@@ -8,7 +8,7 @@ function rustSources(path) {
 /** Digest of everything a cached live proof depends on besides its catalogue entry. */
 export function liveRuntimeHash(root) {
   return sha256(Buffer.concat([
-    ...['../index.js', '../native.mjs', '../wasm-prover.mjs', '../internal/runtime.mjs', '../package-lock.json', './solid-targets.mjs'].map(name => readFileSync(new URL(name, import.meta.url))),
+    ...['../index.js', '../native.mjs', '../wasm-prover.mjs', '../internal/runtime.mjs', '../package-lock.json', './solid-targets.mjs', './consumer-cases.mjs', './consumer-live.mjs'].map(name => readFileSync(new URL(name, import.meta.url))),
     ...['sparq-zk-query-wasm', 'sparq-zk-query', 'sparq-merkle-suite'].flatMap(name => rustSources(join(root, 'crates', name, 'src'))),
     readFileSync(join(root, 'Cargo.lock')),
   ]));

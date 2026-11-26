@@ -21,7 +21,8 @@
     "scripts/offline.py",
     "native.mjs",
     "wasm-prover.mjs",
-    "scripts/check-package.mjs"
+    "scripts/check-package.mjs",
+    "scripts/consumer-cases.mjs"
   ],
   "scripts": {
     "test": "node --test --test-concurrency=1 test/*.test.js",

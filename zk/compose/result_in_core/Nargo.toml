@@ -1,0 +1,5 @@
+[package]
+name = "result_in_core"
+type = "lib"
+authors = ["sparq"]
+compiler_version = "=1.0.0"

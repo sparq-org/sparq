@@ -1,24 +1,82 @@
 //! Syntax admission only. The adapter must resolve and enforce the returned issuer.
 use super::*;
+use std::borrow::Cow;
 
 const VERIFIED_ISSUER: &str = "https://w3id.org/sparq/vcq#verifiedIssuer";
+
+/// An ordinary or single-issuer query admitted from the relying party's text.
+///
+/// An adapter must enforce the issuer returned by [Self::issuer] before using
+/// the result. Admission alone provides no issuer authentication.
+#[derive(Debug)]
+pub struct AdmittedIssuerQuery<'a> {
+    original: &'a str,
+    flat: Cow<'a, str>,
+    issuer: Option<String>,
+    disclosure: DisclosureQuery,
+}
+
+impl<'a> AdmittedIssuerQuery<'a> {
+    /// Applies raw input limits to the request and lowers any admitted issuer scope.
+    ///
+    /// # Errors
+    /// Returns the same admission errors as [lower_issuer_scope].
+    pub fn parse(sparql: &'a str) -> Result<Self, PlanError> {
+        admit_query(sparql)
+    }
+
+    /// Request text to use in the presentation.
+    pub fn original(&self) -> &'a str {
+        self.original
+    }
+
+    /// Query to evaluate over the adapter's issuer-restricted graph.
+    pub fn flat(&self) -> &str {
+        &self.flat
+    }
+
+    /// Issuer IRI whose authenticated key the adapter must enforce.
+    pub fn issuer(&self) -> Option<&str> {
+        self.issuer.as_deref()
+    }
+
+    /// Admitted algebra for witness and public statement construction.
+    pub fn disclosure(&self) -> &DisclosureQuery {
+        &self.disclosure
+    }
+}
 
 /// Admits a flat disclosure query or lowers a single-issuer GRAPH query.
 ///
 /// Returns the original text for ordinary admitted queries. Scoped SELECT DISTINCT
 /// queries may contain only issuer declarations and GRAPH blocks with positive
 /// BGP/JOIN/FILTER bodies. Graph variables must be declared, used only as graph
-/// names, and all name the same issuer IRI. This is syntax admission, not issuer
-/// authentication: callers must resolve that IRI in their policy, restrict proving
+/// names, and all name the same issuer IRI. Queries with IN or whose lowered text
+/// exceeds the text budget admit one triple pattern per graph variable.
+/// Callers must resolve that IRI in their policy, restrict proving
 /// credentials, and check every authenticated public issuer slot when verifying.
 /// Native result verification does not call this helper or change its contract.
+/// Use [AdmittedIssuerQuery] to carry admission into result preparation and
+/// reconstruction when serialization expands the lowered text.
 ///
 /// # Errors
 /// Preserves ordinary admission errors; different issuer IRIs are refused with
 /// `per-fact-issuer-binding-needs-query-method`.
 pub fn lower_issuer_scope(sparql: &str) -> Result<(String, Option<String>), PlanError> {
+    let admitted = AdmittedIssuerQuery::parse(sparql)?;
+    Ok((admitted.flat.into_owned(), admitted.issuer))
+}
+
+fn admit_query(sparql: &str) -> Result<AdmittedIssuerQuery<'_>, PlanError> {
     let original = match DisclosureQuery::parse(sparql) {
-        Ok(_) => return Ok((sparql.to_owned(), None)),
+        Ok(disclosure) => {
+            return Ok(AdmittedIssuerQuery {
+                original: sparql,
+                flat: Cow::Borrowed(sparql),
+                issuer: None,
+                disclosure,
+            });
+        }
         Err(e) => e,
     };
     // The first parse bounds raw text and punctuation before this second AST walk.
@@ -100,8 +158,23 @@ pub fn lower_issuer_scope(sparql: &str) -> Result<(String, Option<String>), Plan
     }
     **inner = body;
     let lowered = parsed.to_string();
-    DisclosureQuery::parse(&lowered).map_err(|_| original)?;
-    Ok((lowered, declarations.into_values().next()))
+    // Serialization can expand prefixed terms. Check the scope before allowing
+    // a query whose lowered text exceeds the original admission budget.
+    let query = DisclosureQuery::parse_algebra(&lowered, NumericProfile::Unsigned)?;
+    if query.patterns.len() != names.len() {
+        if !query.in_filters.is_empty() {
+            return Err(unsupported("scoped IN requires one triple pattern per graph variable"));
+        }
+        DisclosureQuery::check_text_budget(&lowered).map_err(|_| {
+            unsupported("scoped query expansion requires one triple pattern per graph variable")
+        })?;
+    }
+    Ok(AdmittedIssuerQuery {
+        original: sparql,
+        flat: Cow::Owned(lowered),
+        issuer: declarations.into_values().next(),
+        disclosure: query,
+    })
 }
 
 #[cfg(test)]
@@ -110,6 +183,24 @@ mod tests {
 
     fn scoped(body: &str) -> String {
         format!("PREFIX vcq: <https://w3id.org/sparq/vcq#> SELECT DISTINCT ?x WHERE {{ {body} }}")
+    }
+
+    #[test]
+    fn scoped_in_admits_one_pattern_per_graph_variable() {
+        let declaration = "?g vcq:verifiedIssuer <urn:issuer:a> .";
+        let degree = "GRAPH ?g { ?s <urn:degree> ?x . FILTER(?x IN (\"BSc\", \"MSc\")) }";
+        assert!(lower_issuer_scope(&scoped(&format!("{declaration} {degree}"))).is_ok());
+        let separate = format!("{declaration} ?h vcq:verifiedIssuer <urn:issuer:a> . {degree} GRAPH ?h {{ ?s <urn:approved> true }}");
+        assert!(lower_issuer_scope(&scoped(&separate)).is_ok());
+        for body in [
+            format!("{declaration} {degree} GRAPH ?g {{ ?s <urn:approved> true }}"),
+            format!("{declaration} GRAPH ?g {{ ?s <urn:degree> ?x ; <urn:approved> true . FILTER(?x IN (\"BSc\", \"MSc\")) }}"),
+        ] {
+            assert!(matches!(
+                lower_issuer_scope(&scoped(&body)),
+                Err(PlanError::Unsupported(reason)) if reason == "scoped IN requires one triple pattern per graph variable"
+            ));
+        }
     }
 
     #[test]

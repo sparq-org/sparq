@@ -13,7 +13,8 @@
 //! belong in local diagnostics unless the disclosure policy permits them.
 //!
 //! The admitted fragment is SELECT DISTINCT / true ASK with a nonempty positive
-//! BGP, joins, and canonical nonnegative integer or timezone-free date comparisons.
+//! BGP, joins, canonical nonnegative integer or timezone-free date comparisons,
+//! and constant-list IN predicates on bound terms.
 //! Projected blank nodes and query blank-node syntax are rejected; hidden blank
 //! nodes retain per-credential scope during joins. This module is research-grade
 //! and has not been externally audited.
@@ -28,7 +29,9 @@ use std::collections::{BTreeMap, BTreeSet};
 pub(crate) mod date;
 mod issuer_scope;
 mod optimize;
-pub use issuer_scope::lower_issuer_scope;
+mod term_in;
+pub use term_in::TermInFilter;
+pub use issuer_scope::{lower_issuer_scope, AdmittedIssuerQuery};
 /// Separately admitted canonical signed-integer disclosure planning.
 pub mod signed;
 #[doc(inline)]
@@ -124,6 +127,8 @@ pub struct DisclosureQuery {
     pub patterns: Vec<[QuerySlot; 3]>,
     /// Conjunctive integer or date-key comparisons in AST traversal order.
     pub filters: Vec<IntegerFilter>,
+    /// Constant-list membership over authenticated public or private bindings.
+    pub in_filters: Vec<TermInFilter>,
 }
 
 impl DisclosureQuery {
@@ -139,6 +144,11 @@ impl DisclosureQuery {
 
     // Signed bounds use a private typed wrapper; unsigned admission is unchanged.
     fn parse_numeric(sparql: &str, numeric: NumericProfile) -> Result<Self, PlanError> {
+        Self::check_text_budget(sparql)?;
+        Self::parse_algebra(sparql, numeric)
+    }
+
+    fn check_text_budget(sparql: &str) -> Result<(), PlanError> {
         if sparql.len() > MAX_DISCLOSURE_QUERY_BYTES {
             return Err(PlanError::LimitExceeded("query text bytes"));
         }
@@ -151,6 +161,11 @@ impl DisclosureQuery {
         {
             return Err(PlanError::LimitExceeded("query punctuation fuel"));
         }
+        Ok(())
+    }
+
+    // Callers pass budgeted input or a serialization of its admitted algebra.
+    fn parse_algebra(sparql: &str, numeric: NumericProfile) -> Result<Self, PlanError> {
         // The vendored parser additionally guards actual syntactic nesting.
         let parsed = spargebra::SparqlParser::new()
             .parse_query(sparql)
@@ -170,7 +185,7 @@ impl DisclosureQuery {
                 };
                 (
                     QueryKind::SelectDistinct,
-                    variables.iter().map(|v| v.as_str().to_owned()).collect(),
+                    variables.iter().map(|v| v.as_str().to_owned()).collect::<Vec<_>>(),
                     inner.as_ref(),
                 )
             }
@@ -187,15 +202,21 @@ impl DisclosureQuery {
         };
         let mut patterns = Vec::new();
         collect_patterns(inner, &mut patterns, numeric)?;
+        let mut numeric_pattern = inner.clone();
+        let in_filters = term_in::extract(&mut numeric_pattern, numeric)?;
         let filters = match numeric {
             NumericProfile::Signed => signed::collect_filters(inner)?,
-            NumericProfile::Unsigned => date::collect_filters(sparql)?,
+            NumericProfile::Unsigned if in_filters.is_empty() => date::collect_filters(sparql)?,
+            NumericProfile::Unsigned => date::collect_filters(&format!(
+                "SELECT DISTINCT * WHERE {{ {numeric_pattern} }}"
+            ))?,
         };
         let query = Self {
             kind,
             projection,
             patterns,
             filters,
+            in_filters,
         };
         query.validate()?;
         Ok(query)
@@ -220,7 +241,7 @@ impl DisclosureQuery {
         if self.patterns.len() > MAX_DISCLOSURE_PATTERNS {
             return Err(PlanError::LimitExceeded("admitted BGP patterns"));
         }
-        if self.filters.len() > MAX_DISCLOSURE_FILTERS {
+        if self.filters.len() + self.in_filters.len() > MAX_DISCLOSURE_FILTERS {
             return Err(PlanError::LimitExceeded("admitted FILTER comparisons"));
         }
         if self.patterns.is_empty() {
@@ -235,6 +256,12 @@ impl DisclosureQuery {
         }
         if self.kind == QueryKind::Ask && !self.projection.is_empty() {
             return Err(unsupported("ASK cannot release bindings"));
+        }
+        for filter in &self.in_filters {
+            filter.validate()?;
+            if !variables.contains(&filter.variable) {
+                return Err(unsupported("IN requires an authenticated bound variable"));
+            }
         }
         for filter in &self.filters {
             if !variables.contains(&filter.variable) {
@@ -370,6 +397,14 @@ fn collect_filter_variables(
                 out.insert(v.as_str().to_owned());
             }
             E::Literal(_) => {}
+            E::In(value, list) => {
+                if !matches!(value.as_ref(), E::Variable(_))
+                    || list.iter().any(|v| !matches!(v, E::Literal(_) | E::NamedNode(_)))
+                {
+                    return Err(unsupported("IN requires a variable and constant terms"));
+                }
+                pending.push(value);
+            }
             E::And(a, b)
             | E::Less(a, b)
             | E::LessOrEqual(a, b)
@@ -433,6 +468,20 @@ pub enum FilterObligation {
         /// A triple slot carrying the operand, linked by identity obligations.
         operand: SlotRef,
     },
+    /// The verifier can check IN on the authenticated released operand.
+    PublicInCheck {
+        /// Index into `DisclosureQuery::in_filters`.
+        filter: usize,
+        /// A triple slot carrying the released operand.
+        operand: SlotRef,
+    },
+    /// A backend must prove IN against its hidden, authenticated operand.
+    HiddenInPredicate {
+        /// Index into `DisclosureQuery::in_filters`.
+        filter: usize,
+        /// A triple slot carrying the operand, linked by identity obligations.
+        operand: SlotRef,
+    },
 }
 
 /// Required work for one released mapping, including PRIVATE witness locations.
@@ -447,7 +496,7 @@ pub struct PlannedRow {
     /// A triple is present only when all three slots are publicly determined.
     /// Its membership and authentication obligations are retained separately.
     pub disclosed_triples: Vec<Option<Triple>>,
-    /// Predicate obligations, including public checks requiring authentication.
+    /// Numeric and IN predicate obligations, including public checks requiring authentication.
     pub filters: Vec<FilterObligation>,
     /// A deterministic spanning star over each hidden variable's occurrences.
     pub identities: Vec<IdentityObligation>,
@@ -688,16 +737,17 @@ fn assemble_plan(
         let row = row_obligations(query, release, witnesses)?;
         metrics.membership_occurrences += row.witnesses.len();
         metrics.disclosed_triples += row.disclosed_triples.iter().filter(|t| t.is_some()).count();
-        metrics.public_filter_checks += row
-            .filters
-            .iter()
-            .filter(|f| matches!(f, FilterObligation::PublicCheck { .. }))
-            .count();
-        metrics.hidden_filter_obligations += row
-            .filters
-            .iter()
-            .filter(|f| matches!(f, FilterObligation::HiddenPredicate { .. }))
-            .count();
+        for filter in &row.filters {
+            match filter {
+                FilterObligation::PublicCheck { .. } | FilterObligation::PublicInCheck { .. } => {
+                    metrics.public_filter_checks += 1;
+                }
+                FilterObligation::HiddenPredicate { .. }
+                | FilterObligation::HiddenInPredicate { .. } => {
+                    metrics.hidden_filter_obligations += 1;
+                }
+            }
+        }
         metrics.hidden_identity_obligations += row.identities.len();
         rows.push(row);
     }
@@ -791,12 +841,16 @@ fn find_witness<A: Fn(usize, MembershipRef, &Triple) -> bool>(
 ) -> Result<bool, PlanError> {
     let numeric = budget.numeric;
     if pattern_index == query.patterns.len() {
-        return Ok(query.filters.iter().all(|filter| {
-            bindings
-                .get(&filter.variable)
-                .and_then(|v| filter.value(numeric, &v.term))
-                .is_some_and(|value| integer_comparison(value, filter.op, filter.bound))
-        }));
+        return Ok(
+            query.in_filters.iter().all(|f| {
+                bindings.get(&f.variable).is_some_and(|v| f.accepts(&v.term))
+            }) && query.filters.iter().all(|filter| {
+                bindings
+                    .get(&filter.variable)
+                    .and_then(|v| filter.value(numeric, &v.term))
+                    .is_some_and(|value| integer_comparison(value, filter.op, filter.bound))
+            }),
+        );
     }
     for (credential, graph) in credentials.iter().enumerate() {
         for (leaf, triple) in graph.canonical.triples.iter().enumerate() {
@@ -865,6 +919,11 @@ fn extend_bindings(
     }
     // Parsing required every FILTER variable to be directly bound in its own
     // positive input scope, so rejecting an already-bound failing value is safe.
+    if !query.in_filters.iter().all(|f| {
+        next.get(&f.variable).is_none_or(|v| f.accepts(&v.term))
+    }) {
+        return None;
+    }
     query
         .filters
         .iter()
@@ -918,25 +977,19 @@ fn row_obligations(
 ) -> Result<PlannedRow, PlanError> {
     let mut public_slots = Vec::new();
     let mut disclosed_triples = Vec::new();
-    let mut hidden_occurrences: BTreeMap<String, Vec<SlotRef>> = BTreeMap::new();
+    let mut occurrences: BTreeMap<&str, Vec<SlotRef>> = BTreeMap::new();
     for (pattern_index, pattern) in query.patterns.iter().enumerate() {
         let mut slots: [Option<Term>; 3] = [None, None, None];
         for (position, slot) in pattern.iter().enumerate() {
             slots[position] = match slot {
                 QuerySlot::Constant(term) => Some(term.clone()),
-                QuerySlot::Variable(variable) => match released.get(variable) {
-                    Some(term) => Some(term.clone()),
-                    None => {
-                        hidden_occurrences
-                            .entry(variable.clone())
-                            .or_default()
-                            .push(SlotRef {
-                                pattern: pattern_index,
-                                slot: position,
-                            });
-                        None
-                    }
-                },
+                QuerySlot::Variable(variable) => {
+                    occurrences.entry(variable).or_default().push(SlotRef {
+                        pattern: pattern_index,
+                        slot: position,
+                    });
+                    released.get(variable).cloned()
+                }
             };
         }
         let disclosed = match (&slots[0], &slots[1], &slots[2]) {
@@ -949,30 +1002,49 @@ fn row_obligations(
         disclosed_triples.push(disclosed);
     }
     let mut identities = Vec::new();
-    for (variable, occurrences) in &hidden_occurrences {
-        for to in &occurrences[1..] {
+    for (&variable, slots) in &occurrences {
+        if released.contains_key(variable) {
+            continue;
+        }
+        for to in &slots[1..] {
             identities.push(IdentityObligation {
-                variable: variable.clone(),
-                from: occurrences[0],
+                variable: variable.to_owned(),
+                from: slots[0],
                 to: *to,
             });
         }
     }
+    let operand_of = |variable: &str| {
+        occurrences
+            .get(variable)
+            .and_then(|slots| slots.first())
+            .copied()
+            .ok_or_else(|| unsupported("FILTER variable has no authenticated slot"))
+    };
     let mut filters = Vec::new();
     for (index, filter) in query.filters.iter().enumerate() {
         if released.contains_key(&filter.variable) {
             filters.push(FilterObligation::PublicCheck { filter: index });
         } else {
-            let operand = hidden_occurrences
-                .get(&filter.variable)
-                .and_then(|slots| slots.first())
-                .copied()
-                .ok_or_else(|| unsupported("FILTER variable has no authenticated slot"))?;
             filters.push(FilterObligation::HiddenPredicate {
                 filter: index,
-                operand,
+                operand: operand_of(&filter.variable)?,
             });
         }
+    }
+    for (index, filter) in query.in_filters.iter().enumerate() {
+        let operand = operand_of(&filter.variable)?;
+        filters.push(if released.contains_key(&filter.variable) {
+            FilterObligation::PublicInCheck {
+                filter: index,
+                operand,
+            }
+        } else {
+            FilterObligation::HiddenInPredicate {
+                filter: index,
+                operand,
+            }
+        });
     }
     Ok(PlannedRow {
         released: released.clone(),

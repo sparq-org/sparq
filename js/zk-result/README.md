@@ -46,10 +46,28 @@ comparison uses a dedicated date member. Mixed hidden date/integer comparisons
 and multiple hidden date comparisons reject. Pattern constants such as a degree
 IRI and a typed boolean are supported; unsupported cases reject.
 
+`FILTER(?value IN ("BSc", "MSc"))` is accepted when `?value` is projected,
+including inside an issuer-scoped GRAPH block. The list contains up to sixteen
+constant IRIs, strings, canonical unsigned integers or timezone-free dates.
+Scoped IN queries admit one triple pattern per graph variable.
+The raw query text must fit the admission budget. Admitted lists can contain up
+to sixteen constants under a single issuer's GRAPH scope, including compact
+integer syntax and prefixed timezone-free dates.
+Verification checks membership against the authenticated released RDF term.
+IN can be conjoined with the existing numeric filters; their datatype and lexical
+rules still apply. Dedicated method-bound members support one hidden IN operand
+at status depth ten with the default integer capacity and no hidden numeric
+comparisons in the same proof. Each released row omits the hidden operand and
+reveals that it is a member of the public list. A list with one distinct value
+identifies the operand.
+NOT IN, disjunctions, variable list items,
+noncanonical numeric/date constants and other literal datatypes refuse.
+
 The registry bundles these method-bound member families in either credential
 capacity shape:
 
 - `result_v5_k{1,2}_n16_p3_r4_f0_d10` for public predicates;
+- `result_v5_k{1,2}_n16_p3_r4_f1_in_d10` for one hidden typed IN;
 - `result_v5_k{1,2}_n16_p3_r4_f1_date_d10` for a hidden date comparison;
 - `result_v5_k{1,2}_n16_p3_r4_f2_i64_d{10,17,20}` for hidden unsigned integer comparisons.
 
@@ -126,6 +144,8 @@ All declarations must name the same issuer IRI. Multiple graph variables with
 that IRI may draw facts from separate credentials of that issuer; graph variables
 do not identify individual credentials. FILTERs belong inside their GRAPH block
 and must reference variables bound by that block's own input.
+If prefix expansion puts the lowered text over the query budget, each graph
+variable must have exactly one triple pattern.
 
 The Rust adapter shares admission and lowering between proving and verification.
 It lowers the scoped query to the existing flat relation, proves using only
@@ -259,7 +279,8 @@ zero or one; unsigned integers retain their exact value. Arrays flatten in row
 order, with the last index varying fastest.
 
 In this table `K` is the member's signature-slot capacity and `F` its hidden
-comparison capacity. Rows with `F` words are omitted when `F = 0`. Positions are
+comparison capacity. `I` is one for the hidden IN member and zero otherwise.
+Rows with zero words are omitted. Positions are
 zero-based. Variables are sorted lexicographically, independently of projection
 or first-occurrence order; variable identifiers are one-based, with zero marking
 a pattern constant. There are three pattern slots, six variable slots and four
@@ -288,9 +309,12 @@ independently against released terms and contribute no hidden-comparison fields.
 | 54+2K | `filter_vars` | F | Receiver query: hidden comparison variable identifiers in query comparison order; unused comparison slots use identifier one. |
 | 54+2K+F | `filter_ops` | F | Receiver query: comparison codes: less-than zero, less-or-equal one, greater-than two, greater-or-equal three, equality four, inequality five; unused slots are zero. |
 | 54+2K+2F | `filter_bounds` | F | Receiver query: exact unsigned integer bound or Gregorian YYYYMMDD date key; unused slots are zero. |
+| 54+2K+3F | `in_filter_var` | I | Receiver query's bound hidden variable identifier. |
+| 54+2K+3F+I | `in_filter_count` | I | Receiver query's active IN constant count. |
+| 54+2K+3F+2I | `in_filter_constants` | 16I | Typed string-canonical encodings of expected-query constants, followed by zero padding. |
 <!-- public-input-layout:end -->
 
-The total is `54+2K+3F` words. Public-predicate members have `F = 0`, date members
+The total is `54+2K+3F+18I` words. Public-predicate members have `F = 0`, date members
 have `F = 1`, and hidden integer members have `F = 2`. Either `K = 1` or `K = 2`;
 status depth changes the accepted root derivation and selected key, not this
 layout. A snapshot's status tree uses the selected depth, least-significant-bit
@@ -337,3 +361,10 @@ and runs these tests offline. The proof exchange example in
 Shared build and runtime support is copied from `js/zk-shared` into the package
 during the maintainer build. The bundled copy keeps installations self-contained;
 drift checks cover the dependency pins, CRS handling and backend settings.
+
+Maintainer circuit regeneration defaults to a private compiler home under its
+temporary build directory. Set `SPARQ_RESULT_COMPILER_HOME` to a writable
+directory to reuse its pinned Git dependency cache, including when GitHub access
+is restricted. The variable applies only to the compiler child process.
+Regenerate checked-in artifacts from committed circuit inputs so that
+`assets/provenance.json` identifies a reproducible source revision.

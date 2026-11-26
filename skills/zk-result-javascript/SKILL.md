@@ -32,6 +32,18 @@ Hidden FILTER operands support full-width unsigned `xsd:integer` and canonical
 timezone-free `xsd:date` comparisons. Negative integer constants reject; the
 `i64` suffix denotes unsigned width. Mixed hidden date/integer comparisons and
 multiple hidden date comparisons reject.
+Projected operands also admit `FILTER(?value IN ("BSc", "MSc"))`, inside a
+scoped GRAPH block or in a flat query. Lists contain one to sixteen constant
+IRIs, strings, canonical unsigned integers or timezone-free dates. A scoped
+list within the raw input budget supports the same sixteen-constant limit.
+Scoped IN queries admit one triple pattern per graph variable. Independent
+reconstruction checks projected membership against authenticated released terms. AND
+with existing numeric comparisons is supported. A single hidden IN uses its dedicated
+method-bound member at status depth ten with the default integer capacity and
+without hidden numeric comparisons in that proof. Each released row omits the
+hidden operand and reveals that it is a member of the public list. A list with
+one distinct value identifies the operand. NOT IN, OR,
+variable list items and noncanonical or unsupported typed constants refuse.
 
 Policy `issuers?: Record<string, string>` maps issuer IRIs to trusted compressed
 public keys; `trustedIssuers?: string[]` remains an additional trust list.
@@ -52,6 +64,8 @@ declarations and GRAPH blocks over the admitted BGP/JOIN/FILTER fragment.
 Each graph variable must be declared, used as a graph name, and occur nowhere
 else; FILTERs stay inside GRAPH blocks. Every declaration must name the same IRI,
 resolved through the policy map or members, or admission rejects `issuer-not-in-policy`.
+When the lowered text exceeds the query budget, each graph variable must have
+exactly one triple pattern.
 Multiple member keys for a scoped issuer IRI reject `issuer-scope-ambiguous-key`,
 even when only one key is used in the proof. Unscoped queries allow that roster;
 multiple verification methods with the same key remain unambiguous.
@@ -64,6 +78,7 @@ This binds all supporting facts to one issuer per proof. Per-fact binding across
 issuers is the query method's job. Research grade, not externally audited.
 
 Bundled method-bound families are `result_v5_k{1,2}_n16_p3_r4_f0_d10`,
+`result_v5_k{1,2}_n16_p3_r4_f1_in_d10`,
 `result_v5_k{1,2}_n16_p3_r4_f1_date_d10` and
 `result_v5_k{1,2}_n16_p3_r4_f2_i64_d{10,17,20}`. Native preparation selects the
 member from the query, selected credentials and accepted status snapshots;
@@ -144,3 +159,9 @@ afterward. Consumer tarballs already contain all generated runtime files.
 Shared support comes from `js/zk-shared` and is copied into each package by its
 maintainer build. Keep the generated copy aligned before running offline checks
 or packing a tarball. The package remains research grade, not externally audited.
+
+Maintainer circuit regeneration defaults to a private writable compiler home
+under its temporary build directory. Set `SPARQ_RESULT_COMPILER_HOME` to a
+writable directory with the pinned Git dependencies to reuse its cache.
+Regenerate checked-in artifacts from committed circuit inputs so the artifact
+provenance identifies their source revision.

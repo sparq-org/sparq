@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "d57bae5d28c1242df18a95081e0cd38cda5032e6",
+  "sourceCommit": "fc1fc586a1663ed8fa32bc0d6eecba77b6ed1dc3",
   "uncommittedSourceChanges": false,
   "toolchain": {
     "nargo": "1.0.0-beta.21",
@@ -85,6 +85,22 @@
       "proofBytes": 14656,
       "acirSha256": "d92191e5f97ac2bf858ce776a1f8cd911aa356edae0ea47c0298fc8bd00214bb",
       "vkSha256": "81c1948ec204d0bcb97c9455282b7764297d63198092765ba28d3a80d3a7eaad"
+    },
+    {
+      "member": "result_v5_k1_n16_p3_r4_f1_in_d10",
+      "acir": "result_v5_k1_n16_p3_r4_f1_in_d10.json",
+      "vk": "result_v5_k1_n16_p3_r4_f1_in_d10.vk",
+      "proofBytes": 14656,
+      "acirSha256": "447afdd50ccd87d8d0c4e09f2dd3da86d69b493b18cd77ce6b4491c720247da8",
+      "vkSha256": "8991d80823fa19ce8793734d7a9bed6624d0ce1590a95491cb492aca4d5728f2"
+    },
+    {
+      "member": "result_v5_k2_n16_p3_r4_f1_in_d10",
+      "acir": "result_v5_k2_n16_p3_r4_f1_in_d10.json",
+      "vk": "result_v5_k2_n16_p3_r4_f1_in_d10.vk",
+      "proofBytes": 14656,
+      "acirSha256": "251bfcc33a38521ba6c6a5ff2af41fe4806a8a7f690a14b5c51948aa7a6eff66",
+      "vkSha256": "ed7791b8554a06efed60818e507ab82dbaa8442855a3275e4a3094e017bc8722"
     }
   ]
 }

@@ -301,11 +301,15 @@ different IRIs reject `per-fact-issuer-binding-needs-query-method`, even if thei
 policy keys coincide. Multiple graph variables may use separate credentials with
 that issuer's key; they do not identify individual credentials.
 
-`planner::lower_issuer_scope(query)` returns `(flat_query, optional_issuer_iri)`
-after shared syntax admission, preserving original text for admitted unscoped
-queries. It authenticates no issuer by itself. The Node Rust adapter resolves
-the IRI through the policy map (`issuer-not-in-policy` if unknown), restricts
-proving credentials to that key, reconstructs the flat relation independently,
+`planner::AdmittedIssuerQuery::parse(query)` applies the text budget to the
+receiver query and retains its admitted algebra. The adapter evaluates
+`flat()` over the issuer-restricted graph and uses
+`result::prepare_admitted_result` and
+`result::reconstruct_admitted_result_public_inputs` for the same algebra.
+`planner::lower_issuer_scope` returns the flat text and optional issuer IRI for
+callers that need those values. The Node Rust adapter resolves the IRI through
+the policy map (`issuer-not-in-policy` if unknown), restricts proving
+credentials to that key, reconstructs the flat relation independently,
 and checks every authenticated public issuer slot for that key
 (`issuer-scope-mismatch` before nonce-store access). The outer presentation retains
 the exact receiver request. This binds all supporting facts to **one issuer per
@@ -351,3 +355,20 @@ redacted and the Rust key zeroizes on drop. The caller must protect, store and
 erase exported secrets; exported bytes/strings are not automatically scrubbed.
 These keys remain research grade, not externally audited, and generation does
 not change the signing path's constant-time caveats.
+
+### Typed constant-list membership
+
+`DisclosureQuery::in_filters` records `TermInFilter` obligations separately from
+numeric comparisons. Each operand must be bound in the FILTER's
+own positive input scope. One to sixteen constant IRIs, strings, canonical
+unsigned integers or timezone-free dates are admitted. NOT IN and OR refuse.
+Planner witness selection checks the authenticated value; independent public
+reconstruction checks projected membership directly.
+Existing numeric FILTER admission and circuit obligations remain in force.
+Projected membership needs no new circuit member. One hidden membership uses
+`result_v5_k{1,2}_n16_p3_r4_f1_in_d10`: its public variable/list fields constrain
+the existing authenticated private binding. These members require status depth
+ten and the default integer capacity. Preparation refuses `HideInU64` for hidden
+membership. Mixing hidden IN with hidden numeric predicates or adding another
+hidden IN refuses. The Node adapter admits one triple pattern per graph variable
+for scoped queries with IN or with lowered text that exceeds the query budget.

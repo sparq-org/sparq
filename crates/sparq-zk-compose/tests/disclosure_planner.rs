@@ -650,3 +650,139 @@ fn admitted_candidates_preserve_wallet_indices_and_query_checks() {
     )
     .is_err());
 }
+
+#[test]
+fn projected_in_keeps_authentication_and_rejects_nonmembers() {
+    let q = query("SELECT DISTINCT ?degree WHERE { ?s ex:degree ?degree FILTER(?degree IN (\"BSc\", \"MSc\")) }");
+    let graph = credential(&[
+        triple("alice", "degree", Literal::new_simple_literal("BSc").into()),
+        triple("bob", "degree", Literal::new_simple_literal("MSc").into()),
+        triple("eve", "degree", Literal::new_simple_literal("PhD").into()),
+    ], 1);
+    for value in ["BSc", "MSc", "PhD"] {
+        let released = row(&[("degree", Literal::new_simple_literal(value).into())]);
+        let result = plan_disclosure(&q, std::slice::from_ref(&graph), &[released], PlannerLimits::default());
+        if value == "PhD" {
+            assert!(matches!(result, Err(PlanError::NoWitness { .. })));
+        } else {
+            let plan = result.unwrap();
+            assert_eq!(plan.authentication, vec![0]);
+            assert_eq!(plan.memberships.len(), 1);
+            assert_eq!(plan.metrics.public_filter_checks, 1);
+        }
+    }
+}
+
+#[test]
+fn both_planners_record_projected_and_hidden_in_operands() {
+    use sparq_zk_compose::planner::{optimize_disclosure, OptimizationLimits};
+
+    let q = query(
+        r#"SELECT DISTINCT ?age ?degree WHERE {
+            ?s ex:age ?age .
+            ?s ex:degree ?degree .
+            ?s ex:qualification ?qualification .
+            FILTER(?age >= 18 && ?degree IN ("BSc", "MSc") && ?qualification IN ("A", "B"))
+        }"#,
+    );
+    let degree: Term = Literal::new_simple_literal("BSc").into();
+    let graphs = [credential(
+        &[
+            triple("alice", "age", integer("42")),
+            triple("alice", "degree", degree.clone()),
+            triple(
+                "alice",
+                "qualification",
+                Literal::new_simple_literal("A").into(),
+            ),
+        ],
+        1,
+    )];
+    let released = [row(&[("age", integer("42")), ("degree", degree)])];
+    let first = plan_disclosure(&q, &graphs, &released, PlannerLimits::default()).unwrap();
+    let optimized = optimize_disclosure(&q, &graphs, &released, OptimizationLimits::default())
+        .unwrap()
+        .plan
+        .unwrap();
+    for plan in [first, optimized] {
+        assert_eq!(
+            plan.rows[0].filters,
+            [
+                FilterObligation::PublicCheck { filter: 0 },
+                FilterObligation::PublicInCheck {
+                    filter: 0,
+                    operand: SlotRef { pattern: 1, slot: 2 },
+                },
+                FilterObligation::HiddenInPredicate {
+                    filter: 1,
+                    operand: SlotRef { pattern: 2, slot: 2 },
+                },
+            ]
+        );
+        assert_eq!(plan.metrics.public_filter_checks, 2);
+        assert_eq!(plan.metrics.hidden_filter_obligations, 1);
+    }
+}
+
+#[test]
+fn constructed_in_lists_obey_the_same_admission_as_parsed_queries() {
+    use sparq_zk_compose::planner::{optimize_disclosure, OptimizationLimits};
+
+    let admitted = query("SELECT DISTINCT ?degree WHERE { ?s ex:degree ?degree FILTER(?degree IN (\"BSc\", \"MSc\")) }");
+    let degree: Term = Literal::new_simple_literal("BSc").into();
+    let graph = credential(&[triple("alice", "degree", degree.clone())], 1);
+    let released = [row(&[("degree", degree.clone())])];
+    let mut full_list = admitted.clone();
+    full_list.in_filters[0].constants = vec![degree.clone(); 16];
+    assert!(plan_disclosure(
+        &full_list,
+        std::slice::from_ref(&graph),
+        &released,
+        PlannerLimits::default()
+    )
+    .is_ok());
+    assert!(optimize_disclosure(
+        &full_list,
+        std::slice::from_ref(&graph),
+        &released,
+        OptimizationLimits::default()
+    )
+    .unwrap()
+    .plan
+    .is_some());
+    for constants in [
+        Vec::new(),
+        vec![degree; 17],
+        vec![integer("01")],
+        vec![Literal::from(true).into()],
+        vec![Literal::new_language_tagged_literal("BSc", "en")
+            .unwrap()
+            .into()],
+        vec![Literal::new_typed_literal(
+            "2000-01-01Z",
+            NamedNode::new("http://www.w3.org/2001/XMLSchema#date").unwrap(),
+        )
+        .into()],
+    ] {
+        let mut q = admitted.clone();
+        q.in_filters[0].constants = constants;
+        assert!(matches!(
+            plan_disclosure(
+                &q,
+                std::slice::from_ref(&graph),
+                &released,
+                PlannerLimits::default()
+            ),
+            Err(PlanError::Unsupported(_))
+        ));
+        assert!(matches!(
+            optimize_disclosure(
+                &q,
+                std::slice::from_ref(&graph),
+                &released,
+                OptimizationLimits::default()
+            ),
+            Err(PlanError::Unsupported(_))
+        ));
+    }
+}

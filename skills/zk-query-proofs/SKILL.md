@@ -343,7 +343,9 @@ remaining proof obligations. Its credential/leaf references and metrics are
 PRIVATE planning data; authentication remains required for public triples and
 FILTER operands. See [disclosure planning](references/disclosure-planner.md) for
 the API, bounds, result contract, and limitations. Host planning is not
-cryptographic verification; this surface is not externally audited.
+cryptographic verification; this surface is not externally audited. Typed IN
+obligations live in `DisclosureQuery::in_filters` and require backend enforcement
+separately from numeric filters; see the [membership contract](references/successful-results.md#typed-constant-list-membership).
 `planner::signed::SignedDisclosureQuery` and its signed planning/optimization
 functions separately admit canonical `i64` FILTERs. They preserve committed RDF
 terms and do not extend the existing unsigned proof verifier. See the signed
@@ -402,7 +404,10 @@ from `verify_manifest`: only nonempty positive `SELECT DISTINCT` answers, select
 IRIs/literals, private canonical nonnegative integer predicates, and canonical
 timezone-free `xsd:date` comparisons are admitted. `ResultOptions::integer_capacity` selects the default
 range policy or explicit `IntegerCapacityPolicy::HideInU64`; method-bound hidden
-integers always use the full-width family and keep decimal length private.
+integer comparisons use the full-width family and keep decimal length private.
+Hidden `IN` membership requires the default capacity policy. The result adapter
+admits one triple pattern per graph variable for scoped queries with `IN` or with
+lowered text that exceeds the query budget.
 Status capacity is independently derived from all freshness-accepted snapshots.
 Public predicates run in the verifier and select the member without numeric
 circuitry. Roots/salts/status indices and intermediate encodings are private;
@@ -431,6 +436,9 @@ including the exact datatype and Gregorian calendar validation. Query admission
 refuses timezone suffixes, alternate date spellings and date-time bounds by name.
 `planner::IntegerFilter::datatype` records `PredicateDatatype::{Integer, Date}`;
 planner admission and verification retain this distinction when evaluating keys.
+Both planners record projected and hidden IN obligations in `PlannedRow::filters`.
+Each IN obligation names its `DisclosureQuery::in_filters` index and authenticated
+operand slot. Hidden-IN result members require the default integer capacity.
 Research-stage, not externally
 audited: no complete-answer, absence, wallet-size or holder-identity guarantee.
 
@@ -622,7 +630,8 @@ The [Node package and host seam](references/successful-results.md#node-package-a
 use the same private preparation and independent statement reconstruction.
 
 The Node policy's optional `issuers` map admits GRAPH queries naming one issuer
-per proof. `planner::lower_issuer_scope` shares syntax lowering; the adapter checks
+per proof. The adapter parses the request with `planner::AdmittedIssuerQuery::parse`
+and carries its admitted algebra through preparation and reconstruction. It checks
 the policy key against credentials and every authenticated public issuer slot.
 Per-fact binding across issuers belongs to the query method. See the contract for
 named refusals and report semantics. Research grade, not externally audited.

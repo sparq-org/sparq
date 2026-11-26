@@ -453,6 +453,230 @@
           "freshness": true
         }
       }
+    },
+    {
+      "planHash": "40ac338a2f3fd09e7a57c99bcea78ddce33aae02f58da64b002cf0632406eeec",
+      "packageName": "query_40ac338a2f3fd09e7a57c99bcea78ddce33aae02f58da64b002cf0632406eeec",
+      "acir": "40ac338a2f3fd09e7a57c99bcea78ddce33aae02f58da64b002cf0632406eeec.json",
+      "vk": "40ac338a2f3fd09e7a57c99bcea78ddce33aae02f58da64b002cf0632406eeec.vk.hex",
+      "acirSha256": "7d6a8228fb11e3a4d567188d368567794049b8d6e05e3543fd1be1e3ed7c7efe",
+      "vkSha256": "0e04aa1212ee2a94ecd657ceb3a82af629c0ba36cee7fb49a3c15d3721f064e4",
+      "wasmProving": false,
+      "example": {
+        "name": "consumer-insurance-count",
+        "query": "PREFIX vcq: <https://w3id.org/sparq/vcq#>\nPREFIX xsd: <http://www.w3.org/2001/XMLSchema#>\nSELECT DISTINCT ?result WHERE {\n  ?lic vcq:verifiedIssuer <urn:fictional:insurance-quote:licensing> .\n  ?reg vcq:verifiedIssuer <urn:fictional:insurance-quote:claims-register> .\n  GRAPH ?lic { ?subject <urn:claim:licence.years> ?v0 . } BIND((?v0 >= 5) AS ?test0)\n  GRAPH ?lic { ?subject <urn:claim:licence.points> ?v1 . } BIND((?v1 <= 3) AS ?test1)\n  GRAPH ?reg { ?subject <urn:claim:claims.five-year-count> ?v2 . } BIND((?v2 = 0) AS ?test2)\n  GRAPH ?reg { ?subject <urn:claim:claims.five-year-complete> ?v3 . } BIND((?v3 = true) AS ?test3)\n  BIND((?test0 && ?test1 && ?test2 && ?test3) AS ?result)\n}",
+        "bounds": {
+          "credentials": 2,
+          "quadsPerCredential": 64,
+          "rowsPerTable": 4
+        },
+        "credentialQuadBounds": [
+          16,
+          64
+        ],
+        "envelope": {
+          "holder": true,
+          "status": true,
+          "validity": true,
+          "freshness": true,
+          "openingProfile": "long-objects"
+        }
+      }
+    },
+    {
+      "planHash": "93d31cc08c4b9fe9b13d01ea5ab65d275a0a7de28e82aff8365c6afd2d3e6d1c",
+      "packageName": "query_93d31cc08c4b9fe9b13d01ea5ab65d275a0a7de28e82aff8365c6afd2d3e6d1c",
+      "acir": "93d31cc08c4b9fe9b13d01ea5ab65d275a0a7de28e82aff8365c6afd2d3e6d1c.json",
+      "vk": "93d31cc08c4b9fe9b13d01ea5ab65d275a0a7de28e82aff8365c6afd2d3e6d1c.vk.hex",
+      "acirSha256": "d98f4fa9b678987e114a2402deada8f100519ec716861da2b4acc1437ba5b032",
+      "vkSha256": "fe378042065429e7111e53bd6a13e0ec4a81ffdb46f9f8eb880cdc74754dbe69",
+      "wasmProving": false,
+      "example": {
+        "name": "consumer-insurance-absence",
+        "query": "PREFIX vcq: <https://w3id.org/sparq/vcq#>\nPREFIX xsd: <http://www.w3.org/2001/XMLSchema#>\nSELECT DISTINCT ?result WHERE {\n  ?lic vcq:verifiedIssuer <urn:fictional:insurance-quote:licensing> .\n  ?reg vcq:verifiedIssuer <urn:fictional:insurance-quote:claims-register> .\n  GRAPH ?lic { ?subject <urn:claim:licence.years> ?v0 . ?subject <urn:claim:licence.points> ?v1 . }\n  BIND((?v0 >= 5 && ?v1 <= 3 &&\n        NOT EXISTS { GRAPH ?reg { ?subject <urn:claim:claims.claim> ?c . ?c <urn:claim:claims.date> ?d .\n                     FILTER(?d >= \"2021-11-13\"^^xsd:date) } }) AS ?result)\n}",
+        "bounds": {
+          "credentials": 2,
+          "quadsPerCredential": 64,
+          "rowsPerTable": 16
+        },
+        "credentialQuadBounds": [
+          16,
+          64
+        ],
+        "envelope": {
+          "holder": true,
+          "status": true,
+          "validity": true,
+          "freshness": true,
+          "openingProfile": "long-objects",
+          "tableRowBounds": [
+            4,
+            4,
+            4,
+            4,
+            4,
+            4,
+            4,
+            16,
+            16,
+            16,
+            16,
+            4,
+            4,
+            4
+          ]
+        }
+      }
+    },
+    {
+      "planHash": "39c05adeeffb4f9eda54ddbed885539ba8cbd70dd993c561097e15030b636980",
+      "packageName": "query_39c05adeeffb4f9eda54ddbed885539ba8cbd70dd993c561097e15030b636980",
+      "acir": "39c05adeeffb4f9eda54ddbed885539ba8cbd70dd993c561097e15030b636980.json",
+      "vk": "39c05adeeffb4f9eda54ddbed885539ba8cbd70dd993c561097e15030b636980.vk.hex",
+      "acirSha256": "29b753fc603b01f9e65aea82a90de90f6665a437e159cce21ef2f8fc5bd08b16",
+      "vkSha256": "d4b06cd526b00ab67598cfd50006ea70927e9902fd7423139b776214aaf33729",
+      "wasmProving": false,
+      "example": {
+        "name": "consumer-trial",
+        "query": "PREFIX vcq: <https://w3id.org/sparq/vcq#>\nPREFIX xsd: <http://www.w3.org/2001/XMLSchema#>\nSELECT DISTINCT ?result WHERE {\n  ?prac vcq:verifiedIssuer <urn:fictional:trial-eligibility:practice> .\n  GRAPH ?prac { ?subject <urn:claim:trial.age> ?v0 . } BIND((?v0 >= 18) AS ?test0)\n  GRAPH ?prac { ?subject <urn:claim:trial.age> ?v1 . } BIND((?v1 <= 65) AS ?test1)\n  GRAPH ?prac { ?subject <urn:claim:trial.diagnosis> ?v2 . } BIND((?v2 = \"condition-a\") AS ?test2)\n  BIND(NOT EXISTS { GRAPH ?prac { ?subject <urn:claim:trial.medications> ?excluded3 .\n                    FILTER(?excluded3 IN (\"excluded-x\", \"excluded-y\")) } } AS ?test3)\n  GRAPH ?prac { ?subject <urn:claim:trial.medication-complete> ?v4 . } BIND((?v4 = true) AS ?test4)\n  BIND((?test0 && ?test1 && ?test2 && ?test3 && ?test4) AS ?result)\n}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 64,
+          "rowsPerTable": 32
+        },
+        "credentialQuadBounds": [
+          64
+        ],
+        "envelope": {
+          "holder": true,
+          "status": true,
+          "validity": true,
+          "freshness": true,
+          "openingProfile": "long-objects",
+          "tableRowBounds": [
+            2,
+            2,
+            2,
+            2,
+            2,
+            2,
+            2,
+            2,
+            2,
+            2,
+            32,
+            32,
+            2,
+            2,
+            2,
+            2,
+            2,
+            2,
+            2
+          ]
+        }
+      }
+    },
+    {
+      "planHash": "7f62f68b145d82caa5cb8825aaba219b3f97b6821d109bd57b1df08158b69473",
+      "packageName": "query_7f62f68b145d82caa5cb8825aaba219b3f97b6821d109bd57b1df08158b69473",
+      "acir": "7f62f68b145d82caa5cb8825aaba219b3f97b6821d109bd57b1df08158b69473.json",
+      "vk": "7f62f68b145d82caa5cb8825aaba219b3f97b6821d109bd57b1df08158b69473.vk.hex",
+      "acirSha256": "358028630ef4454d4bb599e41cace6117a6a3864c415b731f1d065a68b798381",
+      "vkSha256": "0a1e6387a8b635e7e57717a91e182c8feacbd3ec4230af71a3acb9d271e3d9f6",
+      "wasmProving": false,
+      "example": {
+        "name": "consumer-recycled-min",
+        "query": "PREFIX vcq: <https://w3id.org/sparq/vcq#>\nPREFIX xsd: <http://www.w3.org/2001/XMLSchema#>\nSELECT DISTINCT ((MIN(?value) >= 0.3) AS ?result) WHERE {\n  ?subject <urn:claim:material.recycled-fraction> ?value .\n}",
+        "bounds": {
+          "credentials": 4,
+          "quadsPerCredential": 16,
+          "rowsPerTable": 4
+        },
+        "credentialQuadBounds": [
+          16,
+          16,
+          16,
+          16
+        ],
+        "envelope": {
+          "status": true,
+          "validity": true,
+          "freshness": true
+        }
+      }
+    },
+    {
+      "planHash": "ac8c9f6f939e0fc888696773fc95393dcc7c3eb5f6b6faa87dda7f71b1fac984",
+      "packageName": "query_ac8c9f6f939e0fc888696773fc95393dcc7c3eb5f6b6faa87dda7f71b1fac984",
+      "acir": "ac8c9f6f939e0fc888696773fc95393dcc7c3eb5f6b6faa87dda7f71b1fac984.json",
+      "vk": "ac8c9f6f939e0fc888696773fc95393dcc7c3eb5f6b6faa87dda7f71b1fac984.vk.hex",
+      "acirSha256": "3430e5ccdb454e2cb46f22559f315b74eabeabbf202c59b805167cfadd2263d1",
+      "vkSha256": "b0cb788b2894b2d25d634b3148a04659299e60458585402e13d065b9b98b7200",
+      "wasmProving": false,
+      "example": {
+        "name": "consumer-degree",
+        "query": "PREFIX vcq: <https://w3id.org/sparq/vcq#>\nPREFIX xsd: <http://www.w3.org/2001/XMLSchema#>\nSELECT DISTINCT ?value WHERE {\n  ?g vcq:verifiedIssuer <urn:fictional:degree-recognition:university> .\n  GRAPH ?g { ?subject <urn:claim:degree.level> ?value . FILTER(?value IN (\"BSc\", \"MSc\")) }\n}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 16,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "aa4dd674a668dc8b4ea34001ec349bb1470cda264cbb8d27ae84139e55ec9716",
+      "packageName": "query_aa4dd674a668dc8b4ea34001ec349bb1470cda264cbb8d27ae84139e55ec9716",
+      "acir": "aa4dd674a668dc8b4ea34001ec349bb1470cda264cbb8d27ae84139e55ec9716.json",
+      "vk": "aa4dd674a668dc8b4ea34001ec349bb1470cda264cbb8d27ae84139e55ec9716.vk.hex",
+      "acirSha256": "ccdb188d069a80213e9a5ea13fa03b31119647f0e1c81eeade57a8a135e19258",
+      "vkSha256": "59042ed1a20e918b7b7d62af4537bde4a0c6fa1f9ee4671c5803560ab3745136",
+      "wasmProving": false,
+      "example": {
+        "name": "consumer-degree-hidden",
+        "query": "PREFIX vcq: <https://w3id.org/sparq/vcq#>\nPREFIX xsd: <http://www.w3.org/2001/XMLSchema#>\nSELECT DISTINCT ?subject WHERE {\n  ?g vcq:verifiedIssuer <urn:fictional:degree-recognition:university> .\n  GRAPH ?g { ?subject <urn:claim:degree.level> ?value . FILTER(?value IN (\"BSc\", \"MSc\")) }\n}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 16,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "46062bec7997c80ccd8156cdac5af0418414677ccb1a7d77cafa8e92a9236fd6",
+      "packageName": "query_46062bec7997c80ccd8156cdac5af0418414677ccb1a7d77cafa8e92a9236fd6",
+      "acir": "46062bec7997c80ccd8156cdac5af0418414677ccb1a7d77cafa8e92a9236fd6.json",
+      "vk": "46062bec7997c80ccd8156cdac5af0418414677ccb1a7d77cafa8e92a9236fd6.vk.hex",
+      "acirSha256": "c5dec25561c9bb07834492df3c04ef0c1e9d64595edf0eda3383f4d680e32f2b",
+      "vkSha256": "ab2beaa29e3d55e5a961b1b8208e1e7e17c1ceda0e67855618aaa7400c0cc279",
+      "wasmProving": false,
+      "example": {
+        "name": "consumer-degree-typed",
+        "query": "PREFIX vcq: <https://w3id.org/sparq/vcq#>\nPREFIX xsd: <http://www.w3.org/2001/XMLSchema#>\nSELECT DISTINCT ?value WHERE {\n  ?g vcq:verifiedIssuer <urn:fictional:degree-recognition:university> .\n  GRAPH ?g { ?subject <urn:claim:degree.level> ?value . FILTER(?value IN (1, 2)) }\n}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 16,
+          "rowsPerTable": 4
+        }
+      }
+    },
+    {
+      "planHash": "4401b17f7f4d698f860cd264cd3d3f56a59a533ef5bef347c37c2aeec3837ae2",
+      "packageName": "query_4401b17f7f4d698f860cd264cd3d3f56a59a533ef5bef347c37c2aeec3837ae2",
+      "acir": "4401b17f7f4d698f860cd264cd3d3f56a59a533ef5bef347c37c2aeec3837ae2.json",
+      "vk": "4401b17f7f4d698f860cd264cd3d3f56a59a533ef5bef347c37c2aeec3837ae2.vk.hex",
+      "acirSha256": "9f42bb3d4d81e55a4d1b4e17bef12f47f439634a87dc3da909c476b5cff760ef",
+      "vkSha256": "e046c51134db9a48b5c60d36055f98f6078554e4be4d95c501663dcefd1580db",
+      "wasmProving": false,
+      "example": {
+        "name": "consumer-degree-typed-hidden",
+        "query": "PREFIX vcq: <https://w3id.org/sparq/vcq#>\nPREFIX xsd: <http://www.w3.org/2001/XMLSchema#>\nSELECT DISTINCT ?subject WHERE {\n  ?g vcq:verifiedIssuer <urn:fictional:degree-recognition:university> .\n  GRAPH ?g { ?subject <urn:claim:degree.level> ?value . FILTER(?value IN (1, 2)) }\n}",
+        "bounds": {
+          "credentials": 1,
+          "quadsPerCredential": 16,
+          "rowsPerTable": 4
+        }
+      }
     }
   ],
   "sourceBundleSha256": "8aa2d6dc7ec4556dbb3b3531b74b65d89da65fd5cb1c393fa7e16e6f54c8fe8e",

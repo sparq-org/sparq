@@ -22,8 +22,8 @@ use crate::driver::{CircuitProver, DriverError};
 use crate::manifest::{DisclosedTerm, FieldHex, StatusListSnapshot};
 use crate::planner::signed::{NumericProfile, SignedDisclosureQuery};
 use crate::planner::{
-    optimize_disclosure_admitted, plan_disclosure_admitted, DisclosureQuery, MembershipRef,
-    OptimizationCompletion, OptimizationLimits, PlannerLimits, QueryKind, QuerySlot,
+    optimize_disclosure_admitted, plan_disclosure_admitted, AdmittedIssuerQuery, DisclosureQuery,
+    MembershipRef, OptimizationCompletion, OptimizationLimits, PlannerLimits, QueryKind, QuerySlot,
 };
 use crate::revocation::{
     accepted_set_root, accepted_set_witness, merkle_root, merkle_witness, AcceptedStatusEntry,
@@ -63,6 +63,45 @@ const POLICY_DEPTH: u32 = 4;
 
 /// Separately versioned signed-integer successful-result preparation and verification.
 pub mod signed;
+
+fn select_package(
+    contract: NumericContract,
+    query: &DisclosureQuery,
+    credentials: usize,
+    numeric_filters: usize,
+    depth: u32,
+    legacy: bool,
+) -> Result<(&'static str, u32), ResultError> {
+    let hidden_in = query
+        .in_filters
+        .iter()
+        .filter(|f| !query.projection.contains(&f.variable))
+        .count();
+    if hidden_in == 0 {
+        return contract.package(credentials, numeric_filters, depth, legacy);
+    }
+    if hidden_in != 1
+        || numeric_filters != 0
+        || depth != 10
+        || legacy
+        || !matches!(contract, NumericContract::Unsigned(_))
+    {
+        return Err(reject("hidden IN requires one membership predicate, no hidden numeric predicates and status depth ten"));
+    }
+    if !matches!(
+        contract,
+        NumericContract::Unsigned(PrivateIntegerCapacity::TwoDigits)
+    ) {
+        return Err(reject("hidden IN requires the default integer capacity"));
+    }
+    match credentials {
+        1 => Ok(("result_v5_k1_n16_p3_r4_f1_in_d10", BOUND_VERSION)),
+        2 => Ok(("result_v5_k2_n16_p3_r4_f1_in_d10", BOUND_VERSION)),
+        _ => Err(reject("hidden IN credential capacity")),
+    }
+}
+
+
 
 // Adversarial corpus access stays test-only; private witnesses are not a public API.
 #[cfg(test)]
@@ -825,6 +864,15 @@ fn public_statement(
     policy: &ResultPolicy,
     nonce: &VerifierNonce,
 ) -> Result<PublicStatement, ResultError> {
+    public_statement_with_admission(p, policy, nonce, None)
+}
+
+fn public_statement_with_admission(
+    p: &ResultPresentation,
+    policy: &ResultPolicy,
+    nonce: &VerifierNonce,
+    admitted: Option<DisclosureQuery>,
+) -> Result<PublicStatement, ResultError> {
     if matches!(p.version, 1 | 2) && !policy.admit_unbound_legacy {
         return Err(reject(
             "no method-bound successful-result member verifies a method-unbound legacy presentation; \
@@ -839,19 +887,33 @@ use ResultPolicy::admit_unbound_legacy for already-issued material",
         }
         NumericContract::PublicPattern
     } else {
-        unsigned_contract(
-            p.integer_capacity,
-            &DisclosureQuery::parse(&p.query).map_err(|e| reject(e.to_string()))?,
-        )?
+        match &admitted {
+            Some(query) => unsigned_contract(p.integer_capacity, query)?,
+            None => unsigned_contract(
+                p.integer_capacity,
+                &DisclosureQuery::parse(&p.query).map_err(|e| reject(e.to_string()))?,
+            )?,
+        }
     };
-    public_statement_for(p.into(), contract, policy, nonce)
+    public_statement_for_admitted(p.into(), contract, policy, nonce, admitted)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn public_statement_for(
     p: PresentationView<'_>,
     contract: NumericContract,
     policy: &ResultPolicy,
     nonce: &VerifierNonce,
+) -> Result<PublicStatement, ResultError> {
+    public_statement_for_admitted(p, contract, policy, nonce, None)
+}
+
+fn public_statement_for_admitted(
+    p: PresentationView<'_>,
+    contract: NumericContract,
+    policy: &ResultPolicy,
+    nonce: &VerifierNonce,
+    admitted: Option<DisclosureQuery>,
 ) -> Result<PublicStatement, ResultError> {
     if !contract.accepts_version(p.version) || p.challenge != &nonce.as_field_hex() {
         return Err(reject("version or challenge mismatch"));
@@ -859,7 +921,11 @@ fn public_statement_for(
     if p.issuer_slots.is_empty() || p.issuer_slots.len() > MAX_CREDENTIALS {
         return Err(reject("unsupported credential capacity bucket"));
     }
-    let query = contract.parse(p.query)?;
+    let query = match (admitted, contract) {
+        (Some(query), NumericContract::PublicPattern) => public_prefix(query)?,
+        (Some(query), _) => query,
+        (None, _) => contract.parse(p.query)?,
+    };
     // Keep ASK out of this first wire contract; no accidental false/absence claim.
     if query.kind != QueryKind::SelectDistinct {
         return Err(reject("only SELECT DISTINCT is supported"));
@@ -902,6 +968,19 @@ fn public_statement_for(
         }
         rows.push(row);
     }
+    for filter in &query.in_filters {
+        if !query.projection.contains(&filter.variable) {
+            continue;
+        }
+        for row in &rows {
+            if !row
+                .get(&filter.variable)
+                .is_some_and(|value| filter.accepts(value))
+            {
+                return Err(reject("public IN FILTER is false"));
+            }
+        }
+    }
     let hidden_filters: Vec<_> = query
         .filters
         .iter()
@@ -937,7 +1016,7 @@ fn public_statement_for(
     let entries = policy.entries()?;
     let status_depth = policy.status_depth()?;
     let (package, version) =
-        contract.package(
+        select_package(contract, &query,
             p.issuer_slots.len(),
             hidden_filters.len(),
             status_depth,
@@ -1027,6 +1106,21 @@ fn public_statement_for(
             ("filter_bounds", json!(bounds)),
         ]);
     }
+    if let Some(filter) = query.in_filters.iter()
+        .find(|f| !query.projection.contains(&f.variable))
+    {
+        let variable = vars.iter().position(|v| v == &filter.variable)
+            .ok_or_else(|| reject("unbound IN variable"))? + 1;
+        let mut constants = vec![field_to_hex(&Fr::from(0u64)); 16];
+        for (slot, term) in filter.constants.iter().enumerate() {
+            constants[slot] = field_to_hex(&field(term)?);
+        }
+        fields.extend([
+            ("in_filter_var", json!(variable)),
+            ("in_filter_count", json!(filter.constants.len())),
+            ("in_filter_constants", json!(constants)),
+        ]);
+    }
     if matches!(contract, NumericContract::PublicPattern) {
         fields.push(("public_triples", json!(public_triples(&query, &rows)?)));
     }
@@ -1097,7 +1191,8 @@ pub enum IntegerCapacityPolicy {
     /// use full width, while legacy opt-in issuance retains its small bucket.
     #[default]
     Smallest,
-    /// Use the full-u64 member for any private predicate, hiding the small bucket.
+    /// Use the full-u64 member for hidden integer comparisons, hiding the small bucket.
+    /// Hidden IN requires the default capacity policy.
     HideInU64,
 }
 
@@ -1173,6 +1268,33 @@ pub fn prepare_result_with_options(
     )
 }
 
+/// Prepares a result for an adapter-admitted query.
+///
+/// The adapter must resolve [AdmittedIssuerQuery::issuer] through receiver policy
+/// and supply only credentials signed by that key when a scope is present.
+///
+/// # Errors
+/// Returns the same witness and capacity errors as [prepare_result_with_options].
+pub fn prepare_admitted_result(
+    query: &AdmittedIssuerQuery<'_>,
+    credentials: &[ResultCredential],
+    rows: &[BTreeMap<String, Term>],
+    policy: &ResultPolicy,
+    nonce: &VerifierNonce,
+    options: ResultOptions,
+) -> Result<PreparedResult, ResultError> {
+    prepare_result_contract(
+        (query.original(), Some(query.disclosure().clone())),
+        credentials,
+        rows,
+        policy,
+        nonce,
+        options,
+        NumericProfile::Unsigned,
+        false,
+    )
+}
+
 // beadzkp-15.1: explicit opt-in; ResultOptions is unchanged so
 // existing struct literals and default dispatch keep their behavior.
 /// Prepares a version-four result whose first public pattern skips typed openings.
@@ -1199,7 +1321,7 @@ pub fn prepare_result_public_pattern(
     options: ResultOptions,
 ) -> Result<PreparedResult, ResultError> {
     prepare_result_contract(
-        query,
+        (query, None),
         credentials,
         rows,
         policy,
@@ -1220,7 +1342,7 @@ fn prepare_result_numeric(
     profile: NumericProfile,
 ) -> Result<PreparedResult, ResultError> {
     prepare_result_contract(
-        query,
+        (query, None),
         credentials,
         rows,
         policy,
@@ -1233,7 +1355,7 @@ fn prepare_result_numeric(
 
 #[allow(clippy::too_many_arguments)]
 fn prepare_result_contract(
-    query: &str,
+    (query, admitted): (&str, Option<DisclosureQuery>),
     credentials: &[ResultCredential],
     rows: &[BTreeMap<String, Term>],
     policy: &ResultPolicy,
@@ -1247,7 +1369,18 @@ fn prepare_result_contract(
     if credentials.len() > crate::planner::MAX_DISCLOSURE_CREDENTIALS {
         return Err(reject("input credentials exceed disclosure planning limit"));
     }
-    let mut parsed = parse_numeric_query(query, profile)?;
+    let mut parsed = match admitted {
+        Some(query) => query,
+        None => parse_numeric_query(query, profile)?,
+    };
+    if options.integer_capacity == IntegerCapacityPolicy::HideInU64
+        && parsed
+            .in_filters
+            .iter()
+            .any(|filter| !parsed.projection.contains(&filter.variable))
+    {
+        return Err(reject("hidden IN requires the default integer capacity"));
+    }
     let hidden_date =
         crate::planner::date::hidden_date(&parsed).map_err(|e| reject(e.to_string()))?;
     let entries = policy.entries()?;
@@ -1472,7 +1605,7 @@ fn prepare_result_contract(
         NumericProfile::Signed => NumericContract::Signed,
     };
     let (_, version) =
-        contract.package(used.len(), hidden_filters, status_depth, policy.admit_unbound_legacy)?;
+        select_package(contract, &parsed, used.len(), hidden_filters, status_depth, policy.admit_unbound_legacy)?;
     // sq-j506: the issuer message every selected credential is witnessed under is
     // the one THIS member's relation folds, so a method-bound attestation is never
     // witnessed into a legacy member (or the reverse).
@@ -1502,7 +1635,13 @@ fn prepare_result_contract(
             .collect(),
         proof: Vec::new(),
     };
-    let statement = public_statement_for((&presentation).into(), contract, policy, nonce)?;
+    let statement = public_statement_for_admitted(
+        (&presentation).into(),
+        contract,
+        policy,
+        nonce,
+        Some(parsed),
+    )?;
     let public_inputs = public_bytes(&statement.fields)?;
     let mut fields = statement.fields.clone();
     let zero = field_to_hex(&Fr::from(0u64));
@@ -1678,12 +1817,15 @@ fn prepare_result_contract(
         .iter()
         .map(|(name, value)| format!("{name} = {}\n", toml_witness_value(value)))
         .collect();
+    let parsed = &statement.query;
     let work = ResultWork {
         selected_credentials,
         shared_memberships: memberships.len(),
         witness_uses: rows.len() * parsed.patterns.len(),
-        public_predicates: rows.len() * (parsed.filters.len() - statement.hidden_filters.len()),
-        private_predicates: rows.len() * statement.hidden_filters.len(),
+        public_predicates: rows.len() * (parsed.filters.len() - statement.hidden_filters.len()
+            + parsed.in_filters.iter().filter(|f| parsed.projection.contains(&f.variable)).count()),
+        private_predicates: rows.len() * (statement.hidden_filters.len()
+            + parsed.in_filters.iter().filter(|f| !parsed.projection.contains(&f.variable)).count()),
         signature_checks: used.len(),
         optimization,
     };
@@ -1834,6 +1976,35 @@ pub fn reconstruct_result_public_inputs(
     })
 }
 
+/// Reconstructs a result statement from the adapter-admitted receiver query.
+///
+/// The adapter must resolve [AdmittedIssuerQuery::issuer] through receiver policy
+/// and check the authenticated issuer slots before accepting the proof.
+///
+/// # Errors
+/// Returns the same statement errors as [reconstruct_result_public_inputs].
+pub fn reconstruct_admitted_result_public_inputs(
+    expected_query: &AdmittedIssuerQuery<'_>,
+    presentation: &ResultPresentation,
+    policy: &ResultPolicy,
+    nonce: &VerifierNonce,
+) -> Result<ReconstructedResult, ResultError> {
+    if presentation.query != expected_query.original() {
+        return Err(reject("query differs from relying-party request"));
+    }
+    let statement = public_statement_with_admission(
+        presentation,
+        policy,
+        nonce,
+        Some(expected_query.disclosure().clone()),
+    )?;
+    Ok(ReconstructedResult {
+        member: statement.package,
+        public_inputs: public_bytes(&statement.fields)?,
+        released: statement.rows,
+    })
+}
+
 /// Verifies a released result against the relying party's exact request and policy.
 ///
 /// Re-parses the query, checks public predicates, reconstructs every public input
@@ -1907,6 +2078,84 @@ mod tests {
     const QUERY: &str = "SELECT DISTINCT ?name WHERE { ?person <urn:name> ?name . ?person <urn:age> ?age . ?person <urn:licensed> <urn:yes> . FILTER(?age >= 18) }";
     const PUBLIC_QUERY: &str =
         "SELECT DISTINCT ?age WHERE { ?person <urn:age> ?age . FILTER(?age >= 18) }";
+
+    #[test]
+    fn hidden_in_selects_only_its_bound_member_and_supported_capacity() {
+        let query = DisclosureQuery::parse("SELECT DISTINCT ?person WHERE { ?person <urn:degree> ?value . FILTER(?value IN (\"BSc\", \"MSc\")) }").unwrap();
+        let contract = NumericContract::Unsigned(PrivateIntegerCapacity::TwoDigits);
+        for (credentials, member) in [
+            (1, "result_v5_k1_n16_p3_r4_f1_in_d10"),
+            (2, "result_v5_k2_n16_p3_r4_f1_in_d10"),
+        ] {
+            assert_eq!(select_package(contract, &query, credentials, 0, 10, false).unwrap(), (member, BOUND_VERSION));
+        }
+        assert!(select_package(contract, &query, 1, 1, 10, false).is_err());
+        assert!(select_package(contract, &query, 1, 0, 17, false).is_err());
+        assert!(select_package(contract, &query, 1, 0, 10, true).is_err());
+        let mut repeated = query.clone();
+        repeated.in_filters.push(query.in_filters[0].clone());
+        assert!(select_package(contract, &repeated, 1, 0, 10, false).is_err());
+    }
+
+    #[test]
+    fn reconstruct_hidden_in_requires_the_default_integer_capacity() {
+        let (fixtures, mut policy, nonce, _) = fixture();
+        policy.admit_unbound_legacy = false;
+        let rows = vec![BTreeMap::from([("person".into(), iri("urn:alice").into())])];
+        let credentials = [
+            credential_signed_over(
+                vec![triple(
+                    "urn:alice",
+                    "urn:degree",
+                    Literal::new_simple_literal("BSc").into(),
+                )],
+                1,
+                fixtures[0].status_index,
+                &fixtures[0].status_list,
+                result_presentation_message,
+            ),
+            credential_signed_over(
+                fixtures[1].graph.canonical.triples.clone(),
+                2,
+                fixtures[1].status_index,
+                &fixtures[1].status_list,
+                result_presentation_message,
+            ),
+        ];
+        for (count, member, extra_pattern) in [
+            (1, "result_v5_k1_n16_p3_r4_f1_in_d10", ""),
+            (
+                2,
+                "result_v5_k2_n16_p3_r4_f1_in_d10",
+                "?person <urn:licensed> <urn:yes> .",
+            ),
+        ] {
+            let query = format!(
+                "SELECT DISTINCT ?person WHERE {{ ?person <urn:degree> ?value . {extra_pattern} FILTER(?value IN (\"BSc\", \"MSc\")) }}"
+            );
+            let prepared =
+                prepare_result(&query, &credentials[..count], &rows, &policy, &nonce).unwrap();
+            let mut presentation = prepared.presentation;
+            assert_eq!(
+                presentation.integer_capacity,
+                PrivateIntegerCapacity::TwoDigits
+            );
+            let reconstructed =
+                reconstruct_result_public_inputs(&query, &presentation, &policy, &nonce).unwrap();
+            assert_eq!(reconstructed.member, member);
+            assert_eq!(reconstructed.public_inputs, prepared.public_inputs);
+
+            presentation.integer_capacity = PrivateIntegerCapacity::FullU64;
+            let Err(error) = reconstruct_result_public_inputs(&query, &presentation, &policy, &nonce)
+            else {
+                panic!("nondefault integer capacity accepted for {member}");
+            };
+            assert!(error
+                .to_string()
+                .contains("hidden IN requires the default integer capacity"));
+        }
+    }
+
 
     fn iri(s: &str) -> NamedNode {
         NamedNode::new(s).unwrap()
@@ -2893,6 +3142,7 @@ mod tests {
                 projection: Vec::new(),
                 patterns: vec![pattern],
                 filters: Vec::new(),
+                in_filters: Vec::new(),
             };
             assert!(public_triples(&query, &rows).is_err());
         }
@@ -2905,6 +3155,7 @@ mod tests {
                 QuerySlot::Variable("o".into()),
             ]],
             filters: Vec::new(),
+            in_filters: Vec::new(),
         };
         let blank_rows = vec![BTreeMap::from([(
             "o".into(),

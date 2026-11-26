@@ -8,6 +8,7 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { request, testIssuerKeygen } from '../index.js';
 import { canonicalGraph, issueFixture } from '../scripts/test-credentials.mjs';
+import { consumerCases } from '../scripts/consumer-cases.mjs';
 import { examplePolicy } from '../scripts/catalogue-example.mjs';
 import { wasmProverFits, keyDyadicSize } from '../wasm-prover.mjs';
 test('every catalogue example derives its pinned plan and leaves no stale assets', () => {
@@ -56,4 +57,46 @@ test('catalogue, binary pins and keys fail closed when their stored digests diff
       writeFileSync(path, original);
     }
   } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('Solid consumer queries have pinned catalogue examples and native artifacts', () => {
+  const table = JSON.parse(readFileSync(new URL('../assets/catalogue.json', import.meta.url)));
+  for (const sample of consumerCases) {
+    const entry = table.entries.find(e => e.example.name === sample.name);
+    assert(entry, sample.name);
+    assert.deepEqual(entry.example, sample);
+  }
+});
+
+test('scoped degree requests pin both typed projections and share a plan across integer and date constants', () => {
+  const issuer = testIssuerKeygen('00'.repeat(32));
+  for (const suffix of ['', '-hidden']) {
+    const sample = consumerCases.find(e => e.name === 'consumer-degree' + suffix);
+    const policy = examplePolicy(sample, issuer, 'urn:sparq:test:catalogue');
+    const withList = list => request({
+      query: sample.query.replace('"BSc", "MSc"', list), policy, nonce: '09'.repeat(32),
+    });
+    const integers = withList('1, 2');
+    const dates = withList('"2026-11-12"^^xsd:date, "2026-11-13"^^xsd:date');
+    assert.equal(integers.planHash, dates.planHash);
+    assert.notEqual(integers.digest, dates.digest);
+    assert.notEqual(integers.planHash, withList('"BSc", "MSc"').planHash);
+  }
+});
+
+test('the consumer trial plan admits the full exclusion list capacity', () => {
+  const sample = consumerCases.find(e => e.name === 'consumer-trial');
+  const issuer = testIssuerKeygen('00'.repeat(32));
+  const policy = examplePolicy(sample, issuer, 'urn:sparq:test:catalogue');
+  const nonce = '09'.repeat(32);
+  const original = request({ query: sample.query, policy, nonce });
+  const withExclusions = count => {
+    const list = Array.from({ length: count }, (_, i) => JSON.stringify(`excluded-${i}`));
+    const query = sample.query.replace('"excluded-x", "excluded-y"', list.join(', '));
+    return request({ query, policy, nonce });
+  };
+  const expanded = withExclusions(16);
+  assert.equal(expanded.planHash, original.planHash);
+  assert.notEqual(expanded.digest, original.digest);
+  assert.throws(() => withExclusions(17), /capacity refusal: IN list/);
 });
