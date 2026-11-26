@@ -138,8 +138,9 @@ The SHA-256 successor and the Poseidon2 member use the checked date and derived-
 entries below. The original SHA-256 tree profile gives every `xsd:date` and every
 built-in integer subtype other than `xsd:integer` the all-zero key. Base
 `xsd:integer`, `xsd:decimal` and valid `xsd:dateTime` values share the same classes
-across editions. The extended profile validates timezone suffixes for `xsd:date`
-and `xsd:dateTime` as a standalone `Z` or a signed `HH:MM` offset.
+across editions. The SHA-256 successor accepts a standalone `Z` or a signed
+`HH:MM` timezone offset for both `xsd:date` and `xsd:dateTime`.
+Poseidon2 retains its original timezone encoding.
 Each example gives the first byte of the key.
 
 #table(
@@ -267,8 +268,10 @@ literal of datatype `xsd:string` or `https://w3id.org/security#cryptosuiteString
 The successor's N-Quads issuance and verification interfaces MUST reject proof
 configurations containing a `sec:proofValue` predicate. A whole-credential
 verifier checks the decoded 96-byte proof value length before canonicalization.
-The native implementation applies independent size and RDFC-1.0 work limits to
-the document and configuration.
+The successor uses RDFC-1.0 Appendix A serialization for blank-node hashing and
+canonical output. The native implementation applies independent byte, parsed quad
+and canonicalization work limits to the document and configuration. Verification
+also caps the document's physical line count.
 
 == Use in proofs of query answers
 

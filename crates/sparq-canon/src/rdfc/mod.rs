@@ -14,4 +14,5 @@ pub use api::{
     canonicalize_quads, canonicalize_quads_with, issue_quads, issue_quads_with,
     CanonicalizationOptions,
 };
+pub(crate) use canon::NQuadsSerialization;
 pub use error::CanonicalizationError;

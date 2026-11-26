@@ -12,7 +12,7 @@ Changes to the base, apart from the patches below:
   manifest-driven test module was dropped (its fixtures were never vendored; sparq runs
   the W3C suite from `crates/sparq-canon/tests/rdf_canon_suite.rs`).
 - `api.rs` was trimmed to `canonicalize_quads[_with]`, `issue_with`,
-  `issue_quads[_with]` and the private relabel helpers. Their bodies are unchanged.
+  `issue_quads[_with]` and the private relabel helpers.
 - Dead code was removed: `serialize_graph`, `PerNodeHndqCallCounter`,
   `HndqCallCounter::sum`, `CanonicalizationError::Base16EncodingFailed`, and `logger.rs`.
 - `crate::` became `super::`, and `oxrdf` became `oxrdf02` (sparq's alias for
@@ -156,3 +156,10 @@ still goes through the existing relabelling and final serialization. Native
 builds retain oxrdf's Dataset and the original work-map types.
 The ordered bounded issuer uses the same explicit HNDQ and per-candidate
 permutation budgets as canonical output and the existing issuer entry point.
+
+## Appendix A serialization
+
+The bounded N-Quads API applies RDFC-1.0 Appendix A serialization in first-degree
+hashing, structural ordering and final output. The RDF 1.1 literal formatter in
+oxrdf 0.3 writes the required escapes. The existing entry points keep the
+original formatter to preserve stored canonical bytes and commitments.

@@ -1,12 +1,13 @@
 //! Research-grade Ed25519/SHA-256 suite with private per-leaf salts.
 use crate::{
-    check_cryptosuite, comparison_key, config_quads, sha256, Error, SignedCredential, SALT_BYTES,
+    check_cryptosuite, config_quads, keys::salted_sha256_comparison_key, sha256, Error,
+    SignedCredential, SALT_BYTES,
 };
 use ed25519_dalek::{Signature, VerifyingKey, SIGNATURE_LENGTH};
 use hmac::{Hmac, Mac};
 use oxrdf::{GraphName, NamedOrBlankNode, Quad, Term};
 use sha2::{Digest, Sha256};
-use sparq_canon::{canonicalize_quads_bounded_with, parse_nquads, CanonicalizationLimits};
+use sparq_canon::{canonicalize_nquads_bounded, CanonicalizationLimits};
 
 /// Data Integrity suite identifier and signed-message domain.
 pub const EDDSA_SHA256_MERKLE_SALTED_2026: &str = "eddsa-sha256-merkle-salted-2026";
@@ -30,7 +31,7 @@ pub fn quad_hash(quad: &Quad) -> Option<[u8; 32]> {
         return None;
     }
     let hash = Sha256::new_with_prefix(EDDSA_SHA256_MERKLE_SALTED_2026).chain_update(b"/quad\0");
-    sha256::quad_digest(quad, hash, comparison_key)
+    sha256::quad_digest(quad, hash, salted_sha256_comparison_key)
 }
 
 fn quad_components_fit(quad: &Quad) -> bool {
@@ -131,12 +132,7 @@ fn canonicalize(
     limits: &CanonicalizationLimits,
     rejected: Error,
 ) -> Result<String, Error> {
-    if text.len() > limits.max_input_bytes {
-        return Err(rejected);
-    }
-    let quads = parse_nquads(text).map_err(|_| rejected)?;
-    let canonical =
-        canonicalize_quads_bounded_with::<Sha256>(&quads, limits).map_err(|_| rejected)?;
+    let canonical = canonicalize_nquads_bounded(text, limits).map_err(|_| rejected)?;
     if canonical.len() > limits.max_input_bytes {
         return Err(rejected);
     }
@@ -259,9 +255,13 @@ fn check_credential(
         return Err(Error("configuration is not canonical"));
     }
     let canonical = canonical_document(&credential.document, limits)?;
-    let mut lines: Vec<_> = credential.document.split_inclusive('\n').collect();
-    lines.sort_unstable();
-    if lines.concat() != canonical {
+    let mut lines = credential.document.split_inclusive('\n');
+    let mut sorted: Vec<_> = lines.by_ref().take(limits.max_quads).collect();
+    if lines.next().is_some() {
+        return Err(Error("document line capacity"));
+    }
+    sorted.sort_unstable();
+    if !sorted.into_iter().eq(canonical.split_inclusive('\n')) {
         return Err(Error("document is not canonical"));
     }
     let hashes = quad_hashes(&credential.document).collect::<Result<Vec<_>, _>>()?;
@@ -387,6 +387,31 @@ mod tests {
         assert_eq!(
             canonical_document(input, &limits),
             Err(Error("document canonicalization rejected"))
+        );
+    }
+
+    #[test]
+    fn verifier_bounds_physical_document_lines_before_sorting() {
+        let signer = SigningKey::from_bytes(&[7; 32]);
+        let key = signer.verifying_key();
+        let mut credential = issue(DOCUMENT, CONFIG, &signer, [9; 32]).unwrap();
+        let limits = CanonicalizationLimits {
+            max_quads: 1,
+            ..CANONICALIZATION_LIMITS
+        };
+        assert_eq!(check_credential(&credential, &key, &limits), Ok(()));
+        credential.document.insert(0, '\n');
+        assert_eq!(
+            check_credential(&credential, &key, &limits),
+            Err(Error("document line capacity"))
+        );
+        let limits = CanonicalizationLimits {
+            max_quads: 2,
+            ..limits
+        };
+        assert_eq!(
+            check_credential(&credential, &key, &limits),
+            Err(Error("document is not canonical"))
         );
     }
 

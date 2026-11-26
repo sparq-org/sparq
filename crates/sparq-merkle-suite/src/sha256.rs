@@ -13,7 +13,7 @@ pub fn comparison_key(literal: &oxrdf::Literal) -> [u8; crate::KEY_BYTES] {
     {
         [0; crate::KEY_BYTES]
     } else {
-        crate::keys::legacy_comparison_key(literal)
+        crate::keys::comparison_key(literal)
     }
 }
 /// Appends the typed byte encoding of one term (or graph name) to `out`.

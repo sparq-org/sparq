@@ -29,6 +29,49 @@ const CONFIG: &str =
     "_:p <https://w3id.org/security#cryptosuite> \"schnorr-poseidon2-merkle-2026\" .\n";
 
 #[test]
+fn poseidon_verifies_existing_datetime_timezone_vector() {
+    assert_eq!(
+        comparison_key(&typed("2000-02-29Z05:30", "date"))[0],
+        k::UNREPRESENTABLE
+    );
+    let signer = p::keypair_from_seed(&[7; 32]);
+    // Root and signature from the original Poseidon2 encoding.
+    let credential = p::Credential {
+        document: concat!(
+            "<urn:s> <urn:p> \"2000-02-29T00:00:00Z05:30\"",
+            "^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n",
+        )
+        .into(),
+        proof_config: concat!(
+            "<urn:p> <https://w3id.org/security#cryptosuite> ",
+            "\"schnorr-poseidon2-merkle-2026\" .\n",
+        )
+        .into(),
+        salt: Fr::from(9u64),
+        count: 1,
+        root: sparq_zk::field::field_from_hex_str_strict(
+            "0x056f1ac0b2a1ce4fb74cd9487159db1699432046eeaf833cd515e990c17a2076",
+        )
+        .unwrap(),
+        signature: sig::signature_from_hex(concat!(
+            "687a8e2c3a75bdac8009349befe6c67035f5d0cea7f4298a941f114ffcca300c",
+            "e2d82986ca79a37902f57dbf8469a227f4c468941304307e7218fb17991f4a05",
+        ))
+        .unwrap(),
+    };
+    assert!(p::verify(&credential, &signer.public_key()));
+    let issued = p::issue(
+        &credential.document,
+        &credential.proof_config,
+        &signer,
+        credential.salt,
+    )
+    .unwrap();
+    assert_eq!(issued.root, credential.root);
+    assert_eq!(issued.signature, credential.signature);
+}
+
+#[test]
 fn rdf_identity_binds_kind_lexical_datatype_and_language() {
     use oxrdf::{BlankNode, Term};
     let iri = Term::NamedNode(NamedNode::new_unchecked("urn:identity"));

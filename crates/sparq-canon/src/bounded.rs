@@ -1,6 +1,8 @@
 // Bound input/output before RDFC and meter its HNDQ calls and permutations.
+use crate::rdfc::NQuadsSerialization;
 use crate::{CanonError, Digest};
 use oxrdf::{GraphName, NamedOrBlankNode, Quad, Term};
+use oxttl::NQuadsParser;
 #[cfg(not(target_os = "zkvm"))]
 use std::collections::HashSet as WorkSet;
 #[cfg(target_os = "zkvm")]
@@ -22,6 +24,29 @@ pub struct CanonicalizationLimits {
     pub max_permutation_steps: usize,
 }
 
+/// Canonicalizes RDF 1.1 N-Quads using SHA-256 and RDFC-1.0 Appendix A
+/// serialization in both blank-node hashing and output.
+///
+/// # Errors
+/// Rejects malformed N-Quads, RDF 1.2 terms and excessive input, output or work.
+/// The input quad limit counts parser results before RDF set deduplication.
+pub fn canonicalize_nquads_bounded(
+    input: &str,
+    limits: &CanonicalizationLimits,
+) -> Result<String, CanonError> {
+    if input.len() > limits.max_input_bytes {
+        return Err(capacity("canonical input byte capacity"));
+    }
+    let mut quads = Vec::new();
+    for quad in NQuadsParser::new().for_slice(input.as_bytes()) {
+        if quads.len() == limits.max_quads {
+            return Err(capacity("canonical input quad capacity"));
+        }
+        quads.push(quad.map_err(|error| CanonError::Bridge(error.to_string()))?);
+    }
+    canonicalize_bounded::<sha2::Sha256>(&quads, limits, NQuadsSerialization::AppendixA)
+}
+
 /// Canonicalizes an RDF 1.1 dataset with preflight and library work limits.
 ///
 /// # Errors
@@ -30,12 +55,21 @@ pub fn canonicalize_quads_bounded_with<D: Digest>(
     dataset: &[Quad],
     limits: &CanonicalizationLimits,
 ) -> Result<String, CanonError> {
+    canonicalize_bounded::<D>(dataset, limits, NQuadsSerialization::Legacy)
+}
+
+fn canonicalize_bounded<D: Digest>(
+    dataset: &[Quad],
+    limits: &CanonicalizationLimits,
+    serialization: NQuadsSerialization,
+) -> Result<String, CanonError> {
     let quads = prepare(dataset, limits)?;
     let result = crate::rdfc::canonicalize_quads_with::<D>(
         &quads,
         &crate::rdfc::CanonicalizationOptions {
             hndq_call_limit: Some(limits.max_hndq_calls),
             permutation_limit: Some(limits.max_permutation_steps),
+            serialization,
         },
     )
     .map_err(|error| CanonError::Canonicalization(error.to_string()))?;
@@ -61,6 +95,7 @@ pub fn issue_quads_bounded_with<D: Digest>(
             &crate::rdfc::CanonicalizationOptions {
                 hndq_call_limit: Some(limits.max_hndq_calls),
                 permutation_limit: Some(limits.max_permutation_steps),
+                ..Default::default()
             },
         )
         .map_err(|error| CanonError::Canonicalization(error.to_string()))?;
@@ -104,6 +139,7 @@ fn issue_bounded_guest<D: Digest>(
         &crate::rdfc::CanonicalizationOptions {
             hndq_call_limit: Some(limits.max_hndq_calls),
             permutation_limit: Some(limits.max_permutation_steps),
+            ..Default::default()
         },
     )
     .map_err(|error| CanonError::Canonicalization(error.to_string()))

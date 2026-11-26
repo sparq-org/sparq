@@ -3,7 +3,7 @@
 use ed25519_dalek::{Signer, SigningKey};
 use oxrdf::{BaseDirection, GraphName, Literal, NamedNode, Quad, Term, Triple};
 use sha2::{Digest, Sha256};
-use sparq_merkle_suite::{comparison_key, sha256, sha256_salted as salted, SignedCredential};
+use sparq_merkle_suite::{sha256, sha256_salted as salted, SignedCredential};
 
 const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
 const SUITE: &str = "eddsa-sha256-merkle-salted-2026";
@@ -36,7 +36,6 @@ fn assert_committed_key(literal: &Literal, expected_key: [u8; 31]) {
     frame(&mut encoded, literal.language().unwrap_or(""));
     encoded.extend_from_slice(&expected_key);
     encoded.push(0);
-    assert_eq!(comparison_key(literal), expected_key, "{literal}");
     let expected: [u8; 32] = Sha256::digest(encoded).into();
     assert_eq!(salted::quad_hash(&quad), Some(expected), "{literal}");
 }
@@ -182,6 +181,49 @@ fn signing_key() -> SigningKey {
 }
 
 #[test]
+fn successor_signs_appendix_a_configuration_bytes() {
+    let signer = signing_key();
+    let salt = [7; 32];
+    let base = using_suite(SUITE);
+    for (character, escape, other, digest) in [
+        (
+            "\u{FFFE}",
+            r"\uFFFE",
+            "value1",
+            "f5b8e144f919eb1a870b857355827cd1af6eabb733fdf6a6c9461ae3fd8a29f8",
+        ),
+        (
+            "\u{FFFF}",
+            r"\uFFFF",
+            "value6",
+            "aba20a18667c3943a58e4c6901370874fdc7841bfee298056f28935d593306be",
+        ),
+    ] {
+        let config =
+            |value| format!("{base}_:a <urn:p> \"{value}\" .\n_:b <urn:p> \"{other}\" .\n");
+        let expected =
+            format!("{base}_:c14n0 <urn:p> \"{other}\" .\n_:c14n1 <urn:p> \"{escape}\" .\n");
+        let credential = salted::issue(DATE, &config(character), &signer, salt).unwrap();
+        assert_eq!(credential.proof_config, expected);
+        assert_eq!(
+            salted::issue(DATE, &config(escape), &signer, salt).unwrap(),
+            credential
+        );
+        let digest = hex::<32>(digest);
+        assert_eq!(Sha256::digest(expected.as_bytes()).as_slice(), digest);
+        let quad = oxttl::NQuadsParser::new()
+            .for_slice(DATE.as_bytes())
+            .next()
+            .unwrap()
+            .unwrap();
+        let root = salted::leaf(&salted::quad_hash(&quad).unwrap(), &salt, 0);
+        let message = salted::signed_message(&salt, 1, &root, &digest);
+        assert_eq!(credential.signature[..64], signer.sign(&message).to_bytes());
+        assert!(salted::verify(&credential, &signer.verifying_key()));
+    }
+}
+
+#[test]
 fn equal_comparison_keys_preserve_distinct_rdf_terms() {
     let objects = [
         typed("+0255", "unsignedByte"),
@@ -191,7 +233,7 @@ fn equal_comparison_keys_preserve_distinct_rdf_terms() {
     ];
     let mut document = String::new();
     for object in &objects {
-        assert_eq!(comparison_key(object), decimal_key(255));
+        assert_committed_key(object, decimal_key(255));
         let term = Term::from(object.clone());
         document.push_str(&format!("<urn:s> <urn:p> {term} .\n"));
     }

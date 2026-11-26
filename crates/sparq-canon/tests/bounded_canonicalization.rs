@@ -2,8 +2,8 @@
 use oxrdf::{BlankNode, GraphName, NamedNode, Quad, Term};
 use sha2::Sha256;
 use sparq_canon::{
-    canonicalize_quads_bounded_with, issue_quads_bounded_ordered_with, issue_quads_bounded_with,
-    CanonicalizationLimits,
+    canonicalize_nquads_bounded, canonicalize_quads_bounded_with, issue_quads_bounded_ordered_with,
+    issue_quads_bounded_with, CanonError, CanonicalizationLimits,
 };
 
 fn limits() -> CanonicalizationLimits {
@@ -23,6 +23,45 @@ fn edge(from: &str, predicate: &str, to: &str) -> Quad {
         BlankNode::new(to).unwrap(),
         GraphName::DefaultGraph,
     )
+}
+
+#[test]
+fn bounded_nquads_counts_parser_results_before_reading_the_suffix() {
+    let cap = CanonicalizationLimits {
+        max_quads: 1,
+        ..limits()
+    };
+    let line = "<urn:s> <urn:p> <urn:o> .\n";
+    let malformed = "not a quad";
+    assert_eq!(canonicalize_nquads_bounded(line, &cap).unwrap(), line);
+    assert!(matches!(
+        canonicalize_nquads_bounded(malformed, &cap),
+        Err(CanonError::Bridge(_))
+    ));
+    let oversized = format!("{line}{line}{malformed}");
+    assert!(matches!(
+        canonicalize_nquads_bounded(&oversized, &cap),
+        Err(CanonError::Canonicalization(message)) if message == "canonical input quad capacity"
+    ));
+}
+
+#[test]
+fn bounded_nquads_sorts_appendix_a_lines() {
+    let input = concat!(
+        "<urn:s> <urn:p> \"a\" .\n",
+        "<urn:s> <urn:p> \"\u{FFFE}\"^^<urn:datatype> <urn:graph> .\n",
+        "<urn:s> <urn:p> \"\u{FFFF}\"@en .\n",
+    );
+    let expected = concat!(
+        "<urn:s> <urn:p> \"\\uFFFE\"^^<urn:datatype> <urn:graph> .\n",
+        "<urn:s> <urn:p> \"\\uFFFF\"@en .\n",
+        "<urn:s> <urn:p> \"a\" .\n",
+    );
+    assert_eq!(
+        canonicalize_nquads_bounded(input, &limits()).unwrap(),
+        expected
+    );
+    assert_eq!(sparq_canon::canonicalize_nquads(input).unwrap(), input);
 }
 
 #[test]

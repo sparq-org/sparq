@@ -30,14 +30,15 @@ const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
 const PAYLOAD: usize = KEY_BYTES - 1;
 const DECIMAL_SCALE: usize = 18;
 
-/// The 31-byte comparison key of `literal`.
+/// The 31-byte comparison key of `literal` in the Poseidon2 profile.
 #[must_use]
 pub fn comparison_key(literal: &Literal) -> [u8; KEY_BYTES] {
-    comparison_key_for(literal, false)
+    comparison_key_for(literal, true)
 }
 
-pub(crate) fn legacy_comparison_key(literal: &Literal) -> [u8; KEY_BYTES] {
-    comparison_key_for(literal, true)
+#[cfg(feature = "sha256-salted")]
+pub(crate) fn salted_sha256_comparison_key(literal: &Literal) -> [u8; KEY_BYTES] {
+    comparison_key_for(literal, false)
 }
 
 fn comparison_key_for(literal: &Literal, legacy_timezone: bool) -> [u8; KEY_BYTES] {
@@ -53,7 +54,7 @@ fn comparison_key_for(literal: &Literal, legacy_timezone: bool) -> [u8; KEY_BYTE
         Some("double") => double_key(lexical, false, &mut out),
         Some("float") => double_key(lexical, true, &mut out),
         Some("dateTime") => date_time_key(lexical, &mut out, legacy_timezone),
-        Some("date") => date_key(lexical, &mut out),
+        Some("date") => date_key(lexical, &mut out, legacy_timezone),
         Some("boolean") => match lexical {
             "true" | "1" => {
                 out[1] = 1;
@@ -246,9 +247,8 @@ fn date_time_key(lexical: &str, out: &mut [u8; KEY_BYTES], legacy_timezone: bool
     }
 }
 
-// Parses an XSD 1.1 dateTime. Ill-typed input is `Err(NONE)`; a valid value
-// outside the four-digit-year, millisecond, before-24:00 profile is
-// `Err(UNREPRESENTABLE)`.
+// The extended key uses a four-digit year and millisecond precision before 24:00.
+// Preserve the original timezone parsing for the existing suite identifiers.
 fn date_time_millis(lexical: &str, legacy_timezone: bool) -> Result<(u8, i64), u8> {
     let invalid = key_class::NONE;
     let (date, time) = lexical.split_once('T').ok_or(invalid)?;
@@ -414,7 +414,7 @@ fn valid_integer_subtype(local: &str, text: &str) -> bool {
     }
 }
 
-fn date_key(text: &str, out: &mut [u8; KEY_BYTES]) -> u8 {
+fn date_key(text: &str, out: &mut [u8; KEY_BYTES], legacy_timezone: bool) -> u8 {
     // Preserve XSD validation from dateTime, including arbitrary year lengths.
     // The calendar-day class deliberately excludes timezoned dates. The engine
     // normalizes zoned values to UTC and gives mixed timezone presence a partial
@@ -428,7 +428,7 @@ fn date_key(text: &str, out: &mut [u8; KEY_BYTES]) -> u8 {
         .map(|(i, _)| i)
         .or_else(|| text.find(['Z', '+']));
     let (date, zone) = zone_at.map_or((text, ""), |i| (&text[..i], &text[i..]));
-    match date_time_millis(&format!("{date}T00:00:00{zone}"), false) {
+    match date_time_millis(&format!("{date}T00:00:00{zone}"), legacy_timezone) {
         Ok((_, millis)) if zone.is_empty() => {
             let days = millis / 86_400_000;
             let key = (days as u64) ^ (1 << 63);

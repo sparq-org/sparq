@@ -20,7 +20,9 @@ Supply a fresh, uniformly random 32-byte salt at issuance
 and treat the resulting `signature || salt` bytes as private credential
 material. The successor checks the 96-byte proof value and canonical Ed25519
 public key encoding before canonicalizing either input. Issuance and verification
-bound the document and configuration independently by size and RDFC-1.0 work.
+use [RDFC-1.0 Appendix A serialization](https://www.w3.org/TR/rdf-canon/#canonical-quads)
+and bound each input by bytes, parsed quads and canonicalization work.
+Verification also caps the document's physical line count.
 The limits are listed in the
 [Merkle credentials skill](../../skills/merkle-credentials/SKILL.md).
 
@@ -66,11 +68,14 @@ parameters and released terms use identity, with credential scope for blank node
 
 ## ✨ Features
 
-The shared `comparison_key` validates built-in integer subtypes, preserves the
-existing key payloads, and adds timezone-free `xsd:date`. Valid timezoned dates
+Poseidon2 and the SHA successor validate built-in integer subtypes, preserve the
+existing key payloads, and support timezone-free `xsd:date`. Valid timezoned dates
 retain the unrepresentable class because a calendar-day ordinal cannot preserve timezone offsets and the
 engine's partial order when timezone presence differs. Unrepresentable and no-key classes
 never establish an order. Equal string prefixes also establish no order.
+`comparison_key` returns the Poseidon2 key. The SHA successor enforces the
+XSD timezone syntax for dates and date-times. Poseidon2 retains its original
+timezone encoding.
 
 The Poseidon2 member uses length-bound byte packing, strict private quad-hash
 ordering, index-derived leaf salts, minimal binary trees with zero padding, and

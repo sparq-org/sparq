@@ -83,6 +83,12 @@ Tests: `crates/sparq-canon/tests/bounded_canonicalization.rs`.
 
 ### Text in, text out (`canonicalize_nquads`)
 
+Use `canonicalize_nquads_bounded(input, &limits)` to apply SHA-256 and
+[RDFC-1.0 Appendix A](https://www.w3.org/TR/rdf-canon/#canonical-quads) serialization
+to both blank-node hashing and canonical output. It checks source bytes before
+parsing and caps the number of parsed quads before deduplication. Existing
+entry points keep their historical serialization for stored digests and signatures.
+
 When you already hold serialized RDF — e.g. across a language boundary — skip the
 oxrdf term plumbing: `canonicalize_nquads(&str) -> Result<String, _>` parses an
 N-Quads document and returns its canonical N-Quads (`parse_nquads` exposes the parse

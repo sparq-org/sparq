@@ -78,11 +78,12 @@ zero-based index. Treat the resulting `SignedCredential`, including
 and issuer key to `sha256_salted::verify(&credential, &verifying_key)`. Each SHA
 verifier accepts only its declared suite.
 
-Successor issuance and verification set independent limits for the document and
-configuration. For each input, the raw text and canonical text have a 4 MiB
-limit. Each input allows up to 16,384 quads, 4,000 Hash N-Degree Quads calls and
-20,000 permutation steps. Verification checks the 96-byte proof value and the
-canonical Ed25519 public key encoding before canonicalization.
+Successor issuance and verification use [RDFC-1.0 Appendix A serialization](https://www.w3.org/TR/rdf-canon/#canonical-quads)
+for blank-node hashing and canonical output. The document and configuration each
+allow up to 4 MiB of raw text and canonical text, 16,384 parsed quads before
+deduplication, 4,000 Hash N-Degree Quads calls and 20,000 permutation steps.
+Verification also caps the document at 16,384 physical lines and checks the
+96-byte proof value and canonical Ed25519 public key encoding before canonicalization.
 
 For private tree reconstruction, `sha256_salted::quad_hash` hashes a canonical
 RDFC-1.0 quad. It refuses triple terms, directional language-tagged literals and
@@ -95,19 +96,20 @@ Guest adoption is tracked by [#7391](https://github.com/sparq-org/sparq/issues/7
 
 ## Comparison keys
 
-`comparison_key(&literal)` returns the class byte followed by its payload.
+`comparison_key(&literal)` returns the Poseidon2 class byte followed by its payload.
 Classes for decimals, IEEE values, zoned/local date-times, booleans and strings
 retain their existing payloads. Built-in integer-derived datatypes are validated
 against their value spaces and use the decimal class. XML Schema defines no
 additional built-in decimal-derived non-integer datatypes; unknown custom
 subtypes cannot be inferred from an IRI alone and get no key.
 
-Poseidon2 and the SHA successor use the shared extended profile. Timezone-free
-`xsd:date` with a year from `0001` through `9999` uses the calendar-day class.
+Poseidon2 and the SHA successor share the extended date and integer subtype keys.
+Timezone-free `xsd:date` with a year from `0001` through `9999` uses the calendar-day class.
 Valid dates with a timezone or a year outside that range get
-`UNREPRESENTABLE`. The extended profile accepts timezone suffixes of `Z` or
-signed `HH:MM` on dates and date-times. Invalid literals get `NONE`. Neither class
-can establish an order. Prefix keys establish an order only when prefixes differ.
+`UNREPRESENTABLE`. The SHA successor accepts timezone suffixes of `Z` or signed
+`HH:MM` on both datatypes and assigns `NONE` to invalid literals. Poseidon2
+retains its original timezone encoding for credential compatibility. Prefix keys
+establish an order only when prefixes differ.
 RDF term identity is key-independent: use `TermCell::identity()` in Noir and
 `poseidon::term_identity(&term)` in Rust. Scan, join, DISTINCT, sameTerm,
 parameters and released terms use identity; blank nodes also compare credential
