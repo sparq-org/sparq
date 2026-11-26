@@ -9,7 +9,7 @@ fn iri(enc: Field) -> TermCell {
 fn same_subject_different_object_is_not_a_duplicate() {
     crate::ops_core::scan([[iri(1),iri(9),iri(2)],[iri(1),iri(9),iri(3)]],
         [true;2],[0,2,1],[unbound(),iri(9),unbound()],
-        Table {rows:[[iri(1),iri(2)],[iri(1),iri(3)],[unbound();2],[unbound();2]],len:2});
+        Table {rows:[[iri(1),iri(2)],[iri(1),iri(3)],[unbound();2],[unbound();2]],len:2}, [0,1], [0,1,0,0]);
 }
 
 #[test]
@@ -18,14 +18,14 @@ fn blank_node_scope_is_part_of_duplicate_identity() {
     let mut b=a;b.scope=2;
     crate::ops_core::scan([[a,iri(9),iri(10)],[b,iri(9),iri(10)]],
         [true;2],[0,1,1],[unbound(),iri(9),iri(10)],
-        Table {rows:[[a],[b],[unbound()],[unbound()]],len:2});
+        Table {rows:[[a],[b],[unbound()],[unbound()]],len:2}, [0,1], [0,1,0,0]);
 }
 
 #[test]
 fn all_constant_scan_emits_the_empty_binding_once() {
     crate::ops_core::scan([[iri(1),iri(9),iri(10)];3],
         [true;3],[1;3],[iri(1),iri(9),iri(10)],
-        Table {rows:[[unbound()];4],len:1});
+        Table {rows:[[unbound()];4],len:1}, [0;3], [0;4]);
 }
 
 #[test]
@@ -34,7 +34,7 @@ fn inactive_and_nonmatching_rows_do_not_populate_the_cache() {
         [iri(7),iri(9),iri(10)],[iri(8),iri(8),iri(10)],
         [iri(1),iri(9),iri(2)],[iri(1),iri(9),iri(1)],
     ],[false,true,true,true],[0,1,0],[unbound(),iri(9),unbound()],
-        Table {rows:[[iri(1)],[unbound()],[unbound()],[unbound()]],len:1});
+        Table {rows:[[iri(1)],[unbound()],[unbound()],[unbound()]],len:1}, [0;4], [3,0,0,0]);
 }
 
 #[test]
@@ -45,14 +45,99 @@ fn first_matching_occurrence_retains_the_complete_payload() {
     crate::ops_core::scan([
         [early,iri(8),iri(10)],[matched,iri(9),iri(10)],[later,iri(9),iri(10)],
     ],[true;3],[0,1,1],[unbound(),iri(9),iri(10)],
-        Table {rows:[[matched],[unbound()],[unbound()],[unbound()]],len:1});
+        Table {rows:[[matched],[unbound()],[unbound()],[unbound()]],len:1}, [0;3], [1,0,0,0]);
 }
 
 #[test(should_fail_with="scan completeness or capacity")]
 fn scan_cannot_evict_an_emitted_row_to_fit_another_match() {
     crate::ops_core::scan([
         [iri(1),iri(9),iri(10)],[iri(2),iri(9),iri(10)],[iri(3),iri(9),iri(10)],
-    ],[true;3],[0,1,1],[unbound(),iri(9),iri(10)],empty::<2,1>());
+    ],[true;3],[0,1,1],[unbound(),iri(9),iri(10)],empty::<2,1>(), [0;3], [0;2]);
+}
+
+#[test]
+fn indexed_scan_accepts_source_order_different_from_output_order() {
+    crate::ops_core::scan([[iri(2),iri(9),iri(10)],[iri(1),iri(9),iri(10)],[iri(2),iri(9),iri(10)]],
+        [true;3],[0,1,1],[unbound(),iri(9),iri(10)],
+        Table {rows:[[iri(1)],[iri(2)],[unbound()],[unbound()]],len:2}, [1,0,1], [1,0,0,0]);
+}
+
+#[test(should_fail_with="scan completeness or capacity")]
+fn indexed_scan_rejects_a_dropped_match() {
+    crate::ops_core::scan([[iri(1),iri(9),iri(10)],[iri(2),iri(9),iri(10)]],
+        [true;2],[0,1,1],[unbound(),iri(9),iri(10)],
+        Table {rows:[[iri(1)],[unbound()]],len:1}, [0,0], [0,0]);
+}
+
+#[test(should_fail_with="scan extra binding")]
+fn indexed_scan_rejects_an_extra_row() {
+    crate::ops_core::scan([[iri(1),iri(9),iri(10)]],
+        [true],[0,1,1],[unbound(),iri(9),iri(10)],
+        Table {rows:[[iri(1)],[iri(2)]],len:2}, [0], [0,0]);
+}
+
+#[test(should_fail_with="scan first payload")]
+fn indexed_scan_rejects_a_wrong_payload_source() {
+    let mut first=iri(1);first.key=11;
+    let mut later=first;later.key=22;
+    crate::ops_core::scan([[first,iri(9),iri(10)],[later,iri(9),iri(10)]],
+        [true;2],[0,1,1],[unbound(),iri(9),iri(10)],
+        Table {rows:[[later],[unbound()]],len:1}, [0,0], [0,0]);
+}
+
+#[test(should_fail_with="scan first payload")]
+fn indexed_scan_rejects_a_later_source_with_consistent_payload() {
+    let mut first=iri(1);first.key=11;
+    let mut later=first;later.key=22;
+    crate::ops_core::scan([[first,iri(9),iri(10)],[later,iri(9),iri(10)]],
+        [true;2],[0,1,1],[unbound(),iri(9),iri(10)],
+        Table {rows:[[later],[unbound()]],len:1}, [0,0], [1,0]);
+}
+
+#[test(should_fail_with="scan completeness or capacity")]
+fn indexed_scan_rejects_wrong_but_inverse_hints() {
+    crate::ops_core::scan([[iri(1),iri(9),iri(10)],[iri(2),iri(9),iri(10)]],
+        [true;2],[0,1,1],[unbound(),iri(9),iri(10)],
+        Table {rows:[[iri(1)],[iri(2)]],len:2}, [1,0], [1,0]);
+}
+
+#[test(should_fail_with="scan extra binding")]
+fn indexed_scan_rejects_an_inactive_source() {
+    crate::ops_core::scan([[iri(1),iri(9),iri(10)];2],
+        [false,true],[0,1,1],[unbound(),iri(9),iri(10)],
+        Table {rows:[[iri(1)],[unbound()]],len:1}, [0,0], [0,0]);
+}
+
+#[test(should_fail_with="scan extra binding")]
+fn indexed_scan_rejects_a_nonmatching_source() {
+    crate::ops_core::scan([[iri(1),iri(8),iri(10)],[iri(1),iri(9),iri(10)]],
+        [true;2],[0,1,1],[unbound(),iri(9),iri(10)],
+        Table {rows:[[iri(1)],[unbound()]],len:1}, [0,0], [0,0]);
+}
+
+#[test(should_fail_with="scan completeness or capacity")]
+fn indexed_scan_rejects_a_target_in_output_padding() {
+    crate::ops_core::scan([[iri(1),iri(9),iri(10)]],
+        [true],[0,1,1],[unbound(),iri(9),iri(10)],
+        Table {rows:[[iri(1)],[unbound()]],len:1}, [1], [0,0]);
+}
+
+#[test(should_fail_with="scan source index")]
+fn indexed_scan_rejects_an_out_of_range_source() {
+    crate::ops_core::scan([[iri(1),iri(8),iri(10)]],
+        [true],[0,1,1],[unbound(),iri(9),iri(10)],
+        Table {rows:[[iri(1)],[unbound()]],len:1}, [0], [1,0]);
+}
+
+#[test]
+fn indexed_scan_ignores_unused_hints_for_an_empty_result() {
+    crate::ops_core::scan([[iri(1),iri(8),iri(10)]],
+        [true],[0,1,1],[unbound(),iri(9),iri(10)],empty::<2,1>(), [0xffffffff], [0xffffffff;2]);
+}
+
+#[test]
+fn indexed_scan_accepts_an_empty_dataset() {
+    crate::ops_core::scan([],[],[0,1,1],[unbound(),iri(9),iri(10)],empty::<2,1>(), [], [0;2]);
 }
 
 #[test]

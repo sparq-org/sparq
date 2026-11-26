@@ -41,19 +41,19 @@ fn two() -> Table<4, 1> { Table { rows: [[iri(1)], [iri(2)], [unbound()], [unbou
 fn one() -> Table<4, 1> { Table { rows: [[iri(1)], [unbound()], [unbound()], [unbound()]], len: 1 } }
 
 #[test]
-fn scan_honest() { ops_core::scan([[iri(1),iri(9),iri(10)],[iri(2),iri(9),iri(10)],[iri(1),iri(9),iri(10)]],[true,true,true],[0,1,1],[unbound(),iri(9),iri(10)],two()); }
+fn scan_honest() { ops_core::scan([[iri(1),iri(9),iri(10)],[iri(2),iri(9),iri(10)],[iri(1),iri(9),iri(10)]],[true,true,true],[0,1,1],[unbound(),iri(9),iri(10)],two(), [0,1,0], [0,1,0,0]); }
 
 #[test(should_fail_with = "scan completeness or capacity")]
-fn scan_missing() { ops_core::scan([[iri(1),iri(9),iri(10)],[iri(2),iri(9),iri(10)],[iri(1),iri(9),iri(10)]],[true,true,true],[0,1,1],[unbound(),iri(9),iri(10)],one()); }
+fn scan_missing() { ops_core::scan([[iri(1),iri(9),iri(10)],[iri(2),iri(9),iri(10)],[iri(1),iri(9),iri(10)]],[true,true,true],[0,1,1],[unbound(),iri(9),iri(10)],one(), [0,0,0], [0;4]); }
 
 #[test(should_fail_with = "scan extra binding")]
-fn scan_extra() { ops_core::scan([[iri(1),iri(9),iri(10)],[iri(2),iri(9),iri(10)],[iri(1),iri(9),iri(10)]],[true,true,true],[0,1,1],[unbound(),iri(9),iri(10)],Table {rows:[[iri(1)],[iri(2)],[iri(3)],[unbound()]],len:3}); }
+fn scan_extra() { ops_core::scan([[iri(1),iri(9),iri(10)],[iri(2),iri(9),iri(10)],[iri(1),iri(9),iri(10)]],[true,true,true],[0,1,1],[unbound(),iri(9),iri(10)],Table {rows:[[iri(1)],[iri(2)],[iri(3)],[unbound()]],len:3}, [0,1,0], [0,1,0,0]); }
 
 #[test(should_fail_with = "table order")]
-fn scan_reordered() { ops_core::scan([[iri(1),iri(9),iri(10)],[iri(2),iri(9),iri(10)],[iri(1),iri(9),iri(10)]],[true,true,true],[0,1,1],[unbound(),iri(9),iri(10)],Table {rows:[[iri(2)],[iri(1)],[unbound()],[unbound()]],len:2}); }
+fn scan_reordered() { ops_core::scan([[iri(1),iri(9),iri(10)],[iri(2),iri(9),iri(10)],[iri(1),iri(9),iri(10)]],[true,true,true],[0,1,1],[unbound(),iri(9),iri(10)],Table {rows:[[iri(2)],[iri(1)],[unbound()],[unbound()]],len:2}, [1,0,1], [1,0,0,0]); }
 
 #[test(should_fail_with = "table padding")]
-fn scan_padding() { ops_core::scan([[iri(1),iri(9),iri(10)],[iri(2),iri(9),iri(10)],[iri(1),iri(9),iri(10)]],[true,true,true],[0,1,1],[unbound(),iri(9),iri(10)],Table {rows:[[iri(1)],[iri(2)],[iri(3)],[unbound()]],len:2}); }
+fn scan_padding() { ops_core::scan([[iri(1),iri(9),iri(10)],[iri(2),iri(9),iri(10)],[iri(1),iri(9),iri(10)]],[true,true,true],[0,1,1],[unbound(),iri(9),iri(10)],Table {rows:[[iri(1)],[iri(2)],[iri(3)],[unbound()]],len:2}, [0,1,0], [0,1,0,0]); }
 
 #[test]
 fn join_honest() { ops_core::join(two(),Table {rows:[[]],len:1},[0],[0],two()); }
@@ -146,7 +146,7 @@ fn select_reordered() { ops_core::select(two(),Table {rows:[[iri(2)],[iri(1)],[u
 fn select_padding() { ops_core::select(two(),Table {rows:[[iri(1)],[iri(2)],[iri(3)],[unbound()]],len:2}); }
 
 #[test(should_fail_with = "scan completeness or capacity")]
-fn scan_overflow() { ops_core::scan([[iri(1),iri(9),iri(10)],[iri(2),iri(9),iri(10)],[iri(3),iri(9),iri(10)]],[true;3],[0,1,1],[unbound(),iri(9),iri(10)],empty::<2,1>()); }
+fn scan_overflow() { ops_core::scan([[iri(1),iri(9),iri(10)],[iri(2),iri(9),iri(10)],[iri(3),iri(9),iri(10)]],[true;3],[0,1,1],[unbound(),iri(9),iri(10)],empty::<2,1>(), [0;3], [0;2]); }
 
 #[test(should_fail_with = "join completeness or capacity")]
 fn join_overflow() { ops_core::join(two(),two(),[0,1],[1,0],empty::<2,2>()); }
@@ -180,7 +180,7 @@ fn ask_padding() { ops_core::ask(Table {rows:[[iri(1)],[iri(2)]],len:1},true); }
 fn ask_overflow() { ops_core::ask(Table {rows:[[iri(1)],[iri(2)]],len:3},true); }
 #[test]
 fn repeated_pattern_variable_and_blank_scope() {
-    ops_core::scan([[iri(1),iri(9),iri(2)]],[true],[0,1,0],[unbound(),iri(9),unbound()],empty::<2,1>());
+    ops_core::scan([[iri(1),iri(9),iri(2)]],[true],[0,1,0],[unbound(),iri(9),unbound()],empty::<2,1>(), [0], [0;2]);
     let mut a = iri(1); a.kind = 2; a.scope = 1;
     let mut b = a; b.scope = 2;
     ops_core::join(Table{rows:[[a]],len:1},Table{rows:[[b]],len:1},[0],[0],empty::<2,1>());
@@ -466,7 +466,7 @@ fn statement_supplied_cells_cannot_claim_a_signature_mode() {
 
 #[test(should_fail)]
 fn scan_column_must_belong_to_the_schema() {
-    ops_core::scan([[unbound();3]],[false],[2,1,1],[unbound();3],empty::<2,1>());
+    ops_core::scan([[unbound();3]],[false],[2,1,1],[unbound();3],empty::<2,1>(), [0], [0;2]);
 }
 #[test(should_fail)]
 fn join_column_must_belong_to_the_schema() {
@@ -791,7 +791,7 @@ fn rows_permutation_accepts_distinct_capacity_buckets() {
 }
 fn rows_scan(out:TermCell) {
     ops_core::scan([[iri(1),iri(9),rows_literal(10,11)],[iri(1),iri(9),rows_literal(10,22)]],
-        [true,true],[1,1,0],[iri(1),iri(9),unbound()],Table{rows:[[out],[unbound()],[unbound()],[unbound()]],len:1});
+        [true,true],[1,1,0],[iri(1),iri(9),unbound()],Table{rows:[[out],[unbound()],[unbound()],[unbound()]],len:1}, [0;2], [0;4]);
 }
 #[test]
 fn rows_scan_keeps_the_first_duplicate_payload() {rows_scan(rows_literal(10,11));}
@@ -808,20 +808,21 @@ fn rows_scan_authenticates_the_language() {let mut out=rows_literal(10,11);out.l
 #[test(should_fail_with="scan distinct bindings")]
 fn rows_scan_refuses_duplicate_output_bindings() {
     ops_core::scan([[iri(1),iri(9),iri(10)]],[true],[0,1,1],[unbound(),iri(9),iri(10)],
-        Table{rows:[[iri(1)],[iri(1)],[unbound()],[unbound()]],len:2});
+        Table{rows:[[iri(1)],[iri(1)],[unbound()],[unbound()]],len:2}, [0], [0;4]);
 }
 #[test]
 fn rows_scan_ignores_nonmatching_source_payloads() {
     ops_core::scan([[iri(2),iri(9),rows_literal(10,11)],[iri(1),iri(9),rows_literal(10,22)]],
         [true,true],[1,1,0],[iri(1),iri(9),unbound()],
-        Table{rows:[[rows_literal(10,22)],[unbound()],[unbound()],[unbound()]],len:1});
+        Table{rows:[[rows_literal(10,22)],[unbound()],[unbound()],[unbound()]],len:1}, [0;2], [1,0,0,0]);
 }
 #[test(should_fail_with="scan completeness or capacity")]
 fn rows_scan_cannot_truncate_a_full_bucket() {
     let mut source=[[iri(1),iri(9),iri(10)];33];let mut out=crate::table::empty::<32,1>();out.len=32;
+    let mut target=[0;33];let mut payload_source=[0;32];
     for i in 0..33 {source[i][0]=iri(i as Field+1);}
-    for i in 0..32 {out.rows[i]=[iri(i as Field+1)];}
-    ops_core::scan(source,[true;33],[0,1,1],[unbound(),iri(9),iri(10)],out);
+    for i in 0..32 {out.rows[i]=[iri(i as Field+1)];target[i]=i;payload_source[i]=i;}
+    ops_core::scan(source,[true;33],[0,1,1],[unbound(),iri(9),iri(10)],out, target, payload_source);
 }
 
 #[test]

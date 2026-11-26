@@ -19,6 +19,7 @@ spec.loader.exec_module(gate)
 class QueryProfiles(unittest.TestCase):
     def test_hosted_keeps_agreement_authentication_and_native_verification(self):
         required = {
+            "tests/execution.rs::indexed_scan_hints_execute_in_each_witness_layout",
             "tests/coverage.rs::compiler_agreement_for_every_passing_plan",
             "tests/proofs.rs::native_proof_reconstructs_inputs_and_consumes_only_after_acceptance",
             "tests/authentication.rs::suite_program_checks_authentication_membership_keys_and_credential_limits",
@@ -66,6 +67,7 @@ class QueryProfiles(unittest.TestCase):
                  for case in ("honest", "missing", "extra", "reordered", "padding", "overflow")]
         names += ["sparq_noir_query_core ops_core_reads::reads_check_every_active_input_row"]
         names += [f"sparq_noir_query_core ops_core_tests::{name}" for name in profile.ROWS_CONTRACTS]
+        names += [f"sparq_noir_query_core ops_core_scan_tests::{name}" for name in profile.INDEXED_SCAN_CONTRACTS]
         self.assertEqual(profile.check_noir_listing("\n".join(names)), len(names))
         for missing in (0, len(names) - 1, names.index("sparq_noir_query_core ops_core_reads::reads_check_every_active_input_row")):
             with self.subTest(missing=missing), self.assertRaises(ValueError):
@@ -77,8 +79,28 @@ class QueryProfiles(unittest.TestCase):
         names = {f"ops_core_tests::{op}_{case}" for op in profile.OPERATORS
                  for case in ("honest", "missing", "extra", "reordered", "padding", "overflow")}
         names |= {f"ops_core_tests::{name}" for name in profile.ROWS_CONTRACTS}
+        names |= {f"ops_core_scan_tests::{name}" for name in profile.INDEXED_SCAN_CONTRACTS}
         for name in names:
             self.assertTrue(any(selected in name for selected in profile.NOIR_FILTERS), name)
+
+    def test_hosted_indexed_scan_rejections_cannot_disappear(self):
+        expected = {
+            "indexed_scan_rejects_a_dropped_match",
+            "indexed_scan_rejects_an_extra_row",
+            "indexed_scan_rejects_a_wrong_payload_source",
+            "indexed_scan_rejects_a_later_source_with_consistent_payload",
+            "indexed_scan_rejects_wrong_but_inverse_hints",
+        }
+        self.assertEqual(set(profile.INDEXED_SCAN_CONTRACTS), expected)
+        names = {f"ops_core_tests::{op}_{case}" for op in profile.OPERATORS
+                 for case in ("honest", "missing", "extra", "reordered", "padding", "overflow")}
+        names |= {f"ops_core_tests::{name}" for name in profile.ROWS_CONTRACTS}
+        names.add("ops_core_reads::reads_check_every_active_input_row")
+        guards = {f"ops_core_scan_tests::{name}" for name in expected}
+        names |= guards
+        for guard in guards:
+            with self.subTest(guard=guard), self.assertRaises(ValueError):
+                profile.check_noir_listing("\n".join(f"sparq_noir_query_core {n}" for n in names - {guard}))
 
     def test_ledger_profiles_partition_the_real_inventory(self):
         trees = gate.collect(ROOT)
@@ -186,6 +208,7 @@ class QueryPolicyFeatures(unittest.TestCase):
                  for case in ("honest", "missing", "extra", "reordered", "padding", "overflow")]
         names += ["sparq_noir_query_core ops_core_reads::reads_check_every_active_input_row"]
         names += [f"sparq_noir_query_core ops_core_tests::{name}" for name in profile.ROWS_CONTRACTS]
+        names += [f"sparq_noir_query_core ops_core_scan_tests::{name}" for name in profile.INDEXED_SCAN_CONTRACTS]
         names += self.policy_listing()
         core = ROOT / "zk/noir-query/core"
         for complete in (True, False):

@@ -2,7 +2,7 @@
 
 use crate::{
     interp::{Cell, CredentialCells, EncodeTerm, ResultValue, Trace},
-    plan::{Operator, Parameter, Plan, ResultForm, Schema},
+    plan::{Operator, Parameter, Plan, ResultForm, Schema, Slot},
     Error,
 };
 use std::fmt::Write;
@@ -15,6 +15,26 @@ pub fn prover_toml(
     trace: &Trace,
     request_digest: [u8; 32],
     presentation_salt: [u8; 32],
+) -> Result<String, Error> {
+    prover_toml_with_scan_dataset(
+        plan,
+        credentials,
+        encoder,
+        trace,
+        request_digest,
+        presentation_salt,
+        None,
+    )
+}
+
+fn prover_toml_with_scan_dataset(
+    plan: &Plan,
+    credentials: &[CredentialCells],
+    encoder: &impl EncodeTerm,
+    trace: &Trace,
+    request_digest: [u8; 32],
+    presentation_salt: [u8; 32],
+    scan_dataset: Option<&[Option<[Cell; 3]>]>,
 ) -> Result<String, Error> {
     if trace.tables.len() != plan.nodes().len() {
         return Err(Error::Invalid("trace node count".into()));
@@ -140,7 +160,108 @@ pub fn prover_toml(
     for (i, (t, node)) in trace.tables.iter().zip(plan.nodes()).enumerate() {
         writeln!(out, "t{i} = {}", table(&t.rows, &node.output)?).unwrap();
     }
+    let padded;
+    let dataset = if let Some(dataset) = scan_dataset {
+        dataset
+    } else {
+        padded = padded_scan_dataset(
+            credentials,
+            &vec![cap.quads_per_credential; cap.credentials as usize],
+        );
+        &padded
+    };
+    append_scan_hints(plan, encoder, trace, dataset, &mut out)?;
     Ok(out)
+}
+
+fn padded_scan_dataset(
+    credentials: &[CredentialCells],
+    capacities: &[u32],
+) -> Vec<Option<[Cell; 3]>> {
+    capacities
+        .iter()
+        .enumerate()
+        .flat_map(|(c, &capacity)| {
+            (0..capacity as usize).map(move |q| {
+                credentials
+                    .get(c)
+                    .and_then(|credential| credential.quads.get(q))
+                    .map(|quad| [quad[0], quad[1], quad[2]])
+            })
+        })
+        .collect()
+}
+
+fn append_scan_hints(
+    plan: &Plan,
+    encoder: &impl EncodeTerm,
+    trace: &Trace,
+    dataset: &[Option<[Cell; 3]>],
+    out: &mut String,
+) -> Result<(), Error> {
+    for (node_id, node) in plan.nodes().iter().enumerate() {
+        let Operator::Scan(pattern) = &node.operator else {
+            continue;
+        };
+        let mut constants = [Cell::default(); 3];
+        for (p, slot) in pattern.iter().enumerate() {
+            if let Slot::Parameter(id) = slot {
+                let Parameter::Term(term) = &plan.parameters()[*id as usize] else {
+                    return Err(Error::Invalid("scan term parameter".into()));
+                };
+                constants[p] = encoder.encode(term)?;
+            }
+        }
+        let mut target = vec![0; dataset.len()];
+        let mut source = vec![0; node.output.capacity as usize];
+        let mut seen = vec![false; source.len()];
+        for (i, triple) in dataset.iter().enumerate() {
+            let Some(triple) = triple else { continue };
+            let mut row = vec![Cell::default(); node.output.variables.len()];
+            let mut matches = true;
+            for (p, slot) in pattern.iter().enumerate() {
+                match slot {
+                    Slot::Parameter(_) => matches &= triple[p].same_term(constants[p]),
+                    Slot::Variable(v) => {
+                        let col = node
+                            .output
+                            .variables
+                            .iter()
+                            .position(|a| a == v)
+                            .expect("scan column");
+                        matches &= !row[col].bound || row[col].same_term(triple[p]);
+                        row[col] = triple[p];
+                    }
+                }
+            }
+            if !matches {
+                continue;
+            }
+            if let Some(r) = trace.tables[node_id].rows.iter().position(|output| {
+                row.len() == output.len()
+                    && row.iter().zip(output).all(|(a, b)| a.same_term(*b))
+            }) {
+                target[i] = r as u32;
+                if !seen[r] {
+                    source[r] = i as u32;
+                    seen[r] = true;
+                }
+            }
+        }
+        writeln!(
+            out,
+            "target_{node_id} = {}",
+            array(target.iter().map(u32::to_string))
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "source_{node_id} = {}",
+            array(source.iter().map(u32::to_string))
+        )
+        .unwrap();
+    }
+    Ok(())
 }
 
 fn array(items: impl IntoIterator<Item = String>) -> String {
@@ -378,13 +499,33 @@ fn prover_toml_authenticated_mode(
     } else {
         layout.reconstruct_authenticated_with_envelope(plan, &statement, envelope)?
     };
-    let base = prover_toml(
+    let mut scan_dataset = padded_scan_dataset(&cells, &plan.credential_quad_capacities());
+    if canonical
+        && plan.nodes().iter().any(|node| matches!(node.operator, Operator::Scan(_)))
+    {
+        let predicate = SuiteEncoder.encode(
+            &oxrdf::NamedNode::new_unchecked(crate::credential::VERIFIED_ISSUER).into(),
+        )?;
+        for c in 0..plan.capacity().credentials as usize {
+            scan_dataset.push(if let Some(credential) = credentials.get(c) {
+                Some([
+                    crate::credential::credential_graph(request_digest, c as u32)?,
+                    predicate,
+                    SuiteEncoder.encode(&credential.trust_member()?.issuer.into())?,
+                ])
+            } else {
+                None
+            });
+        }
+    }
+    let base = prover_toml_with_scan_dataset(
         plan,
         &cells,
         &SuiteEncoder,
         trace,
         request_digest,
         presentation_salt,
+        Some(&scan_dataset),
     )?;
     let cap = plan.capacity();
     let opening = plan.opening_profile().limits();

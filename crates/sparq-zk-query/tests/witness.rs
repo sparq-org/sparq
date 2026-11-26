@@ -18,6 +18,152 @@ const B: Bounds = Bounds {
     rows_per_table: 4,
 };
 
+fn hint(input: &str, name: &str) -> Vec<u32> {
+    let prefix = format!("{name} = [");
+    input
+        .lines()
+        .find_map(|line| line.strip_prefix(&prefix))
+        .unwrap()
+        .trim_end_matches(']')
+        .split(',')
+        .map(|s| s.trim().parse().unwrap())
+        .collect()
+}
+
+#[test]
+fn scan_hints_preserve_physical_padding_and_first_matching_sources() {
+    use fixture_support::{iri, quad};
+    use sparq_zk_query::interp::CredentialCells;
+    let plan = lower("SELECT ?s WHERE {?s <urn:p> <urn:o>}", B).unwrap();
+    let b = quad(&iri("urn:b"), &iri("urn:p"), &iri("urn:o"));
+    let mut later = b;
+    later[0].key[31] = 42;
+    let a = quad(&iri("urn:a"), &iri("urn:p"), &iri("urn:o"));
+    let data = vec![
+        CredentialCells {
+            quads: vec![b, later],
+        },
+        CredentialCells { quads: vec![a] },
+    ];
+    let trace = evaluate(&plan, &data, &FixtureEncoder).unwrap();
+    let input = prover_toml(&plan, &data, &FixtureEncoder, &trace, [7; 32], [3; 32]).unwrap();
+    let b_index = trace.tables[0]
+        .rows
+        .iter()
+        .position(|r| r[0] == b[0])
+        .unwrap();
+    let a_index = trace.tables[0]
+        .rows
+        .iter()
+        .position(|r| r[0] == a[0])
+        .unwrap();
+    let mut targets = vec![0; 8];
+    targets[0] = b_index as u32;
+    targets[1] = b_index as u32;
+    targets[4] = a_index as u32;
+    let mut sources = vec![0; 4];
+    sources[a_index] = 4;
+    assert_eq!(hint(&input, "target_0"), targets);
+    assert_eq!(hint(&input, "source_0"), sources);
+}
+
+#[test]
+fn scan_hints_check_constants_and_repeated_variables() {
+    use fixture_support::{iri, quad};
+    use sparq_zk_query::interp::CredentialCells;
+    let plan = lower("ASK {?x <urn:p> ?x}", B).unwrap();
+    let data = vec![CredentialCells {
+        quads: vec![
+            quad(&iri("urn:a"), &iri("urn:q"), &iri("urn:a")),
+            quad(&iri("urn:a"), &iri("urn:p"), &iri("urn:b")),
+            quad(&iri("urn:a"), &iri("urn:p"), &iri("urn:a")),
+        ],
+    }];
+    let trace = evaluate(&plan, &data, &FixtureEncoder).unwrap();
+    let input = prover_toml(&plan, &data, &FixtureEncoder, &trace, [7; 32], [3; 32]).unwrap();
+    assert_eq!(hint(&input, "target_0"), vec![0; 8]);
+    assert_eq!(hint(&input, "source_0"), vec![2, 0, 0, 0]);
+}
+
+#[test]
+fn scan_hints_cover_heterogeneous_authenticated_slots() {
+    use sparq_zk_query::{credential::SuiteEncoder, witness::prover_toml_suite_fixture};
+    let plan = lower(
+        "ASK {?s <urn:p> ?o}",
+        Bounds {
+            quads_per_credential: 8,
+            ..B
+        },
+    )
+    .unwrap()
+    .with_credential_quad_bounds(&[4, 8])
+    .unwrap();
+    let data = vec![
+        authenticated::sign("<urn:a> <urn:q> <urn:b> .\n", 0),
+        authenticated::fixture().remove(0),
+    ];
+    let cells = data
+        .iter()
+        .enumerate()
+        .map(|(i, c)| c.cells(i as u32).unwrap())
+        .collect::<Vec<_>>();
+    let trace = evaluate(&plan, &cells, &SuiteEncoder).unwrap();
+    let input = prover_toml_suite_fixture(
+        &plan,
+        &data,
+        &trace,
+        [7; 32],
+        [3; 32],
+        authenticated::issuer_root(),
+    )
+    .unwrap();
+    assert_eq!(hint(&input, "target_0").len(), 12);
+    let mut sources = hint(&input, "source_0");
+    sources.truncate(trace.tables[0].rows.len());
+    sources.sort_unstable();
+    assert_eq!(sources, vec![4, 5]);
+}
+
+#[test]
+fn scan_hints_include_canonical_default_issuer_assertions() {
+    use sparq_zk_query::{
+        credential::{assemble_issuer_dataset, SuiteEncoder},
+        interp::evaluate_dataset,
+        witness::{prover_toml_enveloped, EnvelopeInput, EnvelopeWitness},
+    };
+    let plan = lower(
+        &format!(
+            "ASK {{?g <{}> <urn:issuer>}}",
+            sparq_zk_query::credential::VERIFIED_ISSUER
+        ),
+        Bounds {
+            credentials: 1,
+            quads_per_credential: 8,
+            rows_per_table: 2,
+        },
+    )
+    .unwrap();
+    let data = authenticated::canonical_fixture();
+    let policy = authenticated::canonical_policy();
+    let dataset = assemble_issuer_dataset(&data, &policy.trust_members, [7; 32]).unwrap();
+    let trace = evaluate_dataset(&plan, &dataset, &SuiteEncoder).unwrap();
+    let input = prover_toml_enveloped(
+        &plan,
+        &data,
+        &trace,
+        [7; 32],
+        [3; 32],
+        EnvelopeInput {
+            policy: &policy,
+            evidence: &EnvelopeWitness::default(),
+            revealed: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(hint(&input, "target_0"), vec![0; 9]);
+    assert_eq!(hint(&input, "source_0"), vec![8, 0]);
+}
+
 #[test]
 fn canonical_status_witness_admits_bounded_paths_and_refuses_mismatched_lengths() {
     use sparq_zk_query::{

@@ -18,6 +18,104 @@ use sparq_zk_query::{
 use fixture_support::Workspace;
 
 #[test]
+fn indexed_scan_hints_execute_in_each_witness_layout() {
+    let Some(gate) = support::gate(
+        "indexed_scan_hints_execute_in_each_witness_layout",
+        &["nargo", "bb"],
+    ) else {
+        return;
+    };
+    use sparq_zk_query::{
+        codegen::{generate as canonical, generate_suite_fixture},
+        credential::{assemble_issuer_dataset, SuiteEncoder, VERIFIED_ISSUER},
+        interp::evaluate_dataset,
+        witness::{
+            prover_toml_enveloped, prover_toml_suite_fixture, EnvelopeInput, EnvelopeWitness,
+        },
+    };
+    let bounds = Bounds {
+        credentials: 2,
+        quads_per_credential: 8,
+        rows_per_table: 4,
+    };
+    let plan = lower("ASK {?s <urn:p> ?o}", bounds)
+        .unwrap()
+        .with_credential_quad_bounds(&[4, 8])
+        .unwrap();
+    let credentials = vec![
+        authenticated::sign("<urn:a> <urn:q> <urn:b> .\n", 0),
+        authenticated::fixture().remove(0),
+    ];
+    let cells = credentials
+        .iter()
+        .enumerate()
+        .map(|(i, c)| c.cells(i as u32).unwrap())
+        .collect::<Vec<_>>();
+    let trace = evaluate(&plan, &cells, &SuiteEncoder).unwrap();
+    let operator = prover_toml(&plan, &cells, &SuiteEncoder, &trace, [7; 32], [3; 32]).unwrap();
+    let suite = prover_toml_suite_fixture(
+        &plan,
+        &credentials,
+        &trace,
+        [7; 32],
+        [3; 32],
+        authenticated::issuer_root(),
+    )
+    .unwrap();
+    let issuer_plan = lower(
+        &format!("ASK {{?g <{VERIFIED_ISSUER}> <urn:issuer>}}"),
+        bounds,
+    )
+    .unwrap()
+    .with_credential_quad_bounds(&[4, 8])
+    .unwrap();
+    let policy = authenticated::canonical_policy();
+    let canonical_data = [authenticated::canonical_sign(
+        "<urn:a> <urn:p> <urn:o> .",
+        0,
+    )];
+    let dataset = assemble_issuer_dataset(&canonical_data, &policy.trust_members, [7; 32]).unwrap();
+    let issuer_trace = evaluate_dataset(&issuer_plan, &dataset, &SuiteEncoder).unwrap();
+    let envelope = prover_toml_enveloped(
+        &issuer_plan,
+        &canonical_data,
+        &issuer_trace,
+        [7; 32],
+        [3; 32],
+        EnvelopeInput {
+            policy: &policy,
+            evidence: &EnvelopeWitness::default(),
+            revealed: None,
+        },
+    )
+    .unwrap();
+    for (package, input) in [
+        (generate(&plan).unwrap(), operator),
+        (generate_suite_fixture(&plan).unwrap(), suite),
+        (canonical(&issuer_plan).unwrap(), envelope),
+    ] {
+        let workspace = Workspace::new(&package);
+        let driver = ProgramProver::new(&workspace.0, &package.name).unwrap();
+        driver.execute(&input, "scan_honest").unwrap();
+        for name in ["target_0", "source_0"] {
+            let line = input
+                .lines()
+                .find(|line| line.starts_with(&format!("{name} = [")))
+                .unwrap();
+            let count = line.split(',').count();
+            let bad = format!("{name} = [{}]", vec!["4294967295"; count].join(", "));
+            assert!(
+                driver
+                    .execute(&input.replace(line, &bad), "scan_wrong_hint")
+                    .is_err(),
+                "{name}"
+            );
+        }
+    }
+    support::complete(gate);
+}
+
+#[test]
 fn generated_driver_refuses_path_packages_before_io() {
     for name in [
         "",

@@ -68,8 +68,8 @@ hash or other cryptography, ships no production challenge store, proves no crypt
 and registers no method. See [query-method contracts](references/query-method-contracts.md).
 The research-grade, externally unaudited [Noir query compiler contracts](references/query-method-contracts.md#noir-query-compiler)
 cover portable planning, canonical envelope policy, verifier-selected capacities,
-private holder/status evidence and native proof lifecycle. Its subprocess driver
-remains native. The [closed graph fixture adapter](references/query-method-contracts.md#closed-graph-fixtures)
+private holder/status evidence, indexed core SCAN hints and native proof lifecycle.
+Its subprocess driver remains native. The [closed graph fixture adapter](references/query-method-contracts.md#closed-graph-fixtures)
 documents canonical fixture ordering, per-table bounds and the current integration
 boundary. Source generation, interpreter checks, circuit execution and proof
 verification have separate evidence requirements.

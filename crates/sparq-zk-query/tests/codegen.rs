@@ -10,6 +10,38 @@ const B: Bounds = Bounds {
 };
 
 #[test]
+fn scan_hints_follow_the_dataset_layout_in_each_generation_mode() {
+    use sparq_zk_query::codegen::{generate_operator_fixture, generate_suite_fixture};
+    let plan = lower(
+        "ASK {?s <urn:p> ?o}",
+        Bounds {
+            quads_per_credential: 8,
+            ..B
+        },
+    )
+    .unwrap()
+    .with_credential_quad_bounds(&[4, 8])
+    .unwrap();
+    for (package, dataset_capacity) in [
+        (generate_operator_fixture(&plan).unwrap(), 16),
+        (generate_suite_fixture(&plan).unwrap(), 12),
+        (generate(&plan).unwrap(), 14),
+    ] {
+        let source = &package.files[&format!("{}/src/main.nr", package.name)];
+        assert!(source.contains(&format!("target_0: [u32; {dataset_capacity}]")));
+        assert!(source.contains("source_0: [u32; 4]"));
+        assert!(source.contains("t0, target_0, source_0);"));
+        assert!(!source.contains("target_0: pub"));
+        assert!(!source.contains("source_0: pub"));
+    }
+    let plan = lower("ASK {}", B).unwrap();
+    let package = generate(&plan).unwrap();
+    let source = &package.files[&format!("{}/src/main.nr", package.name)];
+    assert!(!source.contains("target_"));
+    assert!(!source.contains("source_"));
+}
+
+#[test]
 fn canonical_generation_keeps_fixture_issuer_profiles_explicit() {
     let plan = sparq_zk_query::credential_graphs::lower("ASK {}", B).unwrap();
     let plan = sparq_zk_query::credential_graphs::bind_issuer_registry(
