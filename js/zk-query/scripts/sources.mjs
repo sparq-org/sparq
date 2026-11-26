@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { withCatalogueLock } from './catalogue-lock.mjs';
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const assets = fileURLToPath(new URL('../assets/', import.meta.url));
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -77,14 +78,16 @@ export function snapshotSources() {
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const bundle = snapshotSources();
-  const table = JSON.parse(readFileSync(join(assets, 'catalogue.json')));
-  if (table.sourceBundleSha256 !== sha(bundle)) {
-    throw new Error('source bundle differs from catalogue pin. Refresh both with build-circuits.mjs --write-pins');
-  }
-  const staging = mkdtempSync(join(assets, '.sources-'));
-  try {
-    const staged = join(staging, 'sources.json');
-    writeFileSync(staged, bundle);
-    renameSync(staged, join(assets, 'sources.json'));
-  } finally { rmSync(staging, { recursive: true, force: true }); }
+  withCatalogueLock(assets, () => {
+    const table = JSON.parse(readFileSync(join(assets, 'catalogue.json')));
+    if (table.sourceBundleSha256 !== sha(bundle)) {
+      throw new Error('source bundle differs from catalogue pin. Refresh both with build-circuits.mjs --write-pins');
+    }
+    const staging = mkdtempSync(join(assets, '.sources-'));
+    try {
+      const staged = join(staging, 'sources.json');
+      writeFileSync(staged, bundle);
+      renameSync(staged, join(assets, 'sources.json'));
+    } finally { rmSync(staging, { recursive: true, force: true }); }
+  });
 }

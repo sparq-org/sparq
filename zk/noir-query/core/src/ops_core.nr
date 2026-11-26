@@ -82,8 +82,12 @@ pub fn scan<let D: u32, let R: u32, let V: u32>(
     for r in 1..R {
         assert((r>=out.len)|!same_row(out.rows[r],out.rows[r-1]),"scan distinct bindings");
     }
+    let mut matched = [false; D];
+    let mut projected = [[unbound(); V]; D];
     for i in 0..D {
         let (matches,row)=scan_row::<V>(dataset[i],active[i],slots,constants);
+        matched[i] = matches;
+        projected[i] = row;
         assert(!matches|(target[i]<out.len),"scan completeness or capacity");
         if R>0 {
             let r=if matches {target[i]} else {0};
@@ -99,8 +103,9 @@ pub fn scan<let D: u32, let R: u32, let V: u32>(
             let live=r<out.len;
             assert(!live|(source[r]<D),"scan source index");
             let i=if live {source[r]} else {0};
-            let (matches,row)=scan_row::<V>(dataset[i],active[i],slots,constants);
-            assert(!live|(matches&same_row(row,out.rows[r])),"scan extra binding");
+            // Read the match flag and projection already computed from this input.
+            let row = projected[i];
+            assert(!live | (matched[i] & same_row(row, out.rows[r])), "scan extra binding");
             assert(!live|crate::table::equal_row(row,out.rows[r]),"scan first payload");
         }
     }

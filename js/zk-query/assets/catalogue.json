@@ -13,7 +13,7 @@
       "packageName": "query_de79582c38ce4d4c00a4159f5d7fcc50fc62dd2f9377aa0bcfa370c6e3fd3f2e",
       "acir": "de79582c38ce4d4c00a4159f5d7fcc50fc62dd2f9377aa0bcfa370c6e3fd3f2e.json",
       "vk": "de79582c38ce4d4c00a4159f5d7fcc50fc62dd2f9377aa0bcfa370c6e3fd3f2e.vk.hex",
-      "acirSha256": "2fa216a412128e4e74db53fc8e160debbbc1dad878c2e502f42355435a440cf1",
+      "acirSha256": "cea2b2d14734df21cf4afb5c5aacd7c3d91c2cfb8d65a70481f56a737aaec4b1",
       "vkSha256": "2c30c23982d48a84a39b908e5a001fc2c984a5bd86077f0b1a348437b4594695",
       "wasmProving": true,
       "example": {
@@ -25,15 +25,15 @@
           "rowsPerTable": 1
         }
       },
-      "buildInputSha256": "25c527ec888d67df9924faac1ac73e8052e86e336314f18cd85d668b83d9bcb5"
+      "buildInputSha256": "2646f1a9596e369207907f48e1485b110c5b135cb600cecc0015bf1f96d0728b"
     },
     {
       "planHash": "054fc173ecd02fb8084fc3fb81c996586be45aeeb8feec71e3f75093c61f9662",
       "packageName": "query_054fc173ecd02fb8084fc3fb81c996586be45aeeb8feec71e3f75093c61f9662",
       "acir": "054fc173ecd02fb8084fc3fb81c996586be45aeeb8feec71e3f75093c61f9662.json",
       "vk": "054fc173ecd02fb8084fc3fb81c996586be45aeeb8feec71e3f75093c61f9662.vk.hex",
-      "acirSha256": "089dadf0840c1b156254adde3919919cd48cca06756774c3ca55b64342279270",
-      "vkSha256": "a0e783f44aabff087a059b4e9f5bfa19303388b8ea6ddd4d21b029ab941403d2",
+      "acirSha256": "a42dfe9514c5f4570ef0f43479eb6b2e49e8b05af8e342411ab1bc89d722996b",
+      "vkSha256": "4e6ec54b4d15acc646785c433cdafae81526e5dd759adc5411aa986effb1fc16",
       "wasmProving": true,
       "example": {
         "name": "bgp",
@@ -44,15 +44,15 @@
           "rowsPerTable": 4
         }
       },
-      "buildInputSha256": "b45fe2f90b227fe790cd3b5b0a73627c34918f0bc2dc6ad19bd741c3d4106b5e"
+      "buildInputSha256": "babde610f7d921082c5afdaa2664c1ed7a729106cb42083aba38b72b0b6e3884"
     },
     {
       "planHash": "06d1d14af6cc4a47f12cef2bdde0d5b26d19847166ebac7c3675ed7969b7e29d",
       "packageName": "query_06d1d14af6cc4a47f12cef2bdde0d5b26d19847166ebac7c3675ed7969b7e29d",
       "acir": "06d1d14af6cc4a47f12cef2bdde0d5b26d19847166ebac7c3675ed7969b7e29d.json",
       "vk": "06d1d14af6cc4a47f12cef2bdde0d5b26d19847166ebac7c3675ed7969b7e29d.vk.hex",
-      "acirSha256": "6a66ee6f215e1f411665b4715070ac55e215a78b77f5c82b4f2f60da88b44c7b",
-      "vkSha256": "fad9133bad7a126109ba83d92aea224b7c9c7429fd168e7158897bc6cca6a0da",
+      "acirSha256": "c8ec13d806642738f4c8f7647a090137888644e91851a0aa9731b423b2bb56f8",
+      "vkSha256": "d0b09b865409f33b0344b9f63d1938835b0076bc8798a4c690efef20aacada6e",
       "wasmProving": true,
       "example": {
         "name": "join-one-credential",
@@ -63,15 +63,15 @@
           "rowsPerTable": 4
         }
       },
-      "buildInputSha256": "35cb2ba19ba8ad97de0c983d14abd96f133bdf828d44d389c5997e4230fdad98"
+      "buildInputSha256": "78682340b7846ae0d418ed8a702c236981dc52ddf639bf752c6458040592ae27"
     },
     {
       "planHash": "b7e7a830a7cea9df1502763d7cdde19a6634a3ed592ced17b8e47d882f679475",
       "packageName": "query_b7e7a830a7cea9df1502763d7cdde19a6634a3ed592ced17b8e47d882f679475",
       "acir": "b7e7a830a7cea9df1502763d7cdde19a6634a3ed592ced17b8e47d882f679475.json",
       "vk": "b7e7a830a7cea9df1502763d7cdde19a6634a3ed592ced17b8e47d882f679475.vk.hex",
-      "acirSha256": "fa12cbd5fd2978bd53dc480601f485e188b8fa777a3fe1ce134351e691a9e053",
-      "vkSha256": "05dbc6c5a8087ec5b560afedb5d5a6e85cfbddd2c35725a11a395cec8b8f0132",
+      "acirSha256": "7b6a62f7a84de5dcb00e110fbb049db61a705db7ea5f928356e1998abf41381d",
+      "vkSha256": "6cabbbc1f67faadae620c76bd014ece1989e5ce29d4f5b2727fa2d8260f62352",
       "wasmProving": true,
       "example": {
         "name": "join-two-credentials",
@@ -82,15 +82,15 @@
           "rowsPerTable": 4
         }
       },
-      "buildInputSha256": "1559ec87b05ff383454560648900b02e034cf9fd06c9f59c82914158f473d5f5"
+      "buildInputSha256": "d52ffe0261c32f995470712adb9390851361de2b9f4103c28530690e667d4ad9"
     },
     {
       "planHash": "9db87b5bcdd52564a9ddb1f874646c00d5519731752d3aed70b0b370decaaa5d",
       "packageName": "query_9db87b5bcdd52564a9ddb1f874646c00d5519731752d3aed70b0b370decaaa5d",
       "acir": "9db87b5bcdd52564a9ddb1f874646c00d5519731752d3aed70b0b370decaaa5d.json",
       "vk": "9db87b5bcdd52564a9ddb1f874646c00d5519731752d3aed70b0b370decaaa5d.vk.hex",
-      "acirSha256": "15fa0eaa29dddea9849e23e1f268c947f519fbedf90b9f4bbe8e4cda0dbf3b92",
-      "vkSha256": "1885606dd36c5b6c20f8000ff3d262f4560dd1a13b71f18d7b847a653d93eadf",
+      "acirSha256": "76621a42940abac7074749c610521fa92e18c2ad086a668754d6d5ad5b59f1f0",
+      "vkSha256": "de171b094c2902f5ee1a9251dc7fb3aa276627d6a7fec11854ac9e5e7c545f50",
       "wasmProving": true,
       "example": {
         "name": "integer-range",
@@ -101,15 +101,15 @@
           "rowsPerTable": 4
         }
       },
-      "buildInputSha256": "63f23a4dde13e442fbaae5e37f41276c9b156f27158a98381d9698c1c34e0829"
+      "buildInputSha256": "544f851ed8caab0eba3302f17c8bc2e9c640967d07f9fda69215b7d12bcdeea0"
     },
     {
       "planHash": "2b074a324c733fa1b2fae66ae06a76d43c1df9e4776717596a944636e61fbace",
       "packageName": "query_2b074a324c733fa1b2fae66ae06a76d43c1df9e4776717596a944636e61fbace",
       "acir": "2b074a324c733fa1b2fae66ae06a76d43c1df9e4776717596a944636e61fbace.json",
       "vk": "2b074a324c733fa1b2fae66ae06a76d43c1df9e4776717596a944636e61fbace.vk.hex",
-      "acirSha256": "014af29f248c7b27a31e908796e6b65e7bc1e9b5969f72396f2f4b5f7b40e03d",
-      "vkSha256": "daa7510f2b66cb6b0737b62f5db78576820b6712da905e7e26421a39eda21ace",
+      "acirSha256": "d19c78ce8252ebf7f95e7b2f6e2e82b3d74fdca9dd5ef096b679b0b495197802",
+      "vkSha256": "9de30d2fb6f944b30d6ad37523fcb0def81775d35974af482d36685f39735e67",
       "wasmProving": true,
       "example": {
         "name": "date-range",
@@ -120,15 +120,15 @@
           "rowsPerTable": 4
         }
       },
-      "buildInputSha256": "2250f6f69984aafcc1ff934c3379b90d86f12b623d052f841ff64aadf6b19c65"
+      "buildInputSha256": "9faab84f0828744e09ab494c6ffd342672dab3cfff665ed1b24618c0dbbe15f4"
     },
     {
       "planHash": "5751fc5086df1dba0b0042f9fed0a55b662572940bad1417534150b1a0fab732",
       "packageName": "query_5751fc5086df1dba0b0042f9fed0a55b662572940bad1417534150b1a0fab732",
       "acir": "5751fc5086df1dba0b0042f9fed0a55b662572940bad1417534150b1a0fab732.json",
       "vk": "5751fc5086df1dba0b0042f9fed0a55b662572940bad1417534150b1a0fab732.vk.hex",
-      "acirSha256": "c63fb173c7d270847f4147aa4b46234a1ab52806b406e85c153fdff25033e372",
-      "vkSha256": "07554ece87b6951834e84a9cf95d3d5349f193fb205efe0d316750f621a0ce89",
+      "acirSha256": "1a913fb348c6ac780c4b99edd5b6cde6bb11dfee0f6d69e38cc9d92cbf965b92",
+      "vkSha256": "cc707c032790b6c125e5315a3ff4ad6bf961517b6df0013ea32848d295920718",
       "wasmProving": true,
       "example": {
         "name": "membership",
@@ -139,15 +139,15 @@
           "rowsPerTable": 4
         }
       },
-      "buildInputSha256": "5381b78e70d599cb8f70cc4cedd597235944bdc887d0ac66bcc48e7e73b642ae"
+      "buildInputSha256": "60397aa8a7d12baf948da9243427f85dafd7b9e8ca75bb336d776bce544978bb"
     },
     {
       "planHash": "2facc4d27c257fbace0b9a605a63d7a3b751799830f4c17ff073475d69528e59",
       "packageName": "query_2facc4d27c257fbace0b9a605a63d7a3b751799830f4c17ff073475d69528e59",
       "acir": "2facc4d27c257fbace0b9a605a63d7a3b751799830f4c17ff073475d69528e59.json",
       "vk": "2facc4d27c257fbace0b9a605a63d7a3b751799830f4c17ff073475d69528e59.vk.hex",
-      "acirSha256": "c8c67f1dba1555e116caad217cf0515c708a4f1d3ac290ec29254afaaf1c7bcd",
-      "vkSha256": "5ae16584404690657a2bf357dc3f8d1e6ca77b150412802c308a7505f3df1e81",
+      "acirSha256": "39af318a775b6193d8234e3b1cc51651c067f086f7e407cf059d024412f0cfd3",
+      "vkSha256": "f4550095296e8a5637bd062990949a245ecf56d928515cec0d2a2abc4a31cc9d",
       "wasmProving": true,
       "example": {
         "name": "values",
@@ -158,14 +158,14 @@
           "rowsPerTable": 4
         }
       },
-      "buildInputSha256": "cd0e88fd9ca9ef885b82a455a2160a838cad3d776ba73a5484717ad449d5d742"
+      "buildInputSha256": "c4d32d11cf6a4e1b169e412e1850a8f5b4497bf419731ae040de1f7dcc235da7"
     },
     {
       "planHash": "035732d9c54a9c4cf1f85c3850ea7105524716e7f56d2818e4acb2775b9c39ef",
       "packageName": "query_035732d9c54a9c4cf1f85c3850ea7105524716e7f56d2818e4acb2775b9c39ef",
       "acir": "035732d9c54a9c4cf1f85c3850ea7105524716e7f56d2818e4acb2775b9c39ef.json",
       "vk": "035732d9c54a9c4cf1f85c3850ea7105524716e7f56d2818e4acb2775b9c39ef.vk.hex",
-      "acirSha256": "f167be1262fcd88cc7337c34da0b4df3763a5d5fce8ad0e9f19b9171244721a8",
+      "acirSha256": "2582171e6d23e6452903bbeec206510a31eed3a7210ba22e657a1bb469b9504a",
       "vkSha256": "f612a028ea06fca4b87db59d85ebaad7a98cecb3cd9cf82b0476bd6398edf080",
       "wasmProving": true,
       "example": {
@@ -177,14 +177,14 @@
           "rowsPerTable": 8
         }
       },
-      "buildInputSha256": "def5a283b491582c2be1526622392ff603011f226bc9833b05edd91dbcf77d38"
+      "buildInputSha256": "e143aca1dc782f37524d6b13bfb29c5f91daf40a2a3a218c40abcbd076a9cccd"
     },
     {
       "planHash": "25715fddc10bc10fd0ea6d70fef6174f135c6054ebfefe2cb85427f915d0820a",
       "packageName": "query_25715fddc10bc10fd0ea6d70fef6174f135c6054ebfefe2cb85427f915d0820a",
       "acir": "25715fddc10bc10fd0ea6d70fef6174f135c6054ebfefe2cb85427f915d0820a.json",
       "vk": "25715fddc10bc10fd0ea6d70fef6174f135c6054ebfefe2cb85427f915d0820a.vk.hex",
-      "acirSha256": "2c909d35337c864ba4e36956e64ecb9a89b3a57f39a61cea7202d534df81a036",
+      "acirSha256": "407f7405308d2b416757b24183cb71a58c769d5b7581a1ec050c716eea7c497a",
       "vkSha256": "080c636227789ac7d00039e5834f7cd5473bfb08daf43f371a4d91e8282aa0f6",
       "wasmProving": true,
       "example": {
@@ -196,15 +196,15 @@
           "rowsPerTable": 8
         }
       },
-      "buildInputSha256": "4fb0392ffb52c53d1a579cb231ac492af9c6523c4ae03c35aeb24c0f8f60726e"
+      "buildInputSha256": "4e45612c36f7e5b09fa36b0c9b0bee59a55fd5fb6c7ec7fbddd2a9fe72602444"
     },
     {
       "planHash": "0c2bb71f84c10bbbac9b8b2178d680c2fb216d226a12e7fc97e2df2f5f830b06",
       "packageName": "query_0c2bb71f84c10bbbac9b8b2178d680c2fb216d226a12e7fc97e2df2f5f830b06",
       "acir": "0c2bb71f84c10bbbac9b8b2178d680c2fb216d226a12e7fc97e2df2f5f830b06.json",
       "vk": "0c2bb71f84c10bbbac9b8b2178d680c2fb216d226a12e7fc97e2df2f5f830b06.vk.hex",
-      "acirSha256": "d07e06e57885b020777809115d612655138ec9bc68357d3186cdc56dfceeb1e1",
-      "vkSha256": "5ba6b7a78f0609e5a025196a80288077e27abdf71e9706deb1004fc146f7db50",
+      "acirSha256": "ef225fa118d3793b8afde81f292d3a0d0a0c680e65d9e4bda10f7c816e5a0aec",
+      "vkSha256": "9c046a9b8e0635bc5e9dbcec635d77e50ca1d51c6cba599ea1599835c8f41e92",
       "wasmProving": true,
       "example": {
         "name": "slice",
@@ -215,15 +215,15 @@
           "rowsPerTable": 4
         }
       },
-      "buildInputSha256": "5599abb2a7e5a524a3394d4facfe6252971d9346836a665aa5ace04ab8ef8b27"
+      "buildInputSha256": "8716560ae93922af442e6bdaadf5dfecd8ab3ea7bc257b35df03a112f67c4a7e"
     },
     {
       "planHash": "6b22856101a6abe928b1b43cb1c3c7e04c2a883a278be5a9c8e1dd4d35a53f47",
       "packageName": "query_6b22856101a6abe928b1b43cb1c3c7e04c2a883a278be5a9c8e1dd4d35a53f47",
       "acir": "6b22856101a6abe928b1b43cb1c3c7e04c2a883a278be5a9c8e1dd4d35a53f47.json",
       "vk": "6b22856101a6abe928b1b43cb1c3c7e04c2a883a278be5a9c8e1dd4d35a53f47.vk.hex",
-      "acirSha256": "9d3c25c061e80c9f0fe20594d585b7234582c6ef8240cc5e0b8552cc61846790",
-      "vkSha256": "32d506d8ad1f3a55b0424d693c55029206e81abdfda60d61d1698dd615954323",
+      "acirSha256": "5fa7dcabbdac24a02c9461e31611a6e7c93323a88928fe4a542a2cefe6a76158",
+      "vkSha256": "0b56bdbcd36452ed43bbd46bc59967b0a88c678b91a37e1b79420e237e05bea1",
       "wasmProving": true,
       "example": {
         "name": "ask-true",
@@ -234,15 +234,15 @@
           "rowsPerTable": 4
         }
       },
-      "buildInputSha256": "1f69d53901bf8132d99b312c32310bdabd4186956f4337e4f91c02287fb33912"
+      "buildInputSha256": "07b1f5e44d5ff04ba6e9de70d1846445bc0cbea74395fcdf8182ef1f0d4180d5"
     },
     {
       "planHash": "3b1b08f69ebe383092c3bebf3f9c77af78f8f8019e94deed1b3832a1b291bcab",
       "packageName": "query_3b1b08f69ebe383092c3bebf3f9c77af78f8f8019e94deed1b3832a1b291bcab",
       "acir": "3b1b08f69ebe383092c3bebf3f9c77af78f8f8019e94deed1b3832a1b291bcab.json",
       "vk": "3b1b08f69ebe383092c3bebf3f9c77af78f8f8019e94deed1b3832a1b291bcab.vk.hex",
-      "acirSha256": "9c5751cbf5f64ee1b4757247da119c9c9ec1ece1d2f286d99c0eba7299f35c20",
-      "vkSha256": "64bcec32fea2c134484fb0bd32a83f1d7d91782147488c2066f34b66baac850e",
+      "acirSha256": "cdce45a3de16d4ad668143bb3d0bb8e5a19693677c9ffd8ff03b9d371f9300c6",
+      "vkSha256": "e113a7aeb49532ce7ca57a0aea584f73a247dae7c60c894fa4e6c734facc14f4",
       "wasmProving": true,
       "example": {
         "name": "ask-false",
@@ -253,15 +253,15 @@
           "rowsPerTable": 4
         }
       },
-      "buildInputSha256": "975d42e4f34ddb867d48d97fd2c4f9c76ad2ff678b6af92619337ff5417e7e6d"
+      "buildInputSha256": "be222e1c871ef7dcaeb0017d46e179b9761fe821aeff00039c492ddfb0a11ff3"
     },
     {
       "planHash": "ad9b76a67978f50927234ce587f3ca800a16c42ced0bb67d5b6e340c2818d324",
       "packageName": "query_ad9b76a67978f50927234ce587f3ca800a16c42ced0bb67d5b6e340c2818d324",
       "acir": "ad9b76a67978f50927234ce587f3ca800a16c42ced0bb67d5b6e340c2818d324.json",
       "vk": "ad9b76a67978f50927234ce587f3ca800a16c42ced0bb67d5b6e340c2818d324.vk.hex",
-      "acirSha256": "e00fc07cf7d4e64e8ee16e417cf14550de521edce76c23c4ddd771436cb1f5b4",
-      "vkSha256": "b51fb6044f3e081f7f61778ac5e4b3efeb8b09f38453047d5446b7a0e4e34b7b",
+      "acirSha256": "02432b339afe147688c8eac4a84d5055108e9dc5d18823533dc536fec76a6f63",
+      "vkSha256": "3a8b31ad9ea4bd67bcc3fcd7b59054a37a1b47ed327ce9f1ec01fffe38abfba0",
       "wasmProving": false,
       "example": {
         "name": "target-insurance-1a",
@@ -283,15 +283,15 @@
           "openingProfile": "long-objects"
         }
       },
-      "buildInputSha256": "9b58fb69f36dd7aeb720c5faa8e9056429a9e9c1a607a3c538557fc536cf3a90"
+      "buildInputSha256": "189e2c8aa7f366fbb9d841f199a7432f7b54912c59ef84911d9075b7c2d55a5e"
     },
     {
       "planHash": "08ee621df5cd63cfc785135fb1d62fdcabd049d9e0f0bdf59938895fb01ed2c4",
       "packageName": "query_08ee621df5cd63cfc785135fb1d62fdcabd049d9e0f0bdf59938895fb01ed2c4",
       "acir": "08ee621df5cd63cfc785135fb1d62fdcabd049d9e0f0bdf59938895fb01ed2c4.json",
       "vk": "08ee621df5cd63cfc785135fb1d62fdcabd049d9e0f0bdf59938895fb01ed2c4.vk.hex",
-      "acirSha256": "d0526d3b8012c9cf495d2a0d9b5bad524d3351f745be162f00064d194cd698f7",
-      "vkSha256": "d03f09e71d0090d6519b9c52513faa315495840583f274dd54c040cc08bb4d7c",
+      "acirSha256": "530d62ff3c25d66cae858abcc006c663ee9e7c7d28418d37f80b5f3813c826ed",
+      "vkSha256": "95cb455389b8c33de270d18874a9ddc4e54203ddfc5240ec4e7d718359454bc7",
       "wasmProving": false,
       "example": {
         "name": "target-insurance-1b",
@@ -333,15 +333,15 @@
           ]
         }
       },
-      "buildInputSha256": "8e65fe0eb34478a5a6056e6678ae9ee2596dc4448ef90896e8c50110b75ef64f"
+      "buildInputSha256": "f7bad6d8ec4e17b120d67c7e70e59c452d7cb6a775fe385d6201b4d388902225"
     },
     {
       "planHash": "1d5a9938503746fbe77ab56f8cff2a549207ec273ea2817d9a51154c90e22f20",
       "packageName": "query_1d5a9938503746fbe77ab56f8cff2a549207ec273ea2817d9a51154c90e22f20",
       "acir": "1d5a9938503746fbe77ab56f8cff2a549207ec273ea2817d9a51154c90e22f20.json",
       "vk": "1d5a9938503746fbe77ab56f8cff2a549207ec273ea2817d9a51154c90e22f20.vk.hex",
-      "acirSha256": "0e56118bb95cd5567790192901437e31c080f49c7af437a1f270a733de526e3b",
-      "vkSha256": "e43a35acb0364e7d20e68e634fa77258d55d35e84a89296ad0f13b6257ac39e4",
+      "acirSha256": "33a7cfab6a5e11d98cc6d1912b430c3499c30961f51857b3e03ece9c7ad210a9",
+      "vkSha256": "b0aa0c8d14d7effd0887bb51fa3dc89c08e6141e7e1a342b14ef1b4aa5c00416",
       "wasmProving": false,
       "example": {
         "name": "target-trial",
@@ -378,15 +378,15 @@
           ]
         }
       },
-      "buildInputSha256": "53b9f6b55fe8c73fb88a34156462c4ad725be195c4794afd9f11833e8b473ac8"
+      "buildInputSha256": "567fbf3c5cf2ae3e943b602ea4343f39eab7f7c16c71ad86706860f9643de6f5"
     },
     {
       "planHash": "0d7ea5d20eb11852b83d805d8775588f8ea8a89fb9327fb022eaa051f4ec070d",
       "packageName": "query_0d7ea5d20eb11852b83d805d8775588f8ea8a89fb9327fb022eaa051f4ec070d",
       "acir": "0d7ea5d20eb11852b83d805d8775588f8ea8a89fb9327fb022eaa051f4ec070d.json",
       "vk": "0d7ea5d20eb11852b83d805d8775588f8ea8a89fb9327fb022eaa051f4ec070d.vk.hex",
-      "acirSha256": "948477e735ebab64bd58104dd98b2ac3113d316ee805eb48e99ca252026c3d12",
-      "vkSha256": "cd2a571c580ec64fe07e860cea950f7331c2fd8237a5bc64e68ee3d648cf9306",
+      "acirSha256": "cd7386dfa52a6ab5d9632c22c80afa3cb7e7c3fba64d28c419d56ca995fdae26",
+      "vkSha256": "5fd42580303876c0595a09b99d65872e13a8fa81b478c5452cce2c0354185e51",
       "wasmProving": false,
       "example": {
         "name": "target-recycled-min",
@@ -409,15 +409,15 @@
           "freshness": true
         }
       },
-      "buildInputSha256": "fb6d2ded4fbab7af43b675019c42e43e6d5e4c1958d5e2bfea38a44f6134332c"
+      "buildInputSha256": "f9d1b56ae084dfdd51324521ab6751b38d4495ac659b90d4c6f71f700f229201"
     },
     {
       "planHash": "a206e8ae7a95059f578f290580e0cbcc1f691088a28ccfc35632e007c83e6801",
       "packageName": "query_a206e8ae7a95059f578f290580e0cbcc1f691088a28ccfc35632e007c83e6801",
       "acir": "a206e8ae7a95059f578f290580e0cbcc1f691088a28ccfc35632e007c83e6801.json",
       "vk": "a206e8ae7a95059f578f290580e0cbcc1f691088a28ccfc35632e007c83e6801.vk.hex",
-      "acirSha256": "deb0d5ca9370a5f1ed5f4f6b5c254d7f37deb2f03f54d49cd8560111dad4546a",
-      "vkSha256": "9c81397e9c99cce500272dffb5c561fb395ee87c07ceb44dfc2580ebe829a189",
+      "acirSha256": "ef7238a447124515a37b10c77704b2b94ce491c4bf3a9362b521b7adb76687b0",
+      "vkSha256": "87a94baf613c44d18f0ba75039f29b97ed96233ea1dd906ea8e6da46ea887998",
       "wasmProving": false,
       "example": {
         "name": "target-recycled-sum",
@@ -440,15 +440,15 @@
           "freshness": true
         }
       },
-      "buildInputSha256": "8b5a96200fd109b5199049ce122d6d47b6e016e2eed05f0780c28cef737be264"
+      "buildInputSha256": "36bd60e50b7dbeba7ded1f95ffeb1ecad3a98d67bffcc0b1f2197891c85ad84e"
     },
     {
       "planHash": "7a28394e6cf1b32c0e9171977734b3acf32b988f670474b4351d04323541c0f7",
       "packageName": "query_7a28394e6cf1b32c0e9171977734b3acf32b988f670474b4351d04323541c0f7",
       "acir": "7a28394e6cf1b32c0e9171977734b3acf32b988f670474b4351d04323541c0f7.json",
       "vk": "7a28394e6cf1b32c0e9171977734b3acf32b988f670474b4351d04323541c0f7.vk.hex",
-      "acirSha256": "8fa07373ca179f312e8761e206560d154ff0856c7d760ebe3e81def0a20482e1",
-      "vkSha256": "d1b705dfeafaf04f0e1606be3d6f781d04bdc630bb5e6c5666bedfca19a4756e",
+      "acirSha256": "b56929952db9b3d054ad6399893117af171f354df54204a401b942823eb9da53",
+      "vkSha256": "ab71955df8558ad26c0cc5de9f1be522fc91f607193b523d94f9fd938b57b0a7",
       "wasmProving": false,
       "example": {
         "name": "target-recycled-having",
@@ -471,10 +471,10 @@
           "freshness": true
         }
       },
-      "buildInputSha256": "857fd5f777af0083af2b4037455d5f215b6d85de3313778e339df67ece20d433"
+      "buildInputSha256": "ca528f51c988b3eea11da380594c927f7d77a3aedc88678c44f47683c3148e75"
     }
   ],
-  "sourceBundleSha256": "581c4cbffebd438093b06e8911c5372f5c97eaeb555dbff33dfa209fdee262fd",
+  "sourceBundleSha256": "f606bcdabf20359345180777a0bd66455e6a5df97e15e54eb6581b9cb7733875",
   "crsPinsSha256": "b31eedd906f0f02d8e940af834a239694c9ef9790909e7c8b77d0065d819c41d",
   "notYetCatalogued": [],
   "nativeKnownFailures": []

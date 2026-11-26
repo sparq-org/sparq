@@ -1,6 +1,6 @@
 // Research grade and not externally audited. Deterministic planner fixture.
 const { createHash } = require('node:crypto');
-const { readFileSync } = require('node:fs');
+const { existsSync, readFileSync } = require('node:fs');
 const { join } = require('node:path');
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -14,12 +14,13 @@ exports.hostCall = (operation, payload) => {
   if (operation !== 'plan') throw new Error(`unexpected host operation ${operation}`);
   const planHash = sha256(input.query);
   const packageName = `query_${planHash}`;
+  const planAbi = `scan-abi-${planHash}`;
   return JSON.stringify({
     planHash,
     packageName,
     files: {
       'Nargo.toml': packageName,
-      'src/main.nr': read('scan-abi'),
+      'src/main.nr': read(existsSync(join(__dirname, planAbi)) ? planAbi : 'scan-abi'),
     },
   });
 };

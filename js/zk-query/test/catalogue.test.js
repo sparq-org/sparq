@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { request, testIssuerKeygen } from '../index.js';
+import { prove, request, testIssuerKeygen } from '../index.js';
 import { sha256 } from '../internal/runtime.mjs';
 import { catalogueBuildDigest } from '../scripts/cache.mjs';
 import { canonicalGraph, issueFixture } from '../scripts/test-credentials.mjs';
@@ -31,6 +31,17 @@ test('every catalogue example derives its pinned plan and leaves no stale assets
   const keys = readdirSync(directory).filter(name => /^[a-f0-9]{64}\.vk\.hex$/.test(name));
   assert.deepEqual(keys.sort(), table.entries.map(entry => entry.vk).sort());
   for (const name of readdirSync(directory).filter(name => /^[a-f0-9]{64}\.json$/.test(name))) assert(table.entries.some(entry => entry.acir === name), 'stale catalogue program');
+});
+test('the refreshed holder requires a fresh request for an indexed SCAN plan', async t => {
+  const old = JSON.parse(readFileSync(new URL('./fixtures/bgp-before-indexed-scan.json', import.meta.url)));
+  const clock = old.policy.notBefore;
+  t.mock.method(Date, 'now', () => clock * 1000);
+
+  await assert.rejects(prove({ request: old, credentials: [] }), /verification key mismatch/);
+  const fresh = request({ query: old.query, policy: old.policy, nonce: '0a'.repeat(32) });
+  assert.equal(fresh.planHash, old.planHash);
+  assert.notEqual(fresh.verificationKey, old.verificationKey);
+  assert.equal(JSON.parse(host.hostCall('holder', JSON.stringify({ request: fresh, clock }))).planHash, old.planHash);
 });
 test('default proof preparation supplies the canonical envelope private inputs', () => {
   const fixture = JSON.parse(readFileSync(new URL('./fixtures/authenticated.json', import.meta.url)));

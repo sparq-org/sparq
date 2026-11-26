@@ -9,11 +9,14 @@ import { copyPinnedBinary } from '../native.mjs';
 import { canonicalArtifact } from './artifact.mjs';
 import { catalogueBuildDigest, stageSource } from './cache.mjs';
 import { snapshotSources } from './sources.mjs';
+import { withCatalogueLock } from './catalogue-lock.mjs';
 import { sha256 } from '../internal/runtime.mjs';
 import { examplePolicy, exampleRecord } from './catalogue-example.mjs';
 const packageDir = fileURLToPath(new URL('../', import.meta.url));
 const assets = join(packageDir, 'assets'), tablePath = join(assets, 'catalogue.json');
-const table = JSON.parse(readFileSync(tablePath));
+const originalCatalogue = readFileSync(tablePath);
+const table = JSON.parse(originalCatalogue);
+const originalContents = JSON.stringify(table);
 const host = createRequire(import.meta.url)('../wasm/sparq_zk_query_wasm.cjs');
 const flag = name => { const i = process.argv.indexOf(name); return i < 0 ? undefined : process.argv[i + 1]; };
 const update = process.argv.includes('--write-pins');
@@ -26,10 +29,15 @@ const cache = resolve(flag('--cache') || join(tmpdir(), 'sparq-query-catalogue')
 const concurrency = Number(process.env.CARGO_BUILD_JOBS || '1');
 if (!Number.isSafeInteger(concurrency) || concurrency < 1) throw new Error('catalogue build concurrency rejected');
 const entries = flag('--cases') ? JSON.parse(readFileSync(flag('--cases'))) : table.entries.map(e => e.example);
+const issuer = JSON.parse(host.hostCall('testIssuerKeygen', JSON.stringify('00'.repeat(32))));
+function planExample(example) {
+  const policy = examplePolicy(example, issuer, 'urn:sparq:catalogue');
+  return JSON.parse(host.hostCall('plan', JSON.stringify({ query: example.query, policy })));
+}
+const buildDigest = plan => catalogueBuildDigest(plan.files, sourceDigest, toolchainDigest);
 const plans = new Map();
 for (const example of entries) {
-  const policy = examplePolicy(example, JSON.parse(host.hostCall('testIssuerKeygen', JSON.stringify('00'.repeat(32)))), 'urn:sparq:catalogue');
-  const plan = JSON.parse(host.hostCall('plan', JSON.stringify({ query: example.query, policy })));
+  const plan = planExample(example);
   if (plans.has(plan.planHash) && JSON.stringify(plans.get(plan.planHash).plan.files) !== JSON.stringify(plan.files)) throw new Error('catalogue plan generated different sources');
   plans.set(plan.planHash, { plan, example });
 }
@@ -40,9 +48,17 @@ function run(binary, args, options) {
     child.once('close', code => code === 0 ? resolve() : reject(new Error('native catalogue command failed')));
   });
 }
-if (update && table.sourceBundleSha256 !== sourceDigest &&
-    table.entries.some(entry => !plans.has(entry.planHash))) {
-  throw new Error('source bundle changed; --write-pins must rebuild every catalogue plan');
+if (update) {
+  const omitted = table.entries.filter(entry => !plans.has(entry.planHash));
+  if (table.sourceBundleSha256 !== sourceDigest && omitted.length) {
+    throw new Error('source bundle changed; --write-pins must rebuild every catalogue plan');
+  }
+  for (const entry of omitted) {
+    const plan = planExample(entry.example);
+    if (plan.planHash !== entry.planHash || buildDigest(plan) !== entry.buildInputSha256) {
+      throw new Error(`catalogue build inputs differ for omitted example ${entry.example.name ?? entry.planHash}; include every stale plan in --write-pins`);
+    }
+  }
 }
 
 function publish(staging, names) {
@@ -75,7 +91,7 @@ function publish(staging, names) {
 async function build({ plan, example }, staging, nargo, bb) {
   const entry = table.entries.find(e => e.planHash === plan.planHash);
   if (!entry && !update) throw new Error('missing pinned catalogue plan; use --write-pins');
-  const buildInputSha256 = catalogueBuildDigest(plan.files, sourceDigest, toolchainDigest);
+  const buildInputSha256 = buildDigest(plan);
   if (!update && entry.buildInputSha256 !== buildInputSha256) throw new Error('catalogue build inputs differ from their pin');
   const acir = `${plan.planHash}.json`, vk = `${plan.planHash}.vk.hex`;
   if (entry?.buildInputSha256 === buildInputSha256 && existsSync(join(assets, acir)) && sha256(readFileSync(join(assets, acir))) === entry.acirSha256 && existsSync(join(assets, vk)) && sha256(Buffer.from(readFileSync(join(assets, vk), 'utf8').trim(), 'hex')) === entry.vkSha256) return;
@@ -114,8 +130,7 @@ try {
     if (failed.length) throw new AggregateError(failed.map(result => result.reason), 'native catalogue build refused');
   } finally { rmSync(bins, { recursive: true, force: true }); }
 
-  const names = ['sources.json'];
-  writeFileSync(join(staging, 'sources.json'), sourceBundle);
+  const names = [];
   for (const planHash of plans.keys()) {
     const candidate = candidates.get(planHash);
     if (!candidate) continue;
@@ -127,8 +142,20 @@ try {
   }
   if (update) {
     table.sourceBundleSha256 = sourceDigest;
-    writeFileSync(join(staging, 'catalogue.json'), JSON.stringify(table, null, 2) + '\n');
-    names.push('catalogue.json');
+    if (JSON.stringify(table) !== originalContents) {
+      writeFileSync(join(staging, 'catalogue.json'), JSON.stringify(table, null, 2) + '\n');
+      names.push('catalogue.json');
+    }
   }
-  publish(staging, names);
+  withCatalogueLock(assets, () => {
+    if (!originalCatalogue.equals(readFileSync(tablePath))) {
+      throw new Error('catalogue changed during build; retry against the current catalogue');
+    }
+    const bundlePath = join(assets, 'sources.json');
+    if (!existsSync(bundlePath) || !sourceBundle.equals(readFileSync(bundlePath))) {
+      writeFileSync(join(staging, 'sources.json'), sourceBundle);
+      names.unshift('sources.json');
+    }
+    if (names.length) publish(staging, names);
+  });
 } finally { rmSync(staging, { recursive: true, force: true }); }

@@ -20,6 +20,13 @@ if (!checked.verified) throw new Error(checked.reason);
 ```
 
 The verifier stores its own request and supplies that copy to `verify`.
+
+The indexed SCAN catalogue refresh changes verification keys for affected plans,
+even when their plan hashes stay the same. Finish outstanding requests with the
+package version that issued them, or issue fresh requests after upgrading. A
+holder using the refreshed catalogue refuses a request carrying an older key
+with `verification key mismatch`.
+
 `policy` requires `bounds`, `trustedIssuers` and `audience`. Bounds contain
 `credentials`, `quadsPerCredential` and `rowsPerTable`; trusted issuers are suite
 public keys. `credentialQuadBounds` optionally refines ordered credential slots.
@@ -198,9 +205,14 @@ The offline wrapper also works before a build, directly from a source checkout.
 Its `--cache` directory retains completed native compilations; `--cases` accepts
 query/bounds profiles and `--write-pins` explicitly updates maintainer pins.
 When the source bundle changes, a pin update must include every catalogue plan.
+With the same bundle, the builder regenerates omitted examples and requires
+their build-input digests to match the existing pins.
 The builder stages the bundle, rebuilt programs and keys, and new catalogue.
-It publishes these files after every selected build succeeds. `sources.mjs`
-regenerates the bundle only when it matches the existing catalogue pin.
+It publishes under a lock after every selected build succeeds and the
+catalogue revision still matches. Unchanged catalogue contents require no
+rewrite. Retry if another publisher holds the lock or has updated the catalogue.
+`sources.mjs` uses the same lock and regenerates the bundle only when it matches
+the existing catalogue pin.
 `CARGO_BUILD_JOBS` also bounds concurrent catalogue builds, defaulting to serial
 when unset. Duplicate plan hashes share a build and must generate identical sources.
 The build-input pin covers the generated files, the library bundle and the

@@ -94,6 +94,7 @@ class QueryProfiles(unittest.TestCase):
             "indexed_scan_rejects_a_match_with_zero_output_capacity",
             "indexed_scan_rejects_an_extra_row_with_an_empty_dataset",
             "indexed_scan_rejects_a_later_source_after_nonmatching_rows",
+            "indexed_scan_rejects_a_repeated_variable_mismatch_with_the_correct_projection",
         }
         self.assertEqual(set(profile.INDEXED_SCAN_CONTRACTS), expected)
         names = {f"ops_core_tests::{op}_{case}" for op in profile.OPERATORS

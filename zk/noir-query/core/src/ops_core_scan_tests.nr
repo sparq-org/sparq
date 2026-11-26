@@ -115,6 +115,15 @@ fn indexed_scan_rejects_a_nonmatching_source() {
         Table {rows:[[iri(1)],[unbound()]],len:1}, [0,0], [0,0]);
 }
 
+#[test(should_fail_with = "scan extra binding")]
+fn indexed_scan_rejects_a_repeated_variable_mismatch_with_the_correct_projection() {
+    crate::ops_core::scan(
+        [[iri(2), iri(9), iri(1)], [iri(1), iri(9), iri(1)]],
+        [true; 2], [0, 1, 0], [unbound(), iri(9), unbound()],
+        Table { rows: [[iri(1)], [unbound()]], len: 1 }, [0, 0], [0, 0],
+    );
+}
+
 #[test(should_fail_with="scan completeness or capacity")]
 fn indexed_scan_rejects_a_target_in_output_padding() {
     crate::ops_core::scan([[iri(1),iri(9),iri(10)]],
