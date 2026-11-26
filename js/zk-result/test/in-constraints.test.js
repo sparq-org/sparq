@@ -20,6 +20,33 @@ test('scoped IN admits one pattern per declared graph in preparation and reconst
 });
 
 for (const two of [false, true]) {
+  test(`hidden IN checks both active rows with ${two ? 'joined' : 'single'} credentials`, async () => {
+    const f = inFixture(two, 'BSc', 'MSc');
+    const prepared = prepare(f);
+    const member = `result_v5_k${two ? 2 : 1}_n16_p3_r4_f1_in_d10`;
+    assert.equal(prepared.member, member);
+    const noir = new Noir(JSON.parse(readFileSync(new URL(`../assets/${member}.json`, import.meta.url))));
+    const rows = prepared.presentationSkeleton.rows;
+    assert.deepEqual(new Set(rows), new Set([
+      { subject: { kind: 'iri', value: 'urn:subject' } },
+      { subject: { kind: 'iri', value: 'urn:subject:second' } },
+    ]));
+    assert.equal(Number(prepared.witnessInputs.result_count), 2);
+    await noir.execute(prepared.witnessInputs);
+
+    const firstDegree = rows[0].subject.value === 'urn:subject' ? 'BSc' : 'MSc';
+    const query = f.query.replace('"BSc", "MSc"', `"${firstDegree}"`);
+    const singleton = prepare({ ...f, query });
+    assert.deepEqual(singleton.presentationSkeleton.rows, [rows[0]]);
+    await noir.execute(singleton.witnessInputs);
+
+    const witness = { ...prepared.witnessInputs,
+      in_filter_count: singleton.witnessInputs.in_filter_count,
+      in_filter_constants: singleton.witnessInputs.in_filter_constants,
+    };
+    await assert.rejects(noir.execute(witness), /IN membership is false/);
+  });
+
   test(`hidden IN constraints retain authentication and policy with ${two ? 'joined' : 'single'} credentials`, async () => {
     const prepared = prepare(inFixture(two));
     const member = `result_v5_k${two ? 2 : 1}_n16_p3_r4_f1_in_d10`;

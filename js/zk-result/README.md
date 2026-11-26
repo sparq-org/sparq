@@ -57,7 +57,9 @@ Verification checks membership against the authenticated released RDF term.
 IN can be conjoined with the existing numeric filters; their datatype and lexical
 rules still apply. Dedicated method-bound members support one hidden IN operand
 at status depth ten with the default integer capacity and no hidden numeric
-comparisons in the same proof. The selected value remains private.
+comparisons in the same proof. Each released row omits the hidden operand and
+reveals that it is a member of the public list. A list with one distinct value
+identifies the operand.
 NOT IN, disjunctions, variable list items,
 noncanonical numeric/date constants and other literal datatypes refuse.
 

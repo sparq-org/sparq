@@ -40,7 +40,9 @@ Scoped IN queries admit one triple pattern per graph variable. Independent
 reconstruction checks projected membership against authenticated released terms. AND
 with existing numeric comparisons is supported. A single hidden IN uses its dedicated
 method-bound member at status depth ten with the default integer capacity and
-without hidden numeric comparisons in that proof. Its operand stays private. NOT IN, OR,
+without hidden numeric comparisons in that proof. Each released row omits the
+hidden operand and reveals that it is a member of the public list. A list with
+one distinct value identifies the operand. NOT IN, OR,
 variable list items and noncanonical or unsupported typed constants refuse.
 
 Policy `issuers?: Record<string, string>` maps issuer IRIs to trusted compressed
