@@ -354,8 +354,9 @@ impl Request {
     pub fn stored(&self) -> &StoredRequest {
         &self.stored
     }
-    /// Binds verified coverage for the request's exact dataset and validity window.
-    pub fn with_coverage(mut self, coverage: Coverage) -> Result<Self, Error> {
+    /// Binds verified coverage using the verifier's request creation time in Unix seconds.
+    pub fn with_coverage(mut self, coverage: Coverage, issued_at: u64) -> Result<Self, Error> {
+        coverage.check_valid_at(issued_at)?;
         let claims = coverage.claims();
         if self.stored.requirements().anchor() != Some(&claims.input_commitment) {
             return Err(Error::Invalid("coverage dataset commitment".into()));

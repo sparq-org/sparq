@@ -50,8 +50,10 @@ sparq-query-protocol = { path = "crates/sparq-query-protocol" }
   control characters, `?` allowed); it is not IRI validation. `QueryForm::supports_contract`
   pairs SELECT with the SELECT contracts, ASK with the ASK contracts and CONSTRUCT or DESCRIBE
   with `GraphRdfc10`. The query is not parsed; adapters check that its parsed form matches.
-- Encoding: `encode_stored_request(&StoredRequest)` and `encode_method_descriptor(&descriptor)`
-  return `Vec<u8>` under `LOCAL_ENCODING_PROFILE` (`local-struct-v1`), see the schema below.
+- Encoding uses `local-struct-v1` for descriptors and ordinary requests. For exact,
+  agreed requests, `StoredRequest::with_coverage_digest` stores an adapter-validated
+  digest and selects `local-struct-v2`. Query the selected request profile with
+  `stored_request_encoding_profile(&request)`.
 - Challenges: trait `ChallengeStore: Send + Sync` with `consume(&self, &Challenge32) ->
   Result<ChallengeOutcome, ChallengeStoreError>`; `consume_challenge(&store, &stored_request)`
   consumes the request's ORIGINAL challenge and maps replay to `invalid` and store failure to
@@ -96,7 +98,7 @@ sparq-query-protocol = { path = "crates/sparq-query-protocol" }
 | original challenge already consumed | invalid, verify, `ChallengeReplayed` |
 | challenge store failed | infrastructure, verify, `ChallengeStoreFailure(code)` |
 
-## Local encoding schema (`local-struct-v1`)
+## Local encoding schemas
 
 <!-- zkp-16.2: mirrors the `encoding` module rustdoc; change both together. -->
 A structural, byte-exact encoding of this crate's typed values. It is **not** RDF or SPARQL
@@ -108,6 +110,9 @@ u64 big-endian length then the bytes; `u32`/`u64` are big-endian; `fixed32` is 3
 `option` is `0x00`, or `0x01` then the value; `list` is a u64 big-endian count then each entry in
 stored order (never sorted).
 
+The covered request profile uses the domain `sparq:vcq:stored-request:local-struct-v2`
+followed by `0x00`. Tags `01` through `18` have the same encoding as in `local-struct-v1`.
+
 | Tag | Stored-request field | Value |
 |---|---|---|
 | `01` to `08` | query, base IRI, challenge, audience, not before, not after, form, DESCRIBE policy | `bytes`, `option<bytes>`, `fixed32`, `bytes`, `u64`, `u64`, `enum`, `option<bytes>` |
@@ -118,6 +123,7 @@ stored order (never sorted).
 | `13` to `15` | accepted suites, mappings, linking | `list<bytes>` |
 | `16`, `17` | released-row bound, presentation-byte bound | `u32` |
 | `18` | methods, preference order | `list<bytes>`, each a full descriptor encoding |
+| `19` | detached coverage digest, in `local-struct-v2` | `fixed32` |
 
 | Tag | Descriptor field | Value |
 |---|---|---|

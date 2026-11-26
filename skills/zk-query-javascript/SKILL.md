@@ -71,7 +71,8 @@ When `notAfter` is omitted, its default is capped at `expiresAt`.
 The profile accepts one to 64 distinct claim types and up to 64 KiB each for the
 signed claims document and proof configuration.
 
-Keep the detached credential in the stored request. The holder passes only the
+Keep the detached credential and `coverageCheckedAt` in the stored request.
+The latter records the verifier's creation time in Unix seconds. The holder passes only the
 dataset's ordered source credentials to `prove`, with the original presentation
 salt as `backend.presentationSaltHex`. The request digest includes the SHA-256 of
 the RDFC-1.0 canonical signed coverage claims.
@@ -113,8 +114,10 @@ dataset commitment and digest. Use that signed scope when relying on coverage.
 
 In Rust, `CoverageClaims::issuance_documents` builds suite inputs and
 `Coverage::verify` checks the detached credential against the chosen authority,
-scope and anchor. `Request::with_coverage` checks the window and binds the verified
-evidence. `StoredRequest::coverage_digest` exposes the protocol binding, and
+scope and anchor. `Coverage::check_valid_at` accepts a verifier-supplied instant
+in Unix seconds. `Request::with_coverage(coverage, issued_at)` checks that instant
+and the request window, then binds the verified evidence.
+`StoredRequest::coverage_digest` exposes the protocol binding, and
 `stored_request_encoding_profile` identifies the local byte encoding. The query
 request retains the credential through `Request::coverage`.
 

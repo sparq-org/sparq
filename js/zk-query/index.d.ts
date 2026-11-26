@@ -50,6 +50,8 @@ export interface StatusList { list: string; purpose: string; bits: string }
 export interface Request {
   query: string; policy: Policy; nonce: string; planHash: string;
   verificationKey: string; digest: string; requestRdf: string;
+  /** Verifier-recorded request creation time in Unix seconds, present with coverage. */
+  coverageCheckedAt?: number;
 }
 export type QueryResult = { boolean: boolean } | { variables: string[]; rows: (string | null)[][] };
 export interface Presentation {

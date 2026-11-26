@@ -61,8 +61,8 @@ properties as well. `prepare_with_envelope_features` selects the optional consum
 The current suite profile opens complete credentials, checks hidden signatures
 and canonical trust-member membership. Source identities are key-independent; value consumers check complete active inputs, including rejected rows. Released RDF clears value-key metadata. Overflow refuses.
 The verifier reconstructs the plan and constants from its stored request, re-encodes the released RDF answer,
-and consumes the shared challenge after proof verification and a final validity check.
-Supplied-cell programs are isolated operator fixtures.
+and consumes the challenge after proof verification and a final validity check. Supplied-cell programs are isolated operator fixtures.
+For `Request::with_coverage`, see the [native usage notes](../../skills/zk-query-javascript/SKILL.md#verifying).
 
 The request digest is SHA-256 over RDFC canonical N-Quads of this method's request.
 The typed protocol encoding is a named method parameter within that RDF. Public inputs, in order, are request digest, salted input commitment, signature

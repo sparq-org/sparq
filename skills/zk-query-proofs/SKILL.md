@@ -65,7 +65,11 @@ shape-checked base IRI, DESCRIBE policy), encodes it and descriptors under the L
 profile `local-struct-v1`, and defines a shared `ChallengeStore` contract that consumes the
 original challenge once. It has no backend, interoperable wire encoding, transport, parser,
 hash or other cryptography, ships no production challenge store, proves no cryptographic claim,
-and registers no method. See [query-method contracts](references/query-method-contracts.md).
+and registers no method. An exact, anchored request may bind an adapter-validated
+detached coverage digest using `StoredRequest::with_coverage_digest`. Such requests use
+`local-struct-v2`; the detached exact-evaluator adapters refuse them. See
+[query-method contracts](references/query-method-contracts.md) and
+[authenticated Node query coverage](../zk-query-javascript/SKILL.md).
 The research-grade, externally unaudited [Noir query compiler contracts](references/query-method-contracts.md#noir-query-compiler)
 cover portable planning, canonical envelope policy, verifier-selected capacities,
 private holder/status evidence and native proof lifecycle. Its subprocess driver

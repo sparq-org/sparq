@@ -270,6 +270,8 @@ impl Policy {
 pub(crate) struct RequestWire {
     pub query: String,
     pub policy: Policy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coverage_checked_at: Option<u64>,
     pub nonce: String,
     pub plan_hash: String,
     pub verification_key: String,
@@ -284,7 +286,7 @@ fn native(
     p: &Policy,
     nonce: &str,
     key: &[u8],
-    coverage: Option<Coverage>,
+    coverage: Option<(Coverage, u64)>,
 ) -> Result<Request> {
     let plan = p.plan(query)?;
     let envelope = p.envelope_policy()?;
@@ -359,7 +361,7 @@ fn native(
     )
     .map_err(err)?;
     match coverage {
-        Some(coverage) => request.with_coverage(coverage).map_err(err),
+        Some((coverage, issued_at)) => request.with_coverage(coverage, issued_at).map_err(err),
         None => Ok(request),
     }
 }
@@ -395,11 +397,8 @@ pub(crate) fn create(input: &str) -> Result<RequestWire> {
         .checked_add(3600)
         .ok_or("request time overflow")?;
     if let Some(evidence) = &coverage {
-        let claims = evidence.claims();
-        if input.clock < claims.as_of || input.clock >= claims.expires_at {
-            return Err("coverage validity at request creation".into());
-        }
-        default_end = default_end.min(claims.expires_at);
+        evidence.check_valid_at(input.clock).map_err(err)?;
+        default_end = default_end.min(evidence.claims().expires_at);
     }
     policy.not_before.get_or_insert(input.clock);
     policy.not_after.get_or_insert(default_end);
@@ -407,10 +406,18 @@ pub(crate) fn create(input: &str) -> Result<RequestWire> {
     let plan = policy.plan(&input.query)?;
     checked_key(&plan, &key)?;
     let nonce = hex(&word(&input.nonce)?);
-    let request = native(&input.query, &policy, &nonce, &key, coverage)?;
+    let coverage_checked_at = coverage.as_ref().map(|_| input.clock);
+    let request = native(
+        &input.query,
+        &policy,
+        &nonce,
+        &key,
+        coverage.zip(coverage_checked_at),
+    )?;
     Ok(RequestWire {
         query: input.query,
         policy,
+        coverage_checked_at,
         nonce,
         plan_hash: hex(&plan.hash()),
         verification_key: hex(&key),
@@ -424,7 +431,17 @@ pub(crate) fn restore(wire: &RequestWire) -> Result<Request> {
         return Err("noncanonical stored policy".into());
     }
     let key = bytes(&wire.verification_key)?;
-    let request = native(&wire.query, &policy, &wire.nonce, &key, policy.validated_coverage()?)?;
+    let coverage = policy.validated_coverage()?;
+    if coverage.is_some() != wire.coverage_checked_at.is_some() {
+        return Err("stored request reconstruction differs".into());
+    }
+    let request = native(
+        &wire.query,
+        &policy,
+        &wire.nonce,
+        &key,
+        coverage.zip(wire.coverage_checked_at),
+    )?;
     if wire.plan_hash != hex(&request.plan().map_err(err)?.hash())
         || wire.digest != hex(&request.digest())
         || wire.request_rdf != request.canonical_rdf()
@@ -517,9 +534,18 @@ mod coverage_tests {
             .to_string()
         };
         let stored = create(&input(1)).unwrap();
+        let mut uncovered: Value = serde_json::from_str(&input(1)).unwrap();
+        uncovered["policy"].as_object_mut().unwrap().remove("coverage");
+        let uncovered = create(&uncovered.to_string()).unwrap();
+        assert_ne!(stored.digest, uncovered.digest);
         let request = restore(&stored).unwrap();
         let attestation = request.coverage().unwrap();
         assert_eq!(attestation.claims().issuer.as_str(), "urn:authority");
+        let stored_coverage = serde_json::to_value(&stored.policy.coverage).unwrap();
+        assert_eq!(
+            Some(attestation.credential().document.as_str()),
+            stored_coverage["credential"]["graphNQuads"].as_str()
+        );
         assert_eq!(
             request.stored().coverage_digest(),
             Some(&attestation.digest())
@@ -542,10 +568,65 @@ mod coverage_tests {
         plain.input_commitment = Some(hex(&[7; 32]));
         let key = bytes(&fixture.verification_key).unwrap();
         let request = native(&fixture.query, &plain, &fixture.nonce, &key, None).unwrap();
-        assert!(request
-            .with_coverage(coverage)
-            .unwrap_err()
-            .to_string()
-            .contains("coverage dataset commitment"));
+        assert!(
+            request
+                .with_coverage(coverage, 2)
+                .unwrap_err()
+                .to_string()
+                .contains("coverage dataset commitment")
+        );
+    }
+
+    #[test]
+    fn native_coverage_binding_requires_validation_at_request_creation() {
+        let fixture = fixture();
+        let mut policy = policy(&fixture, 1).normalize().unwrap();
+        let coverage = policy.validated_coverage().unwrap().unwrap();
+        policy.coverage = None;
+        policy.not_before = Some(3);
+        let key = bytes(&fixture.verification_key).unwrap();
+        let request = native(&fixture.query, &policy, &fixture.nonce, &key, None).unwrap();
+        for issued_at in [1, 6] {
+            assert!(coverage.check_valid_at(issued_at).is_err());
+            assert!(
+                request
+                    .clone()
+                    .with_coverage(coverage.clone(), issued_at)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("coverage validity at request creation")
+            );
+        }
+        assert!(request.clone().with_coverage(coverage.clone(), 2).is_ok());
+        assert!(request.with_coverage(coverage, 5).is_ok());
+    }
+
+    #[test]
+    fn native_request_rejects_a_bare_coverage_digest() {
+        let fixture = fixture();
+        let mut policy = policy(&fixture, 1).normalize().unwrap();
+        policy.coverage = None;
+        let key = bytes(&fixture.verification_key).unwrap();
+        let plain = native(&fixture.query, &policy, &fixture.nonce, &key, None).unwrap();
+        let build = |stored| {
+            Request::new_authenticated(
+                stored,
+                plain.bounds(),
+                key.clone(),
+                plain.issuer_root().unwrap(),
+            )
+        };
+        assert!(build(plain.stored().clone()).is_ok());
+        let digest_only = plain
+            .stored()
+            .clone()
+            .with_coverage_digest(Digest32::new([3; 32]).unwrap())
+            .unwrap();
+        assert!(
+            build(digest_only)
+                .unwrap_err()
+                .to_string()
+                .contains("coverage credential required")
+        );
     }
 }

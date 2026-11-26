@@ -151,6 +151,8 @@ The authority independently determines and signs the committed dataset's
 coverage. The period is half-open, ends by `asOf`, and uses Unix seconds, as
 do `asOf` and `expiresAt`. The request window must fit within
 `[asOf, expiresAt)`. A default `notAfter` is shortened to expiry when necessary.
+Keep the full stored request, including its verifier-recorded `coverageCheckedAt`
+instant. Reconstruction checks that instant against the signed validity window.
 `report.exactness` gives the basis for query exactness. On a covered request,
 `report.coverage` also identifies the authority, scope and canonical claims digest.
 

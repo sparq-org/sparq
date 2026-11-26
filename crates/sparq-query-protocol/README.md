@@ -71,9 +71,10 @@ for (obligation, enforcer) in admission.obligations() {
   `infrastructure`. One store namespace is shared across methods and the original challenge,
   never a per-method derived nonce, is consumed. The trait cannot enforce atomicity or
   durability, and the crate ships **no production store**.
-- **Local structural encoding.** `encode_stored_request` and `encode_method_descriptor` emit
-  deterministic `local-struct-v1` bytes. This is **not** the §7.2 wire profile, not a transport,
-  and not RDF or SPARQL canonicalization; there is no decoder and no digest is computed.
+- **Local structural encoding.** Method descriptors and ordinary requests use
+  `local-struct-v1`. Exact requests with an agreed anchor can store an adapter-validated
+  coverage digest using `StoredRequest::with_coverage_digest`. The covered bytes use
+  `local-struct-v2`. These profiles encode typed values for the adapter's own digest.
 
 ### Not modelled yet
 
@@ -92,13 +93,15 @@ and base IRI; consume the original challenge exactly once through the shared sto
 key authorization and status from verifier-pinned trust material; link hidden witnesses under the
 admitted linking profile; load and check artifacts from verifier configuration; bound input size
 before decoding; and report `ClaimEvidence` only for checks it actually ran.
+Adapters must refuse a stored coverage digest unless they validate the detached credential
+and bind the digest into the proof statement.
 
 ## 📚 Learn more
 
 - Crate rustdoc (`cargo doc -p sparq-query-protocol --open`): full API, the complete doctested
   example, and what adapters still owe.
 - [Query method contracts reference](../../skills/zk-query-proofs/references/query-method-contracts.md):
-  API by draft section, failure mapping (§11 vectors), the `local-struct-v1` schema table and
+  API by draft section, failure mapping (§11 vectors), the local encoding schema and
   what is not covered.
 - [VC query protocol draft](../../research/vc-query-protocol.md) and
   [method registry](../../research/vc-query-methods.json).

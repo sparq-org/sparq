@@ -4,7 +4,7 @@
 //! vcq draft 0 (`research/vc-query-protocol.md`, registry
 //! `research/vc-query-methods.json`). It contains shared types, the
 //! [`QueryMethod`] trait, deterministic, fail-closed capability negotiation,
-//! a validated [`StoredRequest`], a named LOCAL structural byte encoding and
+//! a validated [`StoredRequest`], named local structural byte encodings and
 //! a shared [`ChallengeStore`] contract. It contains no proof backend, no
 //! interoperable wire encoding or transport, no RDF or SPARQL
 //! canonicalization, no query parser and no cryptography or hash, and **it
@@ -33,8 +33,9 @@
 //! is still a subset: issuer sets, status windows, trust-policy roots,
 //! disclosure policy, the rest of the evaluation context and graph-size bounds
 //! are not modelled, so not every credential policy is represented, and none
-//! is enforced here. The local encoding ([`LOCAL_ENCODING_PROFILE`]) is
-//! byte-exact over these typed values but is not the §7.2 wire profile.
+//! is enforced here. [`StoredRequest::with_coverage_digest`] attaches a digest
+//! checked by an adapter to an exact, anchored request. Covered requests use
+//! [`COVERAGE_ENCODING_PROFILE`]; other requests use [`LOCAL_ENCODING_PROFILE`].
 //!
 //! # Negotiation rules
 //!
@@ -65,6 +66,8 @@
 //! trust material (draft §4.2 rule 9), and link hidden witnesses across
 //! obligations (§8). A digest an adapter supplies does not show that any
 //! hidden predicate was checked.
+//! Adapters that support detached coverage must verify the credential and
+//! bind its digest. Other adapters must refuse requests carrying that digest.
 //!
 //! # Examples
 //!

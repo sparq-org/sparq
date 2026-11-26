@@ -481,6 +481,29 @@ fn admission_from_another_request_is_rejected() {
 }
 
 #[test]
+fn rejects_detached_coverage_before_proof_or_challenge_use() {
+    let mut spec = Spec::bag();
+    spec.authority = ScopeAuthority::VerifierAgreedAnchor;
+    spec.anchor = Some(v3::dataset_commitment(&dataset(), &v3::Policy::default()).unwrap());
+    let request = spec.stored();
+    let admission = adapter()
+        .admit(request.requirements(), adapter().descriptor())
+        .unwrap();
+    assert!(adapter().prepare(&request, &admission, dataset()).is_ok());
+    let covered = request
+        .with_coverage_digest(sparq_query_protocol::Digest32::new([8; 32]).unwrap())
+        .unwrap();
+    let store = Store::default();
+    let prepare = adapter().prepare(&covered, &admission, dataset()).unwrap_err();
+    let verification = verify(&covered, &placeholder(), &store).unwrap_err();
+    for (error, phase) in [(prepare, Phase::Prepare), (verification, Phase::Verify)] {
+        assert_eq!((error.class(), error.phase()), (FailureClass::Unsupported, phase));
+        assert_eq!(error.code(), backend("vcq-coverage-unsupported"));
+    }
+    assert_eq!(store.calls(), 0);
+}
+
+#[test]
 fn prepare_checks_the_private_dataset_and_anchor_opening() {
     let expected_commitment = v3::dataset_commitment(&dataset(), &v3::Policy::default()).unwrap();
     for (anchor, outcome) in [

@@ -38,6 +38,12 @@ Request construction, dataset assembly and authorization paths use the native
 typed policy APIs. Signed credentials must contain the matching canonical root
 and issuer properties and signed verification-method metadata.
 
+For a covered request, the adapter verifies the detached credential against the
+configured authority, scope and dataset commitment. It stores the verifier's
+creation time as `coverageCheckedAt` and rechecks it when reconstructing the
+request. Verification reports the basis for query exactness and includes the
+signed scope when coverage was validated.
+
 ## 📚 Contract
 
 The package's [public-input layout](../../js/zk-query/README.md#public-input-layout)

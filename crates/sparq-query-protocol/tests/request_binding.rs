@@ -185,6 +185,11 @@ fn detached_coverage_has_a_distinct_encoding_and_requires_exact_anchor() {
         stored_request_encoding_profile, COVERAGE_ENCODING_PROFILE, COVERAGE_REQUEST_DOMAIN,
     };
 
+    assert_eq!(COVERAGE_ENCODING_PROFILE, "local-struct-v2");
+    assert_eq!(
+        COVERAGE_REQUEST_DOMAIN,
+        b"sparq:vcq:stored-request:local-struct-v2\0"
+    );
     assert_eq!(
         golden_request()
             .with_coverage_digest(digest(4))

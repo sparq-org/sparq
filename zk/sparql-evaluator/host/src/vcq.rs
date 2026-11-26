@@ -577,10 +577,9 @@ impl Risc0ExactV3 {
 
 /// Recomputes admission against `capabilities` and checks the actual query shape.
 ///
-/// Shared with the V5 adapter. Checks run in this order: recomputed admission
-/// equals the supplied one; no explicit base IRI; the parsed, statically
-/// admitted V3 query has the declared form; the admitted contract takes that
-/// shape (SELECT sequences and DESCRIBE are unsupported).
+/// Shared with the V5 adapter. Recompute admission, then check detached coverage
+/// and explicit base IRI support. The parsed and statically admitted query must
+/// match the declared form and admitted contract.
 pub(crate) fn checked_admission(
     capabilities: &Capabilities,
     request: &StoredRequest,
@@ -590,6 +589,9 @@ pub(crate) fn checked_admission(
     let recomputed = admit(request.requirements(), admission.descriptor(), capabilities)?;
     if recomputed != *admission {
         return Err(invalid(phase, "vcq-admission-mismatch"));
+    }
+    if request.coverage_digest().is_some() {
+        return Err(unsupported(phase, "vcq-coverage-unsupported"));
     }
     if request.base_iri().is_some() {
         return Err(unsupported(phase, "vcq-base-iri-unsupported"));

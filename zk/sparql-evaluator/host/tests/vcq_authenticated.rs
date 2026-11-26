@@ -822,6 +822,32 @@ fn admission_from_another_request_is_rejected() {
 }
 
 #[test]
+fn rejects_detached_coverage_before_proof_or_challenge_use() {
+    let request = Spec::bag().agreed(fixture::anchor(fixture::SALT)).stored();
+    let admission = adapter()
+        .admit(request.requirements(), adapter().descriptor())
+        .unwrap();
+    assert!(
+        adapter()
+            .prepare(&request, &admission, credentials(fixture::SALT))
+            .is_ok()
+    );
+    let covered = request
+        .with_coverage_digest(Digest32::new([8; 32]).unwrap())
+        .unwrap();
+    let store = Store::default();
+    let prepare = adapter()
+        .prepare(&covered, &admission, credentials(fixture::SALT))
+        .unwrap_err();
+    let verification = verify(&covered, &placeholder(), &store).unwrap_err();
+    for (error, phase) in [(prepare, Phase::Prepare), (verification, Phase::Verify)] {
+        assert_eq!((error.class(), error.phase()), (FailureClass::Unsupported, phase));
+        assert_eq!(error.code(), backend("vcq-coverage-unsupported"));
+    }
+    assert_eq!(store.calls(), 0);
+}
+
+#[test]
 fn prepare_authenticates_natively_and_checks_the_anchor_opening() {
     let prepare = |spec: Spec, private: PrivateCredentials| {
         let request = spec.stored();

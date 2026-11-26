@@ -468,7 +468,8 @@ statement does not verify for another. In particular:
 + The request digest MUST be bound. The digest covers the query, the input commitment, the
   trust requirements, the accepted cryptosuites, signature modes and proof methods, the
   bounds, the challenge, the domain and the validity period. For @sec-envelope-draft it also
-  covers the holder requirement, status policy and validity time. Binding it means a proof made for
+  covers the holder requirement, status policy and validity time. A covered request includes
+  its detached credential's coverage digest. Binding it means a proof made for
   one request does not verify for another, including one sent to another verifier, and the
   proof needs only one public value for all of them.
 + The result MUST be bound. The verifier takes the result only from what the proof proves.

@@ -170,6 +170,14 @@ impl Coverage {
         &self.claims
     }
 
+    /// Checks that the attestation is valid at a verifier-supplied Unix instant.
+    pub fn check_valid_at(&self, now: u64) -> Result<(), Error> {
+        if now < self.claims.as_of || now >= self.claims.expires_at {
+            return Err(invalid("validity at request creation"));
+        }
+        Ok(())
+    }
+
     /// Returns the original detached credential for storage with the request.
     pub fn credential(&self) -> &suite::Credential {
         &self.credential

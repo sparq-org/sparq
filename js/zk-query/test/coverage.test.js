@@ -31,8 +31,8 @@ const credentials = [
 
 const call = (operation, input) => JSON.parse(host.hostCall(operation, JSON.stringify(input)));
 const store = (policy, clock = 10) => call('request', { query, policy, nonce, verificationKey, clock });
-const prepare = (request, credentials) => call('prepareProof', {
-  request, credentials, clock: 10, presentationSaltHex: salt,
+const prepare = (request, credentials, clock = 10) => call('prepareProof', {
+  request, credentials, clock, presentationSaltHex: salt,
 });
 const verify = (request, presentation, proof = () => true, consume = () => 'fresh', clock = 10) =>
   JSON.parse(host.verifyWith(JSON.stringify({ request, presentation }), proof, consume, () => clock));
@@ -85,6 +85,13 @@ test('coverage binds the canonical signed claims to the public request statement
   assert.notEqual(reissued.signatureHex, covered.coverage.credential.signatureHex);
   const canonical = store({ ...covered, coverage: { ...covered.coverage, credential: reissued } });
   assert.equal(canonical.digest, stored.digest);
+  const invalidSignature = structuredClone(stored);
+  invalidSignature.policy.coverage.credential.signatureHex = reissued.signatureHex;
+  const invalid = verify(invalidSignature, presentation,
+    () => assert.fail('coverage signature must be checked during reconstruction'),
+    () => assert.fail('invalid coverage must leave the challenge unused'));
+  assert.equal(invalid.verified, false);
+  assert.match(invalid.reason, /coverage signature/);
   const extended = store({ ...covered, coverage: { ...covered.coverage, credential: issue({ ...claims, expiresAt: 21 }) } });
   assert.notEqual(extended.digest, stored.digest);
 
@@ -93,6 +100,7 @@ test('coverage binds the canonical signed claims to the public request statement
   const refused = verify(stripped, presentation, () => assert.fail('coverage is absent'));
   assert.equal(refused.verified, false);
   assert.match(refused.reason, /stored request reconstruction differs/);
+  assert.equal(plain.coverageCheckedAt, undefined);
 
   const plainChecked = verify(plain, { ...plainPrepared.presentationSkeleton, proof: '01' });
   assert.equal(plainChecked.report.exactness, 'agreed-dataset');
@@ -115,6 +123,7 @@ test('request refuses independently changed coverage signer, scope, period, data
   rejects({ scope: { ...scope, registry: 'urn:other' } }, /coverage scope/);
   rejects({ scope: { ...scope, subject: 'urn:other' } }, /coverage scope/);
   rejects({ scope: { ...scope, claimTypes: ['urn:p'] } }, /coverage scope/);
+  rejects({ scope: { ...scope, periodStart: 2 } }, /coverage period/);
   rejects({ scope: { ...scope, periodEnd: 8 } }, /coverage period/);
   rejects({ scope: { ...scope, method: 'urn:other' } }, /coverage method/);
   rejects({ scope: { ...scope, profile: 'urn:other' } }, /coverage profile/);
@@ -135,12 +144,28 @@ test('request creation validates coverage instants and caps the default request 
   const { claims, anchored, covered } = scenario();
   const defaults = { ...covered, notBefore: undefined, notAfter: undefined };
   const stored = store(defaults);
+  assert.equal(stored.coverageCheckedAt, 10);
   assert.equal(stored.policy.notBefore, claims.asOf);
   assert.equal(stored.policy.notAfter, claims.expiresAt);
   assert.throws(() => store({ ...covered, notBefore: 9 }), /coverage validity window/);
   assert.throws(() => store({ ...covered, notAfter: 21 }), /coverage validity window/);
   assert.throws(() => store(defaults, 9), /coverage validity at request creation/);
   assert.throws(() => store(defaults, 20), /coverage validity at request creation/);
+
+  const future = { ...covered, notBefore: 12, notAfter: 18 };
+  assert.throws(() => store(future, 9), /coverage validity at request creation/);
+  const scheduled = store(future, 10);
+  assert.equal(scheduled.policy.notBefore, 12);
+  const presentation = { ...prepare(scheduled, credentials, 12).presentationSkeleton, proof: '01' };
+  const seen = () => assert.fail('coverage must be revalidated before proof or nonce handling');
+  const { coverageCheckedAt, ...withoutCheckedAt } = scheduled;
+  assert.equal(coverageCheckedAt, 10);
+  assert.match(verify(withoutCheckedAt, presentation, seen, seen, 12).reason,
+    /stored request reconstruction differs/);
+  for (const invalid of [9, 20]) {
+    assert.match(verify({ ...scheduled, coverageCheckedAt: invalid }, presentation, seen, seen, 12).reason,
+      /coverage validity at request creation/);
+  }
 
   const now = Math.floor(Date.now() / 1000);
   const live = issue({ ...claims, expiresAt: now + 300 });
@@ -166,6 +191,17 @@ test('coverage issuance checks historical intervals and claim bounds', () => {
   const large = structuredClone(covered);
   large.coverage.credential.graphNQuads += ' '.repeat(65_536);
   assert.throws(() => store(large), /coverage document size/);
+});
+
+test('request admission checks the signed historical interval', () => {
+  const { claims, covered } = scenario();
+  const fields = coverageDocument(claims);
+  const graphNQuads = fields.graphNQuads.replace(/(coveragePeriodEnd> )"9"/, '$1"11"');
+  assert.notEqual(graphNQuads, fields.graphNQuads);
+  const credential = testIssue({ issuer: signer, ...fields, graphNQuads, seedHex: '17'.repeat(32) });
+  assert.throws(() => store({ ...covered, coverage: {
+    authority, credential, scope: { ...scope, periodEnd: 11 },
+  } }), /coverage period/);
 });
 
 test('omitting a dataset credential fails agreement even when the complete answer is equal', () => {
