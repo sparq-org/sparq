@@ -873,6 +873,21 @@ fn shape_cache_reuses_constants_and_invalidates_library_revisions() {
     let other_constants = compiler.prepare("ASK {?v <urn:q> ?y}", B).unwrap();
     assert_eq!(original.verification_key, other_constants.verification_key);
     assert_eq!(entries(), 1);
+    let tighter = compiler
+        .prepare(
+            "ASK {?s <urn:p> ?x}",
+            Bounds {
+                rows_per_table: 3,
+                ..B
+            },
+        )
+        .unwrap();
+    assert_eq!(original.plan.hash(), tighter.plan.hash());
+    assert!(
+        original.artifact["bytecode"] != tighter.artifact["bytecode"],
+        "different row bounds select different generated checks"
+    );
+    assert_eq!(entries(), 2);
     use std::io::Write;
     writeln!(
         std::fs::OpenOptions::new()
@@ -898,7 +913,7 @@ fn shape_cache_reuses_constants_and_invalidates_library_revisions() {
     std::fs::write(path, source.replace(old, new)).unwrap();
     let changed = compiler.prepare("ASK {?s <urn:p> ?x}", B).unwrap();
     assert_ne!(original.verification_key, changed.verification_key);
-    assert_eq!(entries(), 3);
+    assert_eq!(entries(), 4);
     assert_eq!(
         compiler
             .prove(
@@ -1166,39 +1181,58 @@ fn holder_refuses_unlisted_row_buckets_before_proving() {
         compiler.prove(&allowed, &[], &[], &FixtureEncoder, [3; 32], clock),
         Err(Error::Infrastructure(_))
     ));
+
+    let mut buckets = BucketPolicy::default();
+    buckets.allow_plan(&approved_plan);
+    buckets.allow_plan(&swapped.plan().unwrap());
+    let compiler = compiler.with_bucket_policy(buckets);
+    assert_eq!(compiler.holder_plan(&allowed).unwrap(), approved_plan);
+    assert_eq!(
+        compiler.holder_plan(&swapped).unwrap(),
+        swapped.plan().unwrap()
+    );
+    assert_eq!(
+        compiler.holder_plan(&other_shape).unwrap_err(),
+        Error::RowBucketsNotAllowed
+    );
 }
 
 #[test]
 fn holder_defaults_to_the_catalogue_row_policy() {
     let query = "ASK {}";
-    let bounds = Bounds {
-        credentials: 1,
-        quads_per_credential: 2,
-        rows_per_table: 1,
+    let make = |rows_per_table| {
+        let bounds = Bounds {
+            credentials: 1,
+            quads_per_credential: 2,
+            rows_per_table,
+        };
+        let plan = sparq_zk_query::lower::lower(query, bounds).unwrap();
+        let key = vec![41; 8];
+        let prepared = Prepared {
+            descriptor: sparq_zk_query::request::descriptor(&plan, &key).unwrap(),
+            plan,
+            verification_key: key.clone(),
+            artifact: serde_json::Value::Null,
+        };
+        authenticated_request(stored(&prepared, query, 9, "urn:verifier", None), bounds, key)
+            .unwrap()
     };
-    let plan = sparq_zk_query::lower::lower(query, bounds).unwrap();
-    let key = vec![41; 8];
-    let prepared = Prepared {
-        descriptor: sparq_zk_query::request::descriptor(&plan, &key).unwrap(),
-        plan,
-        verification_key: key.clone(),
-        artifact: serde_json::Value::Null,
-    };
-    let request = authenticated_request(
-        stored(&prepared, query, 9, "urn:verifier", None),
-        bounds,
-        key,
-    )
-    .unwrap();
+    let allowed = make(1);
+    let denied = make(2);
+    let allowed_plan = allowed.plan().unwrap();
+    assert_eq!(allowed_plan.hash(), denied.plan().unwrap().hash());
     let work = tempfile::tempdir().unwrap();
     let compiler = Compiler::new(work.path(), work.path()).unwrap();
+    assert_eq!(compiler.holder_plan(&allowed).unwrap(), allowed_plan);
     assert_eq!(
-        compiler.holder_plan(&request).unwrap().hash(),
-        prepared.plan.hash()
+        compiler
+            .prove(&denied, &[], &[], &FixtureEncoder, [3; 32], || NOW)
+            .unwrap_err(),
+        Error::RowBucketsNotAllowed
     );
     let compiler = compiler.with_bucket_policy(BucketPolicy::default());
     assert_eq!(
-        compiler.holder_plan(&request).unwrap_err(),
+        compiler.holder_plan(&allowed).unwrap_err(),
         Error::RowBucketsNotAllowed
     );
 }

@@ -35,11 +35,12 @@ struct Compiled {
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 struct CacheKey {
     plan: [u8; 32],
+    row_limit: u32,
     library: [u8; 32],
 }
 
-/// In-process key cache indexed by shape hash and invalidated when trusted
-/// library source changes. Keys are derived locally, never loaded from a request.
+/// In-process key cache indexed by shape hash, public row limit and trusted
+/// library source. Keys are derived locally, never loaded from a request.
 pub struct Compiler {
     root: PathBuf,
     zk: PathBuf,
@@ -160,6 +161,8 @@ impl Compiler {
         }
         let cache_key = CacheKey {
             plan: plan.hash(),
+            // The public ceiling also selects the generated row-bound check.
+            row_limit: plan.bounds().rows_per_table,
             library: *fingerprint.finalize().as_bytes(),
         };
         let mut cache = self

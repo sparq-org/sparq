@@ -203,7 +203,8 @@ Value reads carry a datatype profile per column. The compiler derives each
 profile from the hashed plan alone: the plan encoding carries the datatype class
 of every constant an expression reads (non-literal, numeric, date, dateTime,
 boolean, string, other literal) and the generation mode (operator fixture, suite
-fixture, canonical envelope), so equal plan hashes generate identical programs.
+fixture, canonical envelope). Equal plan hashes with the same exact public row
+limit generate identical programs.
 Values and list members stay outside the hash: a public membership list reads
 every supported datatype and compares at run time, so a member's class changes
 neither the mask nor the program.
@@ -446,18 +447,19 @@ points enforce the same check before compilation or witness generation. A miss
 returns `RowBucketsNotAllowed`. Verifier preparation and verification derive
 their plans from the verifier's stored request.
 
-The holder can produce a proof only when each evaluated table fits its public
-bound. This includes intermediate operator outputs before the final result, such as
-scan and join outputs and the evaluated tables of correlated `EXISTS` bodies.
-For repeated requests over the same private inputs and equivalent query
-evaluation, each success bounds every table's cardinality from above. The
-smallest successful bound for a given table gives its tightest upper bound from
-those successes. A refusal known to be due to a row overflow means at least one
-table exceeded its corresponding bound. If every other table is already known
-to fit, that refusal supplies a lower bound for the remaining table. The released
-answer omits these intermediate cardinalities as separate fields. The allow-list
-limits which bucket vectors a holder will evaluate, and the outcomes of approved
-requests can still disclose these bounds.
+In a proven evaluation, each table's active rows fit both its bucket and the
+public row limit. This includes intermediate scan and join outputs and the
+tables evaluated for each outer binding of a correlated `EXISTS`. For repeated
+requests over the same private inputs and equivalent query evaluation, the
+smallest successful effective bound for a given table gives its tightest upper
+bound from those successes. When the same bound applies to several evaluations
+of a correlated table, it also bounds the largest cardinality across them.
+A refusal known to be due to a row overflow means at least one table exceeded
+its effective bound. If every other table is already known to fit, that refusal
+supplies a lower bound for the remaining table. A policy refusal gives no row
+count information because the holder makes that decision before evaluation.
+The released answer omits intermediate cardinalities as separate fields.
+Approved requests can still disclose these bounds.
 
 ### Closed graph fixtures
 

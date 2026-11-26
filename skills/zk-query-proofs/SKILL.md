@@ -218,7 +218,8 @@ For a custom list, start with `capacity::BucketPolicy::default()`, call
 `Compiler::with_bucket_policy`. `Compiler::holder_plan(&request)` checks the
 request's plan hash and public row limit. `prove` and `prove_with_envelope`
 return `Error::RowBucketsNotAllowed` on a policy miss before compiling or
-generating a witness. See the [query-method contracts](references/query-method-contracts.md#holder-row-bucket-policy).
+generating a witness. The exact public row limit also distinguishes entries in
+the native compiler cache. See the [query-method contracts](references/query-method-contracts.md#holder-row-bucket-policy).
 
 The query crate's `envelope_policy::{PolicyInput, derive, public_words}` helper
 prepares the agreed public policy extension from typed stored-policy input.

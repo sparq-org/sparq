@@ -11,9 +11,8 @@ Separate public quad limits choose the ordered credential-slot buckets. `Opening
 The request stores selected opening bounds and optional envelope consumers; the plan hash commits both.
 
 Constants are public parameters. Plan encodings include parameter kinds, wiring, schemas, orders,
-capacities, the generation mode and each expression constant's datatype class, but no values or
-variable names, so equal plan hashes generate identical programs. Constant membership lists use a
-fixed parameter block and public active length; values and list lengths preserve the shape.
+capacities, generation mode and expression constant datatype classes. Constant values, variable names
+and membership list lengths preserve the shape. Membership lists use a fixed block and public length.
 Rows are ordered lexicographically by term encoding in schema order; duplicates
 remain unless DISTINCT is requested. Scans check canonical bindings directly,
 including completeness, uniqueness and the first matching source payload.
@@ -45,7 +44,7 @@ run it with `cargo test -p sparq-zk-query --features ordered-json`.
 
 `method::Compiler` provides `prepare`, `prove` and `verify`. Choose an artifact root outside a Nargo workspace;
 `with_crs_path` selects a writable CRS cache. Driver, pin guard and challenge-store contracts are shared.
-Keys are cached by plan and trusted source; request-key comparison precedes reading private inputs.
+Keys are cached by plan hash, public row limit and trusted source. The holder checks the key before reading private inputs.
 
 `Request::new_authenticated` stores the native key, authoritative issuer-set root,
 shared protocol request and public bounds. `prepare_with_credential_quad_bounds`

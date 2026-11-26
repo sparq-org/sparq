@@ -109,10 +109,11 @@ outside named graphs. Exact target host interpretation, source generation,
 canonical witness preparation, circuit execution and proof verification are
 separate evidence stages.
 
-The cache is indexed by plan shape and invalidated by a fingerprint of the trusted
-library sources and pinned dependency declarations. It compiles from private source
-snapshots. Cached keys are never accepted from a presentation or loaded as trusted
-serialized cache bytes. Independent native compilations check ACIR and key identity.
+The cache key includes the plan hash, the exact public row limit and a fingerprint
+of the trusted library sources and pinned dependency declarations. Compilation uses
+private source snapshots. Cached keys are never accepted from a presentation or
+loaded as trusted serialized cache bytes. Independent native compilations check
+ACIR and key identity.
 The primitive lives in the proof driver module with method re-exports so the adapter
 lane's owned files remain available for its implementation.
 
