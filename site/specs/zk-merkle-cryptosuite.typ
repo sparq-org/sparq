@@ -98,8 +98,8 @@ sampled byte salts.
 
 The issuer canonicalizes the unsecured credential with RDFC-1.0 using SHA-256.
 The result is a set of quads with canonical blank node labels. Blank nodes keep
-those labels in their leaves. Quads containing an RDF 1.2 triple term are not
-supported.
+those labels in their leaves. The RDFC-1.0 profile excludes RDF 1.2 triple terms
+and directional language-tagged literals.
 
 == Term encoding
 
@@ -117,11 +117,11 @@ The #dfn[term encoding] `enc(t)` of a term `t` is:
 
 A literal's #dfn[comparison key] is one class byte and 30 payload bytes,
 computed from its datatype and lexical form only. It is an order-preserving
-encoding of the literal's value: for two literals whose keys have the same class
-from `0x01` to `0x06`, or class `0x08`, comparing the keys as unsigned big-endian integers gives
+encoding of the literal's value. For two literals whose keys have the same class
+from `0x01` to `0x06`, comparing the keys as unsigned big-endian integers gives
 the result of the SPARQL operators `=`, `!=`, `<`, `>`, `<=` and `>=` on the
-literals #cite("SPARQL11-QUERY"). Each class holds only datatypes that SPARQL
-compares with one another.
+literals #cite("SPARQL11-QUERY"). Class `0x08` compares calendar days for methods
+that support timezone-free `xsd:date` value comparisons as a SPARQL extension.
 
 - Keys of different classes MUST NOT be compared.
 - A class `0x07` key decides an order only when the two prefixes differ.
@@ -165,7 +165,7 @@ Each example gives the first byte of the key.
   [`0x06`], [`xsd:string` of at most 30 bytes and no U+0000],
     [the lexical bytes],
   [`0x07`], [other `xsd:string`], [the first 30 lexical bytes],
-  [`0x08`], [timezone-free `xsd:date`],
+  [`0x08`], [timezone-free `xsd:date` with years from `0001` through `9999`],
     [8 bytes: proleptic Gregorian days since 1970-01-01 plus 2#super[63]],
   [`0x7F`], [valid values the key cannot represent],
     [none: decimals with more than 18 fractional digits or a magnitude of at least
@@ -258,6 +258,9 @@ configuration contains one cryptosuite statement naming the accepted suite. It
 then recomputes the tree and signed message using that suite's rules and verifies
 the signature. Ed25519 verification MUST reject non-canonical encodings and
 small-order keys.
+
+For the SHA-256 successor, the object of the cryptosuite statement MUST be a
+literal of datatype `xsd:string` or `https://w3id.org/security#cryptosuiteString`.
 
 == Use in proofs of query answers
 

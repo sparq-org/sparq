@@ -68,7 +68,8 @@ Enable the default-off `sha256-salted` feature to select the native successor.
 Call `sha256_salted::issue(document, proof_config, &signing_key, salt)` with a fresh,
 uniformly random `[u8; 32]` from a cryptographic random source. The proof
 configuration must contain one cryptosuite statement naming
-`eddsa-sha256-merkle-salted-2026`. The issuer
+`eddsa-sha256-merkle-salted-2026` as an `xsd:string` or an
+`https://w3id.org/security#cryptosuiteString` literal. The issuer
 canonicalizes the RDF dataset and sorts its quads by unsigned digest. It derives
 private leaf salts by HMAC-SHA-256 over the suite's leaf-salt domain and each
 zero-based index. Treat the resulting `SignedCredential`, including
@@ -77,8 +78,9 @@ and issuer key to `sha256_salted::verify(&credential, &verifying_key)`. Each SHA
 verifier accepts only its declared suite.
 
 For private tree reconstruction, `sha256_salted::quad_hash` hashes a canonical
-quad and `sha256_salted::root` takes the strictly increasing digests and issuance
-salt. `leaf_salt` and `leaf` derive the salt and leaf at a given index.
+RDFC-1.0 quad. It refuses triple terms and directional language-tagged literals.
+`sha256_salted::root` takes the strictly increasing digests and issuance salt.
+`leaf_salt` and `leaf` derive the salt and leaf at a given index.
 `signed_message` binds the suite, issuance salt, exact count, root and canonical
 configuration digest. Keep the unsalted quad digests and derived salts private.
 Guest adoption is tracked by [#7391](https://github.com/sparq-org/sparq/issues/7391).
@@ -93,10 +95,9 @@ additional built-in decimal-derived non-integer datatypes; unknown custom
 subtypes cannot be inferred from an IRI alone and get no key.
 
 Poseidon2 and the SHA successor use the shared extended profile. Timezone-free
-`xsd:date` uses the calendar-day class. Valid timezoned dates get
-`UNREPRESENTABLE`: the day ordinal cannot retain timezone offsets, and the
-engine's mixed-timezone comparison is a partial order. This member adds no
-separate zoned-date key class. Invalid literals get `NONE`. Neither class
+`xsd:date` with a year from `0001` through `9999` uses the calendar-day class.
+Valid dates with a timezone or a year outside that range get
+`UNREPRESENTABLE`. Invalid literals get `NONE`. Neither class
 can establish an order. Prefix keys establish an order only when prefixes differ.
 RDF term identity is key-independent: use `TermCell::identity()` in Noir and
 `poseidon::term_identity(&term)` in Rust. Scan, join, DISTINCT, sameTerm,

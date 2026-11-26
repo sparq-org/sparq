@@ -55,6 +55,13 @@ pub struct SignedCredential {
 }
 
 fn canonical_config(text: &str, suite: &str) -> Result<String, Error> {
+    canonical_config_with(text, |literal| literal.value() == suite)
+}
+
+fn canonical_config_with(
+    text: &str,
+    matches_suite: impl FnOnce(&oxrdf::Literal) -> bool,
+) -> Result<String, Error> {
     use oxrdf::Term;
     let text = sparq_canon::canonicalize_nquads(text)
         .map_err(|_| Error("configuration canonicalization rejected"))?;
@@ -66,7 +73,7 @@ fn canonical_config(text: &str, suite: &str) -> Result<String, Error> {
         .filter(|q| q.predicate.as_str() == "https://w3id.org/security#cryptosuite")
         .collect::<Vec<_>>();
     if suite_statements.len() != 1
-        || !matches!(&suite_statements[0].object, Term::Literal(l) if l.value() == suite)
+        || !matches!(&suite_statements[0].object, Term::Literal(l) if matches_suite(l))
     {
         return Err(Error(
             "configuration must name this cryptosuite exactly once",

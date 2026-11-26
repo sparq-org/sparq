@@ -14,7 +14,8 @@ proof configuration must name `schnorr-poseidon2-merkle-2026` with
 Enable the default-off `sha256-salted` feature and use
 `sha256_salted::{issue, verify}` for the native Ed25519/SHA-256 successor.
 Its proof configuration names `eddsa-sha256-merkle-salted-2026` under the
-same predicate. Supply a fresh, uniformly random 32-byte salt at issuance
+same predicate with an `xsd:string` or `sec:cryptosuiteString` literal.
+Supply a fresh, uniformly random 32-byte salt at issuance
 and treat the resulting `signature || salt` bytes as private credential
 material. Each verifier accepts its own edition.
 
@@ -76,7 +77,9 @@ uses this crate**; the model file is included directly only by the test oracle.
 The original SHA member uses the frozen datatype profile. The successor shares
 the extended comparison keys with Poseidon2 and derives leaf salts from the
 issuance salt and each position in strict quad-hash order. Literal frames bind
-the original RDF term along with its comparison key.
+the original RDF term along with its comparison key. The successor's quad
+encoder accepts the RDFC-1.0 term profile, which excludes triple terms and
+directional language-tagged literals.
 
 `tests/sha_parity.rs` checks the actual model source against this crate over fixed
 vectors and generated data, including issuance and verification. It runs in the

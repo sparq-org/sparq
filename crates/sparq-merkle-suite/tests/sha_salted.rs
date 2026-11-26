@@ -1,7 +1,7 @@
 #![cfg(feature = "sha256-salted")]
 
 use ed25519_dalek::{Signer, SigningKey};
-use oxrdf::{GraphName, Literal, NamedNode, Quad, Term};
+use oxrdf::{BaseDirection, GraphName, Literal, NamedNode, Quad, Term, Triple};
 use sha2::{Digest, Sha256};
 use sparq_merkle_suite::{comparison_key, sha256, sha256_salted as salted, SignedCredential};
 
@@ -64,6 +64,8 @@ fn successor_commits_checked_calendar_keys() {
         "2000-02-29Z",
         "2000-02-29+00:00",
         "2000-02-29-00:00",
+        "2000-02-29+05:30",
+        "2000-02-29-03:30",
         "2000-02-29+14:00",
         "2000-02-29-14:00",
         "0000-02-29",
@@ -301,14 +303,108 @@ fn successor_verifier_requires_its_suite_in_the_signed_configuration() {
     let salt = [7; 32];
     let legacy_config = using_suite(sha256::EDDSA_SHA256_MERKLE_2026);
     let root = salted::root(&hashes(DATE), &salt).unwrap();
-    let digest = Sha256::digest(legacy_config.as_bytes()).into();
-    let signature = key.sign(&salted::signed_message(&salt, 1, &root, &digest));
-    let credential = SignedCredential {
-        document: DATE.to_owned(),
-        proof_config: legacy_config,
+    let extra = legacy_config.replacen("<urn:p>", "<urn:q>", 1);
+    for config in [
+        String::new(),
+        format!("{}{extra}", using_suite(SUITE)),
+        legacy_config,
+    ] {
+        let digest = Sha256::digest(config.as_bytes()).into();
+        let signature = key.sign(&salted::signed_message(&salt, 1, &root, &digest));
+        let credential = SignedCredential {
+            document: DATE.to_owned(),
+            proof_config: config,
+            signature: [signature.to_bytes().as_slice(), salt.as_slice()].concat(),
+        };
+        assert!(!salted::verify(&credential, &key.verifying_key()));
+    }
+}
+
+#[test]
+fn successor_checks_cryptosuite_literal_type() {
+    let key = signing_key();
+    let pk = key.verifying_key();
+    let salt = [7; 32];
+    let prefix = format!("<urn:p> <https://w3id.org/security#cryptosuite> \"{SUITE}\"");
+    let root = salted::root(&hashes(DATE), &salt).unwrap();
+    for (suffix, accepted) in [
+        ("", true),
+        ("^^<https://w3id.org/security#cryptosuiteString>", true),
+        ("@en", false),
+        ("^^<http://www.w3.org/2001/XMLSchema#boolean>", false),
+    ] {
+        let proof_config = format!("{prefix}{suffix} .\n");
+        let digest = Sha256::digest(proof_config.as_bytes()).into();
+        let message = salted::signed_message(&salt, 1, &root, &digest);
+        let credential = SignedCredential {
+            document: DATE.to_owned(),
+            proof_config: proof_config.clone(),
+            signature: [key.sign(&message).to_bytes().as_slice(), salt.as_slice()].concat(),
+        };
+        assert_eq!(salted::verify(&credential, &pk), accepted, "{suffix}");
+        assert_eq!(
+            salted::issue(DATE, &proof_config, &key, salt).ok(),
+            accepted.then_some(credential.clone()),
+            "{suffix}"
+        );
+    }
+}
+
+#[test]
+fn successor_refuses_quad_objects_outside_rdfc10() {
+    let subject = NamedNode::new("urn:s").unwrap();
+    let predicate = NamedNode::new("urn:p").unwrap();
+    let key = signing_key();
+    let config = using_suite(SUITE);
+    let mut credential = salted::issue(DATE, &config, &key, [7; 32]).unwrap();
+    let mut quad = Quad::new(
+        subject.clone(),
+        predicate.clone(),
+        Literal::new_language_tagged_literal("word", "en").unwrap(),
+        GraphName::DefaultGraph,
+    );
+    assert!(salted::quad_hash(&quad).is_some());
+    for object in [
+        Literal::new_directional_language_tagged_literal("word", "en", BaseDirection::Ltr)
+            .unwrap()
+            .into(),
+        Literal::new_directional_language_tagged_literal("word", "en", BaseDirection::Rtl)
+            .unwrap()
+            .into(),
+        Triple::new(subject, predicate, NamedNode::new("urn:o").unwrap()).into(),
+    ] {
+        quad.object = object;
+        assert_eq!(salted::quad_hash(&quad), None, "{quad}");
+        credential.document = format!("{quad} .\n");
+        assert!(salted::issue(&credential.document, &config, &key, [7; 32]).is_err());
+        assert!(!salted::verify(&credential, &key.verifying_key()));
+    }
+}
+
+#[test]
+fn successor_verifier_refuses_resigned_out_of_order_quads() {
+    let key = signing_key();
+    let salt = [7; 32];
+    let config = using_suite(SUITE);
+    let digest = Sha256::digest(config.as_bytes()).into();
+    let in_order = [DATE, LANG].concat();
+    let credential = salted::issue(&in_order, &config, &key, salt).unwrap();
+    assert_eq!(credential.document, in_order);
+    assert!(salted::verify(&credential, &key.verifying_key()));
+
+    let document = [LANG, DATE].concat();
+    let quads = hashes(&document);
+    let mut node = Sha256::new_with_prefix([1]);
+    node.update(salted::leaf(&quads[0], &salt, 0));
+    node.update(salted::leaf(&quads[1], &salt, 1));
+    let root = node.finalize().into();
+    let signature = key.sign(&salted::signed_message(&salt, 2, &root, &digest));
+    let out_of_order = SignedCredential {
+        document,
+        proof_config: config,
         signature: [signature.to_bytes().as_slice(), salt.as_slice()].concat(),
     };
-    assert!(!salted::verify(&credential, &key.verifying_key()));
+    assert!(!salted::verify(&out_of_order, &key.verifying_key()));
 }
 
 #[test]

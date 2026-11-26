@@ -1,17 +1,21 @@
 //! Research-grade Ed25519/SHA-256 suite with private per-leaf salts.
-use crate::{canonical_config, comparison_key, sha256, Error, SignedCredential, SALT_BYTES};
+use crate::{canonical_config_with, comparison_key, sha256, Error, SignedCredential, SALT_BYTES};
 use ed25519_dalek::{Signature, VerifyingKey};
 use hmac::{Hmac, Mac};
-use oxrdf::Quad;
+use oxrdf::{Quad, Term};
 use sha2::{Digest, Sha256};
 
 /// Data Integrity suite identifier and signed-message domain.
 pub const EDDSA_SHA256_MERKLE_SALTED_2026: &str = "eddsa-sha256-merkle-salted-2026";
 
-/// Unsalted digest of a canonical quad for private ordering. Triple terms return
-/// `None`. Literal frames bind both the RDF term bytes and the extended key.
+/// Unsalted digest of a canonical RDFC-1.0 quad for private ordering.
+/// Returns `None` for triple terms and directional language-tagged literals.
+/// Literal frames bind both the RDF term bytes and the extended key.
 #[must_use]
 pub fn quad_hash(quad: &Quad) -> Option<[u8; 32]> {
+    if matches!(&quad.object, Term::Literal(literal) if literal.direction().is_some()) {
+        return None;
+    }
     let hash = Sha256::new_with_prefix(EDDSA_SHA256_MERKLE_SALTED_2026).chain_update(b"/quad\0");
     sha256::quad_digest(quad, hash, comparison_key)
 }
@@ -80,12 +84,23 @@ fn canonical_document(document: &str) -> Result<String, Error> {
         .map_err(|_| Error("document canonicalization rejected"))
 }
 
+fn canonical_config(proof_config: &str) -> Result<String, Error> {
+    canonical_config_with(proof_config, |literal| {
+        literal.value() == EDDSA_SHA256_MERKLE_SALTED_2026
+            && matches!(
+                literal.datatype().as_str(),
+                "http://www.w3.org/2001/XMLSchema#string"
+                    | "https://w3id.org/security#cryptosuiteString"
+            )
+    })
+}
+
 fn quad_hashes(document: &str) -> impl Iterator<Item = Result<[u8; 32], Error>> + '_ {
     oxttl::NQuadsParser::new()
         .for_slice(document.as_bytes())
         .map(|quad| {
             let quad = quad.map_err(|_| Error("quad parsing rejected"))?;
-            quad_hash(&quad).ok_or(Error("RDF 1.2 triple terms are not admitted"))
+            quad_hash(&quad).ok_or(Error("quad object is outside the RDFC-1.0 profile"))
         })
 }
 
@@ -105,7 +120,8 @@ fn document_message(
 
 /// Issue an ordered credential with `signature || salt` as its proof value bytes.
 /// The issuer supplies a fresh uniformly random 32-byte salt and shares it
-/// only with the holder. The proof configuration must name this suite.
+/// only with the holder. The proof configuration must name this suite with an
+/// `xsd:string` or `sec:cryptosuiteString` literal.
 ///
 /// # Errors
 /// Refuses malformed or unsupported documents, empty trees, and invalid proof
@@ -119,7 +135,7 @@ pub fn issue(
     use ed25519_dalek::Signer;
 
     let document = canonical_document(document)?;
-    let proof_config = canonical_config(proof_config, EDDSA_SHA256_MERKLE_SALTED_2026)?;
+    let proof_config = canonical_config(proof_config)?;
     let mut rows = quad_hashes(&document)
         .zip(document.split_inclusive('\n'))
         .map(|(hash, line)| Ok((hash?, line)))
@@ -140,8 +156,7 @@ pub fn issue(
 #[must_use]
 pub fn verify(credential: &SignedCredential, key: &VerifyingKey) -> bool {
     let check = || -> Result<(), Error> {
-        let configuration =
-            canonical_config(&credential.proof_config, EDDSA_SHA256_MERKLE_SALTED_2026)?;
+        let configuration = canonical_config(&credential.proof_config)?;
         if configuration != credential.proof_config {
             return Err(Error("configuration is not canonical"));
         }
