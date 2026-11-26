@@ -8,6 +8,7 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { request, testIssuerKeygen } from '../index.js';
 import { canonicalGraph, issueFixture } from '../scripts/test-credentials.mjs';
+import { consumerCases } from '../scripts/consumer-cases.mjs';
 import { examplePolicy } from '../scripts/catalogue-example.mjs';
 import { wasmProverFits, keyDyadicSize } from '../wasm-prover.mjs';
 test('every catalogue example derives its pinned plan and leaves no stale assets', () => {
@@ -56,4 +57,13 @@ test('catalogue, binary pins and keys fail closed when their stored digests diff
       writeFileSync(path, original);
     }
   } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('Solid consumer queries have pinned catalogue examples and native artifacts', () => {
+  const table = JSON.parse(readFileSync(new URL('../assets/catalogue.json', import.meta.url)));
+  for (const sample of consumerCases) {
+    const entry = table.entries.find(e => e.example.name === sample.name);
+    assert(entry, sample.name);
+    assert.deepEqual(entry.example, sample);
+  }
 });

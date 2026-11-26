@@ -13,7 +13,8 @@
 //! belong in local diagnostics unless the disclosure policy permits them.
 //!
 //! The admitted fragment is SELECT DISTINCT / true ASK with a nonempty positive
-//! BGP, joins, and canonical nonnegative integer or timezone-free date comparisons.
+//! BGP, joins, canonical nonnegative integer or timezone-free date comparisons,
+//! and constant-list IN predicates on bound terms.
 //! Projected blank nodes and query blank-node syntax are rejected; hidden blank
 //! nodes retain per-credential scope during joins. This module is research-grade
 //! and has not been externally audited.
@@ -28,6 +29,8 @@ use std::collections::{BTreeMap, BTreeSet};
 pub(crate) mod date;
 mod issuer_scope;
 mod optimize;
+mod term_in;
+pub use term_in::TermInFilter;
 pub use issuer_scope::lower_issuer_scope;
 /// Separately admitted canonical signed-integer disclosure planning.
 pub mod signed;
@@ -124,6 +127,8 @@ pub struct DisclosureQuery {
     pub patterns: Vec<[QuerySlot; 3]>,
     /// Conjunctive integer or date-key comparisons in AST traversal order.
     pub filters: Vec<IntegerFilter>,
+    /// Constant-list membership over authenticated public or private bindings.
+    pub in_filters: Vec<TermInFilter>,
 }
 
 impl DisclosureQuery {
@@ -170,7 +175,7 @@ impl DisclosureQuery {
                 };
                 (
                     QueryKind::SelectDistinct,
-                    variables.iter().map(|v| v.as_str().to_owned()).collect(),
+                    variables.iter().map(|v| v.as_str().to_owned()).collect::<Vec<_>>(),
                     inner.as_ref(),
                 )
             }
@@ -187,15 +192,21 @@ impl DisclosureQuery {
         };
         let mut patterns = Vec::new();
         collect_patterns(inner, &mut patterns, numeric)?;
+        let mut numeric_pattern = inner.clone();
+        let in_filters = term_in::extract(&mut numeric_pattern, numeric)?;
         let filters = match numeric {
             NumericProfile::Signed => signed::collect_filters(inner)?,
-            NumericProfile::Unsigned => date::collect_filters(sparql)?,
+            NumericProfile::Unsigned if in_filters.is_empty() => date::collect_filters(sparql)?,
+            NumericProfile::Unsigned => date::collect_filters(&format!(
+                "SELECT DISTINCT * WHERE {{ {numeric_pattern} }}"
+            ))?,
         };
         let query = Self {
             kind,
             projection,
             patterns,
             filters,
+            in_filters,
         };
         query.validate()?;
         Ok(query)
@@ -220,7 +231,7 @@ impl DisclosureQuery {
         if self.patterns.len() > MAX_DISCLOSURE_PATTERNS {
             return Err(PlanError::LimitExceeded("admitted BGP patterns"));
         }
-        if self.filters.len() > MAX_DISCLOSURE_FILTERS {
+        if self.filters.len() + self.in_filters.len() > MAX_DISCLOSURE_FILTERS {
             return Err(PlanError::LimitExceeded("admitted FILTER comparisons"));
         }
         if self.patterns.is_empty() {
@@ -235,6 +246,11 @@ impl DisclosureQuery {
         }
         if self.kind == QueryKind::Ask && !self.projection.is_empty() {
             return Err(unsupported("ASK cannot release bindings"));
+        }
+        for filter in &self.in_filters {
+            if !variables.contains(&filter.variable) {
+                return Err(unsupported("IN requires an authenticated bound variable"));
+            }
         }
         for filter in &self.filters {
             if !variables.contains(&filter.variable) {
@@ -370,6 +386,14 @@ fn collect_filter_variables(
                 out.insert(v.as_str().to_owned());
             }
             E::Literal(_) => {}
+            E::In(value, list) => {
+                if !matches!(value.as_ref(), E::Variable(_))
+                    || list.iter().any(|v| !matches!(v, E::Literal(_) | E::NamedNode(_)))
+                {
+                    return Err(unsupported("IN requires a variable and constant terms"));
+                }
+                pending.push(value);
+            }
             E::And(a, b)
             | E::Less(a, b)
             | E::LessOrEqual(a, b)
@@ -447,7 +471,7 @@ pub struct PlannedRow {
     /// A triple is present only when all three slots are publicly determined.
     /// Its membership and authentication obligations are retained separately.
     pub disclosed_triples: Vec<Option<Triple>>,
-    /// Predicate obligations, including public checks requiring authentication.
+    /// Numeric predicate obligations, including public checks requiring authentication.
     pub filters: Vec<FilterObligation>,
     /// A deterministic spanning star over each hidden variable's occurrences.
     pub identities: Vec<IdentityObligation>,
@@ -692,12 +716,12 @@ fn assemble_plan(
             .filters
             .iter()
             .filter(|f| matches!(f, FilterObligation::PublicCheck { .. }))
-            .count();
+            .count() + query.in_filters.iter().filter(|f| query.projection.contains(&f.variable)).count();
         metrics.hidden_filter_obligations += row
             .filters
             .iter()
             .filter(|f| matches!(f, FilterObligation::HiddenPredicate { .. }))
-            .count();
+            .count() + query.in_filters.iter().filter(|f| !query.projection.contains(&f.variable)).count();
         metrics.hidden_identity_obligations += row.identities.len();
         rows.push(row);
     }
@@ -791,12 +815,16 @@ fn find_witness<A: Fn(usize, MembershipRef, &Triple) -> bool>(
 ) -> Result<bool, PlanError> {
     let numeric = budget.numeric;
     if pattern_index == query.patterns.len() {
-        return Ok(query.filters.iter().all(|filter| {
-            bindings
-                .get(&filter.variable)
-                .and_then(|v| filter.value(numeric, &v.term))
-                .is_some_and(|value| integer_comparison(value, filter.op, filter.bound))
-        }));
+        return Ok(
+            query.in_filters.iter().all(|f| {
+                bindings.get(&f.variable).is_some_and(|v| f.accepts(&v.term))
+            }) && query.filters.iter().all(|filter| {
+                bindings
+                    .get(&filter.variable)
+                    .and_then(|v| filter.value(numeric, &v.term))
+                    .is_some_and(|value| integer_comparison(value, filter.op, filter.bound))
+            }),
+        );
     }
     for (credential, graph) in credentials.iter().enumerate() {
         for (leaf, triple) in graph.canonical.triples.iter().enumerate() {
@@ -865,6 +893,11 @@ fn extend_bindings(
     }
     // Parsing required every FILTER variable to be directly bound in its own
     // positive input scope, so rejecting an already-bound failing value is safe.
+    if !query.in_filters.iter().all(|f| {
+        next.get(&f.variable).is_none_or(|v| f.accepts(&v.term))
+    }) {
+        return None;
+    }
     query
         .filters
         .iter()

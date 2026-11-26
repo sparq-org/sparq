@@ -14,6 +14,7 @@ import { agreement } from './compiler-agreement.mjs';
 import { proofContract } from './proof-contract.mjs';
 import { liveRuntimeHash } from './live-runtime.mjs';
 import './targets-live.mjs';
+import './consumer-live.mjs';
 import '../test/binary.live.js';
 test('split prover, seeded issuance and compiler agreement live contracts', async () => {
 const root = fileURLToPath(new URL('../../../', import.meta.url));

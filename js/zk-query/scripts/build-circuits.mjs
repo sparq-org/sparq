@@ -51,7 +51,8 @@ async function build({ plan, example }) {
   const work = join(cache, plan.planHash); mkdirSync(work, { recursive: true, mode: 0o700 });
   for (const [name, text] of Object.entries({ ...sources, ...plan.files })) stageSource(work, name, text);
   const nativeArtifact = join(work, 'target', `${plan.packageName}.json`);
-  if (!existsSync(nativeArtifact)) await run(nargo, ['compile'], { cwd: work, env: { ...process.env, RAYON_NUM_THREADS: '1' } });
+  const nargoHome = join(work, 'nargo-home'); mkdirSync(nargoHome, { recursive: true, mode: 0o700 });
+  if (!existsSync(nativeArtifact)) await run(nargo, ['compile'], { cwd: work, env: { ...process.env, HOME: nargoHome, RAYON_NUM_THREADS: '1' } });
   const bytes = canonicalArtifact(readFileSync(nativeArtifact));
   if (!update && sha256(bytes) !== entry.acirSha256) throw new Error('cached catalogue program differs from its pin');
   if (!existsSync(join(work, 'vk'))) await run(bb, ['write_vk', '-b', nativeArtifact, '-o', work, '-t', 'noir-recursive', '--crs_path', join(assets, 'crs')], { cwd: work, env: { ...process.env, HARDWARE_CONCURRENCY: '1' } });

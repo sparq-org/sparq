@@ -40,7 +40,7 @@ const recycled = target => target.startsWith('3');
  * Credentials, policy envelope, holder and status lists for one target case.
  * `revoked` sets the status bit; the others keep honest facts.
  */
-export function targetFixture(target, kase = 'honest') {
+export function targetFixture(target, kase = 'honest', transformClaims = claims => claims) {
   const holder = testHolderKeygen('17'.repeat(32));
   const rows = facts(target, kase);
   const keyIndex = (issuer, i) => recycled(target) ? RECYCLED.indexOf(issuer) : i;
@@ -50,7 +50,7 @@ export function targetFixture(target, kase = 'honest') {
     const key = testIssuerKeygen((k + 0x40).toString(16).repeat(32));
     issuers.set(k, { issuer, verificationMethod: `urn:method:${k}`, publicKey: key.publicKey });
     lists.set(k, { list: `urn:list:${k}`, purpose: 'revocation', bits: kase === 'revoked' ? '1' : '0' });
-    let graph = `${claims}<urn:credential> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <${CRED}VerifiableCredential> .
+    let graph = `${transformClaims(claims)}<urn:credential> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <${CRED}VerifiableCredential> .
 <urn:credential> <${CRED}issuer> <${issuer}> .
 <urn:credential> <${CRED}credentialSubject> <urn:subject> .
 <urn:credential> <${CRED}validFrom> "2020-01-01T00:00:00Z"^^<${XSD}dateTime> .

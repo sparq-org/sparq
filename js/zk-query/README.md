@@ -267,3 +267,48 @@ SELECT table field order: `rows`, `len`.
 ## License
 
 MIT.
+
+## Solid consumer catalogue
+
+The query texts and capacity policies live in
+[`scripts/consumer-cases.mjs`](scripts/consumer-cases.mjs). They are checked
+against the catalogue by the package tests and packaging gate.
+
+| Example | Query contract |
+| --- | --- |
+| `consumer-insurance-count` | The consumer's separate threshold/count/completeness BINDs, scoped to licensing and claims-register issuers. |
+| `consumer-insurance-absence` | The consumer's NOT EXISTS claim-date test, scoped to the claims register, without added period checks. |
+| `consumer-trial` | Both age bindings, diagnosis equality, excluded-medication IN and the original medication-complete flag, scoped to the practice. |
+| `consumer-recycled-min` | The exact original unscoped MIN comparison, including a proved false release below the threshold. |
+| `consumer-degree` | Projected degree IN ("BSc", "MSc") inside one university's GRAPH scope. |
+| `consumer-degree-hidden` | The same membership with only the subject projected. |
+
+The insurance and trial variants add issuer declarations and GRAPH scopes to the
+original consumer expressions. They do not replace completeness flags with
+period predicates. Absence is relative to the presented signed roots.
+The original recycled MIN does not require any particular suppliers to contribute
+or restrict the lot. The existing `target-recycled-min` is the recommended scoped
+replacement when those requirements apply: it fixes the lot, restricts supplier
+IRIs, and requires both three distinct issuers and three values. Removing these
+conditions changes the question. A verifier trust roster alone does not prove
+that every listed supplier contributed. Both queries compare native decimals.
+
+Run the native consumer proof suite after building the host and catalogue:
+
+```sh
+node --test js/zk-query/scripts/consumer-live.mjs
+```
+
+Set `SPARQ_NARGO` and `SPARQ_BB` to the pinned binaries. The live toolchain gate
+also runs this suite. It checks both degree alternatives, boolean false branches,
+changed results and non-catalogue query refusals. Research grade, not externally audited.
+
+Native witness execution gives the pinned compiler a private process home under
+its temporary work directory, including its dependency-cache lock. Catalogue
+builds use a private home under their selected `--cache` directory. The parent
+process home is unchanged; vendored source dependencies need no shared home cache.
+
+The trial catalogue policy assumes one subject with one age, diagnosis and
+completeness value in its credential: its outer tables use the smallest two-row bucket, while the
+medication scan and filter retain their full list capacity. A dataset exceeding
+any table bucket refuses; the query expressions are unchanged.

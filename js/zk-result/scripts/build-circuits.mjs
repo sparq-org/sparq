@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, copyFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, copyFileSync, mkdtempSync, rmSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,9 +17,11 @@ if (execFileSync('nargo', ['--version'], { encoding: 'utf8' }).split('\n')[0] !=
     execFileSync('bb', ['--version'], { encoding: 'utf8' }).trim() !== bbVersion) {
   throw new Error('circuit toolchain does not match repository pins');
 }
-const run = (cmd, args, cwd = root) => execFileSync(cmd, args, { cwd, stdio: 'inherit' });
+const run = (cmd, args, cwd = root) => execFileSync(cmd, args, { cwd, stdio: 'inherit', env: cmd === 'nargo' ? { ...process.env, HOME: nargoHome } : process.env });
 const digest = path => createHash('sha256').update(readFileSync(path)).digest('hex');
 const scratch = mkdtempSync(join(tmpdir(), 'sparq-result-circuits-'));
+const nargoHome = join(scratch, 'nargo-home');
+mkdirSync(nargoHome, { mode: 0o700 });
 try {
   installPinnedCrs(JSON.parse(readFileSync(join(assets, 'crs.pins.json'))), join(scratch, 'crs'));
   for (const entry of members) {

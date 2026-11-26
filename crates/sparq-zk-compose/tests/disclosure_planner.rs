@@ -650,3 +650,25 @@ fn admitted_candidates_preserve_wallet_indices_and_query_checks() {
     )
     .is_err());
 }
+
+#[test]
+fn projected_in_keeps_authentication_and_rejects_nonmembers() {
+    let q = query("SELECT DISTINCT ?degree WHERE { ?s ex:degree ?degree FILTER(?degree IN (\"BSc\", \"MSc\")) }");
+    let graph = credential(&[
+        triple("alice", "degree", Literal::new_simple_literal("BSc").into()),
+        triple("bob", "degree", Literal::new_simple_literal("MSc").into()),
+        triple("eve", "degree", Literal::new_simple_literal("PhD").into()),
+    ], 1);
+    for value in ["BSc", "MSc", "PhD"] {
+        let released = row(&[("degree", Literal::new_simple_literal(value).into())]);
+        let result = plan_disclosure(&q, std::slice::from_ref(&graph), &[released], PlannerLimits::default());
+        if value == "PhD" {
+            assert!(matches!(result, Err(PlanError::NoWitness { .. })));
+        } else {
+            let plan = result.unwrap();
+            assert_eq!(plan.authentication, vec![0]);
+            assert_eq!(plan.memberships.len(), 1);
+            assert_eq!(plan.metrics.public_filter_checks, 1);
+        }
+    }
+}

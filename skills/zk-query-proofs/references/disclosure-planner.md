@@ -12,7 +12,8 @@ predicates before accepting a presentation.
 ## Admission and result contract
 
 Use `DisclosureQuery::parse(query_text)` for SELECT DISTINCT or true ASK over a
-nonempty positive BGP, JOIN, and conjunctive directly bound integer or canonical date FILTERs. The
+nonempty positive BGP, JOIN, and conjunctive directly bound integer, canonical
+date or typed constant-list IN filters. The
 parser rejects bag SELECT, REDUCED, LIMIT/OFFSET, ORDER BY, dataset clauses,
 expression projections, subqueries, aggregates, GRAPH, SERVICE, nonpositive
 operators, query blank-node syntax, and unsupported FILTER expressions. A FILTER
@@ -29,14 +30,23 @@ Canonical timezone-free `xsd:date` bounds use the Gregorian `YYYYMMDD` key.
 selection paths require the operand datatype to match the bound. Timezone
 suffixes, alternate date spellings and date-time bounds receive named refusals.
 
+`DisclosureQuery::in_filters` separately records `TermInFilter` obligations:
+one to sixteen constant IRIs, strings, canonical unsigned integers or dates.
+Selection compares authenticated RDF-term identity. The operand can be public
+or hidden, but must be bound in the FILTER's own input. NOT IN, OR and variable
+list items refuse. A backend must enforce these obligations in addition to the
+numeric `filters`; `PlannedRow::filters` records numeric obligations only.
+The [successful-result contract](successful-results.md#typed-constant-list-membership)
+describes projected verification and the bounded hidden-membership members.
+
 Admission has conservative resource limits before any witness search. Query text
 is limited by `MAX_DISCLOSURE_QUERY_BYTES`; raw ASCII punctuation, including
 punctuation inside public literals and IRIs, is limited by
 `MAX_DISCLOSURE_QUERY_PUNCTUATION`. This preparse fuel counter does not tokenize or
 assign SPARQL meaning. It can reject a simple query containing unusually
 punctuation-heavy terms. The existing parser additionally limits syntactic
-nesting. The planner walks graph and expression ASTs iteratively with bounded
-work, and limits both parsed and programmatically constructed shapes using
+nesting. The initial admission walk counts graph and expression ASTs iteratively before
+filter normalization, and limits both parsed and programmatically constructed shapes using
 `MAX_DISCLOSURE_PATTERNS` and `MAX_DISCLOSURE_FILTERS`. These are host safeguards,
 not proof circuit capacities.
 

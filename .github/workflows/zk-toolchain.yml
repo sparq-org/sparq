@@ -611,6 +611,7 @@ jobs:
         run: |
           set -euo pipefail
           nargo test --package sparq_zk_compose_core
+          nargo test --package result_in_core
           nargo test --package scan_v2dl_k1_n16_r4
           nargo test --package join_eq_v2dl_na16_nb16
 

@@ -1,6 +1,7 @@
 // Research grade and not externally audited. Packing is a maintainer operation.
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { consumerCases } from './consumer-cases.mjs';
 import { sha256, checkPinnedFiles } from '../internal/runtime.mjs';
 const directory = new URL('../', import.meta.url);
 const host = createRequire(import.meta.url)('../wasm/sparq_zk_query_wasm.cjs');
@@ -19,3 +20,7 @@ for (const [name, version] of Object.entries(manifest.dependencies)) {
   if (pins[name] !== version || JSON.parse(read(`node_modules/${name}/package.json`)).version !== version) throw new Error('package dependency pin differs');
 }
 await checkPinnedFiles(JSON.parse(read('assets/crs.pins.json')), new URL('assets/crs/', directory));
+
+for (const sample of consumerCases) {
+  if (!table.entries.some(e => e.example.name === sample.name && JSON.stringify(e.example) === JSON.stringify(sample))) throw new Error('package consumer catalogue differs');
+}

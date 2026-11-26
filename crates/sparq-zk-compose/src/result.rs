@@ -64,6 +64,39 @@ const POLICY_DEPTH: u32 = 4;
 /// Separately versioned signed-integer successful-result preparation and verification.
 pub mod signed;
 
+fn select_package(
+    contract: NumericContract,
+    query: &DisclosureQuery,
+    credentials: usize,
+    numeric_filters: usize,
+    depth: u32,
+    legacy: bool,
+) -> Result<(&'static str, u32), ResultError> {
+    let hidden_in = query
+        .in_filters
+        .iter()
+        .filter(|f| !query.projection.contains(&f.variable))
+        .count();
+    if hidden_in == 0 {
+        return contract.package(credentials, numeric_filters, depth, legacy);
+    }
+    if hidden_in != 1
+        || numeric_filters != 0
+        || depth != 10
+        || legacy
+        || !matches!(contract, NumericContract::Unsigned(_))
+    {
+        return Err(reject("hidden IN requires one membership predicate, no hidden numeric predicates and status depth ten"));
+    }
+    match credentials {
+        1 => Ok(("result_v5_k1_n16_p3_r4_f1_in_d10", BOUND_VERSION)),
+        2 => Ok(("result_v5_k2_n16_p3_r4_f1_in_d10", BOUND_VERSION)),
+        _ => Err(reject("hidden IN credential capacity")),
+    }
+}
+
+
+
 // Adversarial corpus access stays test-only; private witnesses are not a public API.
 #[cfg(test)]
 mod proof_bindings;
@@ -902,6 +935,19 @@ fn public_statement_for(
         }
         rows.push(row);
     }
+    for filter in &query.in_filters {
+        if !query.projection.contains(&filter.variable) {
+            continue;
+        }
+        for row in &rows {
+            if !row
+                .get(&filter.variable)
+                .is_some_and(|value| filter.accepts(value))
+            {
+                return Err(reject("public IN FILTER is false"));
+            }
+        }
+    }
     let hidden_filters: Vec<_> = query
         .filters
         .iter()
@@ -937,7 +983,7 @@ fn public_statement_for(
     let entries = policy.entries()?;
     let status_depth = policy.status_depth()?;
     let (package, version) =
-        contract.package(
+        select_package(contract, &query,
             p.issuer_slots.len(),
             hidden_filters.len(),
             status_depth,
@@ -1025,6 +1071,21 @@ fn public_statement_for(
             ("filter_vars", json!(fvars)),
             ("filter_ops", json!(ops)),
             ("filter_bounds", json!(bounds)),
+        ]);
+    }
+    if let Some(filter) = query.in_filters.iter()
+        .find(|f| !query.projection.contains(&f.variable))
+    {
+        let variable = vars.iter().position(|v| v == &filter.variable)
+            .ok_or_else(|| reject("unbound IN variable"))? + 1;
+        let mut constants = vec![field_to_hex(&Fr::from(0u64)); 16];
+        for (slot, term) in filter.constants.iter().enumerate() {
+            constants[slot] = field_to_hex(&field(term)?);
+        }
+        fields.extend([
+            ("in_filter_var", json!(variable)),
+            ("in_filter_count", json!(filter.constants.len())),
+            ("in_filter_constants", json!(constants)),
         ]);
     }
     if matches!(contract, NumericContract::PublicPattern) {
@@ -1472,7 +1533,7 @@ fn prepare_result_contract(
         NumericProfile::Signed => NumericContract::Signed,
     };
     let (_, version) =
-        contract.package(used.len(), hidden_filters, status_depth, policy.admit_unbound_legacy)?;
+        select_package(contract, &parsed, used.len(), hidden_filters, status_depth, policy.admit_unbound_legacy)?;
     // sq-j506: the issuer message every selected credential is witnessed under is
     // the one THIS member's relation folds, so a method-bound attestation is never
     // witnessed into a legacy member (or the reverse).
@@ -1682,8 +1743,10 @@ fn prepare_result_contract(
         selected_credentials,
         shared_memberships: memberships.len(),
         witness_uses: rows.len() * parsed.patterns.len(),
-        public_predicates: rows.len() * (parsed.filters.len() - statement.hidden_filters.len()),
-        private_predicates: rows.len() * statement.hidden_filters.len(),
+        public_predicates: rows.len() * (parsed.filters.len() - statement.hidden_filters.len()
+            + parsed.in_filters.iter().filter(|f| parsed.projection.contains(&f.variable)).count()),
+        private_predicates: rows.len() * (statement.hidden_filters.len()
+            + parsed.in_filters.iter().filter(|f| !parsed.projection.contains(&f.variable)).count()),
         signature_checks: used.len(),
         optimization,
     };
@@ -1907,6 +1970,25 @@ mod tests {
     const QUERY: &str = "SELECT DISTINCT ?name WHERE { ?person <urn:name> ?name . ?person <urn:age> ?age . ?person <urn:licensed> <urn:yes> . FILTER(?age >= 18) }";
     const PUBLIC_QUERY: &str =
         "SELECT DISTINCT ?age WHERE { ?person <urn:age> ?age . FILTER(?age >= 18) }";
+
+    #[test]
+    fn hidden_in_selects_only_its_bound_member_and_supported_capacity() {
+        let query = DisclosureQuery::parse("SELECT DISTINCT ?person WHERE { ?person <urn:degree> ?value . FILTER(?value IN (\"BSc\", \"MSc\")) }").unwrap();
+        let contract = NumericContract::Unsigned(PrivateIntegerCapacity::TwoDigits);
+        for (credentials, member) in [
+            (1, "result_v5_k1_n16_p3_r4_f1_in_d10"),
+            (2, "result_v5_k2_n16_p3_r4_f1_in_d10"),
+        ] {
+            assert_eq!(select_package(contract, &query, credentials, 0, 10, false).unwrap(), (member, BOUND_VERSION));
+        }
+        assert!(select_package(contract, &query, 1, 1, 10, false).is_err());
+        assert!(select_package(contract, &query, 1, 0, 17, false).is_err());
+        assert!(select_package(contract, &query, 1, 0, 10, true).is_err());
+        let mut repeated = query.clone();
+        repeated.in_filters.push(query.in_filters[0].clone());
+        assert!(select_package(contract, &repeated, 1, 0, 10, false).is_err());
+    }
+
 
     fn iri(s: &str) -> NamedNode {
         NamedNode::new(s).unwrap()
@@ -2893,6 +2975,7 @@ mod tests {
                 projection: Vec::new(),
                 patterns: vec![pattern],
                 filters: Vec::new(),
+                in_filters: Vec::new(),
             };
             assert!(public_triples(&query, &rows).is_err());
         }
@@ -2905,6 +2988,7 @@ mod tests {
                 QuerySlot::Variable("o".into()),
             ]],
             filters: Vec::new(),
+            in_filters: Vec::new(),
         };
         let blank_rows = vec![BTreeMap::from([(
             "o".into(),

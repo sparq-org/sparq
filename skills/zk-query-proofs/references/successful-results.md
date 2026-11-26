@@ -351,3 +351,18 @@ redacted and the Rust key zeroizes on drop. The caller must protect, store and
 erase exported secrets; exported bytes/strings are not automatically scrubbed.
 These keys remain research grade, not externally audited, and generation does
 not change the signing path's constant-time caveats.
+
+### Typed constant-list membership
+
+`DisclosureQuery::in_filters` records `TermInFilter` obligations separately from
+numeric comparisons. Each operand must be bound in the FILTER's
+own positive input scope. One to sixteen constant IRIs, strings, canonical
+unsigned integers or timezone-free dates are admitted. NOT IN and OR refuse.
+Planner witness selection checks the authenticated value; independent public
+reconstruction checks projected membership directly.
+Existing numeric FILTER admission and circuit obligations remain in force.
+Projected membership needs no new circuit member. One hidden membership uses
+`result_v5_k{1,2}_n16_p3_r4_f1_in_d10`: its public variable/list fields constrain
+the existing authenticated private binding. Status depth is ten; mixing hidden
+IN with hidden numeric predicates or adding another hidden IN refuses. The Node
+single-issuer scope lowering preserves these obligations.

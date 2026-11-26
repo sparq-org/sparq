@@ -18,10 +18,10 @@ async function digest(path) {
   return hash.digest('hex');
 }
 
-function run(binary, args, { cwd, signal } = {}) {
+function run(binary, args, { cwd, signal, nargoHome } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(binary, args, {
-      cwd, env: { ...process.env, HARDWARE_CONCURRENCY: '1', RAYON_NUM_THREADS: '1' },
+      cwd, env: { ...process.env, ...(nargoHome === undefined ? {} : { HOME: nargoHome }), HARDWARE_CONCURRENCY: '1', RAYON_NUM_THREADS: '1' },
       stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32',
       shell: false, windowsHide: true,
     });
@@ -119,7 +119,9 @@ export async function prove(acirArtifact, witnessInputs, options) {
     await writeFile(artifactPath, acirArtifact.bytes, { mode: 0o600, flag: 'wx' });
     await writeFile(join(work, options.packageName, 'Prover.toml'), witnessInputs.toml, { mode: 0o600, flag: 'wx' });
     try {
-      await run(nargo, ['execute', 'witness', '--package', options.packageName], { cwd: work, signal: options.signal });
+      const nargoHome = join(work, 'nargo-home');
+      await mkdir(nargoHome, { mode: 0o700 });
+      await run(nargo, ['execute', 'witness', '--package', options.packageName], { cwd: work, signal: options.signal, nargoHome });
     } catch {
       throw new ProverRefusal('native witness execution failed');
     }

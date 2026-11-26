@@ -32,6 +32,13 @@ Hidden FILTER operands support full-width unsigned `xsd:integer` and canonical
 timezone-free `xsd:date` comparisons. Negative integer constants reject; the
 `i64` suffix denotes unsigned width. Mixed hidden date/integer comparisons and
 multiple hidden date comparisons reject.
+Projected operands also admit `FILTER(?value IN ("BSc", "MSc"))`, inside a
+scoped GRAPH block or in a flat query. Lists contain one to sixteen constant
+IRIs, strings, canonical unsigned integers or timezone-free dates. IN is checked
+against authenticated released terms during independent reconstruction. AND
+with existing numeric comparisons is supported. A single hidden IN uses its dedicated method-bound member at status depth ten,
+without hidden numeric comparisons in that proof. Its operand stays private. NOT IN, OR,
+variable list items and noncanonical or unsupported typed constants refuse.
 
 Policy `issuers?: Record<string, string>` maps issuer IRIs to trusted compressed
 public keys; `trustedIssuers?: string[]` remains an additional trust list.
@@ -64,6 +71,7 @@ This binds all supporting facts to one issuer per proof. Per-fact binding across
 issuers is the query method's job. Research grade, not externally audited.
 
 Bundled method-bound families are `result_v5_k{1,2}_n16_p3_r4_f0_d10`,
+`result_v5_k{1,2}_n16_p3_r4_f1_in_d10`,
 `result_v5_k{1,2}_n16_p3_r4_f1_date_d10` and
 `result_v5_k{1,2}_n16_p3_r4_f2_i64_d{10,17,20}`. Native preparation selects the
 member from the query, selected credentials and accepted status snapshots;
@@ -144,3 +152,6 @@ afterward. Consumer tarballs already contain all generated runtime files.
 Shared support comes from `js/zk-shared` and is copied into each package by its
 maintainer build. Keep the generated copy aligned before running offline checks
 or packing a tarball. The package remains research grade, not externally audited.
+
+Maintainer circuit regeneration gives nargo a private writable process home under
+its temporary build directory; it does not require the parent home to be writable.

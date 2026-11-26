@@ -32,7 +32,7 @@ removes them afterwards. It does not send credentials to a proving service.
 `backend: 'wasm'` is opt-in and refuses entries outside its supported catalogue.
 Measured authenticated entries admit it and run the same proof and refusal
 contracts in the live suite, including queries spanning credentials. Native
-remains the default. The six Solid App Suite targets are catalogued with full
+remains the default. The `target-*` Solid App Suite entries are catalogued with full
 envelopes (holder binding on insurance and trial) and prove natively only.
 The WebAssembly prover is bounded at a dyadic circuit size of 2^21 and refuses
 larger programs up front; compiler key agreement is claimed up to that bound.
@@ -111,3 +111,26 @@ salt as `backend: { type: 'native', presentationSaltHex }` (or the corresponding
 WebAssembly option). The salt is a full hexadecimal byte string, goes only into
 private witness inputs, and is checked against the stored commitment in Rust.
 Omitting this prover option draws a fresh random presentation salt.
+
+The consumer catalogue examples in
+[`consumer-cases.mjs`](../../js/zk-query/scripts/consumer-cases.mjs) include the
+sequential insurance count/completeness query, insurance NOT EXISTS without
+period checks, trial with its medication-complete flag, the original unscoped
+MIN comparison, and single-issuer degree IN with either the degree or only the subject projected. The first three preserve
+the consumer expressions while adding verifiedIssuer declarations and GRAPH
+scopes. Trial retains both age bindings and admits the full medication list.
+Native tests prove true and false releases, including a recycled fraction of
+0.29. The original MIN query checks only figures presented: it does not establish
+supplier participation or a common lot. Use `target-recycled-min` for the scoped
+lot and the distinct-issuer/value count conditions. Neither query establishes
+completeness beyond presented signed roots. Research grade, not externally audited.
+
+Native witness execution gives the pinned compiler a private process home under
+its temporary work directory, including its dependency-cache lock. Catalogue
+builds use a private home under their selected `--cache` directory. The parent
+process home is unchanged; vendored source dependencies need no shared home cache.
+
+The trial catalogue policy assumes one subject with one age, diagnosis and
+completeness value in its credential: its outer tables use the smallest two-row bucket, while the
+medication scan and filter retain their full list capacity. A dataset exceeding
+any table bucket refuses; the query expressions are unchanged.

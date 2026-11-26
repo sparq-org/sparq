@@ -1,5 +1,8 @@
 [workspace]
 members = [
+    "result_in_core",
+    "result_v5_k1_n16_p3_r4_f1_in_d10",
+    "result_v5_k2_n16_p3_r4_f1_in_d10",
     "result_v5_k1_n16_p3_r4_f2_i64_d10",
     "result_v5_k1_n16_p3_r4_f2_i64_d17",
     "result_v5_k1_n16_p3_r4_f2_i64_d20",

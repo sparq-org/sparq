@@ -50,6 +50,16 @@
       "abi_sha256": "688c0aae52ebc45ada7424f01b9f664b78f2fb9c816548a1ce7856c601ed131e",
       "vk_bytes": 3680,
       "vk_sha256": "81c1948ec204d0bcb97c9455282b7764297d63198092765ba28d3a80d3a7eaad"
+    },
+    "result_v5_k1_n16_p3_r4_f1_in_d10": {
+      "abi_sha256": "00f3e6315de03b361f09ca9a6f7944c0f495ef720a963591cfdb0798712f0c57",
+      "vk_bytes": 3680,
+      "vk_sha256": "8991d80823fa19ce8793734d7a9bed6624d0ce1590a95491cb492aca4d5728f2"
+    },
+    "result_v5_k2_n16_p3_r4_f1_in_d10": {
+      "abi_sha256": "54f8c144c6313feb820be60f2a9fadc3e14d47c044229463240a52645bda64f7",
+      "vk_bytes": 3680,
+      "vk_sha256": "ed7791b8554a06efed60818e507ab82dbaa8442855a3275e4a3094e017bc8722"
     }
   }
 }

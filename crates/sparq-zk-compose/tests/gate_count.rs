@@ -246,6 +246,42 @@ fn gate_count_regression() {
     support::complete(gate);
 }
 
+fn compose_bin_members(dir: &Path) -> Vec<String> {
+    let mut members = Vec::new();
+    for entry in std::fs::read_dir(dir).expect("read zk/compose") {
+        let entry = entry.expect("dir entry");
+        if !entry.file_type().expect("member file type").is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let manifest = entry.path().join("Nargo.toml");
+        if name == "target" || !manifest.exists() {
+            continue;
+        }
+        let (_, kind) = parse_nargo_toml(&manifest).expect("Noir package manifest");
+        match kind.as_str() {
+            "bin" => members.push(name),
+            "lib" => {},
+            _ => panic!("unsupported Noir package type in {}", manifest.display()),
+        }
+    }
+    members.sort();
+    members
+}
+
+#[test]
+fn compose_member_discovery_retains_unbaselined_bins_and_skips_libraries() {
+    let dir = std::env::temp_dir().join(format!("sparq-compose-member-types-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, kind) in [("needs_baseline", "bin"), ("shared_helper", "lib")] {
+        let package = dir.join(name);
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(package.join("Nargo.toml"), format!("[package]\nname = \"{name}\"\ntype = \"{kind}\"\n")).unwrap();
+    }
+    assert_eq!(compose_bin_members(&dir), vec!["needs_baseline"]);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// Belt-and-braces: the snapshot must cover every compiled member directory under
 /// `zk/compose/` (so a new family member can't be added without a baseline). This
 /// runs WITHOUT the toolchain — it only reads directory names + the snapshot.
@@ -258,25 +294,10 @@ fn snapshot_covers_every_member() {
         eprintln!("zk/compose absent; skipping coverage check");
         return;
     }
-    // Member packages are the subdirs with a Nargo.toml that are NOT the shared
-    // `compose_core` library (which is not a proving member).
-    let mut missing = Vec::new();
-    for entry in std::fs::read_dir(&dir).expect("read zk/compose") {
-        let entry = entry.expect("dir entry");
-        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-            continue;
-        }
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if name == "compose_core" || name == "target" {
-            continue;
-        }
-        if !entry.path().join("Nargo.toml").exists() {
-            continue;
-        }
-        if !snapshot.members.contains_key(&name) {
-            missing.push(name);
-        }
-    }
+    let missing: Vec<_> = compose_bin_members(&dir)
+        .into_iter()
+        .filter(|name| !snapshot.members.contains_key(name))
+        .collect();
     assert!(
         missing.is_empty(),
         "compiled member(s) have NO gate-count baseline in tests/gate_count_snapshot.json: {missing:?} \
