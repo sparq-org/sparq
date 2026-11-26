@@ -94,7 +94,8 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     name: real exact-dataset guest and proof
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # Genuine proving dominates this job and its time varies with the hosted runner.
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
