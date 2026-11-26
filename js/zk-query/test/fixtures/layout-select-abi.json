@@ -1246,6 +1246,32 @@
         "visibility": "private"
       },
       {
+        "name": "target_0",
+        "type": {
+          "kind": "array",
+          "length": 5,
+          "type": {
+            "kind": "integer",
+            "sign": "unsigned",
+            "width": 32
+          }
+        },
+        "visibility": "private"
+      },
+      {
+        "name": "source_0",
+        "type": {
+          "kind": "array",
+          "length": 4,
+          "type": {
+            "kind": "integer",
+            "sign": "unsigned",
+            "width": 32
+          }
+        },
+        "visibility": "private"
+      },
+      {
         "name": "t1",
         "type": {
           "kind": "struct",
@@ -1360,6 +1386,10 @@
       "616500237488781120": {
         "error_kind": "string",
         "string": "absent time lexical"
+      },
+      "738138546909151295": {
+        "error_kind": "string",
+        "string": "scan source index"
       },
       "745233435529752958": {
         "error_kind": "string",

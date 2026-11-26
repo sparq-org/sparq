@@ -34,8 +34,12 @@ function fixture(t) {
   const tool = join(packageDir, 'test/fixtures/catalogue-build-tool.mjs');
   const sha = sha256(readFileSync(tool));
   writeFileSync(join(assets, 'toolchain.pins.json'), JSON.stringify({
-    platform: process.platform, arch: process.arch,
-    binaries: { nargo: { version: 'nargo', sha256: sha }, bb: { version: 'bb', sha256: sha } },
+    platforms: {
+      [`${process.platform}-${process.arch}`]: {
+        nargo: { version: 'nargo', sha256: sha },
+        bb: { version: 'bb', sha256: sha },
+      },
+    },
   }));
   writeFileSync(join(assets, 'catalogue.json'), JSON.stringify({ entries: [] }));
   writeFileSync(join(core, 'Nargo.toml'), '[package]\nname = "query_core"\n');
@@ -120,8 +124,10 @@ if (${JSON.stringify(pauseAt)} === 'read') {
   };
 } else {
   fs.renameSync = (from, to) => {
-    if (basename(to) === 'catalogue.json') pause();
+    const catalogue = basename(to) === 'catalogue.json';
+    if (catalogue && ${JSON.stringify(pauseAt)} === 'rename') pause();
     rename(from, to);
+    if (catalogue && ${JSON.stringify(pauseAt)} === 'published') pause();
   };
 }
 syncBuiltinESMExports();
@@ -132,7 +138,7 @@ syncBuiltinESMExports();
     child.stderr.on('data', data => { stderr += data; });
     const result = new Promise((resolve, reject) => {
       child.once('error', reject);
-      child.once('close', status => resolve({ status, stderr }));
+      child.once('close', (status, signal) => resolve({ status, signal, stderr }));
     });
     return {
       async wait() {
@@ -143,6 +149,10 @@ syncBuiltinESMExports();
       },
       resume() {
         writeFileSync(release, '');
+        return result;
+      },
+      kill() {
+        child.kill('SIGKILL');
         return result;
       },
     };
@@ -300,6 +310,43 @@ test('a failed second build leaves the previous catalogue loadable', async t => 
 
   assertPass(f.build({ update: true }));
   assert.deepEqual(f.calls(), []);
+});
+
+test('retry rolls back an interrupted publication before checking the published pins', async t => {
+  for (const [pauseAt, expectedCount] of [['rename', 2], ['published', 3]]) {
+    await t.test(`pause at ${pauseAt}`, async t => {
+      const f = fixture(t);
+      const previous = f.snapshot();
+      const api = await f.api();
+      const keyFor = ({ query }) => api.request({ query, policy: {}, nonce: '' }).verificationKey;
+      const oldKeys = cases.map(keyFor);
+      const added = { query: 'ASK {}', bounds: {} };
+      const selected = [...cases, added];
+      const [entry] = f.table().entries;
+      f.abi(indexedAbi);
+
+      const writer = f.pauseBuild({ update: true, selected, pauseAt });
+      try {
+        await writer.wait();
+        assert.equal(f.table().entries.length, expectedCount);
+        assert.deepEqual(JSON.parse(f.readAsset(entry.acir)).abi, indexedAbi);
+        assert(f.hasAsset(`${planHash(added)}.json`));
+      } finally {
+        assert.equal((await writer.kill()).signal, 'SIGKILL');
+      }
+
+      f.abi(previousAbi);
+      assertPass(f.build());
+      assert.deepEqual(f.calls(), []);
+      assert.deepEqual(f.snapshot(), previous);
+      assert.deepEqual(cases.map(keyFor), oldKeys);
+
+      f.abi(indexedAbi);
+      assertPass(f.build({ update: true, selected }));
+      assertPass(f.build({ selected }));
+      assert.deepEqual(JSON.parse(f.readAsset(entry.acir)).abi, indexedAbi);
+    });
+  }
 });
 
 test('the builder bypasses a warm program and key when the SCAN ABI changes', t => {

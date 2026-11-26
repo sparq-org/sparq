@@ -8,4 +8,7 @@
 /assets/crs/
 /*.tgz
 .host-*/
+/.catalogue-stage-*/
+/.catalogue-pending/
+/.catalogue-publish.lock
 LICENSE

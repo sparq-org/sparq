@@ -131,6 +131,12 @@ fn indexed_scan_rejects_a_target_in_output_padding() {
         Table {rows:[[iri(1)],[unbound()]],len:1}, [1], [0,0]);
 }
 
+#[test(should_fail_with = "scan completeness or capacity")]
+fn indexed_scan_rejects_a_constant_match_in_output_padding() {
+    let triple = [iri(1), iri(9), iri(10)];
+    crate::ops_core::scan([triple], [true], [1; 3], triple, empty::<2, 1>(), [0], [0; 2]);
+}
+
 #[test(should_fail_with="scan source index")]
 fn indexed_scan_rejects_an_out_of_range_source() {
     crate::ops_core::scan([[iri(1),iri(8),iri(10)]],

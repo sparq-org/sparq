@@ -29,7 +29,14 @@ requests after upgrading.
 The native prover runs on the holder's machine as child processes, offline.
 Set `SPARQ_NARGO` and `SPARQ_BB`, or pass
 `backend: { type: 'native', nargoPath, bbPath }`; environment defaults are absent.
-The package requires the pinned version and digest for the native platform.
+The supported native platforms are `linux-x64`, `darwin-arm64` (Apple Silicon)
+and `darwin-x64` (Intel macOS), selected by Node's `process.platform` and
+`process.arch`. Other platforms refuse with
+`ProverRefusal: native platform has no binary pin`.
+The package requires nargo `1.0.0-beta.21` and bb `5.0.0-nightly.20260324`, with
+the platform's pinned executable SHA-256. Download and extract the official
+release archives listed in the [package README](../../js/zk-query/README.md#prover-backends-and-catalogue),
+then supply the `nargo` and `bb` paths. Pins hash executables, not archives.
 It copies binaries and witness material into private temporary directories and
 removes them afterwards. It does not send credentials to a proving service.
 `backend: 'wasm'` is opt-in and refuses entries outside its supported catalogue.

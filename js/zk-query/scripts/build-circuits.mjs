@@ -1,6 +1,6 @@
 // Research grade and not externally audited. Maintainer-only native compilation.
 import { spawn } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, mkdtempSync, linkSync, renameSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, mkdtempSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -9,11 +9,12 @@ import { copyPinnedBinary } from '../native.mjs';
 import { canonicalArtifact } from './artifact.mjs';
 import { catalogueBuildDigest, stageSource } from './cache.mjs';
 import { snapshotSources } from './sources.mjs';
-import { withCatalogueLock } from './catalogue-lock.mjs';
+import { publishCatalogue, recoverCatalogue, withCatalogueLock } from './catalogue-lock.mjs';
 import { sha256 } from '../internal/runtime.mjs';
 import { examplePolicy, exampleRecord } from './catalogue-example.mjs';
 const packageDir = fileURLToPath(new URL('../', import.meta.url));
 const assets = join(packageDir, 'assets'), tablePath = join(assets, 'catalogue.json');
+recoverCatalogue(assets);
 const originalCatalogue = readFileSync(tablePath);
 const table = JSON.parse(originalCatalogue);
 const originalContents = JSON.stringify(table);
@@ -61,33 +62,6 @@ if (update) {
   }
 }
 
-function publish(staging, names) {
-  const backup = join(staging, 'previous');
-  mkdirSync(backup);
-  const replaced = new Set();
-  for (const name of names) {
-    const path = join(assets, name);
-    if (existsSync(path)) {
-      linkSync(path, join(backup, name));
-      replaced.add(name);
-    }
-  }
-  const published = [];
-  try {
-    for (const name of names) {
-      renameSync(join(staging, name), join(assets, name));
-      published.push(name);
-    }
-  } catch (error) {
-    for (const name of published.reverse()) {
-      const path = join(assets, name);
-      if (replaced.has(name)) renameSync(join(backup, name), path);
-      else unlinkSync(path);
-    }
-    throw error;
-  }
-}
-
 async function build({ plan, example }, staging, nargo, bb) {
   const entry = table.entries.find(e => e.planHash === plan.planHash);
   if (!entry && !update) throw new Error('missing pinned catalogue plan; use --write-pins');
@@ -112,7 +86,7 @@ async function build({ plan, example }, staging, nargo, bb) {
 }
 
 mkdirSync(cache, { recursive: true, mode: 0o700 });
-const staging = mkdtempSync(join(assets, '.catalogue-'));
+const staging = mkdtempSync(join(packageDir, '.catalogue-stage-'));
 try {
   const bins = mkdtempSync(join(cache, 'binaries-'));
   const candidates = new Map();
@@ -156,6 +130,6 @@ try {
       writeFileSync(join(staging, 'sources.json'), sourceBundle);
       names.unshift('sources.json');
     }
-    if (names.length) publish(staging, names);
+    if (names.length) publishCatalogue(assets, staging, names);
   });
 } finally { rmSync(staging, { recursive: true, force: true }); }
