@@ -89,8 +89,8 @@ use std::collections::HashMap;
 
 mod bounded;
 pub use bounded::{
-    CanonicalizationLimits, canonicalize_quads_bounded_with, issue_quads_bounded_with,
-    issue_quads_bounded_ordered_with,
+    canonicalize_nquads_bounded, canonicalize_quads_bounded_with, issue_quads_bounded_ordered_with,
+    issue_quads_bounded_with, CanonicalizationLimits,
 };
 
 // ---------------------------------------------------------------------------

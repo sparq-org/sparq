@@ -1,6 +1,7 @@
 # Credential evidence for Solid query answers
 
-Status at `e626490` on `main`. The authenticated Noir query method already implements
+The query-method review is based on `e626490` on `main`. The Merkle section also covers
+the native SHA successor. The authenticated Noir query method implements
 the three relations required by DER-13. Whether a particular answer qualifies depends on
 the verifier's query and policy. Both Node proof methods are research grade and externally
 unaudited. [Issue #7379](https://github.com/sparq-org/sparq/issues/7379)
@@ -95,36 +96,35 @@ and a service restart. At most one distinct answer may be released.
 
 ## Merkle cryptosuites
 
-**M1 · Date and derived-integer keys — partial across members.** Schnorr/Poseidon2 gives
-representable timezone-free `xsd:date` class `0x08` and range-checked integer subtypes the
-decimal class `0x01`. A valid zoned date is unrepresentable (`0x7F`), an ill-typed literal
-has no key (`0x00`). Frozen Ed25519/SHA-256 gives dates and integer subtypes the all-zero key.
+**M1 · Date and derived-integer keys — implemented in the extended profile.**
+Schnorr/Poseidon2 and the opt-in native Ed25519/SHA-256 successor give timezone-free
+`xsd:date` with years from `0001` through `9999` class `0x08` and representable,
+range-checked integer subtypes the decimal class `0x01`. A valid zoned date is
+unrepresentable (`0x7F`), and an ill-typed literal has no key (`0x00`). Frozen
+Ed25519/SHA-256 gives dates and integer subtypes the all-zero key.
 The successful-result package's bundled date and unsigned-integer filters use a separate
 credential format. [Key computation](../crates/sparq-merkle-suite/src/keys.rs) ·
 [Frozen dispatch](../crates/sparq-merkle-suite/src/sha256.rs) ·
 [Filter members](https://github.com/sparq-org/sparq/pull/7397)
 
-Use the field-native comparison profile for Solid today. For SHA support, introduce a
-separately identified successor using the same extended key rules. Key bytes enter signed
-leaves, so a verifier must select the edition through the accepted suite identifier.
-Test both editions on leap days, zoned and invalid dates, integer subtype bounds and lexical
-aliases. Check class and value order independently, retain RDF term identity for joins,
-and verify existing SHA credentials against the frozen vectors.
+The authenticated Noir query method uses the field-native profile. The native SHA
+successor commits the comparison key alongside the RDF term identity, and its
+suite identifier selects the key and tree rules. The tests pin leap days, timezone
+forms, subtype limits, lexical aliases and frozen SHA credentials.
+[Successor tests](../crates/sparq-merkle-suite/tests/sha_salted.rs) ·
+[Frozen vectors](../crates/sparq-merkle-suite/tests/sha_parity.rs)
 
-**M2 · Leaf salts — partial across members.** Poseidon2 orders private quad hashes, derives
-each leaf salt from the private issuance salt and sorted index, then hashes the quad hash
-with that salt. SHA-256 uses unsalted leaves and root, and salts the signed message. The
-presentation salt for dataset agreement is separate. [Poseidon2 tree](../crates/sparq-merkle-suite/src/poseidon.rs) ·
-[SHA tree and message](../crates/sparq-merkle-suite/src/sha256.rs)
-
-Use the same new SHA edition as M1 to introduce leaf salting in one format transition.
-Order by unsalted quad hash, derive each private leaf salt with HMAC-SHA-256 keyed by the
-issuance salt over a suite-specific domain and fixed-width index, then bind it and the quad
-hash in a domain-separated leaf. The new suite identifier selects the signed-message and
-opening rules. No salt becomes a public query input. Test the same quads issued under two
-salts. Both leaves and root must differ for the successor, while the frozen edition has
-equal roots and different messages. Pin issuer/verifier vectors and reject cross-edition
-verification. Coordinate guest adoption with the [frozen-source consolidation](https://github.com/sparq-org/sparq/issues/7391).
+**M2 · Leaf salts — implemented in the salted members.** Poseidon2 and the SHA successor
+order private quad digests and derive a private leaf salt for each index from the issuance
+salt. The SHA successor derives its leaf salts with HMAC-SHA-256 and binds each salt and
+quad digest in a domain-separated leaf. The original SHA edition uses unsalted leaves and
+root and salts its signed message. Issuing the same quads under different salts changes
+the successor's leaves and root. The presentation salt for dataset agreement is separate.
+The successor is available for native issuance and whole-credential verification. Guest
+adoption is tracked by the [frozen-source consolidation](https://github.com/sparq-org/sparq/issues/7391).
+[Poseidon2 tree](../crates/sparq-merkle-suite/src/poseidon.rs) ·
+[SHA successor tree](../crates/sparq-merkle-suite/src/sha256_salted.rs) ·
+[Original SHA tree](../crates/sparq-merkle-suite/src/sha256.rs)
 
 **M3 · Implemented members — partial.** Ed25519/SHA-256 has native issuance and verification
 and a zkVM relation. Schnorr/Poseidon2 has native issuance and verification and a Noir query

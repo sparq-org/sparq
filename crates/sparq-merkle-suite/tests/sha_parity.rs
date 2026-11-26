@@ -120,16 +120,13 @@ fn frozen_source_and_current_suite_match_vectors_and_generated_inputs() {
 
 #[test]
 fn existing_sha_vectors_are_byte_identical() {
-    let source = include_str!("../../../zk/sparql-evaluator/model/tests/merkle_suite.rs");
-    let constant = |name: &str| {
-        source
-            .split(&format!("const {name}: &str = \""))
-            .nth(1)
-            .unwrap()
-            .split('"')
-            .next()
-            .unwrap()
-    };
+    const LEAF: &str = "8c4a491021d82e07c77c748df8c123d9721163cb8da614c7d21a4aef901c1146";
+    const ROOT: &str = "311072a0f565868c243e392ea085e4c2fe752b39751e0707bcd7e42c78683682";
+    const MESSAGE: &str = "d79eb8afe1cbb6c7c146089a2522aa54a6a875176585d135a39d129d50be81a8";
+    const SIGNATURE: &str = concat!(
+        "82f02d82b9845d064bae00df4668950cc03007af33ca6e9970ea0f5514b62eca",
+        "4af505ea8ada76d779bcfc7fa06dcafd997be37abedb75ff6a5ea2ef0bf33501",
+    );
     let hex = |bytes: &[u8]| bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
     let parse = |text: &str| {
         oxttl::NQuadsParser::new()
@@ -143,33 +140,117 @@ fn existing_sha_vectors_are_byte_identical() {
     );
     let b = parse("<urn:vc:1> <http://ex/name> \"Alice\"@en .");
     let leaf = current::leaf(&a).unwrap();
-    assert_eq!(hex(&leaf), constant("LEAF"));
+    assert_eq!(hex(&leaf), LEAF);
     assert_eq!(Some(leaf), frozen::leaf(&a));
     let mut row = [leaf, current::leaf(&b).unwrap()];
     row.sort();
     let root = current::root(&row).unwrap();
-    assert_eq!(hex(&root), constant("ROOT"));
+    assert_eq!(hex(&root), ROOT);
     assert_eq!(Some(root), frozen::root(&row));
     for bad in [Vec::new(), vec![row[1], row[0]], vec![leaf, leaf]] {
         assert_eq!(current::root(&bad), None);
         assert_eq!(frozen::root(&bad), None);
     }
     let message = current::signed_message(&[7; 32], 2, &root, &[9; 32]);
-    assert_eq!(hex(&message), constant("MESSAGE"));
+    assert_eq!(hex(&message), MESSAGE);
     assert_eq!(
         message,
         frozen::signed_message(&[7; 32], 2, &root, &[9; 32])
     );
-    let text = constant("TEST1_SECRET");
-    let bytes = std::array::from_fn(|i| u8::from_str_radix(&text[2 * i..2 * i + 2], 16).unwrap());
-    let key = ed25519_dalek::SigningKey::from_bytes(&bytes);
+    let key = vector_key();
     let signature = ed25519_dalek::Signer::sign(&key, &message);
     assert_eq!(
         hex(&key.verifying_key().to_bytes()),
-        constant("TEST1_PUBLIC")
+        "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
     );
-    assert_eq!(hex(&signature.to_bytes()), constant("SIGNATURE"));
+    assert_eq!(hex(&signature.to_bytes()), SIGNATURE);
     key.verifying_key()
         .verify_strict(&message, &signature)
         .unwrap();
+}
+
+#[test]
+fn frozen_sha_pins_legacy_timezone_spellings() {
+    let mut date_time_key = [0; 31];
+    date_time_key[..9].copy_from_slice(&[0x03, 0x80, 0, 0, 0xdd, 0x99, 0x78, 0xc0, 0x40]);
+    for (datatype, lexical, expected) in [
+        ("date", "2000-02-29Z05:30", [0; 31]),
+        ("dateTime", "2000-02-29T00:00:00Z05:30", date_time_key),
+    ] {
+        let literal = Literal::new_typed_literal(
+            lexical,
+            NamedNode::new(format!("http://www.w3.org/2001/XMLSchema#{datatype}")).unwrap(),
+        );
+        assert_eq!(frozen::comparison_key(&literal), expected);
+        assert_eq!(current::comparison_key(&literal), expected);
+        let mut frozen_bytes = Vec::new();
+        let mut current_bytes = Vec::new();
+        let term = Term::Literal(literal);
+        frozen::encode_term(&term, &mut frozen_bytes);
+        current::encode_term(&term, &mut current_bytes);
+        assert_eq!(current_bytes, frozen_bytes);
+        assert!(current_bytes.ends_with(&expected));
+    }
+}
+
+fn vector_key() -> ed25519_dalek::SigningKey {
+    let seed = "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60";
+    let bytes = std::array::from_fn(|i| u8::from_str_radix(&seed[2 * i..2 * i + 2], 16).unwrap());
+    ed25519_dalek::SigningKey::from_bytes(&bytes)
+}
+
+#[test]
+fn legacy_issuance_pins_unsalted_root_and_signs_each_salt() {
+    let config = "<urn:p> <https://w3id.org/security#cryptosuite> \"eddsa-sha256-merkle-2026\" .\n";
+    let ordered = concat!(
+        "<urn:s> <urn:p> \"+0255\"^^<http://www.w3.org/2001/XMLSchema#unsignedByte> <urn:g> .\n",
+        "<urn:s> <urn:p> \"café\"@fr .\n",
+        "<urn:s> <urn:p> \"2000-02-29\"^^<http://www.w3.org/2001/XMLSchema#date> .\n",
+    );
+    let key = vector_key();
+    let dig = Sha256::digest(config.as_bytes()).into();
+    let hex = |bytes: &[u8]| bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    for (salt, message, signature) in [
+        (
+            [7; 32],
+            "ceb69e6288392174178630bc432677203e071525093b6e5d3a5cc9786c72084c",
+            concat!(
+                "508a0dd2ac0ac770eb4c70c7e580b2287a37a2ab2fbce53fe8f1b8688ea4788ad",
+                "2f84ad505a71bdb157a127be1ca8476a026742650ce31c2fd7208570fe13906",
+            ),
+        ),
+        (
+            [8; 32],
+            "a2e69b40c10a2d0a5519b336428387b8ea2d6e384025b119573f0c865632e7c5",
+            concat!(
+                "bf3c33f60a258b3e77e3f333484ab6e68614b1e6ca29f0090932e097d8d7f432",
+                "d00382c9b666eeca407d4983077262b7480bb86428a0bc6ca86d71b17d72de0e",
+            ),
+        ),
+    ] {
+        let credential = current::issue(ordered, config, &key, salt).unwrap();
+        assert_eq!(
+            credential,
+            frozen::issue(ordered, config, &key, salt).unwrap()
+        );
+        assert_eq!(credential.document, ordered);
+        assert_eq!(credential.proof_config, config);
+        assert_eq!(hex(&credential.signature[..64]), signature);
+        assert_eq!(&credential.signature[64..], &salt);
+        let leaves: Vec<_> = oxttl::NQuadsParser::new()
+            .for_slice(credential.document.as_bytes())
+            .map(|quad| current::leaf(&quad.unwrap()).unwrap())
+            .collect();
+        let root = current::root(&leaves).unwrap();
+        assert_eq!(
+            hex(&root),
+            "b9bb30329b09ff9d191c245ef89cac8c8fd7df6f2de64d5a8391dfa029e579a0"
+        );
+        assert_eq!(
+            hex(&current::signed_message(&salt, 3, &root, &dig)),
+            message
+        );
+        assert!(current::verify(&credential, &key.verifying_key()));
+        assert!(frozen_verify(&credential, &key.verifying_key()));
+    }
 }

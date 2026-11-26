@@ -12,11 +12,13 @@ readme = "README.md"
 default = ["os-random"]
 # Entropy acquisition stays outside the deterministic suite implementation.
 os-random = ["dep:getrandom"]
+sha256-salted = ["dep:hmac"]
 
 [dependencies]
 oxrdf.workspace = true
 oxttl.workspace = true
 sha2 = "0.10"
+hmac = { version = "0.12", optional = true }
 ed25519-dalek = "2"
 sparq-canon = { path = "../sparq-canon" }
 sparq-zk = { path = "../sparq-zk" }

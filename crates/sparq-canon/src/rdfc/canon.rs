@@ -12,7 +12,7 @@ use itertools::Itertools;
 use oxrdf02::{
     BlankNode, GraphName, GraphNameRef, Quad, QuadRef, Subject, SubjectRef, Term, TermRef,
 };
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt};
 #[cfg(target_os = "zkvm")]
 use std::collections::BTreeMap as HashMap;
 #[cfg(not(target_os = "zkvm"))]
@@ -21,8 +21,67 @@ use std::collections::HashMap;
 #[cfg(feature = "log")]
 use tracing::{debug, debug_span, info};
 
+// [SPARQ PATCH] The legacy renderer remains available for existing commitments.
+#[derive(Clone, Copy, Default)]
+pub(crate) enum NQuadsSerialization {
+    #[default]
+    Legacy,
+    AppendixA,
+}
+
+impl NQuadsSerialization {
+    fn quad_line(self, quad: QuadRef<'_>) -> String {
+        if matches!(self, Self::Legacy) {
+            return quad.to_string() + " .\n";
+        }
+        let object = self.object(quad.object);
+        let QuadRef {
+            subject,
+            predicate,
+            graph_name,
+            ..
+        } = quad;
+        match graph_name {
+            GraphNameRef::DefaultGraph => format!("{subject} {predicate} {object} .\n"),
+            graph => format!("{subject} {predicate} {object} {graph} .\n"),
+        }
+    }
+
+    fn object(self, term: TermRef<'_>) -> NQuadsObject<'_> {
+        NQuadsObject {
+            serialization: self,
+            term,
+        }
+    }
+}
+
+struct NQuadsObject<'a> {
+    serialization: NQuadsSerialization,
+    term: TermRef<'a>,
+}
+
+impl fmt::Display for NQuadsObject<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match (self.serialization, self.term) {
+            (NQuadsSerialization::AppendixA, TermRef::Literal(literal)) => {
+                // The oxrdf 0.3 formatter implements Appendix A's literal escapes.
+                let value = literal.value();
+                let literal = if let Some(language) = literal.language() {
+                    oxrdf::LiteralRef::new_language_tagged_literal_unchecked(value, language)
+                } else {
+                    let datatype = oxrdf::NamedNodeRef::new_unchecked(literal.datatype().as_str());
+                    oxrdf::LiteralRef::new_typed_literal(value, datatype)
+                };
+                fmt::Display::fmt(&literal, f)
+            }
+            (_, term) => fmt::Display::fmt(&term, f),
+        }
+    }
+}
+
 /// **4.2 Canonicalization State**
 struct CanonicalizationState {
+    serialization: NQuadsSerialization,
     /// **blank node to quads map**
     ///   A map that relates a blank node identifier to the quads
     ///   in which they appear in the input dataset.
@@ -47,6 +106,7 @@ impl CanonicalizationState {
 
     fn new() -> CanonicalizationState {
         CanonicalizationState {
+            serialization: NQuadsSerialization::Legacy,
             blank_node_to_quads_map: BTreeMap::<String, Vec<Quad>>::new(),
             hash_to_blank_node_map: BTreeMap::<String, Vec<String>>::new(),
             canonical_issuer: IdentifierIssuer::new(Self::DEFAULT_CANONICAL_IDENTIFER_PREFIX),
@@ -209,6 +269,7 @@ fn hash<D: Digest>(data: impl AsRef<[u8]>) -> String {
 pub fn canonicalize_core<D: Digest>(
     input_dataset: &Dataset,
     mut hndq_call_counter: SimpleHndqCallCounter,
+    serialization: NQuadsSerialization,
 ) -> Result<HashMap<String, String>, CanonicalizationError> {
     #[cfg(feature = "log")]
     let _span_ca = debug_span!(
@@ -219,6 +280,7 @@ pub fn canonicalize_core<D: Digest>(
 
     // 1) Create the canonicalization state.
     let mut state = CanonicalizationState::new();
+    state.serialization = serialization;
 
     // 2) For every quad Q in input dataset:
     #[cfg(feature = "log")]
@@ -606,7 +668,7 @@ fn structural_key<'a>(
             };
             let object = match &quad.object {
                 Term::BlankNode(b) => label(b),
-                o => o.to_string(),
+                o => state.serialization.object(o.as_ref()).to_string(),
             };
             let graph = match &quad.graph_name {
                 GraphName::BlankNode(b) => format!(" {}", label(b)),
@@ -684,7 +746,10 @@ fn hash_first_degree_quads<D: Digest>(
             };
             let predicate = quad.predicate.clone();
 
-            Quad::new(subject, predicate, object, graph_name).to_string() + " .\n"
+            let quad = Quad::new(subject, predicate, object, graph_name);
+            canonicalization_state
+                .serialization
+                .quad_line(quad.as_ref())
         })
         .collect::<Vec<String>>();
 
@@ -1304,7 +1369,15 @@ fn hash_n_degree_quads<D: Digest>(
 ///   When serializing quads in canonical n-quads form, components which are blank nodes MUST be
 ///   serialized using the canonical label associated with each blank node from the issued
 ///   identifiers map component of the canonicalized dataset.
-pub fn serialize(dataset: &Dataset) -> String {
+pub fn serialize(dataset: &Dataset, serialization: NQuadsSerialization) -> String {
+    if matches!(serialization, NQuadsSerialization::AppendixA) {
+        let mut lines: Vec<_> = dataset
+            .iter()
+            .map(|quad| serialization.quad_line(quad))
+            .collect();
+        lines.sort_unstable();
+        return lines.concat();
+    }
     let mut ordered_dataset: Vec<QuadRef> = dataset.iter().collect();
     ordered_dataset.sort_by_cached_key(|q| q.to_string());
     ordered_dataset

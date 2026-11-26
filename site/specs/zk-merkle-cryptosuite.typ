@@ -16,11 +16,13 @@
 #intro-section("abstract", "Abstract")[
   This document defines Data Integrity cryptosuites for RDF verifiable credentials
   in which the issuer signs a salted message committing to a Merkle root over the
-  credential's quads. The Poseidon2 member also salts each quad leaf. A literal's encoding
-  carries a comparison key for the value types supported by its suite, including numbers,
-  date-times, booleans and `xsd:string` prefixes. A zero-knowledge proof can then authenticate a credential
-  without canonicalizing it, and reuse a checked key for typed comparisons.
+  credential's quads. The Poseidon2 member and the SHA-256 successor also
+  salt each quad leaf. A literal's encoding carries a comparison key for the value
+  types supported by its suite, including numbers, dates, date-times, booleans and
+  `xsd:string` prefixes. A zero-knowledge proof can then authenticate a credential
+  without canonicalizing it and reuse a checked key for typed comparisons.
   The suite family defines `eddsa-sha256-merkle-2026` for hash-accelerated zkVMs,
+  its salted-leaf successor `eddsa-sha256-merkle-salted-2026`,
   `schnorr-poseidon2-merkle-2026` for arithmetic circuits, and the post-quantum
   `mldsa44-sha256-merkle-2026`.
 ]
@@ -59,13 +61,15 @@ in RFC 2119 #cite("RFC2119") when, and only when, they appear in capitals.
   [*Identifier*], [*Tree hash*], [*Signature*], [*Implementation status*],
   [`eddsa-sha256-merkle-2026`], [SHA-256], [Ed25519 #cite("RFC8032")],
     [Native issuance and verification in `sparq-merkle-suite` and a frozen zkVM relation],
+  [`eddsa-sha256-merkle-salted-2026`], [SHA-256], [Ed25519 #cite("RFC8032")],
+    [Opt-in native issuance and verification in `sparq-merkle-suite`],
   [`schnorr-poseidon2-merkle-2026`], [Poseidon2 over BN254], [Schnorr over Baby Jubjub],
     [Native issuance and verification, Noir credential opening and the authenticated Noir query method],
   [`mldsa44-sha256-merkle-2026`], [SHA-256], [ML-DSA-44 #cite("FIPS204")],
     [Specified here; not yet implemented],
 )
 
-Both implementations are research grade and externally unaudited. The Node successful-result
+The implementations are research grade and externally unaudited. The Node successful-result
 method uses its own credential format. Its bundled date and unsigned integer filters belong
 to that method.
 
@@ -94,12 +98,13 @@ sampled byte salts.
 
 The issuer canonicalizes the unsecured credential with RDFC-1.0 using SHA-256.
 The result is a set of quads with canonical blank node labels. Blank nodes keep
-those labels in their leaves. Quads containing an RDF 1.2 triple term are not
-supported.
+those labels in their leaves. The RDFC-1.0 profile excludes RDF 1.2 triple terms
+and directional language-tagged literals.
 
 == Term encoding
 
 All lengths are 32-bit unsigned big-endian integers, and strings are UTF-8.
+The SHA-256 successor rejects components whose byte length exceeds that range.
 The #dfn[term encoding] `enc(t)` of a term `t` is:
 
 - an IRI: byte `0x01`, then the length and bytes of the IRI;
@@ -113,11 +118,11 @@ The #dfn[term encoding] `enc(t)` of a term `t` is:
 
 A literal's #dfn[comparison key] is one class byte and 30 payload bytes,
 computed from its datatype and lexical form only. It is an order-preserving
-encoding of the literal's value: for two literals whose keys have the same class
-from `0x01` to `0x06`, or class `0x08`, comparing the keys as unsigned big-endian integers gives
+encoding of the literal's value. For two literals whose keys have the same class
+from `0x01` to `0x06`, comparing the keys as unsigned big-endian integers gives
 the result of the SPARQL operators `=`, `!=`, `<`, `>`, `<=` and `>=` on the
-literals #cite("SPARQL11-QUERY"). Each class holds only datatypes that SPARQL
-compares with one another.
+literals #cite("SPARQL11-QUERY"). Class `0x08` compares calendar days for methods
+that support timezone-free `xsd:date` value comparisons as a SPARQL extension.
 
 - Keys of different classes MUST NOT be compared.
 - A class `0x07` key decides an order only when the two prefixes differ.
@@ -129,14 +134,18 @@ compares with one another.
 
 In every other case, a proof uses the lexical form.
 
-The date and derived-integer entries below describe the field-native member. The frozen
-`eddsa-sha256-merkle-2026` encoding gives every `xsd:date` and every built-in integer
-subtype other than `xsd:integer` the all-zero key. Base `xsd:integer`, `xsd:decimal` and
-`xsd:dateTime` retain their existing classes. The examples give the first byte of each key.
+The SHA-256 successor and the Poseidon2 member use the checked date and derived-integer
+entries below. The original SHA-256 tree profile gives every `xsd:date` and every
+built-in integer subtype other than `xsd:integer` the all-zero key. Base
+`xsd:integer`, `xsd:decimal` and valid `xsd:dateTime` values share the same classes
+across editions. The SHA-256 successor accepts a standalone `Z` or a signed
+`HH:MM` timezone offset for both `xsd:date` and `xsd:dateTime`.
+Poseidon2 retains its original timezone encoding.
+Each example gives the first byte of the key.
 
 #table(
   columns: (2fr, 1fr, 1fr),
-  table.header[Typed literal][Ed25519/SHA-256][Schnorr/Poseidon2],
+  table.header[Typed literal][Original SHA-256][SHA-256 successor and Poseidon2],
   [`"1970-01-01"^^xsd:date`], [`0x00`], [`0x08`],
   [`"1970-01-01Z"^^xsd:date`], [`0x00`], [`0x7F`],
   [`"255"^^xsd:unsignedByte`], [`0x00`], [`0x01`],
@@ -160,7 +169,7 @@ subtype other than `xsd:integer` the all-zero key. Base `xsd:integer`, `xsd:deci
   [`0x06`], [`xsd:string` of at most 30 bytes and no U+0000],
     [the lexical bytes],
   [`0x07`], [other `xsd:string`], [the first 30 lexical bytes],
-  [`0x08`], [timezone-free `xsd:date`],
+  [`0x08`], [timezone-free `xsd:date` with years from `0001` through `9999`],
     [8 bytes: proleptic Gregorian days since 1970-01-01 plus 2#super[63]],
   [`0x7F`], [valid values the key cannot represent],
     [none: decimals with more than 18 fractional digits or a magnitude of at least
@@ -172,7 +181,7 @@ subtype other than `xsd:integer` the all-zero key. Base `xsd:integer`, `xsd:deci
 
 Payload bytes not listed are zero. For class `0x06`, byte order is code point
 order because UTF-8 preserves it. Language-tagged strings get no key because
-SPARQL defines no order on them. A date-time's validity, including 29 February,
+SPARQL defines no order on them. The validity of a date or date-time, including 29 February,
 follows the proleptic Gregorian calendar of its actual year, however many
 digits it has.
 
@@ -192,6 +201,26 @@ For `eddsa-sha256-merkle-2026` and `mldsa44-sha256-merkle-2026`:
 The `0x00` and `0x01` prefixes separate leaves from inner nodes, as in
 Certificate Transparency #cite("RFC6962").
 
+=== SHA-256 successor
+
+For `eddsa-sha256-merkle-salted-2026`, let `id` be the ASCII suite identifier.
+A quad digest uses the term encoding with the extended comparison-key profile.
+The issuer sorts quad digests in strictly increasing unsigned big-endian order.
+The tree contains at least one quad, with the count fitting in a `u32`.
+For each canonical quad at zero-based index `i`, compute
+
+```
+q_i    = SHA-256(id || "/quad" || 0x00 || enc(s) || enc(p) || enc(o) || enc(g))
+salt_i = HMAC-SHA-256(key = salt, data = id || "/leaf-salt" || 0x00 || u32be(i))
+leaf_i = SHA-256(id || "/leaf" || 0x00 || q_i || salt_i)
+```
+
+The domain suffixes are ASCII. The private issuance salt `salt` is the
+uniformly sampled 32-byte salt carried in the holder's credential.
+The leaf row follows quad-digest order. Pad with all-zero 32-byte leaves to the
+next power of two and compute inner nodes as `SHA-256(0x01 || left || right)`.
+A tree with one quad has its salted leaf as the root.
+
 == Signed message
 
 For the SHA-256 members, let `n` be the number of quads, `root` the tree root,
@@ -205,9 +234,10 @@ SHA-256(id || 0x00 || salt || n as u32 big-endian || root || config)
 
 where `id` is the ASCII suite identifier.
 
-Issuing the same canonical quads twice with different salts gives the same SHA-256 leaves
-and root, and different signed messages. For the Poseidon2 member the salt also enters the
-leaf computation, so the corresponding leaves and root change.
+Each SHA-256 identifier fixes its tree profile and gives the signed message a
+distinct domain. Issuing the same canonical quads twice with different salts
+retains the original SHA-256 profile's leaves and root and changes its signed
+messages. The successor and Poseidon2 also change the leaves and root.
 
 = Algorithms
 
@@ -220,31 +250,45 @@ with the existing Schnorr-over-Baby-Jubjub scheme instead.
 + Canonicalize the credential and the proof configuration with RDFC-1.0.
 + Draw a fresh, uniformly random 32-byte salt.
 + Compute the leaves, the root and the signed message.
-+ Sign the message: with Ed25519 for `eddsa-sha256-merkle-2026`, or with
++ Sign the message with Ed25519 for either Ed25519 suite, or with
   ML-DSA-44 (pure, empty context) for `mldsa44-sha256-merkle-2026`.
 + Set `proofValue` to the multibase encoding of the signature followed by the
   salt.
 
 == Proof verification
 
-A verifier that holds the whole credential, including the salt, recomputes the
-signed message from the canonical quads and configuration and verifies the
-signature. Ed25519 verification MUST reject non-canonical encodings and
+A verifier that holds the whole credential, including the salt, checks that the
+configuration contains one cryptosuite statement naming the accepted suite. It
+then recomputes the tree and signed message using that suite's rules and verifies
+the signature. Ed25519 verification MUST reject non-canonical encodings and
 small-order keys.
+
+For the SHA-256 successor, the object of the cryptosuite statement MUST be a
+literal of datatype `xsd:string` or `https://w3id.org/security#cryptosuiteString`.
+The successor's N-Quads issuance and verification interfaces MUST reject proof
+configurations containing a `sec:proofValue` predicate. A whole-credential
+verifier checks the decoded 96-byte proof value length before canonicalization.
+The successor uses RDFC-1.0 Appendix A serialization for blank-node hashing and
+canonical output. The native implementation applies independent byte, parsed quad
+and canonicalization work limits to the document and configuration. Verification
+also caps the document's physical line count.
 
 == Use in proofs of query answers
 
 A proof system that evaluates a SPARQL query over credentials secured with these
 suites receives the quads in the member's canonical order, the configuration and
 the salt as private input. It recomputes every leaf from the terms, checks strict
-leaf order for the SHA-256 members or strict quad-hash order for the Poseidon2
-member, and rebuilds the signed message. The answer is then computed over exactly
-those quads. Whenever a proof consumes a comparison key for value semantics, it
+leaf order for the original SHA-256 profile or strict quad-hash order for the
+SHA-256 successor and Poseidon2 member, and rebuilds the signed message.
+The successor's issuance salt and derived leaf salts MUST stay private.
+The answer is then computed over exactly those quads. Whenever a proof consumes
+a comparison key for value semantics, it
 MUST recompute the key from a bound lexical opening; a mismatching key makes the
 proof fail. A holder can hold the same credential under several salts, so a proof
 that rejects duplicate credentials MUST compare their private canonical quad
-sequences, or the SHA-256 member's unsalted root, rather than their salted messages. Any order the proof makes public, such as the
-order of revealed messages, MUST depend only on salted values; an order by the
+sequences, or the original SHA-256 profile's unsalted root, rather than their salted
+messages. Any order the proof makes public, such as the order of revealed messages,
+MUST depend only on salted values; an order by the
 unsalted root would let a verifier compare a private credential with a known
 one.
 
@@ -383,9 +427,10 @@ forming the existing IEEE key, including subnormals and overflow.
 implementation. Its guest compilation and lockfiles are frozen by the
 orchestrator. Every new caller uses the new crate; required-CI tests include the
 model source directly and compare fixed/generated encodings, keys, leaves, trees,
-messages, issuance and verification. The SHA member keeps the frozen key profile;
-the field-native member owns the extended datatype profile. Consolidation at the
-next guest re-freeze is tracked by issue #7391.
+messages, issuance and verification. The original SHA-256 member keeps the frozen
+key profile. The successor and the field-native member use the extended datatype
+profile. The successor has native issuance and verification. Guest adoption is
+tracked with the next guest re-freeze under issue #7391.
 The previous Poseidon2 draft used truncated SHA term hashes and unsalted leaves;
 this revision replaces both before fixing the implemented member's vectors.]
 
@@ -393,7 +438,7 @@ this revision replaces both before fixing the implemented member's vectors.]
 
 #table(
   columns: (auto, 1fr, 1fr, 1fr),
-  [*Property*], [*eddsa-sha256*], [*schnorr-poseidon2*], [*mldsa44-sha256*],
+  [*Property*], [*Ed25519/SHA-256 editions*], [*schnorr-poseidon2*], [*mldsa44-sha256*],
   [Unforgeability, classical], [Ed25519], [Discrete log on Baby Jubjub], [ML-DSA-44],
   [Unforgeability, post-quantum], [None], [None], [ML-DSA-44],
   [Tree binding], [SHA-256 collision resistance], [Poseidon2 collision resistance],

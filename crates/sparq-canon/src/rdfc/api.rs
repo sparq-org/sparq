@@ -1,8 +1,8 @@
 //! The entry points sparq-canon calls. Trimmed from upstream `rdf-canon` 0.15.3 `api.rs`
-//! to the functions this crate uses; bodies are unchanged (see `SPARQ-PATCHES.md`).
+//! to the functions this crate uses (see `SPARQ-PATCHES.md`).
 
 use super::{
-    canon::{canonicalize_core, serialize},
+    canon::{canonicalize_core, serialize, NQuadsSerialization},
     counter::{HndqCallCounter, SimpleHndqCallCounter},
     CanonicalizationError,
 };
@@ -29,6 +29,7 @@ pub fn canonicalize_quads(input_quads: &[Quad]) -> Result<String, Canonicalizati
 pub struct CanonicalizationOptions {
     pub hndq_call_limit: Option<usize>,
     pub permutation_limit: Option<usize>,
+    pub(crate) serialization: NQuadsSerialization,
 }
 
 /// Given some options (e.g., call limit), returns the serialized canonical form of the
@@ -41,7 +42,7 @@ pub fn canonicalize_quads_with<D: Digest>(
     let input_dataset = Dataset::from_iter(input_quads);
     let issued_identifiers_map = issue_with::<D>(&input_dataset, options)?;
     let relabeled_dataset = relabel(&input_dataset, &issued_identifiers_map)?;
-    Ok(serialize(&relabeled_dataset))
+    Ok(serialize(&relabeled_dataset, options.serialization))
 }
 
 /// Given some options (e.g., call limit), assigns deterministic identifiers to any blank
@@ -52,7 +53,7 @@ pub fn issue_with<D: Digest>(
 ) -> Result<HashMap<String, String>, CanonicalizationError> {
     let hndq_call_counter = SimpleHndqCallCounter::new(options.hndq_call_limit)
         .with_permutation_limit(options.permutation_limit);
-    canonicalize_core::<D>(input_dataset, hndq_call_counter)
+    canonicalize_core::<D>(input_dataset, hndq_call_counter, options.serialization)
 }
 
 /// Assigns deterministic identifiers to any blank nodes in the input quads
@@ -69,9 +70,7 @@ pub fn issue_quads_with<D: Digest>(
     options: &CanonicalizationOptions,
 ) -> Result<HashMap<String, String>, CanonicalizationError> {
     let input_dataset = Dataset::from_iter(input_quads);
-    let hndq_call_counter = SimpleHndqCallCounter::new(options.hndq_call_limit)
-        .with_permutation_limit(options.permutation_limit);
-    canonicalize_core::<D>(&input_dataset, hndq_call_counter)
+    issue_with::<D>(&input_dataset, options)
 }
 
 /// Re-label blank node identifiers in the input dataset according to the issued identifiers map.
@@ -176,6 +175,7 @@ mod budget_tests {
         let options = CanonicalizationOptions {
             hndq_call_limit: Some(4_000),
             permutation_limit: Some(2_800),
+            ..Default::default()
         };
         for result in [
             canonicalize_quads_with::<Sha256>(&quads, &options).map(|_| ()),
@@ -189,6 +189,7 @@ mod budget_tests {
         let options = CanonicalizationOptions {
             hndq_call_limit: Some(4_000),
             permutation_limit: Some(3_000),
+            ..Default::default()
         };
         assert_eq!(
             canonicalize_quads_with::<Sha256>(&quads, &options).unwrap(),
@@ -217,6 +218,7 @@ mod budget_tests {
             let options = CanonicalizationOptions {
                 hndq_call_limit: Some(usize::MAX),
                 permutation_limit: Some(budget),
+                ..Default::default()
             };
             for result in [
                 canonicalize_quads_with::<Sha256>(&quads, &options).map(|_| ()),
@@ -240,6 +242,7 @@ mod budget_tests {
         let options = CanonicalizationOptions {
             hndq_call_limit: Some(usize::MAX),
             permutation_limit: Some(8),
+            ..Default::default()
         };
         for result in [
             canonicalize_quads_with::<Sha256>(&quads, &options).map(|_| ()),
@@ -253,6 +256,7 @@ mod budget_tests {
         let options = CanonicalizationOptions {
             hndq_call_limit: Some(usize::MAX),
             permutation_limit: Some(20_000),
+            ..Default::default()
         };
         assert_eq!(
             canonicalize_quads_with::<Sha256>(&quads, &options).unwrap(),

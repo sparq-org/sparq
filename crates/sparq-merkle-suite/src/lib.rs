@@ -9,6 +9,8 @@ pub mod poseidon;
 #[cfg(feature = "os-random")]
 pub mod random;
 pub mod sha256;
+#[cfg(feature = "sha256-salted")]
+pub mod sha256_salted;
 
 pub use keys::{comparison_key, key_class};
 pub use sparq_zk::Fr;
@@ -53,22 +55,28 @@ pub struct SignedCredential {
 }
 
 fn canonical_config(text: &str, suite: &str) -> Result<String, Error> {
-    use oxrdf::Term;
     let text = sparq_canon::canonicalize_nquads(text)
         .map_err(|_| Error("configuration canonicalization rejected"))?;
-    let suite_statements = oxttl::NQuadsParser::new()
-        .for_slice(text.as_bytes())
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| Error("configuration parsing rejected"))?
-        .into_iter()
-        .filter(|q| q.predicate.as_str() == "https://w3id.org/security#cryptosuite")
-        .collect::<Vec<_>>();
-    if suite_statements.len() != 1
-        || !matches!(&suite_statements[0].object, Term::Literal(l) if l.value() == suite)
-    {
-        return Err(Error(
-            "configuration must name this cryptosuite exactly once",
-        ));
-    }
+    check_cryptosuite(&config_quads(&text)?, |literal| literal.value() == suite)?;
     Ok(text)
+}
+
+fn config_quads(text: &str) -> Result<Vec<oxrdf::Quad>, Error> {
+    sparq_canon::parse_nquads(text).map_err(|_| Error("configuration parsing rejected"))
+}
+
+fn check_cryptosuite(
+    quads: &[oxrdf::Quad],
+    matches_suite: impl FnOnce(&oxrdf::Literal) -> bool,
+) -> Result<(), Error> {
+    use oxrdf::Term;
+    let mut suites = quads
+        .iter()
+        .filter(|quad| quad.predicate.as_str() == "https://w3id.org/security#cryptosuite");
+    match (suites.next().map(|quad| &quad.object), suites.next()) {
+        (Some(Term::Literal(literal)), None) if matches_suite(literal) => Ok(()),
+        _ => Err(Error(
+            "configuration must name this cryptosuite exactly once",
+        )),
+    }
 }

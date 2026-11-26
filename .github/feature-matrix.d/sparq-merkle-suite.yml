@@ -1,0 +1,5 @@
+# Leg-name changes also update scripts/tests/feature-matrix-legnames.golden.txt.
+- name: "sparq-merkle-suite (sha256-salted)"
+  crate: "sparq-merkle-suite"
+  features: "sha256-salted"
+  test: true
