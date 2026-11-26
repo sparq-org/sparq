@@ -178,9 +178,16 @@ holder issuer list is refused; omit holder binding to require no holder keys.
 Expression evaluation uses the shared typed gadgets, with a separate capacity
 channel. The generated-query coverage ratchet requires native and WebAssembly
 ABI, bytecode and independently derived key agreement for every passing operator
-program. Authenticated delivery uses the native catalogue and requires native
-compile/key determinism; the Node package refuses unknown plans or changed keys.
-Isolated gadget evidence stays distinct from generated-query and proof evidence.
+program. Isolated gadget evidence stays distinct from generated-query and proof
+evidence.
+
+In `@sparq-org/zk-query`, the holder and verifier trust the published package to
+map the canonical plan hash to its circuit program and verification key. The
+host bindings pin the catalogue by SHA-256, and each entry pins the program and
+key by SHA-256. CI rebuilds these artifacts with the native toolchain, reusing
+cached outputs where available, and checks them against the pins. The Node
+package accepts only queries that lower to a catalogued plan. The standalone
+native `method::Compiler` compiles the plan and derives the key locally.
 
 The credential suite now authenticates proof metadata. `Credential::metadata`,
 `Credential::signed_message` and `credential::dataset_commitment` return `Result`;

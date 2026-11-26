@@ -10,7 +10,7 @@ import { checkPinnedFiles } from './internal/runtime.mjs';
 import pins from './assets/toolchain.pins.json' with { type: 'json' };
 
 const outputLimit = 1 << 20;
-export class ProverRefusal extends Error {}
+export class ProverRefusal extends Error { name = 'ProverRefusal'; }
 
 async function digest(path) {
   const hash = createHash('sha256');
@@ -58,8 +58,8 @@ function run(binary, args, { cwd, signal } = {}) {
 }
 
 export async function copyPinnedBinary(name, source, destination, options = {}) {
-  const expected = pins.binaries[name];
-  if (!expected || process.platform !== pins.platform || process.arch !== pins.arch) {
+  const expected = pins.platforms[`${process.platform}-${process.arch}`]?.[name];
+  if (!expected) {
     throw new ProverRefusal('native platform has no binary pin');
   }
   const requirement = `${name} expected ${expected.version}, SHA-256 ${expected.sha256}`;
