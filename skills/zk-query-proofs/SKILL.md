@@ -203,14 +203,16 @@ For distinct public quad limits per credential slot, use
 `prepare_with_credential_quad_bounds` and
 `Request::new_authenticated_with_quad_bounds`. The default-off `ordered-json` test feature exercises request canonicalization
 with the insertion-order JSON backend. The statement binds the issuer root
-and ordered quad limits as well as the request, commitment and result. Operator
-fixtures use `Request::new_operator_fixture`, an explicitly unauthenticated
-constructor that cannot produce an authenticated proof; the former `Request::new`
-constructor is removed. The statement lane supplies
-the protocol adapter and holder, status and validity envelope. Verification derives
-its plan and result encoding from the stored request and RDF answer and consumes
-the original challenge last. Toolchain pins and verifier target are independent
-of the cache location.
+and ordered quad limits as well as the request, commitment and result. The statement
+lane supplies the protocol adapter and holder, status and validity envelope.
+Verification derives its plan and result encoding from the stored request and RDF
+answer and consumes the original challenge last. Toolchain pins and verifier
+target are independent of the cache location.
+
+Generate a supplied-cell operator program directly from the lowered plan with
+`codegen::generate_operator_fixture(&plan)`. Use `Request::new_operator_fixture`
+when a test needs an unauthenticated fixture request. Authenticated proofs require
+an authenticated request.
 
 The query crate's `envelope_policy::{PolicyInput, derive, public_words}` helper
 prepares the agreed public policy extension from typed stored-policy input.
