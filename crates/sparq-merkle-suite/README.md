@@ -5,13 +5,22 @@ Research-grade, externally unaudited RDF Merkle credential suites. Internal,
 
 ## 🚀 Quickstart
 
-Use `sha256::{issue, verify}` for the Ed25519/SHA-256 member, or
+Use `sha256::{issue, verify}` for the original Ed25519/SHA-256 member, or
 `poseidon::{issue, verify}` for the Schnorr/Poseidon2 member. The latter takes the
 existing `sparq_zk::sig::SecretKey` and a fresh private field salt. Its canonical
 proof configuration must name `schnorr-poseidon2-merkle-2026` with
 `https://w3id.org/security#cryptosuite`.
 
+Enable the default-off `sha256-salted` feature and use
+`sha256_salted::{issue, verify}` for the native Ed25519/SHA-256 successor.
+Its proof configuration names `eddsa-sha256-merkle-salted-2026` under the
+same predicate. Supply a fresh, uniformly random 32-byte salt at issuance
+and treat the resulting `signature || salt` bytes as private credential
+material. Each verifier accepts its own edition.
+
 Run `cargo test -p sparq-merkle-suite` for native compatibility and constant pins.
+Run `cargo test -p sparq-merkle-suite --features sha256-salted --test sha_salted`
+for the successor's interoperability vectors and issuance and verification checks.
 The toolchain workflow also executes the Noir library and differential witnesses.
 
 For reproducible issuers use the seeded entry points:
@@ -64,8 +73,10 @@ and Baby Jubjub implementations rather than maintaining another primitive body.
 
 The frozen zkVM model retains its own SHA implementation. **Every new caller
 uses this crate**; the model file is included directly only by the test oracle.
-The SHA member preserves the frozen datatype dispatch. The field-native member
-owns the extended date and integer-subtype profile.
+The original SHA member uses the frozen datatype profile. The successor shares
+the extended comparison keys with Poseidon2 and derives leaf salts from the
+issuance salt and each position in strict quad-hash order. Literal frames bind
+the original RDF term along with its comparison key.
 
 `tests/sha_parity.rs` checks the actual model source against this crate over fixed
 vectors and generated data, including issuance and verification. It runs in the
@@ -83,6 +94,7 @@ Multikey codec is documented in the usage skill and design record.
 ## 📚 Learn more
 
 See [suite usage](../../skills/merkle-credentials/SKILL.md),
+[cryptosuite specification](../../site/specs/zk-merkle-cryptosuite.typ),
 [design decisions](../../research/noir-merkle-credential-suite.md), and the
 [Noir library](../../zk/noir-query/core/README.md). Canonicalization and signature
 primitives currently enter through the existing capability crates; this is an

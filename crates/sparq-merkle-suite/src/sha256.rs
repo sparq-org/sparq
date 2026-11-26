@@ -4,7 +4,7 @@ use oxrdf::{GraphName, Quad, Term};
 use sha2::{Digest, Sha256};
 /// Data Integrity suite identifier.
 pub const EDDSA_SHA256_MERKLE_2026: &str = "eddsa-sha256-merkle-2026";
-/// Frozen SHA-member dispatch. The field-native member owns the extended date/subtype profile.
+/// Frozen SHA-member dispatch.
 pub fn comparison_key(literal: &oxrdf::Literal) -> [u8; crate::KEY_BYTES] {
     let datatype = literal.datatype().as_str();
     let local = datatype.strip_prefix("http://www.w3.org/2001/XMLSchema#");
@@ -18,6 +18,14 @@ pub fn comparison_key(literal: &oxrdf::Literal) -> [u8; crate::KEY_BYTES] {
 }
 /// Appends the typed byte encoding of one term (or graph name) to `out`.
 pub fn encode_term(term: &Term, out: &mut Vec<u8>) {
+    encode_term_with_key(term, out, &comparison_key);
+}
+
+fn encode_term_with_key(
+    term: &Term,
+    out: &mut Vec<u8>,
+    key_for: &impl Fn(&oxrdf::Literal) -> [u8; crate::KEY_BYTES],
+) {
     match term {
         Term::NamedNode(node) => tagged(out, term_kind::IRI, node.as_str()),
         Term::BlankNode(node) => tagged(out, term_kind::BLANK_NODE, node.as_str()),
@@ -25,7 +33,7 @@ pub fn encode_term(term: &Term, out: &mut Vec<u8>) {
             tagged(out, term_kind::LITERAL, literal.value());
             framed(out, literal.datatype().as_str());
             framed(out, literal.language().unwrap_or(""));
-            out.extend_from_slice(&comparison_key(literal));
+            out.extend_from_slice(&key_for(literal));
         }
         Term::Triple(_) => unreachable!("triple terms are rejected before encoding"),
     }
@@ -36,19 +44,27 @@ pub fn encode_term(term: &Term, out: &mut Vec<u8>) {
 /// Returns `None` for a quad with an RDF 1.2 triple term, which the suite excludes.
 #[must_use]
 pub fn leaf(quad: &Quad) -> Option<[u8; 32]> {
+    quad_digest(quad, Sha256::new_with_prefix([0x00]), comparison_key)
+}
+
+pub(crate) fn quad_digest(
+    quad: &Quad,
+    hash: Sha256,
+    key_for: impl Fn(&oxrdf::Literal) -> [u8; crate::KEY_BYTES],
+) -> Option<[u8; 32]> {
     if matches!(quad.object, Term::Triple(_)) {
         return None;
     }
-    let mut bytes = vec![0x00];
-    encode_term(&Term::from(quad.subject.clone()), &mut bytes);
+    let mut bytes = Vec::new();
+    encode_term_with_key(&Term::from(quad.subject.clone()), &mut bytes, &key_for);
     tagged(&mut bytes, term_kind::IRI, quad.predicate.as_str());
-    encode_term(&quad.object, &mut bytes);
+    encode_term_with_key(&quad.object, &mut bytes, &key_for);
     match &quad.graph_name {
         GraphName::DefaultGraph => bytes.push(term_kind::DEFAULT_GRAPH),
         GraphName::NamedNode(node) => tagged(&mut bytes, term_kind::IRI, node.as_str()),
         GraphName::BlankNode(node) => tagged(&mut bytes, term_kind::BLANK_NODE, node.as_str()),
     }
-    Some(Sha256::digest(&bytes).into())
+    Some(hash.chain_update(bytes).finalize().into())
 }
 
 /// The Merkle root over leaves in strictly increasing byte order.
@@ -61,8 +77,11 @@ pub fn root(leaves: &[[u8; 32]]) -> Option<[u8; 32]> {
     if leaves.is_empty() || leaves.windows(2).any(|pair| pair[0] >= pair[1]) {
         return None;
     }
-    let mut row = leaves.to_vec();
-    row.resize(leaves.len().next_power_of_two(), [0; 32]);
+    merkle_root(leaves.to_vec())
+}
+
+pub(crate) fn merkle_root(mut row: Vec<[u8; 32]>) -> Option<[u8; 32]> {
+    row.resize(row.len().checked_next_power_of_two()?, [0; 32]);
     while row.len() > 1 {
         row = row
             .chunks_exact(2)
@@ -90,8 +109,18 @@ pub fn signed_message(
     root: &[u8; 32],
     config_digest: &[u8; 32],
 ) -> [u8; 32] {
+    message_for_suite(EDDSA_SHA256_MERKLE_2026, salt, quads, root, config_digest)
+}
+
+pub(crate) fn message_for_suite(
+    suite: &str,
+    salt: &[u8; SALT_BYTES],
+    quads: u32,
+    root: &[u8; 32],
+    config_digest: &[u8; 32],
+) -> [u8; 32] {
     let mut hash = Sha256::new();
-    hash.update(EDDSA_SHA256_MERKLE_2026.as_bytes());
+    hash.update(suite.as_bytes());
     hash.update([0x00]);
     hash.update(salt);
     hash.update(quads.to_be_bytes());

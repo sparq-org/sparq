@@ -59,9 +59,29 @@ predicate, object and graph cells. Triple terms are refused.
 
 `sha256::{encode_term, leaf, root, signed_message, issue, verify}` provides the
 Ed25519/SHA-256 member. Its configuration must name `eddsa-sha256-merkle-2026`
-under the same predicate. Its frozen datatype dispatch is separate from the field-native extension. Its `SignedCredential` carries the signature followed by
+under the same predicate. It uses the frozen datatype profile. Its
+`SignedCredential` carries the signature followed by
 the private byte salt. The detached evaluator still holds its frozen second
 copy; existing vectors are parity-checked, while its key dispatch remains frozen.
+
+Enable the default-off `sha256-salted` feature to select the native successor.
+Call `sha256_salted::issue(document, proof_config, &signing_key, salt)` with a fresh,
+uniformly random `[u8; 32]` from a cryptographic random source. The proof
+configuration must contain one cryptosuite statement naming
+`eddsa-sha256-merkle-salted-2026`. The issuer
+canonicalizes the RDF dataset and sorts its quads by unsigned digest. It derives
+private leaf salts by HMAC-SHA-256 over the suite's leaf-salt domain and each
+zero-based index. Treat the resulting `SignedCredential`, including
+`signature || salt`, as private credential material. Pass the whole credential
+and issuer key to `sha256_salted::verify(&credential, &verifying_key)`. Each SHA
+verifier accepts only its declared suite.
+
+For private tree reconstruction, `sha256_salted::quad_hash` hashes a canonical
+quad and `sha256_salted::root` takes the strictly increasing digests and issuance
+salt. `leaf_salt` and `leaf` derive the salt and leaf at a given index.
+`signed_message` binds the suite, issuance salt, exact count, root and canonical
+configuration digest. Keep the unsalted quad digests and derived salts private.
+Guest adoption is tracked by [#7391](https://github.com/sparq-org/sparq/issues/7391).
 
 ## Comparison keys
 
@@ -72,7 +92,8 @@ against their value spaces and use the decimal class. XML Schema defines no
 additional built-in decimal-derived non-integer datatypes; unknown custom
 subtypes cannot be inferred from an IRI alone and get no key.
 
-Timezone-free `xsd:date` uses the calendar-day class. Valid timezoned dates get
+Poseidon2 and the SHA successor use the shared extended profile. Timezone-free
+`xsd:date` uses the calendar-day class. Valid timezoned dates get
 `UNREPRESENTABLE`: the day ordinal cannot retain timezone offsets, and the
 engine's mixed-timezone comparison is a partial order. This member adds no
 separate zoned-date key class. Invalid literals get `NONE`. Neither class
@@ -226,6 +247,8 @@ is [#7391](https://github.com/sparq-org/sparq/issues/7391).
 
 Run `cargo test -p sparq-merkle-suite`, `nargo test` in the Noir core, and the
 live suite test from the ZK toolchain workflow.
+Run `cargo test -p sparq-merkle-suite --features sha256-salted --test sha_salted`
+for the successor's checked keys, salted tree vectors and cross-edition checks.
 `cargo run -p sparq-merkle-suite --example differential_vectors` emits the native
 corpus; `--example noir_differential_fixtures` emits the exact wiring and raw
 witnesses used by the live differential test. Each pair is checked in both

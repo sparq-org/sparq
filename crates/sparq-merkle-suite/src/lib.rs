@@ -9,6 +9,8 @@ pub mod poseidon;
 #[cfg(feature = "os-random")]
 pub mod random;
 pub mod sha256;
+#[cfg(feature = "sha256-salted")]
+pub mod sha256_salted;
 
 pub use keys::{comparison_key, key_class};
 pub use sparq_zk::Fr;
