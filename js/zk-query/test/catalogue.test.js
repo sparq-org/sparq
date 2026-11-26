@@ -6,29 +6,47 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { request, testIssuerKeygen } from '../index.js';
+import { prove, request, testIssuerKeygen } from '../index.js';
+import { sha256 } from '../internal/runtime.mjs';
+import { catalogueBuildDigest } from '../scripts/cache.mjs';
 import { canonicalGraph, issueFixture } from '../scripts/test-credentials.mjs';
 import { examplePolicy } from '../scripts/catalogue-example.mjs';
 import { wasmProverFits, keyDyadicSize } from '../wasm-prover.mjs';
+const host = createRequire(import.meta.url)('../wasm/sparq_zk_query_wasm.cjs');
 test('every catalogue example derives its pinned plan and leaves no stale assets', () => {
   const directory = new URL('../assets/', import.meta.url);
   const table = JSON.parse(readFileSync(new URL('catalogue.json', directory)));
+  const toolchainDigest = sha256(readFileSync(new URL('toolchain.pins.json', directory)));
   const issuer = testIssuerKeygen('00'.repeat(32));
   for (const entry of table.entries) {
-    const stored = request({ query: entry.example.query, policy: examplePolicy(entry.example, issuer, 'urn:sparq:test:catalogue'), nonce: '09'.repeat(32) });
+    const query = entry.example.query;
+    const policy = examplePolicy(entry.example, issuer, 'urn:sparq:test:catalogue');
+    const stored = request({ query, policy, nonce: '09'.repeat(32) });
     assert.equal(stored.planHash, entry.planHash);
     assert.equal(stored.verificationKey, readFileSync(new URL(entry.vk, directory), 'utf8').trim());
+    const plan = JSON.parse(host.hostCall('plan', JSON.stringify({ query, policy })));
+    assert.equal(catalogueBuildDigest(plan.files, table.sourceBundleSha256, toolchainDigest), entry.buildInputSha256, `stale build inputs for ${entry.example.name}`);
     if (entry.wasmProving) assert(wasmProverFits(keyDyadicSize(Buffer.from(stored.verificationKey, 'hex'))), `${entry.planHash} admits WebAssembly beyond its bound`);
   }
   const keys = readdirSync(directory).filter(name => /^[a-f0-9]{64}\.vk\.hex$/.test(name));
   assert.deepEqual(keys.sort(), table.entries.map(entry => entry.vk).sort());
   for (const name of readdirSync(directory).filter(name => /^[a-f0-9]{64}\.json$/.test(name))) assert(table.entries.some(entry => entry.acir === name), 'stale catalogue program');
 });
+test('the refreshed holder requires a fresh request for an indexed SCAN plan', async t => {
+  const old = JSON.parse(readFileSync(new URL('./fixtures/bgp-before-indexed-scan.json', import.meta.url)));
+  const clock = old.policy.notBefore;
+  t.mock.method(Date, 'now', () => clock * 1000);
+
+  await assert.rejects(prove({ request: old, credentials: [] }), /verification key mismatch/);
+  const fresh = request({ query: old.query, policy: old.policy, nonce: '0a'.repeat(32) });
+  assert.equal(fresh.planHash, old.planHash);
+  assert.notEqual(fresh.verificationKey, old.verificationKey);
+  assert.equal(JSON.parse(host.hostCall('holder', JSON.stringify({ request: fresh, clock }))).planHash, old.planHash);
+});
 test('default proof preparation supplies the canonical envelope private inputs', () => {
   const fixture = JSON.parse(readFileSync(new URL('./fixtures/authenticated.json', import.meta.url)));
   const issuer = testIssuerKeygen('00'.repeat(32));
   const credential = issueFixture(issuer, canonicalGraph(''), '01'.repeat(32));
-  const host = createRequire(import.meta.url)('../wasm/sparq_zk_query_wasm.cjs');
   const prepared = JSON.parse(host.hostCall('prepareProof', JSON.stringify({ request: fixture.request, credentials: [credential], clock: fixture.request.policy.notBefore })));
   const artifact = JSON.parse(readFileSync(new URL('./fixtures/layout-abi.json', import.meta.url)));
   const inputs = prepared.witnessInputs.json;

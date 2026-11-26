@@ -20,6 +20,13 @@ if (!checked.verified) throw new Error(checked.reason);
 ```
 
 The verifier stores its own request and supplies that copy to `verify`.
+
+The indexed SCAN catalogue refresh changes verification keys for affected plans,
+even when their plan hashes stay the same. Finish outstanding requests with the
+package version that issued them, or issue fresh requests after upgrading. A
+holder using the refreshed catalogue refuses a request carrying an older key
+with `verification key mismatch`.
+
 `policy` requires `bounds`, `trustedIssuers` and `audience`. Bounds contain
 `credentials`, `quadsPerCredential` and `rowsPerTable`; trusted issuers are suite
 public keys. `credentialQuadBounds` optionally refines ordered credential slots.
@@ -210,10 +217,24 @@ The offline wrapper also works before a build, directly from a source checkout.
 `build-circuits.mjs` regenerates missing catalogue artifacts and checks their pins.
 Its `--cache` directory retains completed native compilations; `--cases` accepts
 query/bounds profiles and `--write-pins` explicitly updates maintainer pins.
+When the source bundle changes, a pin update must include every catalogue plan.
+With the same bundle, the builder regenerates omitted examples and requires
+their build-input digests to match the existing pins.
+The builder stages the bundle, rebuilt programs and keys, and new catalogue.
+It publishes under an OS file lock acquired through Python 3 after every selected
+build succeeds and the catalogue revision still matches. The next writer rolls
+back an interrupted publication using the staged backups. Unchanged catalogue
+contents require no rewrite. Retry if another publisher holds the lock or has
+updated the catalogue.
+`sources.mjs` uses the same lock and regenerates the bundle only when it matches
+the existing catalogue pin.
 `CARGO_BUILD_JOBS` also bounds concurrent catalogue builds, defaulting to serial
 when unset. Duplicate plan hashes share a build and must generate identical sources.
-Cached source paths through symbolic links are refused; staging replaces ordinary
-cached files without modifying another hard link's contents.
+The build-input pin covers the generated files, the library bundle and the
+toolchain pins. It also selects the cache directory for the program and key.
+The builder stages each native build in a temporary directory and renames it
+into the cache after both commands succeed and the key is nonempty. It
+regenerates cache entries from older versions on demand.
 Catalogue checks derive each example's plan again through Rust and reject stale
 key or program files left over from a rebuild. An example's optional `envelope`
 (`holder`, `status`, `validity`, `freshness`, `tableRowBounds`, `openingProfile`)

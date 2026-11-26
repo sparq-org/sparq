@@ -1,11 +1,11 @@
 //! Render the interpreter's complete table trace for generated-package execution.
 
 use crate::{
-    interp::{Cell, CredentialCells, EncodeTerm, ResultValue, Trace},
-    plan::{Operator, Parameter, Plan, ResultForm, Schema},
+    interp::{row_key, Cell, CredentialCells, EncodeTerm, ResultValue, Trace},
+    plan::{Operator, Parameter, Plan, ResultForm, Schema, Slot},
     Error,
 };
-use std::fmt::Write;
+use std::{collections::HashMap, fmt::Write};
 
 /// A research execution input. The method layer supplies its stored request digest.
 pub fn prover_toml(
@@ -15,6 +15,32 @@ pub fn prover_toml(
     trace: &Trace,
     request_digest: [u8; 32],
     presentation_salt: [u8; 32],
+) -> Result<String, Error> {
+    prover_toml_with_scan_dataset(
+        plan,
+        credentials,
+        encoder,
+        trace,
+        request_digest,
+        presentation_salt,
+        || {
+            let cap = plan.capacity();
+            Ok(padded_scan_dataset(
+                credentials,
+                std::iter::repeat_n(cap.quads_per_credential, cap.credentials as usize),
+            ))
+        },
+    )
+}
+
+fn prover_toml_with_scan_dataset(
+    plan: &Plan,
+    credentials: &[CredentialCells],
+    encoder: &impl EncodeTerm,
+    trace: &Trace,
+    request_digest: [u8; 32],
+    presentation_salt: [u8; 32],
+    scan_dataset: impl FnOnce() -> Result<Vec<Option<[Cell; 3]>>, Error>,
 ) -> Result<String, Error> {
     if trace.tables.len() != plan.nodes().len() {
         return Err(Error::Invalid("trace node count".into()));
@@ -140,7 +166,113 @@ pub fn prover_toml(
     for (i, (t, node)) in trace.tables.iter().zip(plan.nodes()).enumerate() {
         writeln!(out, "t{i} = {}", table(&t.rows, &node.output)?).unwrap();
     }
+    if plan
+        .nodes()
+        .iter()
+        .any(|node| matches!(node.operator, Operator::Scan(_)))
+    {
+        append_scan_hints(plan, encoder, trace, &scan_dataset()?, &mut out)?;
+    }
     Ok(out)
+}
+
+fn padded_scan_dataset(
+    credentials: &[CredentialCells],
+    capacities: impl IntoIterator<Item = u32>,
+) -> Vec<Option<[Cell; 3]>> {
+    #[cfg(test)]
+    SCAN_DATASET_BUILDS.set(SCAN_DATASET_BUILDS.get() + 1);
+    capacities
+        .into_iter()
+        .enumerate()
+        .flat_map(|(c, capacity)| {
+            (0..capacity as usize).map(move |q| {
+                credentials
+                    .get(c)
+                    .and_then(|credential| credential.quads.get(q))
+                    .map(|quad| [quad[0], quad[1], quad[2]])
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+thread_local! {
+    static SCAN_DATASET_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn append_scan_hints(
+    plan: &Plan,
+    encoder: &impl EncodeTerm,
+    trace: &Trace,
+    dataset: &[Option<[Cell; 3]>],
+    out: &mut String,
+) -> Result<(), Error> {
+    for (node_id, node) in plan.nodes().iter().enumerate() {
+        let Operator::Scan(pattern) = &node.operator else {
+            continue;
+        };
+        let mut constants = [Cell::default(); 3];
+        for (p, slot) in pattern.iter().enumerate() {
+            if let Slot::Parameter(id) = slot {
+                let Parameter::Term(term) = &plan.parameters()[*id as usize] else {
+                    return Err(Error::Invalid("scan term parameter".into()));
+                };
+                constants[p] = encoder.encode(term)?;
+            }
+        }
+        let mut target = vec![0; dataset.len()];
+        let mut source = vec![0; node.output.capacity as usize];
+        let mut seen = vec![false; source.len()];
+        let rows = &trace.tables[node_id].rows;
+        let mut positions = HashMap::with_capacity(rows.len());
+        for (r, row) in rows.iter().enumerate() {
+            positions.entry(row_key(row)).or_insert(r);
+        }
+        for (i, triple) in dataset.iter().enumerate() {
+            let Some(triple) = triple else { continue };
+            let mut row = vec![Cell::default(); node.output.variables.len()];
+            let mut matches = true;
+            for (p, slot) in pattern.iter().enumerate() {
+                match slot {
+                    Slot::Parameter(_) => matches &= triple[p].same_term(constants[p]),
+                    Slot::Variable(v) => {
+                        let col = node
+                            .output
+                            .variables
+                            .iter()
+                            .position(|a| a == v)
+                            .expect("scan column");
+                        matches &= !row[col].bound || row[col].same_term(triple[p]);
+                        row[col] = triple[p];
+                    }
+                }
+            }
+            if !matches {
+                continue;
+            }
+            if let Some(&r) = positions.get(&row_key(&row)) {
+                target[i] = r as u32;
+                if !seen[r] {
+                    source[r] = i as u32;
+                    seen[r] = true;
+                }
+            }
+        }
+        writeln!(
+            out,
+            "target_{node_id} = {}",
+            array(target.iter().map(u32::to_string))
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "source_{node_id} = {}",
+            array(source.iter().map(u32::to_string))
+        )
+        .unwrap();
+    }
+    Ok(())
 }
 
 fn array(items: impl IntoIterator<Item = String>) -> String {
@@ -291,7 +423,7 @@ pub fn prover_toml_suite_fixture_with_envelope(
         envelope,
         Authentication {
             revealed: None,
-            canonical: false,
+            canonical_issuers: None,
         },
     )
 }
@@ -315,7 +447,7 @@ pub fn prover_toml_suite_fixture_revealed(
         envelope,
         Authentication {
             revealed: Some(&revealed),
-            canonical: false,
+            canonical_issuers: None,
         },
     )
 }
@@ -338,7 +470,7 @@ fn revealed_inputs(
 
 struct Authentication<'a> {
     revealed: Option<&'a crate::statement::RevealedInputs>,
-    canonical: bool,
+    canonical_issuers: Option<&'a [Cell]>,
 }
 fn prover_toml_authenticated_mode(
     plan: &Plan,
@@ -351,7 +483,7 @@ fn prover_toml_authenticated_mode(
 ) -> Result<String, Error> {
     let Authentication {
         revealed,
-        canonical,
+        canonical_issuers,
     } = authentication;
     let issuer_root = envelope.issuer_root;
     use crate::credential::SuiteEncoder;
@@ -378,23 +510,43 @@ fn prover_toml_authenticated_mode(
     } else {
         layout.reconstruct_authenticated_with_envelope(plan, &statement, envelope)?
     };
-    let base = prover_toml(
+    let cap = plan.capacity();
+    let capacities = plan.credential_quad_capacities();
+    let base = prover_toml_with_scan_dataset(
         plan,
         &cells,
         &SuiteEncoder,
         trace,
         request_digest,
         presentation_salt,
+        || {
+            let mut scan_dataset = padded_scan_dataset(&cells, capacities.iter().copied());
+            if let Some(issuers) = canonical_issuers {
+                let predicate = SuiteEncoder.encode(
+                    &oxrdf::NamedNode::new_unchecked(crate::credential::VERIFIED_ISSUER).into(),
+                )?;
+                for c in 0..cap.credentials as usize {
+                    scan_dataset.push(if let Some(&issuer) = issuers.get(c) {
+                        Some([
+                            crate::credential::credential_graph(request_digest, c as u32)?,
+                            predicate,
+                            issuer,
+                        ])
+                    } else {
+                        None
+                    });
+                }
+            }
+            Ok(scan_dataset)
+        },
     )?;
-    let cap = plan.capacity();
     let opening = plan.opening_profile().limits();
     let mut raw = vec![];
     let mut proofs = vec![];
-    let capacities = plan.credential_quad_capacities();
     for (c, &capacity) in capacities.iter().enumerate() {
         let mut quads = vec![];
         if let Some(credential) = credentials.get(c) {
-            if !canonical && credential.issuer_root()? != issuer_root {
+            if canonical_issuers.is_none() && credential.issuer_root()? != issuer_root {
                 return Err(Error::Invalid("issuer membership root".into()));
             }
             for q in credential.quads()? {
@@ -727,8 +879,85 @@ fn json_toml(value: &serde_json::Value) -> String {
 #[path = "witness_envelope.rs"]
 mod envelope;
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) use envelope::{authorize, render_canonical, CanonicalInput};
+pub(crate) use envelope::{authenticated_issuers, authorize, render_authorized, CanonicalInput};
 pub use envelope::{
     prover_toml_enveloped, CredentialEvidence, EnvelopeInput, EnvelopeWitness, HolderWitness,
     StatusWitness,
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        capacity::Bounds,
+        credential::SuiteEncoder,
+        interp::{evaluate, SAME_TERM_CHECKS},
+        lower::lower,
+    };
+    use oxrdf::NamedNode;
+
+    #[test]
+    fn operator_witness_without_a_scan_skips_dataset_build() {
+        let plan = lower(
+            "ASK {}",
+            Bounds {
+                credentials: 1,
+                quads_per_credential: 16,
+                rows_per_table: 2,
+            },
+        )
+        .unwrap();
+        let term = SuiteEncoder
+            .encode(&NamedNode::new_unchecked("urn:term").into())
+            .unwrap();
+        let credentials = [CredentialCells {
+            quads: vec![[term, term, term, Cell::default()]],
+        }];
+        let trace = evaluate(&plan, &credentials, &SuiteEncoder).unwrap();
+        let before = SCAN_DATASET_BUILDS.get();
+        let input =
+            prover_toml(&plan, &credentials, &SuiteEncoder, &trace, [7; 32], [3; 32]).unwrap();
+        assert_eq!(SCAN_DATASET_BUILDS.get(), before);
+        assert!(input.lines().any(|line| line == "result = true"));
+        assert!(!input
+            .lines()
+            .any(|line| line.starts_with("target_") || line.starts_with("source_")));
+    }
+
+    #[test]
+    fn distinct_scan_bindings_only_compare_the_pattern_for_each_triple() {
+        let plan = lower(
+            "SELECT ?s ?o WHERE {?s <urn:p> ?o}",
+            Bounds {
+                credentials: 1,
+                quads_per_credential: 64,
+                rows_per_table: 32,
+            },
+        )
+        .unwrap();
+        let encode = |iri| {
+            SuiteEncoder
+                .encode(&NamedNode::new_unchecked(iri).into())
+                .unwrap()
+        };
+        let predicate = encode("urn:p");
+        let object = encode("urn:o");
+        let mut quads = Vec::new();
+        for value in (1..=32).rev() {
+            let mut subject = encode("urn:s");
+            subject.enc[31] = value;
+            quads.push([subject, predicate, object, Cell::default()]);
+        }
+        quads.push(quads[0]);
+        let credentials = [CredentialCells { quads }];
+        let dataset = padded_scan_dataset(&credentials, [64]);
+        let trace = evaluate(&plan, &credentials, &SuiteEncoder).unwrap();
+        let mut hints = String::new();
+        let before = SAME_TERM_CHECKS.get();
+        append_scan_hints(&plan, &SuiteEncoder, &trace, &dataset, &mut hints).unwrap();
+        assert_eq!(SAME_TERM_CHECKS.get() - before, 33);
+        let source = array((0..32).rev().map(|i| i.to_string()));
+        let source_line = format!("source_0 = {source}");
+        assert!(hints.lines().any(|line| line == source_line));
+    }
+}

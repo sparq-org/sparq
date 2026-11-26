@@ -215,6 +215,8 @@ impl Credential {
     }
     /// Derive the signed issuer, verification method and verifying key.
     pub fn trust_member(&self) -> Result<crate::envelope_policy::TrustMember, Error> {
+        #[cfg(test)]
+        TRUST_MEMBER_CHECKS.set(TRUST_MEMBER_CHECKS.get() + 1);
         if !suite::verify(&self.credential, &self.issuer) {
             return Err(Error::Invalid(
                 "credential suite signature or opening".into(),
@@ -243,8 +245,14 @@ impl Credential {
         &self,
         trust_members: &[crate::envelope_policy::TrustMember],
     ) -> Result<(crate::envelope_policy::CanonicalSet, u32, Vec<Word>), Error> {
+        Self::authorization_path_for_member(&self.trust_member()?, trust_members)
+    }
+
+    pub(crate) fn authorization_path_for_member(
+        member: &crate::envelope_policy::TrustMember,
+        trust_members: &[crate::envelope_policy::TrustMember],
+    ) -> Result<(crate::envelope_policy::CanonicalSet, u32, Vec<Word>), Error> {
         use crate::envelope_policy::{canonical_set_membership, trust_member_digest};
-        let member = self.trust_member()?;
         if !trust_members.iter().any(|m| {
             m.issuer == member.issuer
                 && m.verification_method == member.verification_method
@@ -256,7 +264,7 @@ impl Credential {
             .iter()
             .map(trust_member_digest)
             .collect::<Result<Vec<_>, _>>()?;
-        let result = canonical_set_membership(&leaves, trust_member_digest(&member)?)?;
+        let result = canonical_set_membership(&leaves, trust_member_digest(member)?)?;
         if result.0.depth > ISSUER_DEPTH {
             return Err(Error::Capacity("issuer set depth".into()));
         }
@@ -281,15 +289,18 @@ impl Credential {
     }
     /// Fold the canonical trust-member path at the verifier's public depth.
     pub fn canonical_issuer_root(&self, depth: u32) -> Result<Word, Error> {
+        self.canonical_issuer(depth).map(|(root, _)| root)
+    }
+
+    pub(crate) fn canonical_issuer(&self, depth: u32) -> Result<(Word, oxrdf::NamedNode), Error> {
         if depth > ISSUER_DEPTH
             || self.issuer_siblings.len() != depth as usize
             || self.issuer_index >= (1u64 << depth)
         {
             return Err(Error::Invalid("issuer membership shape".into()));
         }
-        let mut node = field(crate::envelope_policy::trust_member_digest(
-            &self.trust_member()?,
-        )?)?;
+        let member = self.trust_member()?;
+        let mut node = field(crate::envelope_policy::trust_member_digest(&member)?)?;
         for (i, sibling) in self.issuer_siblings.iter().enumerate() {
             node = if (self.issuer_index >> i) & 1 == 0 {
                 sparq_zk::poseidon2::hash(&[node, *sibling])
@@ -297,8 +308,13 @@ impl Credential {
                 sparq_zk::poseidon2::hash(&[*sibling, node])
             };
         }
-        Ok(field_to_be_bytes_32(&node))
+        Ok((field_to_be_bytes_32(&node), member.issuer))
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static TRUST_MEMBER_CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 fn lexical_len(term: &Term) -> Result<usize, Error> {
@@ -393,7 +409,7 @@ pub fn assemble_issuer_dataset(
         let index = u32::try_from(index).map_err(|_| Error::Capacity("credential scope".into()))?;
         opened.push(credential.cells(index)?);
         let member = credential.trust_member()?;
-        credential.authorization_path(trust_members)?;
+        Credential::authorization_path_for_member(&member, trust_members)?;
         issuers.push(SuiteEncoder.encode(&Term::NamedNode(member.issuer))?);
     }
     assemble_dataset(&opened, &issuers, request_digest)

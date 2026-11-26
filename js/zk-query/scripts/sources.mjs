@@ -1,10 +1,11 @@
 // Research grade and not externally audited.
-import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync, realpathSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync, realpathSync, mkdtempSync, renameSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { withCatalogueLock } from './catalogue-lock.mjs';
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const assets = fileURLToPath(new URL('../assets/', import.meta.url));
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -73,15 +74,20 @@ export function snapshotSources() {
   }
   visit(join(root, 'zk/noir-query/core'));
   const sorted = Object.fromEntries(Object.keys(files).sort().map(name => [name, files[name]]));
-  const bundle = Buffer.from(JSON.stringify({ files: sorted, revisions }) + '\n');
-  writeFileSync(join(assets, 'sources.json'), bundle);
-  return sha(bundle);
+  return Buffer.from(JSON.stringify({ files: sorted, revisions }) + '\n');
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const digest = snapshotSources();
-  const tablePath = join(assets, 'catalogue.json'), table = JSON.parse(readFileSync(tablePath));
-  if (process.argv.includes('--write-pins')) {
-    table.sourceBundleSha256 = digest;
-    writeFileSync(tablePath, JSON.stringify(table, null, 2) + '\n');
-  } else if (table.sourceBundleSha256 !== digest) throw new Error('source bundle differs from catalogue pin');
+  const bundle = snapshotSources();
+  withCatalogueLock(assets, () => {
+    const table = JSON.parse(readFileSync(join(assets, 'catalogue.json')));
+    if (table.sourceBundleSha256 !== sha(bundle)) {
+      throw new Error('source bundle differs from catalogue pin. Refresh both with build-circuits.mjs --write-pins');
+    }
+    const staging = mkdtempSync(join(assets, '.sources-'));
+    try {
+      const staged = join(staging, 'sources.json');
+      writeFileSync(staged, bundle);
+      renameSync(staged, join(assets, 'sources.json'));
+    } finally { rmSync(staging, { recursive: true, force: true }); }
+  });
 }

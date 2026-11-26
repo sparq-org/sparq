@@ -76,41 +76,53 @@ pub fn values<let P: u32, let R: u32, let V: u32>(cells: [[TermCell; V]; P], out
 pub fn scan<let D: u32, let R: u32, let V: u32>(
     dataset: [[TermCell; 3]; D], active: [bool; D],
     slots: [u32; 3], constants: [TermCell; 3], out: Table<R, V>,
+    target: [u32; D], source: [u32; R],
 ) {
     check_table(out);
     for r in 1..R {
         assert((r>=out.len)|!same_row(out.rows[r],out.rows[r-1]),"scan distinct bindings");
     }
-    let mut seen=[false;R];
-    let mut metadata=[[[0 as Field;4];V];R];
+    let mut matched = [false; D];
+    let mut projected = [[unbound(); V]; D];
     for i in 0..D {
-        let mut matches=active[i];
-        let mut row=[unbound();V];
-        for p in 0..3 {
-            assert(slots[p]<=V,"scan column");
-            if slots[p]==V {matches=matches&same_term(dataset[i][p],constants[p]);}
-            for v in 0..V {if slots[p]==v {
-                matches=matches&(!row[v].bound|same_term(row[v],dataset[i][p]));
-                row[v]=dataset[i][p];
-            }}
+        let (matches,row)=scan_row::<V>(dataset[i],active[i],slots,constants);
+        matched[i] = matches;
+        projected[i] = row;
+        assert(!matches|(target[i]<out.len),"scan completeness or capacity");
+        if R>0 {
+            let r=if matches {target[i]} else {0};
+            // Immutable indexed reads use ROM rather than a dataset/output cross product.
+            assert(!matches|same_row(row,out.rows[r]),"scan completeness or capacity");
+            assert(!matches|(source[r]<=i),"scan first payload");
         }
-        let mut found:Field=0;
-        for r in 0..R {
-            let hit=matches&(r<out.len)&same_row(row,out.rows[r]);
-            // The first matching source position supplies each metadata field.
-            let first=hit&!seen[r];
-            for v in 0..V {let fields=crate::table::metadata_fields(row[v]);
-                for f in 0..4 {metadata[r][v][f]=metadata[r][v][f]+first as Field*fields[f];}
-            }
-            seen[r]=seen[r]|hit;
-            found=found+hit as Field;
-        }
-        assert(found==matches as Field,"scan completeness or capacity");
     }
     for r in 0..R {
-        assert((r>=out.len)|seen[r],"scan extra binding");
-        for v in 0..V {assert((r>=out.len)|(metadata[r][v]==crate::table::metadata_fields(out.rows[r][v])),"scan first payload");}
+        // D may be empty for isolated fixtures; no source lookup exists then.
+        if D==0 {assert(out.len==0,"scan extra binding");}
+        else {
+            let live=r<out.len;
+            assert(!live|(source[r]<D),"scan source index");
+            let i=if live {source[r]} else {0};
+            // Read the match flag and projection already computed from this input.
+            let row = projected[i];
+            assert(!live | (matched[i] & same_row(row, out.rows[r])), "scan extra binding");
+            assert(!live|crate::table::equal_row(row,out.rows[r]),"scan first payload");
+        }
     }
+}
+
+fn scan_row<let V:u32>(triple:[TermCell;3],active:bool,slots:[u32;3],constants:[TermCell;3])->(bool,[TermCell;V]) {
+    let mut matches=active;
+    let mut row=[unbound();V];
+    for p in 0..3 {
+        assert(slots[p]<=V,"scan column");
+        if slots[p]==V {matches=matches&same_term(triple[p],constants[p]);}
+        for v in 0..V {if slots[p]==v {
+            matches=matches&(!row[v].bound|same_term(row[v],triple[p]));
+            row[v]=triple[p];
+        }}
+    }
+    (matches,row)
 }
 
 /// Each output column maps to a source column, or its source width for absent.

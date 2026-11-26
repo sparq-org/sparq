@@ -154,6 +154,16 @@ audited. Its canonical plan and opening profile are reconstructed from the
 verifier's stored request. Credential-slot, quad and table limits select compiled
 capacities; overflow refuses independently of final result limits.
 
+Generated core SCAN calls take private `target[D]` and `source[R]` arrays after
+the output table. The witness renderers supply both arrays using physical source
+positions, including padding and method-generated issuer assertions. The circuit
+checks matching source rows against their indexed output rows and checks each live
+output against its indexed source, including the payload. Output order and
+distinctness remain checked, and `source[target[i]] <= i` retains the first matching
+payload. Zero-capacity library output tables accept only scans without matches;
+generated programs continue to use positive capacity buckets. Closed graph-profile
+scans use their existing separate relation.
+
 The host compiler modules and presentation values build for WebAssembly; the
 native `method::Compiler` alone owns subprocesses and temporary proof files.
 `Request::plan()` reconstructs the trusted plan and credential limits, while

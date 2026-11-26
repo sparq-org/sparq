@@ -35,6 +35,7 @@ OPENING_AND_EXPRESSION_TESTS = (
 class QueryProfiles(unittest.TestCase):
     def test_hosted_keeps_agreement_authentication_and_native_verification(self):
         required = {
+            "tests/execution.rs::indexed_scan_hints_execute_in_each_witness_layout",
             "tests/coverage.rs::compiler_agreement_for_every_passing_plan",
             "tests/proofs.rs::native_proof_reconstructs_inputs_and_consumes_only_after_acceptance",
             "tests/authentication.rs::suite_program_checks_authentication_membership_keys_and_credential_limits",
@@ -82,6 +83,7 @@ class QueryProfiles(unittest.TestCase):
                  for case in ("honest", "missing", "extra", "reordered", "padding", "overflow")]
         names += ["sparq_noir_query_core ops_core_reads::reads_check_every_active_input_row"]
         names += [f"sparq_noir_query_core ops_core_tests::{name}" for name in profile.ROWS_CONTRACTS]
+        names += [f"sparq_noir_query_core ops_core_scan_tests::{name}" for name in profile.INDEXED_SCAN_CONTRACTS]
         names += [f"sparq_noir_query_core {name}" for name in OPENING_AND_EXPRESSION_TESTS]
         self.assertEqual(profile.check_noir_listing("\n".join(names)), len(names))
         for missing in range(len(names)):
@@ -102,8 +104,36 @@ class QueryProfiles(unittest.TestCase):
         names = {f"ops_core_tests::{op}_{case}" for op in profile.OPERATORS
                  for case in ("honest", "missing", "extra", "reordered", "padding", "overflow")}
         names |= {f"ops_core_tests::{name}" for name in profile.ROWS_CONTRACTS}
+        names |= {f"ops_core_scan_tests::{name}" for name in profile.INDEXED_SCAN_CONTRACTS}
         for name in names:
             self.assertTrue(any(selected in name for selected in profile.NOIR_FILTERS), name)
+
+    def test_hosted_indexed_scan_rejections_cannot_disappear(self):
+        expected = {
+            "indexed_scan_rejects_a_dropped_match",
+            "indexed_scan_rejects_a_constant_match_in_output_padding",
+            "indexed_scan_rejects_an_extra_row",
+            "indexed_scan_rejects_a_wrong_payload_source",
+            "indexed_scan_rejects_a_later_source_with_consistent_payload",
+            "indexed_scan_rejects_wrong_but_inverse_hints",
+            "indexed_scan_accepts_zero_output_capacity_without_matches",
+            "indexed_scan_rejects_a_match_with_zero_output_capacity",
+            "indexed_scan_rejects_an_extra_row_with_an_empty_dataset",
+            "indexed_scan_rejects_a_later_source_after_nonmatching_rows",
+            "indexed_scan_rejects_a_repeated_variable_mismatch_with_the_correct_projection",
+        }
+        self.assertEqual(set(profile.INDEXED_SCAN_CONTRACTS), expected)
+        names = {f"ops_core_tests::{op}_{case}" for op in profile.OPERATORS
+                 for case in ("honest", "missing", "extra", "reordered", "padding", "overflow")}
+        names |= {f"ops_core_tests::{name}" for name in profile.ROWS_CONTRACTS}
+        names.add("ops_core_reads::reads_check_every_active_input_row")
+        names.update(OPENING_AND_EXPRESSION_TESTS)
+        guards = {f"ops_core_scan_tests::{name}" for name in expected}
+        names |= guards
+        self.assertEqual(profile.check_noir_listing("\n".join(f"sparq_noir_query_core {n}" for n in names)), len(names))
+        for guard in guards:
+            with self.subTest(guard=guard), self.assertRaises(ValueError):
+                profile.check_noir_listing("\n".join(f"sparq_noir_query_core {n}" for n in names - {guard}))
 
     def test_ledger_profiles_partition_the_real_inventory(self):
         trees = gate.collect(ROOT)
@@ -213,11 +243,14 @@ class QueryPolicyFeatures(unittest.TestCase):
                  for case in ("honest", "missing", "extra", "reordered", "padding", "overflow")]
         names += ["sparq_noir_query_core ops_core_reads::reads_check_every_active_input_row"]
         names += [f"sparq_noir_query_core ops_core_tests::{name}" for name in profile.ROWS_CONTRACTS]
+        names += [f"sparq_noir_query_core ops_core_scan_tests::{name}" for name in profile.INDEXED_SCAN_CONTRACTS]
         names += [f"sparq_noir_query_core {name}" for name in OPENING_AND_EXPRESSION_TESTS]
         names += self.policy_listing()
         core = ROOT / "zk/noir-query/core"
         for missing, other_package in (
             (None, False),
+            ("ops_core_scan_tests::indexed_scan_rejects_a_constant_match_in_output_padding", True),
+            ("ops_core_scan_tests::indexed_scan_rejects_a_wrong_payload_source", False),
             ("suite_metadata_tests::digest_opening_cannot_change_a_term_kind", False),
             ("expr_binding_tests::bind_error_is_unbound", False),
             ("expr_binding_tests::bind_error_is_unbound", True),

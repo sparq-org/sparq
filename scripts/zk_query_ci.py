@@ -10,6 +10,7 @@ import subprocess
 
 QUERY_PREFIX = "crates/sparq-zk-query/"
 HOSTED_TESTS = (
+    "tests/execution.rs::indexed_scan_hints_execute_in_each_witness_layout",
     "tests/coverage.rs::compiler_agreement_for_every_passing_plan",
     "tests/proofs.rs::native_proof_reconstructs_inputs_and_consumes_only_after_acceptance",
     "tests/authentication.rs::suite_program_checks_authentication_membership_keys_and_credential_limits",
@@ -19,6 +20,19 @@ HOSTED_TESTS = (
     "tests/authentication.rs::converted_credential_view_cannot_be_witnessed_or_constructed",
 )
 OPERATORS = ("scan", "join", "filter", "project", "distinct", "slice", "values", "ask", "select")
+INDEXED_SCAN_CONTRACTS = (
+    "indexed_scan_rejects_a_dropped_match",
+    "indexed_scan_rejects_a_constant_match_in_output_padding",
+    "indexed_scan_rejects_an_extra_row",
+    "indexed_scan_rejects_a_wrong_payload_source",
+    "indexed_scan_rejects_a_later_source_with_consistent_payload",
+    "indexed_scan_rejects_wrong_but_inverse_hints",
+    "indexed_scan_accepts_zero_output_capacity_without_matches",
+    "indexed_scan_rejects_a_match_with_zero_output_capacity",
+    "indexed_scan_rejects_an_extra_row_with_an_empty_dataset",
+    "indexed_scan_rejects_a_later_source_after_nonmatching_rows",
+    "indexed_scan_rejects_a_repeated_variable_mismatch_with_the_correct_projection",
+)
 ROWS_CONTRACTS = (
     "identity_named_view_excludes_default_assertions_and_inactive_rows",
     "rows_plain_string_numeric_class_is_not_a_numeric_value",
@@ -123,6 +137,7 @@ OPENING_AND_EXPRESSION_CONTRACTS = (
     "expr_binding_tests::computed_numeric_canonical_lexical",
 )
 NOIR_FILTERS = tuple(f"ops_core_tests::{op}_" for op in OPERATORS) + (
+    "ops_core_scan_tests::indexed_scan_",
     "ops_core_tests::rows_", "ops_core_reads::", "ops_core_suite::table_identity_", "ops_core_tests::identity_",
     "ops_core_tests::expression_temporal_key_",
     "ops_core_tests::expression_same_type_strings_compare_authenticated_identity",
@@ -199,6 +214,7 @@ def check_noir_listing(output: str) -> int:
     required = {f"ops_core_tests::{op}_{case}" for op in OPERATORS
                 for case in ("honest", "missing", "extra", "reordered", "padding", "overflow")}
     required |= {f"ops_core_tests::{name}" for name in ROWS_CONTRACTS}
+    required |= {f"ops_core_scan_tests::{name}" for name in INDEXED_SCAN_CONTRACTS}
     required.update(OPENING_AND_EXPRESSION_CONTRACTS)
     if not required <= names or not any(n.startswith("ops_core_reads::") for n in names):
         raise ValueError("hosted Noir contract inventory is incomplete")

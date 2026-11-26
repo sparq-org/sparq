@@ -22,6 +22,9 @@ Keep the verifier's own stored request. Its query, audience, bounds, challenge,
 issuer set and key are authoritative. Do not substitute presentation metadata.
 Missing catalogue plans and mismatched keys refuse. Request constants remain
 public parameters, while capacities select a compiled shape.
+The indexed SCAN refresh changes verification keys for affected plans.
+Finish outstanding requests with the issuing package version or issue fresh
+requests after upgrading.
 
 The native prover runs on the holder's machine as child processes, offline.
 Set `SPARQ_NARGO` and `SPARQ_BB`, or pass
@@ -100,7 +103,12 @@ A source checkout builds bindings and pinned CRS with
 `node js/zk-query/scripts/build.mjs`; circuit regeneration is a separate
 `build-circuits.mjs` maintainer operation. Consumer tarballs are self-contained.
 `CARGO_BUILD_JOBS` also limits concurrent native catalogue compilations; unset
-means serial. Completed cache entries are checked against the committed pins.
+means serial. Generated sources, the library bundle and the toolchain pins
+together select the cache entry. Rebuilt programs and keys are checked against
+the committed pins. A changed source bundle requires a full catalogue selection
+for `--write-pins`. With an unchanged bundle, omitted plans must still match
+their generated build-input pins. The builder publishes under a lock after
+every selected build succeeds and the catalogue revision still matches.
 After rebuilding, regenerate every plan, key and fixture together; the catalogue
 test rejects stale assets and examples whose Rust-derived plan differs.
 The toolchain workflow's package job rebuilds the catalogue, runs the offline

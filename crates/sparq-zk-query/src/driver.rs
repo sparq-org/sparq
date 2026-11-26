@@ -225,28 +225,22 @@ impl Compiler {
         let compiled = self.checked_key(request, &plan)?;
         freshness(request, now())?;
         let authorized;
-        let credentials = if let Some(policy) = request.envelope_policy() {
-            authorized = witness::authorize(credentials, policy, &envelope)?;
-            authorized.as_slice()
+        let (credentials, issuers) = if let Some(policy) = request.envelope_policy() {
+            let (with_paths, issuers) = witness::authorize(credentials, policy, &envelope)?;
+            authorized = with_paths;
+            (authorized.as_slice(), issuers)
         } else {
-            credentials
+            (
+                credentials,
+                witness::authenticated_issuers(credentials, &envelope)?,
+            )
         };
-        for credential in credentials {
-            if credential.canonical_issuer_root(envelope.issuer_depth)? != envelope.issuer_root {
-                return Err(Error::Invalid("issuer membership root".into()));
-            }
-        }
         let encoder = &SuiteEncoder;
         let cells = credentials
             .iter()
             .enumerate()
             .map(|(i, c)| c.cells_with_profile(i as u32, plan.opening_profile()))
             .collect::<Result<Vec<_>, _>>()?;
-        let mut issuers = Vec::with_capacity(credentials.len());
-        for credential in credentials {
-            let issuer = Term::NamedNode(credential.trust_member()?.issuer);
-            issuers.push(encoder.encode(&issuer)?);
-        }
         let vocabulary = release_vocabulary(credentials, vocabulary)?;
         let dataset = crate::credential::assemble_dataset(&cells, &issuers, request.digest())?;
         let trace = interp::evaluate_dataset(&plan, &dataset, encoder)?;
@@ -263,9 +257,10 @@ impl Compiler {
             &Layout::new(&plan)
                 .reconstruct_authenticated_with_envelope(&plan, &statement, &envelope)?,
         );
-        let input = witness::render_canonical(
+        let input = witness::render_authorized(
             &plan,
             credentials,
+            &issuers,
             &trace,
             request.digest(),
             salt,

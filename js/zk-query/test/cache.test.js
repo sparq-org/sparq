@@ -4,7 +4,17 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, symlinkSync, linkSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { stageSource } from '../scripts/cache.mjs';
+import { catalogueBuildDigest, stageSource } from '../scripts/cache.mjs';
+
+test('the build digest covers each declared input in a stable file order', () => {
+  const files = { 'Nargo.toml': 'manifest', 'src/main.nr': 'fn main() {}' };
+  const reordered = { 'src/main.nr': files['src/main.nr'], 'Nargo.toml': files['Nargo.toml'] };
+  const original = catalogueBuildDigest(files, 'bundle', 'toolchain');
+  assert.equal(catalogueBuildDigest(reordered, 'bundle', 'toolchain'), original);
+  assert.notEqual(catalogueBuildDigest({ ...files, 'src/main.nr': 'updated main' }, 'bundle', 'toolchain'), original);
+  assert.notEqual(catalogueBuildDigest(files, 'updated bundle', 'toolchain'), original);
+  assert.notEqual(catalogueBuildDigest(files, 'bundle', 'updated toolchain'), original);
+});
 
 test('catalogue staging cannot follow cached source links or escape its directory', () => {
   const directory = mkdtempSync(join(tmpdir(), 'sparq-query-cache-test-'));

@@ -105,6 +105,12 @@ fn generate_inner(plan: &Plan, mode: GenerationMode) -> Result<Package, Error> {
         u8::from(features.freshness),
     );
     let layout = crate::statement::Layout::new(plan);
+    let scan_capacity = if authenticated {
+        plan.credential_quad_capacities().iter().sum::<u32>()
+            + if canonical_envelope { cap.credentials } else { 0 }
+    } else {
+        cap.credentials * cap.quads_per_credential
+    };
     source.push_str(&if authenticated {
         layout.declarations_authenticated()
     } else {
@@ -146,6 +152,9 @@ fn generate_inner(plan: &Plan, mode: GenerationMode) -> Result<Package, Error> {
             node.output.abi_width()
         )
         .unwrap();
+        if matches!(node.operator, Operator::Scan(_)) {
+            writeln!(source, "    target_{i}: [u32; {scan_capacity}],\n    source_{i}: [u32; {}],", node.output.capacity).unwrap();
+        }
         if authenticated {
             if let Operator::Filter(input, expr) = &node.operator {
                 let columns = read_columns(expr, &plan.nodes[*input as usize].output.variables);
@@ -279,7 +288,7 @@ fn generate_inner(plan: &Plan, mode: GenerationMode) -> Result<Package, Error> {
                     Slot::Variable(_) => "unbound()".into(),
                     Slot::Parameter(p) => term(*p),
                 }));
-                writeln!(source,"    ops_core::scan(dataset.rows, dataset.active, {mapping}, {constants}, t{i});").unwrap();
+                writeln!(source,"    ops_core::scan(dataset.rows, dataset.active, {mapping}, {constants}, t{i}, target_{i}, source_{i});").unwrap();
             }
             Operator::Join(a, b) => writeln!(
                 source,
