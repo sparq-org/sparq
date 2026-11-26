@@ -6,10 +6,14 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { copyPinnedBinary } from '../native.mjs';
 import pins from '../assets/toolchain.pins.json' with { type: 'json' };
-test('the pinned executable also has to report the expected version', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'sparq-query-version-test-'));
+test('the pinned executable also has to report the expected version', async t => {
   const binaries = pins.platforms[`${process.platform}-${process.arch}`];
+  if (!binaries) {
+    t.skip('native platform has no binary pin');
+    return;
+  }
   const version = binaries.nargo.version;
+  const directory = await mkdtemp(join(tmpdir(), 'sparq-query-version-test-'));
   try {
     await copyPinnedBinary('nargo', process.env.SPARQ_NARGO, join(directory, 'nargo'));
     binaries.nargo.version = 'deliberately mismatched expected version';

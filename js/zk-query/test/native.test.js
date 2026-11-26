@@ -56,12 +56,14 @@ for (const [platformKey, binaries] of Object.entries(hashes)) {
           const destination = join(directory, name);
           assert.equal(execFileSync(source, ['--version'], { encoding: 'utf8' }), `${versions[name]}\n`);
           assert.equal(await readFile(`${source}.executed`, 'utf8'), 'executed');
+          await rm(`${source}.executed`);
           await assert.rejects(copyPinnedBinary(name, source, destination), error => {
             assert.ok(error instanceof ProverRefusal);
             assert.equal(error.message, `binary pin mismatch: ${name} expected ${versions[name]}, SHA-256 ${sha256}`);
             assert.equal(error.name, 'ProverRefusal');
             return true;
           });
+          assert.equal(existsSync(`${source}.executed`), false, 'source executable ran');
           assert.equal(existsSync(`${destination}.executed`), false);
         }
       });
