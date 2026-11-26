@@ -5,6 +5,7 @@ use sparq_zk_query::{
     capacity::Bounds,
     interp::{evaluate, Cell, CredentialCells, EncodeTerm, ResultValue},
     lower::lower,
+    plan::{Compare, Expr, Operator},
     Error,
 };
 
@@ -304,8 +305,18 @@ fn differential(seed: u64) {
 
 #[test]
 fn mixed_string_equality_uses_recommendation_dispatch_and_records_engine_extension() {
-    for (query, expected, engine_expected) in fixture_support::mixed_string_queries() {
+    let cases = fixture_support::mixed_string_queries();
+    assert_eq!(cases.len(), 27);
+    for (query, expected, engine_expected) in cases {
         let plan = lower(&query, BOUNDS).unwrap();
+        assert!(
+            plan.nodes().iter().any(|node| matches!(
+                &node.operator,
+                Operator::Filter(_, Expr::Not(inner))
+                    if matches!(inner.as_ref(), Expr::Compare(Compare::Equal, _, _))
+            )),
+            "expected a standalone negated equality filter in {query}"
+        );
         let result = evaluate(&plan, &[], &FixtureEncoder).unwrap().result;
         assert_eq!(result, ResultValue::Ask(expected), "{query}");
         fixture_support::assert_engine(&query, "", &ResultValue::Ask(engine_expected));

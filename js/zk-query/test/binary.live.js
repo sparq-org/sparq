@@ -8,12 +8,13 @@ import { copyPinnedBinary } from '../native.mjs';
 import pins from '../assets/toolchain.pins.json' with { type: 'json' };
 test('the pinned executable also has to report the expected version', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'sparq-query-version-test-'));
-  const version = pins.binaries.nargo.version;
+  const binaries = pins.platforms[`${process.platform}-${process.arch}`];
+  const version = binaries.nargo.version;
   try {
     await copyPinnedBinary('nargo', process.env.SPARQ_NARGO, join(directory, 'nargo'));
-    pins.binaries.nargo.version = 'deliberately mismatched expected version';
+    binaries.nargo.version = 'deliberately mismatched expected version';
     await assert.rejects(copyPinnedBinary('nargo', process.env.SPARQ_NARGO, join(directory, 'other')), /binary version mismatch/);
-  } finally { pins.binaries.nargo.version = version; await rm(directory, { recursive: true, force: true }); }
+  } finally { binaries.nargo.version = version; await rm(directory, { recursive: true, force: true }); }
 });
 
 test('native proving gives nargo a private home when the parent home is a file', async () => {

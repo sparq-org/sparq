@@ -181,7 +181,7 @@ class ExactEvaluatorSelection(unittest.TestCase):
                     else:
                         self.assertRegex(action, r"^[\w-]+/[\w-]+@[0-9a-f]{40}$")
         proof, repeat = jobs["exact-evaluator"], jobs["guest-reproducibility"]
-        self.assertIn("\n    timeout-minutes: 120\n", proof)
+        self.assertIn("\n    timeout-minutes: 180\n", proof)
         self.assertIn("\n    timeout-minutes: 90\n", repeat)
         self.assertIn("cache-key: zk-exact-evaluator-risc0-3.0.6-rust-1.97.0", proof)
         self.assertIn("cache-key: zk-guest-reproducibility-risc0-3.0.6-rust-1.97.0", repeat)

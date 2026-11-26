@@ -129,8 +129,21 @@ machine, offline, as child processes. It is not a network service. Supply
 `backend: { type: 'native', nargoPath, bbPath }`, or set `SPARQ_NARGO` and
 `SPARQ_BB`; neither environment variable has a default. Each executable is copied
 to a private temporary directory and checked against the version and digest in
-[the binary pin file](assets/toolchain.pins.json) before execution. The available
-binary pins select the supported native platform. Secret inputs use private files,
+[the binary pin file](assets/toolchain.pins.json) before execution. Pins select by
+Node's `process.platform` and `process.arch`: `linux-x64`, `darwin-arm64` (Apple
+Silicon) and `darwin-x64` (Intel macOS) are supported. Other platforms refuse with
+`ProverRefusal: native platform has no binary pin`.
+Use the official [nargo 1.0.0-beta.21 release](https://github.com/noir-lang/noir/releases/tag/v1.0.0-beta.21)
+and [bb 5.0.0-nightly.20260324 release](https://github.com/AztecProtocol/aztec-packages/releases/tag/v5.0.0-nightly.20260324):
+
+| Native platform | nargo archive | bb archive |
+| --- | --- | --- |
+| `linux-x64` | `nargo-x86_64-unknown-linux-gnu.tar.gz` | `barretenberg-amd64-linux.tar.gz` |
+| `darwin-arm64` | `nargo-aarch64-apple-darwin.tar.gz` | `barretenberg-arm64-darwin.tar.gz` |
+| `darwin-x64` | `nargo-x86_64-apple-darwin.tar.gz` | `barretenberg-amd64-darwin.tar.gz` |
+
+Extract `nargo` and `bb` and supply their paths; the pins hash the executables,
+not the compressed archives. Secret inputs use private files,
 child output is bounded and untrusted, and temporary files are removed afterwards.
 
 Catalogue entries marked `wasmProving` admit the opt-in WebAssembly backend and

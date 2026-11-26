@@ -28,6 +28,17 @@ fn canonical_generation_keeps_fixture_issuer_profiles_explicit() {
 }
 
 #[test]
+fn supplied_cell_generation_needs_only_a_plan() {
+    use sparq_zk_query::codegen;
+
+    let plan = lower("ASK {}", B).unwrap();
+    let package = codegen::generate_operator_fixture(&plan).unwrap();
+    assert!(package
+        .files
+        .contains_key(&format!("{}/src/main.nr", package.name)));
+}
+
+#[test]
 fn exact_targets_use_the_authenticated_named_view() {
     for (query, credentials, quads, rows, slots) in [
         (

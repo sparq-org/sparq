@@ -23,6 +23,13 @@ const BACKEND: &str = "urn:sparq:noir:beta.21:bb:5.0.0-nightly.20260324";
 const VCQ: &str = "https://w3id.org/sparq/vcq#";
 
 /// Immutable verifier request. No field is obtained from the presentation.
+///
+/// The ambiguous unauthenticated constructor is unavailable:
+///
+/// ```compile_fail,E0599
+/// use sparq_zk_query::request::Request;
+/// let _ = Request::new;
+/// ```
 #[derive(Clone, Debug)]
 pub struct Request {
     stored: StoredRequest,
@@ -82,7 +89,14 @@ pub fn descriptor(plan: &Plan, key: &[u8]) -> Result<MethodDescriptor, Error> {
 }
 
 impl Request {
-    pub fn new(stored: StoredRequest, bounds: Bounds, key: Vec<u8>) -> Result<Self, Error> {
+    /// Construct an unauthenticated request for operator fixtures only.
+    /// This request cannot produce an authenticated proof. Supported proof routes
+    /// require [`Self::new_authenticated`] or its authenticated variants.
+    pub fn new_operator_fixture(
+        stored: StoredRequest,
+        bounds: Bounds,
+        key: Vec<u8>,
+    ) -> Result<Self, Error> {
         Self::new_inner(stored, bounds, key, None, None)
     }
     /// Store the verifier's authoritative issuer-set root, never a presentation value.
