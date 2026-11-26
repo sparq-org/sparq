@@ -586,14 +586,6 @@ fn stored_rdf_digest_covers_the_exact_query_key_challenge_and_bounds() {
     };
     let base = request(&prepared, query, 7, "urn:verifier", B);
     assert_eq!(
-        base.envelope_inputs().unwrap_err(),
-        Error::Unsupported("authenticated issuer policy required".into())
-    );
-    assert_eq!(
-        base.issuer_root().unwrap_err(),
-        Error::Unsupported("authenticated issuer policy required".into())
-    );
-    assert_eq!(
         base.canonical_rdf(),
         sparq_canon::canonicalize_nquads(base.canonical_rdf()).unwrap()
     );
@@ -655,6 +647,71 @@ fn stored_rdf_digest_covers_the_exact_query_key_challenge_and_bounds() {
         }
     }
     assert!(found);
+}
+
+#[test]
+fn operator_fixture_requests_refuse_authenticated_proof_routes() {
+    let query = "ASK {}";
+    let plan = sparq_zk_query::lower::lower(query, B).unwrap();
+    let key = vec![1, 2, 3];
+    let prepared = Prepared {
+        descriptor: sparq_zk_query::request::descriptor(&plan, &key).unwrap(),
+        plan,
+        verification_key: key.clone(),
+        artifact: serde_json::Value::Null,
+    };
+    let request =
+        Request::new_operator_fixture(stored(&prepared, query, 7, "urn:verifier", None), B, key)
+            .unwrap();
+    let refusal = Error::Unsupported("authenticated issuer policy required".into());
+    assert_eq!(request.envelope_inputs().unwrap_err(), refusal);
+    assert_eq!(request.issuer_root().unwrap_err(), refusal);
+
+    let work = tempfile::tempdir().unwrap();
+    let artifacts = work.path().join("artifacts");
+    let compiler = Compiler::new(&artifacts, work.path()).unwrap();
+    assert_eq!(
+        compiler
+            .prove(&request, &[], &[], &FixtureEncoder, [3; 32], || NOW)
+            .unwrap_err(),
+        refusal
+    );
+    assert_eq!(
+        compiler
+            .prove_with_envelope(
+                &request,
+                &[],
+                &[],
+                [3; 32],
+                &sparq_zk_query::witness::EnvelopeWitness::default(),
+                || NOW,
+            )
+            .unwrap_err(),
+        refusal
+    );
+    let presentation = sparq_zk_query::method::Presentation {
+        request_digest: request.digest(),
+        input_commitment: [3; 32],
+        signature_mode: 0,
+        result: Answer::Ask(true),
+        proof: vec![],
+    };
+    let store = Store::default();
+    assert_eq!(
+        compiler
+            .verify(
+                &request,
+                &presentation,
+                &FixtureEncoder,
+                &id("urn:verifier"),
+                &store,
+                || NOW,
+            )
+            .unwrap_err(),
+        refusal
+    );
+    assert!(store.0.lock().unwrap().is_empty());
+    assert_eq!(std::fs::read_dir(artifacts).unwrap().count(), 0);
 }
 
 fn request_spec(request: &StoredRequest) -> StoredRequestSpec {

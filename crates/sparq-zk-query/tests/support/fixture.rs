@@ -248,8 +248,9 @@ pub fn mixed_string_queries() -> Vec<(String, bool, bool)> {
             ("<urn:a>", true),
         ] {
             for (left, right) in [(lhs, rhs), (rhs, lhs)] {
-                cases.push((
-                    format!("ASK {{ FILTER(!({left} = {right})) }}"),
+                cases.extend(mixed_string_cases(
+                    left,
+                    right,
                     expected && rhs != "\"a\"@en",
                     expected,
                 ));
@@ -269,11 +270,36 @@ pub fn mixed_string_queries() -> Vec<(String, bool, bool)> {
         ("\"a\"@en", "\"a\"@en", false),
         ("\"a\"@en", "\"a\"@fr", true),
     ] {
-        cases.push((
-            format!("ASK {{ FILTER(!({lhs} = {rhs})) }}"),
+        cases.extend(mixed_string_cases(
+            lhs,
+            rhs,
             expected && !lhs.ends_with("@en"),
             expected,
         ));
     }
     cases
+}
+
+fn mixed_string_cases(
+    lhs: &str,
+    rhs: &str,
+    expected: bool,
+    engine_expected: bool,
+) -> Vec<(String, bool, bool)> {
+    // Boolean parameters preserve the program shape across both outcomes, even
+    // when the datatype pairing always raises a SPARQL comparison error.
+    [
+        (true, false, expected, engine_expected),
+        (false, true, true, true),
+        (false, false, false, false),
+    ]
+    .into_iter()
+    .map(|(keep, fallback, result, engine_result)| {
+        (
+            format!("ASK {{ FILTER((!({lhs} = {rhs}) && {keep}) || {fallback}) }}"),
+            result,
+            engine_result,
+        )
+    })
+    .collect()
 }

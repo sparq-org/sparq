@@ -494,7 +494,8 @@ fn mixed_string_classes_execute_and_refuse_rebound_wrong_traces() {
         assert!(error.to_string().contains("operator length"), "{error}");
         rebound += 1;
     }
-    assert!(rebound > 0, "no program had traces with both results");
+    assert!(!traces.is_empty());
+    assert_eq!(rebound, traces.len(), "every program needs opposite traces");
     support::complete(gate);
 }
 

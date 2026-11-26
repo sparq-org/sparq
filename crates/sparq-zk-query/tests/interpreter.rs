@@ -304,11 +304,22 @@ fn differential(seed: u64) {
 
 #[test]
 fn mixed_string_equality_uses_recommendation_dispatch_and_records_engine_extension() {
+    let mut programs = std::collections::BTreeMap::<String, [bool; 2]>::new();
     for (query, expected, engine_expected) in fixture_support::mixed_string_queries() {
         let plan = lower(&query, BOUNDS).unwrap();
         let result = evaluate(&plan, &[], &FixtureEncoder).unwrap().result;
         assert_eq!(result, ResultValue::Ask(expected), "{query}");
         fixture_support::assert_engine(&query, "", &ResultValue::Ask(engine_expected));
+        let package = sparq_zk_query::codegen::generate_operator_fixture(&plan).unwrap();
+        programs.entry(package.name).or_default()[usize::from(expected)] = true;
+    }
+    assert!(!programs.is_empty());
+    for (program, outcomes) in programs {
+        assert_eq!(
+            outcomes,
+            [true, true],
+            "missing opposite trace for {program}"
+        );
     }
 }
 
