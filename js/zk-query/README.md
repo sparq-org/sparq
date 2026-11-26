@@ -199,6 +199,8 @@ Its `--cache` directory retains completed native compilations; `--cases` accepts
 query/bounds profiles and `--write-pins` explicitly updates maintainer pins.
 `CARGO_BUILD_JOBS` also bounds concurrent catalogue builds, defaulting to serial
 when unset. Duplicate plan hashes share a build and must generate identical sources.
+The build-input pin covers the generated files, the library bundle and the
+toolchain pins. It also selects the cache directory for the program and key.
 Cached source paths through symbolic links are refused; staging replaces ordinary
 cached files without modifying another hard link's contents.
 Catalogue checks derive each example's plan again through Rust and reject stale

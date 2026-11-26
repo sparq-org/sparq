@@ -13,7 +13,7 @@
       "packageName": "query_de79582c38ce4d4c00a4159f5d7fcc50fc62dd2f9377aa0bcfa370c6e3fd3f2e",
       "acir": "de79582c38ce4d4c00a4159f5d7fcc50fc62dd2f9377aa0bcfa370c6e3fd3f2e.json",
       "vk": "de79582c38ce4d4c00a4159f5d7fcc50fc62dd2f9377aa0bcfa370c6e3fd3f2e.vk.hex",
-      "acirSha256": "05d7cac27315ccb752aa731317e9eea0a4533c21394b101df84cee2615be458d",
+      "acirSha256": "2fa216a412128e4e74db53fc8e160debbbc1dad878c2e502f42355435a440cf1",
       "vkSha256": "2c30c23982d48a84a39b908e5a001fc2c984a5bd86077f0b1a348437b4594695",
       "wasmProving": true,
       "example": {
@@ -24,15 +24,16 @@
           "quadsPerCredential": 2,
           "rowsPerTable": 1
         }
-      }
+      },
+      "buildInputSha256": "25c527ec888d67df9924faac1ac73e8052e86e336314f18cd85d668b83d9bcb5"
     },
     {
       "planHash": "054fc173ecd02fb8084fc3fb81c996586be45aeeb8feec71e3f75093c61f9662",
       "packageName": "query_054fc173ecd02fb8084fc3fb81c996586be45aeeb8feec71e3f75093c61f9662",
       "acir": "054fc173ecd02fb8084fc3fb81c996586be45aeeb8feec71e3f75093c61f9662.json",
       "vk": "054fc173ecd02fb8084fc3fb81c996586be45aeeb8feec71e3f75093c61f9662.vk.hex",
-      "acirSha256": "f6511f48605452ac5f5f994dc7a81c92d92ba68217eb1cfa421680e026266b9d",
-      "vkSha256": "8f12a3c95250247879c6e59ed11b45184e8f421fb13660cafe4ff66cdfba2fb0",
+      "acirSha256": "089dadf0840c1b156254adde3919919cd48cca06756774c3ca55b64342279270",
+      "vkSha256": "a0e783f44aabff087a059b4e9f5bfa19303388b8ea6ddd4d21b029ab941403d2",
       "wasmProving": true,
       "example": {
         "name": "bgp",
@@ -42,15 +43,16 @@
           "quadsPerCredential": 4,
           "rowsPerTable": 4
         }
-      }
+      },
+      "buildInputSha256": "b45fe2f90b227fe790cd3b5b0a73627c34918f0bc2dc6ad19bd741c3d4106b5e"
     },
     {
       "planHash": "06d1d14af6cc4a47f12cef2bdde0d5b26d19847166ebac7c3675ed7969b7e29d",
       "packageName": "query_06d1d14af6cc4a47f12cef2bdde0d5b26d19847166ebac7c3675ed7969b7e29d",
       "acir": "06d1d14af6cc4a47f12cef2bdde0d5b26d19847166ebac7c3675ed7969b7e29d.json",
       "vk": "06d1d14af6cc4a47f12cef2bdde0d5b26d19847166ebac7c3675ed7969b7e29d.vk.hex",
-      "acirSha256": "e33e9732e8626a8f44341963f665100038db0d41b306cbda3f2b8e3387cffba7",
-      "vkSha256": "74d72d25f316f1d76454aea24177d7354a971f847fdecd662abe40d5d3da3dc0",
+      "acirSha256": "6a66ee6f215e1f411665b4715070ac55e215a78b77f5c82b4f2f60da88b44c7b",
+      "vkSha256": "fad9133bad7a126109ba83d92aea224b7c9c7429fd168e7158897bc6cca6a0da",
       "wasmProving": true,
       "example": {
         "name": "join-one-credential",
@@ -60,15 +62,16 @@
           "quadsPerCredential": 8,
           "rowsPerTable": 4
         }
-      }
+      },
+      "buildInputSha256": "35cb2ba19ba8ad97de0c983d14abd96f133bdf828d44d389c5997e4230fdad98"
     },
     {
       "planHash": "b7e7a830a7cea9df1502763d7cdde19a6634a3ed592ced17b8e47d882f679475",
       "packageName": "query_b7e7a830a7cea9df1502763d7cdde19a6634a3ed592ced17b8e47d882f679475",
       "acir": "b7e7a830a7cea9df1502763d7cdde19a6634a3ed592ced17b8e47d882f679475.json",
       "vk": "b7e7a830a7cea9df1502763d7cdde19a6634a3ed592ced17b8e47d882f679475.vk.hex",
-      "acirSha256": "3b1413264c1b3b9a8897bfcf7fb00e3e867768b53dc39414295a1d39c10a16ac",
-      "vkSha256": "8a71a80cdca8906b58ee64b3b0ae7c41ad370066fb0eecd24583939211ea8974",
+      "acirSha256": "fa12cbd5fd2978bd53dc480601f485e188b8fa777a3fe1ce134351e691a9e053",
+      "vkSha256": "05dbc6c5a8087ec5b560afedb5d5a6e85cfbddd2c35725a11a395cec8b8f0132",
       "wasmProving": true,
       "example": {
         "name": "join-two-credentials",
@@ -78,15 +81,16 @@
           "quadsPerCredential": 4,
           "rowsPerTable": 4
         }
-      }
+      },
+      "buildInputSha256": "1559ec87b05ff383454560648900b02e034cf9fd06c9f59c82914158f473d5f5"
     },
     {
       "planHash": "9db87b5bcdd52564a9ddb1f874646c00d5519731752d3aed70b0b370decaaa5d",
       "packageName": "query_9db87b5bcdd52564a9ddb1f874646c00d5519731752d3aed70b0b370decaaa5d",
       "acir": "9db87b5bcdd52564a9ddb1f874646c00d5519731752d3aed70b0b370decaaa5d.json",
       "vk": "9db87b5bcdd52564a9ddb1f874646c00d5519731752d3aed70b0b370decaaa5d.vk.hex",
-      "acirSha256": "41bc5ad33c0fe2dcb1cd8ac0a4997fc947cf4629906d94354c75f6dac0c9c9ef",
-      "vkSha256": "a643975c2a88b3e8862220e51a4877d918ef30198f55ad03bea7cac68ce24881",
+      "acirSha256": "15fa0eaa29dddea9849e23e1f268c947f519fbedf90b9f4bbe8e4cda0dbf3b92",
+      "vkSha256": "1885606dd36c5b6c20f8000ff3d262f4560dd1a13b71f18d7b847a653d93eadf",
       "wasmProving": true,
       "example": {
         "name": "integer-range",
@@ -96,15 +100,16 @@
           "quadsPerCredential": 4,
           "rowsPerTable": 4
         }
-      }
+      },
+      "buildInputSha256": "63f23a4dde13e442fbaae5e37f41276c9b156f27158a98381d9698c1c34e0829"
     },
     {
       "planHash": "2b074a324c733fa1b2fae66ae06a76d43c1df9e4776717596a944636e61fbace",
       "packageName": "query_2b074a324c733fa1b2fae66ae06a76d43c1df9e4776717596a944636e61fbace",
       "acir": "2b074a324c733fa1b2fae66ae06a76d43c1df9e4776717596a944636e61fbace.json",
       "vk": "2b074a324c733fa1b2fae66ae06a76d43c1df9e4776717596a944636e61fbace.vk.hex",
-      "acirSha256": "25335db3215ed14463a4039a5339ecaad19814669f84e59dcce7b8beac13e3d6",
-      "vkSha256": "e70d0bcc79f0b2d6e8999b01f905723af12704330150c5726fd16f5802fd479f",
+      "acirSha256": "014af29f248c7b27a31e908796e6b65e7bc1e9b5969f72396f2f4b5f7b40e03d",
+      "vkSha256": "daa7510f2b66cb6b0737b62f5db78576820b6712da905e7e26421a39eda21ace",
       "wasmProving": true,
       "example": {
         "name": "date-range",
@@ -114,15 +119,16 @@
           "quadsPerCredential": 4,
           "rowsPerTable": 4
         }
-      }
+      },
+      "buildInputSha256": "2250f6f69984aafcc1ff934c3379b90d86f12b623d052f841ff64aadf6b19c65"
     },
     {
       "planHash": "5751fc5086df1dba0b0042f9fed0a55b662572940bad1417534150b1a0fab732",
       "packageName": "query_5751fc5086df1dba0b0042f9fed0a55b662572940bad1417534150b1a0fab732",
       "acir": "5751fc5086df1dba0b0042f9fed0a55b662572940bad1417534150b1a0fab732.json",
       "vk": "5751fc5086df1dba0b0042f9fed0a55b662572940bad1417534150b1a0fab732.vk.hex",
-      "acirSha256": "dfd206cfe38f595cbcc07b13fe503b5bd282b044a9e95ab96314428221fd77ab",
-      "vkSha256": "ae312b971a051ecd9968f447855d43f878d9b183969362e1ea87ce185509126c",
+      "acirSha256": "c63fb173c7d270847f4147aa4b46234a1ab52806b406e85c153fdff25033e372",
+      "vkSha256": "07554ece87b6951834e84a9cf95d3d5349f193fb205efe0d316750f621a0ce89",
       "wasmProving": true,
       "example": {
         "name": "membership",
@@ -132,15 +138,16 @@
           "quadsPerCredential": 4,
           "rowsPerTable": 4
         }
-      }
+      },
+      "buildInputSha256": "5381b78e70d599cb8f70cc4cedd597235944bdc887d0ac66bcc48e7e73b642ae"
     },
     {
       "planHash": "2facc4d27c257fbace0b9a605a63d7a3b751799830f4c17ff073475d69528e59",
       "packageName": "query_2facc4d27c257fbace0b9a605a63d7a3b751799830f4c17ff073475d69528e59",
       "acir": "2facc4d27c257fbace0b9a605a63d7a3b751799830f4c17ff073475d69528e59.json",
       "vk": "2facc4d27c257fbace0b9a605a63d7a3b751799830f4c17ff073475d69528e59.vk.hex",
-      "acirSha256": "7c53c1642aca7601301dcd21f18704096d7f6447381b8b95ed8fd04aa2aed7b6",
-      "vkSha256": "a71ec9bdbb4314d975190a487376939c79f0e77c89ea0518007e33ab08e4429f",
+      "acirSha256": "c8c67f1dba1555e116caad217cf0515c708a4f1d3ac290ec29254afaaf1c7bcd",
+      "vkSha256": "5ae16584404690657a2bf357dc3f8d1e6ca77b150412802c308a7505f3df1e81",
       "wasmProving": true,
       "example": {
         "name": "values",
@@ -150,15 +157,16 @@
           "quadsPerCredential": 4,
           "rowsPerTable": 4
         }
-      }
+      },
+      "buildInputSha256": "cd0e88fd9ca9ef885b82a455a2160a838cad3d776ba73a5484717ad449d5d742"
     },
     {
       "planHash": "035732d9c54a9c4cf1f85c3850ea7105524716e7f56d2818e4acb2775b9c39ef",
       "packageName": "query_035732d9c54a9c4cf1f85c3850ea7105524716e7f56d2818e4acb2775b9c39ef",
       "acir": "035732d9c54a9c4cf1f85c3850ea7105524716e7f56d2818e4acb2775b9c39ef.json",
       "vk": "035732d9c54a9c4cf1f85c3850ea7105524716e7f56d2818e4acb2775b9c39ef.vk.hex",
-      "acirSha256": "2ed6b78cb61dd30d446d10a6ddafc842550c6370c2bb6f32cde58060bc159d47",
-      "vkSha256": "2e681d210106d0ae341d68014ec762930fb4e8114f86ba0a3e78226217f8b715",
+      "acirSha256": "f167be1262fcd88cc7337c34da0b4df3763a5d5fce8ad0e9f19b9171244721a8",
+      "vkSha256": "f612a028ea06fca4b87db59d85ebaad7a98cecb3cd9cf82b0476bd6398edf080",
       "wasmProving": true,
       "example": {
         "name": "projection-bag",
@@ -168,15 +176,16 @@
           "quadsPerCredential": 4,
           "rowsPerTable": 8
         }
-      }
+      },
+      "buildInputSha256": "def5a283b491582c2be1526622392ff603011f226bc9833b05edd91dbcf77d38"
     },
     {
       "planHash": "25715fddc10bc10fd0ea6d70fef6174f135c6054ebfefe2cb85427f915d0820a",
       "packageName": "query_25715fddc10bc10fd0ea6d70fef6174f135c6054ebfefe2cb85427f915d0820a",
       "acir": "25715fddc10bc10fd0ea6d70fef6174f135c6054ebfefe2cb85427f915d0820a.json",
       "vk": "25715fddc10bc10fd0ea6d70fef6174f135c6054ebfefe2cb85427f915d0820a.vk.hex",
-      "acirSha256": "3fcc000e5186bbda863758a812b937d83bd7eedef146daccfc9acedb64246c41",
-      "vkSha256": "0dc248d33697ff6ad954b9aa8a4832c7342228ae15aaca0567c4ce7dbfc3b9c1",
+      "acirSha256": "2c909d35337c864ba4e36956e64ecb9a89b3a57f39a61cea7202d534df81a036",
+      "vkSha256": "080c636227789ac7d00039e5834f7cd5473bfb08daf43f371a4d91e8282aa0f6",
       "wasmProving": true,
       "example": {
         "name": "distinct",
@@ -186,15 +195,16 @@
           "quadsPerCredential": 4,
           "rowsPerTable": 8
         }
-      }
+      },
+      "buildInputSha256": "4fb0392ffb52c53d1a579cb231ac492af9c6523c4ae03c35aeb24c0f8f60726e"
     },
     {
       "planHash": "0c2bb71f84c10bbbac9b8b2178d680c2fb216d226a12e7fc97e2df2f5f830b06",
       "packageName": "query_0c2bb71f84c10bbbac9b8b2178d680c2fb216d226a12e7fc97e2df2f5f830b06",
       "acir": "0c2bb71f84c10bbbac9b8b2178d680c2fb216d226a12e7fc97e2df2f5f830b06.json",
       "vk": "0c2bb71f84c10bbbac9b8b2178d680c2fb216d226a12e7fc97e2df2f5f830b06.vk.hex",
-      "acirSha256": "2c8e584f2eb8e918d23d612bf616bb0a16bbacb8f0514cd8418cd691c3fed975",
-      "vkSha256": "cf447002c50a1b1b9c3bb284f8f40b471004b846ecfcf0972eb2e978023906ce",
+      "acirSha256": "d07e06e57885b020777809115d612655138ec9bc68357d3186cdc56dfceeb1e1",
+      "vkSha256": "5ba6b7a78f0609e5a025196a80288077e27abdf71e9706deb1004fc146f7db50",
       "wasmProving": true,
       "example": {
         "name": "slice",
@@ -204,15 +214,16 @@
           "quadsPerCredential": 4,
           "rowsPerTable": 4
         }
-      }
+      },
+      "buildInputSha256": "5599abb2a7e5a524a3394d4facfe6252971d9346836a665aa5ace04ab8ef8b27"
     },
     {
       "planHash": "6b22856101a6abe928b1b43cb1c3c7e04c2a883a278be5a9c8e1dd4d35a53f47",
       "packageName": "query_6b22856101a6abe928b1b43cb1c3c7e04c2a883a278be5a9c8e1dd4d35a53f47",
       "acir": "6b22856101a6abe928b1b43cb1c3c7e04c2a883a278be5a9c8e1dd4d35a53f47.json",
       "vk": "6b22856101a6abe928b1b43cb1c3c7e04c2a883a278be5a9c8e1dd4d35a53f47.vk.hex",
-      "acirSha256": "904e0bf801a842ee8fbae27784bf090097fa513293ae8103f698f29fc09d8037",
-      "vkSha256": "ba716197adfb0b72ea0ffd68c892317a5594a4f298b9793aeff0f22105f0f386",
+      "acirSha256": "9d3c25c061e80c9f0fe20594d585b7234582c6ef8240cc5e0b8552cc61846790",
+      "vkSha256": "32d506d8ad1f3a55b0424d693c55029206e81abdfda60d61d1698dd615954323",
       "wasmProving": true,
       "example": {
         "name": "ask-true",
@@ -222,15 +233,16 @@
           "quadsPerCredential": 4,
           "rowsPerTable": 4
         }
-      }
+      },
+      "buildInputSha256": "1f69d53901bf8132d99b312c32310bdabd4186956f4337e4f91c02287fb33912"
     },
     {
       "planHash": "3b1b08f69ebe383092c3bebf3f9c77af78f8f8019e94deed1b3832a1b291bcab",
       "packageName": "query_3b1b08f69ebe383092c3bebf3f9c77af78f8f8019e94deed1b3832a1b291bcab",
       "acir": "3b1b08f69ebe383092c3bebf3f9c77af78f8f8019e94deed1b3832a1b291bcab.json",
       "vk": "3b1b08f69ebe383092c3bebf3f9c77af78f8f8019e94deed1b3832a1b291bcab.vk.hex",
-      "acirSha256": "07aa9f5fc14383f168f01ebf8379099412827f855645aa5604ca245fbdca044f",
-      "vkSha256": "1e4c85b16e9351478cff050bd10bab7db427927cfbeda1c028e77737c72b5875",
+      "acirSha256": "9c5751cbf5f64ee1b4757247da119c9c9ec1ece1d2f286d99c0eba7299f35c20",
+      "vkSha256": "64bcec32fea2c134484fb0bd32a83f1d7d91782147488c2066f34b66baac850e",
       "wasmProving": true,
       "example": {
         "name": "ask-false",
@@ -240,15 +252,16 @@
           "quadsPerCredential": 4,
           "rowsPerTable": 4
         }
-      }
+      },
+      "buildInputSha256": "975d42e4f34ddb867d48d97fd2c4f9c76ad2ff678b6af92619337ff5417e7e6d"
     },
     {
       "planHash": "ad9b76a67978f50927234ce587f3ca800a16c42ced0bb67d5b6e340c2818d324",
       "packageName": "query_ad9b76a67978f50927234ce587f3ca800a16c42ced0bb67d5b6e340c2818d324",
       "acir": "ad9b76a67978f50927234ce587f3ca800a16c42ced0bb67d5b6e340c2818d324.json",
       "vk": "ad9b76a67978f50927234ce587f3ca800a16c42ced0bb67d5b6e340c2818d324.vk.hex",
-      "acirSha256": "d0b743de20d5692515f9914d02aaf132b8948b241ef80c81af3106f5074297da",
-      "vkSha256": "359f30d4d7f75691a25cfc7ec0c8f843959585888d230252311525f4bfae9ff3",
+      "acirSha256": "e00fc07cf7d4e64e8ee16e417cf14550de521edce76c23c4ddd771436cb1f5b4",
+      "vkSha256": "b51fb6044f3e081f7f61778ac5e4b3efeb8b09f38453047d5446b7a0e4e34b7b",
       "wasmProving": false,
       "example": {
         "name": "target-insurance-1a",
@@ -269,15 +282,16 @@
           "freshness": true,
           "openingProfile": "long-objects"
         }
-      }
+      },
+      "buildInputSha256": "9b58fb69f36dd7aeb720c5faa8e9056429a9e9c1a607a3c538557fc536cf3a90"
     },
     {
       "planHash": "08ee621df5cd63cfc785135fb1d62fdcabd049d9e0f0bdf59938895fb01ed2c4",
       "packageName": "query_08ee621df5cd63cfc785135fb1d62fdcabd049d9e0f0bdf59938895fb01ed2c4",
       "acir": "08ee621df5cd63cfc785135fb1d62fdcabd049d9e0f0bdf59938895fb01ed2c4.json",
       "vk": "08ee621df5cd63cfc785135fb1d62fdcabd049d9e0f0bdf59938895fb01ed2c4.vk.hex",
-      "acirSha256": "86be943d2253381628971e5f6bd00a6ffd74652f207ea51f8984c8d5620d3786",
-      "vkSha256": "99a31d5b71c766d128d88081c14aa0e1a1d863800cb7969d0203ef5d4f8d46cd",
+      "acirSha256": "d0526d3b8012c9cf495d2a0d9b5bad524d3351f745be162f00064d194cd698f7",
+      "vkSha256": "d03f09e71d0090d6519b9c52513faa315495840583f274dd54c040cc08bb4d7c",
       "wasmProving": false,
       "example": {
         "name": "target-insurance-1b",
@@ -318,15 +332,16 @@
             4
           ]
         }
-      }
+      },
+      "buildInputSha256": "8e65fe0eb34478a5a6056e6678ae9ee2596dc4448ef90896e8c50110b75ef64f"
     },
     {
       "planHash": "1d5a9938503746fbe77ab56f8cff2a549207ec273ea2817d9a51154c90e22f20",
       "packageName": "query_1d5a9938503746fbe77ab56f8cff2a549207ec273ea2817d9a51154c90e22f20",
       "acir": "1d5a9938503746fbe77ab56f8cff2a549207ec273ea2817d9a51154c90e22f20.json",
       "vk": "1d5a9938503746fbe77ab56f8cff2a549207ec273ea2817d9a51154c90e22f20.vk.hex",
-      "acirSha256": "85a937c8cb50152a64a0fd52b188191276ded15bf1109db3bb3742e7426e3198",
-      "vkSha256": "6acae8a702f5db5561c21b24e7fb1fe4b9c50f77fd809f6c10aa219db0285f49",
+      "acirSha256": "0e56118bb95cd5567790192901437e31c080f49c7af437a1f270a733de526e3b",
+      "vkSha256": "e43a35acb0364e7d20e68e634fa77258d55d35e84a89296ad0f13b6257ac39e4",
       "wasmProving": false,
       "example": {
         "name": "target-trial",
@@ -362,15 +377,16 @@
             4
           ]
         }
-      }
+      },
+      "buildInputSha256": "53b9f6b55fe8c73fb88a34156462c4ad725be195c4794afd9f11833e8b473ac8"
     },
     {
       "planHash": "0d7ea5d20eb11852b83d805d8775588f8ea8a89fb9327fb022eaa051f4ec070d",
       "packageName": "query_0d7ea5d20eb11852b83d805d8775588f8ea8a89fb9327fb022eaa051f4ec070d",
       "acir": "0d7ea5d20eb11852b83d805d8775588f8ea8a89fb9327fb022eaa051f4ec070d.json",
       "vk": "0d7ea5d20eb11852b83d805d8775588f8ea8a89fb9327fb022eaa051f4ec070d.vk.hex",
-      "acirSha256": "8ad9915e7c0826ac94b0c790733fe0d649d6c0a94d523d3c1c4962eccb00396e",
-      "vkSha256": "3b58cbe4ce08b9bf6f2fdeed414ebfd2172055aa398ce46448cfe425918dc1ba",
+      "acirSha256": "948477e735ebab64bd58104dd98b2ac3113d316ee805eb48e99ca252026c3d12",
+      "vkSha256": "cd2a571c580ec64fe07e860cea950f7331c2fd8237a5bc64e68ee3d648cf9306",
       "wasmProving": false,
       "example": {
         "name": "target-recycled-min",
@@ -392,15 +408,16 @@
           "validity": true,
           "freshness": true
         }
-      }
+      },
+      "buildInputSha256": "fb6d2ded4fbab7af43b675019c42e43e6d5e4c1958d5e2bfea38a44f6134332c"
     },
     {
       "planHash": "a206e8ae7a95059f578f290580e0cbcc1f691088a28ccfc35632e007c83e6801",
       "packageName": "query_a206e8ae7a95059f578f290580e0cbcc1f691088a28ccfc35632e007c83e6801",
       "acir": "a206e8ae7a95059f578f290580e0cbcc1f691088a28ccfc35632e007c83e6801.json",
       "vk": "a206e8ae7a95059f578f290580e0cbcc1f691088a28ccfc35632e007c83e6801.vk.hex",
-      "acirSha256": "acdfac9a4d084df34b3a14951bab233c497665a3133004e512331f7b27dabb5f",
-      "vkSha256": "2b16325de8fdd8543b701267d0128729f0e4ba0ee817ada8ebf83cccf27cde73",
+      "acirSha256": "deb0d5ca9370a5f1ed5f4f6b5c254d7f37deb2f03f54d49cd8560111dad4546a",
+      "vkSha256": "9c81397e9c99cce500272dffb5c561fb395ee87c07ceb44dfc2580ebe829a189",
       "wasmProving": false,
       "example": {
         "name": "target-recycled-sum",
@@ -422,15 +439,16 @@
           "validity": true,
           "freshness": true
         }
-      }
+      },
+      "buildInputSha256": "8b5a96200fd109b5199049ce122d6d47b6e016e2eed05f0780c28cef737be264"
     },
     {
       "planHash": "7a28394e6cf1b32c0e9171977734b3acf32b988f670474b4351d04323541c0f7",
       "packageName": "query_7a28394e6cf1b32c0e9171977734b3acf32b988f670474b4351d04323541c0f7",
       "acir": "7a28394e6cf1b32c0e9171977734b3acf32b988f670474b4351d04323541c0f7.json",
       "vk": "7a28394e6cf1b32c0e9171977734b3acf32b988f670474b4351d04323541c0f7.vk.hex",
-      "acirSha256": "040b8f6b087fcc10fe6145b28fdfa60d784ac5284c94bf23f81514a4452fc29a",
-      "vkSha256": "c3c600fe177a857060a246b15c8b669082f354597e7764e0fc10f6f69b54e32b",
+      "acirSha256": "8fa07373ca179f312e8761e206560d154ff0856c7d760ebe3e81def0a20482e1",
+      "vkSha256": "d1b705dfeafaf04f0e1606be3d6f781d04bdc630bb5e6c5666bedfca19a4756e",
       "wasmProving": false,
       "example": {
         "name": "target-recycled-having",
@@ -452,10 +470,11 @@
           "validity": true,
           "freshness": true
         }
-      }
+      },
+      "buildInputSha256": "857fd5f777af0083af2b4037455d5f215b6d85de3313778e339df67ece20d433"
     }
   ],
-  "sourceBundleSha256": "8aa2d6dc7ec4556dbb3b3531b74b65d89da65fd5cb1c393fa7e16e6f54c8fe8e",
+  "sourceBundleSha256": "581c4cbffebd438093b06e8911c5372f5c97eaeb555dbff33dfa209fdee262fd",
   "crsPinsSha256": "b31eedd906f0f02d8e940af834a239694c9ef9790909e7c8b77d0065d819c41d",
   "notYetCatalogued": [],
   "nativeKnownFailures": []

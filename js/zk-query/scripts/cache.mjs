@@ -1,6 +1,14 @@
 // Research grade and not externally audited. Maintainer source staging only.
 import { lstatSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
+
+export function catalogueBuildDigest(files, sourceBundleDigest, toolchainDigest) {
+  const generated = Object.keys(files).sort().map(name => [name, files[name]]);
+  return createHash('sha256')
+    .update(JSON.stringify([sourceBundleDigest, toolchainDigest, generated]))
+    .digest('hex');
+}
 
 export function stageSource(root, name, text) {
   const parts = name.split('/');

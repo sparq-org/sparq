@@ -1,9 +1,9 @@
 //! Raw canonical-envelope evidence. Sealed suite observations stay inside Noir.
 use super::{json_toml, prover_toml_authenticated_mode, Authentication};
 use crate::{
-    credential::{field, Credential},
+    credential::{field, Credential, SuiteEncoder},
     envelope_policy::{self, PolicyInput},
-    interp::{Trace, Word},
+    interp::{Cell, EncodeTerm, Trace, Word},
     plan::{EnvelopeFeatures, Plan},
     statement::EnvelopeInputs,
     Error,
@@ -200,18 +200,20 @@ pub(crate) fn authorize(
     credentials: &[Credential],
     policy: &PolicyInput,
     envelope: &EnvelopeInputs,
-) -> Result<Vec<Credential>, Error> {
+) -> Result<(Vec<Credential>, Vec<Cell>), Error> {
     credentials
         .iter()
         .map(|credential| {
-            let (set, index, path) = credential.authorization_path(&policy.trust_members)?;
+            let member = credential.trust_member()?;
+            let (set, index, path) =
+                Credential::authorization_path_for_member(&member, &policy.trust_members)?;
             if set.root != envelope.issuer_root || set.depth != envelope.issuer_depth {
                 return Err(Error::Invalid("issuer membership root".into()));
             }
             let mut c = credential.clone();
             c.issuer_index = index as u64;
             c.issuer_siblings = path.into_iter().map(field).collect::<Result<Vec<_>, _>>()?;
-            Ok(c)
+            Ok((c, SuiteEncoder.encode(&member.issuer.into())?))
         })
         .collect()
 }
@@ -232,10 +234,11 @@ pub fn prover_toml_enveloped(
     } = input;
     let envelope: EnvelopeInputs = envelope_policy::derive(policy)?.into();
     envelope.validate()?;
-    let credentials = authorize(credentials, policy, &envelope)?;
-    render_canonical(
+    let (credentials, issuers) = authorize(credentials, policy, &envelope)?;
+    render_authorized(
         plan,
         &credentials,
+        &issuers,
         trace,
         digest,
         salt,
@@ -262,17 +265,42 @@ pub(crate) fn render_canonical(
     salt: Word,
     input: CanonicalInput<'_>,
 ) -> Result<String, Error> {
+    plan.envelope_features().check(input.public)?;
+    let issuers = authenticated_issuers(credentials, input.public)?;
+    render_authorized(plan, credentials, &issuers, trace, digest, salt, input)
+}
+
+pub(crate) fn authenticated_issuers(
+    credentials: &[Credential],
+    envelope: &EnvelopeInputs,
+) -> Result<Vec<Cell>, Error> {
+    credentials
+        .iter()
+        .map(|credential| {
+            let (root, issuer) = credential.canonical_issuer(envelope.issuer_depth)?;
+            if root != envelope.issuer_root {
+                return Err(Error::Invalid("issuer membership root".into()));
+            }
+            SuiteEncoder.encode(&issuer.into())
+        })
+        .collect()
+}
+
+pub(crate) fn render_authorized(
+    plan: &Plan,
+    credentials: &[Credential],
+    issuers: &[Cell],
+    trace: &Trace,
+    digest: Word,
+    salt: Word,
+    input: CanonicalInput<'_>,
+) -> Result<String, Error> {
     let CanonicalInput {
         public: envelope,
         evidence,
         revealed,
     } = input;
     plan.envelope_features().check(envelope)?;
-    for credential in credentials {
-        if credential.canonical_issuer_root(envelope.issuer_depth)? != envelope.issuer_root {
-            return Err(Error::Invalid("issuer membership root".into()));
-        }
-    }
     let cap = plan.capacity().credentials as usize;
     if evidence.holders.len() > cap || evidence.credentials.len() > credentials.len() {
         return Err(Error::Capacity("envelope evidence slots".into()));
@@ -286,7 +314,7 @@ pub(crate) fn render_canonical(
         envelope,
         Authentication {
             revealed,
-            canonical: true,
+            canonical_issuers: Some(issuers),
         },
     )?;
     let empty = json!({"pk":{"x":"0","y":"0"},"sig":{"present":false,"r":{"x":"0","y":"0"},"s":"0","e":"0","e_k":"0"}});
@@ -318,4 +346,95 @@ pub(crate) fn render_canonical(
     }
     crate::witness_closed::append_authenticated(plan, credentials, trace, &mut out)?;
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        capacity::Bounds,
+        credential::{assemble_issuer_dataset, TRUST_MEMBER_CHECKS, VERIFIED_ISSUER},
+        interp::evaluate_dataset,
+        lower::lower,
+    };
+
+    #[test]
+    fn canonical_scan_reuses_the_issuer_from_membership_verification() {
+        let key = sig::SecretKey::from_seed(19);
+        let data = [Credential {
+            credential: sparq_merkle_suite::poseidon::issue(
+                concat!(
+                    "<urn:vc> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> ",
+                    "<https://www.w3.org/2018/credentials#VerifiableCredential> .\n",
+                    "<urn:vc> <https://www.w3.org/2018/credentials#issuer> <urn:issuer> .\n",
+                ),
+                concat!(
+                    "_:p <https://w3id.org/security#cryptosuite> \"schnorr-poseidon2-merkle-2026\" .\n",
+                    "_:p <https://w3id.org/security#verificationMethod> <urn:method> .\n",
+                ),
+                &key,
+                101u64.into(),
+            )
+            .unwrap(),
+            issuer: key.public_key(),
+            issuer_index: 0,
+            issuer_siblings: vec![],
+        }];
+        let policy = PolicyInput {
+            trust_members: vec![data[0].trust_member().unwrap()],
+            ..Default::default()
+        };
+        let digest = [7; 32];
+        let salt = [3; 32];
+        let plan = lower(
+            &format!("ASK {{?g <{VERIFIED_ISSUER}> <urn:issuer>}}"),
+            Bounds {
+                credentials: 1,
+                quads_per_credential: 4,
+                rows_per_table: 2,
+            },
+        )
+        .unwrap();
+        let before = TRUST_MEMBER_CHECKS.get();
+        let dataset = assemble_issuer_dataset(&data, &policy.trust_members, digest).unwrap();
+        assert_eq!(TRUST_MEMBER_CHECKS.get() - before, data.len());
+        let trace = evaluate_dataset(&plan, &dataset, &SuiteEncoder).unwrap();
+        let evidence = EnvelopeWitness::default();
+        let envelope = envelope_policy::derive(&policy).unwrap().into();
+
+        let before = TRUST_MEMBER_CHECKS.get();
+        let from_policy = prover_toml_enveloped(
+            &plan,
+            &data,
+            &trace,
+            digest,
+            salt,
+            EnvelopeInput {
+                policy: &policy,
+                evidence: &evidence,
+                revealed: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(TRUST_MEMBER_CHECKS.get() - before, data.len());
+        assert!(from_policy.lines().any(|line| line == "source_0 = [4, 0]"));
+
+        let (with_paths, _) = authorize(&data, &policy, &envelope).unwrap();
+        let before = TRUST_MEMBER_CHECKS.get();
+        let from_root = render_canonical(
+            &plan,
+            &with_paths,
+            &trace,
+            digest,
+            salt,
+            CanonicalInput {
+                public: &envelope,
+                evidence: &evidence,
+                revealed: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(TRUST_MEMBER_CHECKS.get() - before, data.len());
+        assert_eq!(from_root, from_policy);
+    }
 }

@@ -93,7 +93,9 @@ A source checkout builds bindings and pinned CRS with
 `node js/zk-query/scripts/build.mjs`; circuit regeneration is a separate
 `build-circuits.mjs` maintainer operation. Consumer tarballs are self-contained.
 `CARGO_BUILD_JOBS` also limits concurrent native catalogue compilations; unset
-means serial. Completed cache entries are checked against the committed pins.
+means serial. Generated sources, the library bundle and the toolchain pins
+together select the cache entry. Rebuilt programs and keys are checked against
+the committed pins.
 After rebuilding, regenerate every plan, key and fixture together; the catalogue
 test rejects stale assets and examples whose Rust-derived plan differs.
 The toolchain workflow's package job rebuilds the catalogue, runs the offline

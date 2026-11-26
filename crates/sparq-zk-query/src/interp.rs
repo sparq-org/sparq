@@ -27,8 +27,15 @@ pub struct Cell {
     pub scope: u32,
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static SAME_TERM_CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl Cell {
     pub fn same_term(self, other: Self) -> bool {
+        #[cfg(test)]
+        SAME_TERM_CHECKS.set(SAME_TERM_CHECKS.get() + 1);
         self.bound == other.bound
             && (!self.bound
                 || (self.kind == other.kind && self.enc == other.enc && self.scope == other.scope))

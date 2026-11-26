@@ -15,6 +15,7 @@ import { proofContract } from './proof-contract.mjs';
 import { liveRuntimeHash } from './live-runtime.mjs';
 import './targets-live.mjs';
 import '../test/binary.live.js';
+import '../test/scan.live.js';
 test('split prover, seeded issuance and compiler agreement live contracts', async () => {
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const directory = process.env.SPARQ_QUERY_TEST_DIR; assert(directory, 'evidence directory required');

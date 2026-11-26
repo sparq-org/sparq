@@ -4,7 +4,34 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, symlinkSync, linkSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { stageSource } from '../scripts/cache.mjs';
+import { catalogueBuildDigest, stageSource } from '../scripts/cache.mjs';
+
+test('a warm catalogue cache is reused only for identical build inputs', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'sparq-query-cache-test-'));
+  const packageName = 'query_same_plan';
+  const files = { 'Nargo.toml': 'manifest', 'src/main.nr': 'fn main() {}' };
+  const work = (files, bundle, toolchain) => join(directory, catalogueBuildDigest(files, bundle, toolchain));
+  const program = work => join(work, 'target', `${packageName}.json`);
+  const old = work(files, 'old bundle', 'pinned toolchain');
+  try {
+    mkdirSync(join(old, 'target'), { recursive: true });
+    writeFileSync(program(old), 'previous program');
+    writeFileSync(join(old, 'vk'), 'previous key');
+
+    const reordered = { 'src/main.nr': files['src/main.nr'], 'Nargo.toml': files['Nargo.toml'] };
+    assert.equal(work(reordered, 'old bundle', 'pinned toolchain'), old);
+    const revised = { ...files, 'src/main.nr': 'fn main(target: [u32; 4]) {}' };
+    for (const changed of [
+      work(revised, 'old bundle', 'pinned toolchain'),
+      work(files, 'indexed scan bundle', 'pinned toolchain'),
+      work(files, 'old bundle', 'new toolchain'),
+    ]) {
+      assert.notEqual(changed, old);
+      assert.equal(existsSync(program(changed)), false);
+      assert.equal(existsSync(join(changed, 'vk')), false);
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
 
 test('catalogue staging cannot follow cached source links or escape its directory', () => {
   const directory = mkdtempSync(join(tmpdir(), 'sparq-query-cache-test-'));
