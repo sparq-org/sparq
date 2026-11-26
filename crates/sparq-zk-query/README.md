@@ -14,9 +14,9 @@ Constants are public parameters. Plan encodings include parameter kinds, wiring,
 capacities, the generation mode and each expression constant's datatype class, but no values or
 variable names, so equal plan hashes generate identical programs. Constant membership lists use a
 fixed parameter block and public active length; values and list lengths preserve the shape.
-Rows are ordered lexicographically by term encoding in schema order; duplicates
-remain unless DISTINCT is requested. Scans check canonical bindings directly,
-including completeness, uniqueness and the first matching source payload.
+Rows are ordered lexicographically by term encoding in schema order. Core SCAN
+uses private `target[D]` and `source[R]` indices to check completeness, uniqueness
+and the first matching source payload. Closed graph scans use a separate relation.
 Joins consume one output occurrence per compatible source pair.
 FILTER checks its complete stable subsequence with computed destination ranks.
 Leading projections preserve row order; other projections and SELECT check stable

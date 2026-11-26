@@ -85,10 +85,12 @@ pub fn scan<let D: u32, let R: u32, let V: u32>(
     for i in 0..D {
         let (matches,row)=scan_row::<V>(dataset[i],active[i],slots,constants);
         assert(!matches|(target[i]<out.len),"scan completeness or capacity");
-        let r=if matches {target[i]} else {0};
-        // Immutable indexed reads use ROM rather than a dataset/output cross product.
-        assert(!matches|same_row(row,out.rows[r]),"scan completeness or capacity");
-        assert(!matches|(source[r]<=i),"scan first payload");
+        if R>0 {
+            let r=if matches {target[i]} else {0};
+            // Immutable indexed reads use ROM rather than a dataset/output cross product.
+            assert(!matches|same_row(row,out.rows[r]),"scan completeness or capacity");
+            assert(!matches|(source[r]<=i),"scan first payload");
+        }
     }
     for r in 0..R {
         // D may be empty for isolated fixtures; no source lookup exists then.

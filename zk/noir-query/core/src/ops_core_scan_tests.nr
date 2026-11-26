@@ -141,6 +141,35 @@ fn indexed_scan_accepts_an_empty_dataset() {
 }
 
 #[test]
+fn indexed_scan_accepts_zero_output_capacity_without_matches() {
+    crate::ops_core::scan([[iri(1),iri(9),iri(10)],[iri(2),iri(8),iri(10)]],
+        [false,true],[0,1,1],[unbound(),iri(9),iri(10)],empty::<0,1>(), [0xffffffff;2], []);
+    crate::ops_core::scan([],[],[0,1,1],[unbound(),iri(9),iri(10)],empty::<0,1>(), [], []);
+}
+
+#[test(should_fail_with="scan completeness or capacity")]
+fn indexed_scan_rejects_a_match_with_zero_output_capacity() {
+    crate::ops_core::scan([[iri(1),iri(9),iri(10)]],
+        [true],[0,1,1],[unbound(),iri(9),iri(10)],empty::<0,1>(), [0], []);
+}
+
+#[test(should_fail_with="scan extra binding")]
+fn indexed_scan_rejects_an_extra_row_with_an_empty_dataset() {
+    crate::ops_core::scan([],[],[0,1,1],[unbound(),iri(9),iri(10)],
+        Table {rows:[[iri(1)],[unbound()]],len:1}, [], [0;2]);
+}
+
+#[test(should_fail_with="scan first payload")]
+fn indexed_scan_rejects_a_later_source_after_nonmatching_rows() {
+    let mut first=iri(1);first.key=11;
+    let mut later=first;later.key=22;
+    crate::ops_core::scan([[first,iri(9),iri(10)],[first,iri(8),iri(10)],
+        [first,iri(9),iri(10)],[later,iri(9),iri(10)]],
+        [false,true,true,true],[0,1,1],[unbound(),iri(9),iri(10)],
+        Table {rows:[[later],[unbound()]],len:1}, [0;4], [3,0]);
+}
+
+#[test]
 fn stable_equal_identity_keeps_payload_order() {
     let mut a=iri(1);a.key=11;
     let mut b=a;b.key=22;

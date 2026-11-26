@@ -160,7 +160,9 @@ positions, including padding and method-generated issuer assertions. The circuit
 checks matching source rows against their indexed output rows and checks each live
 output against its indexed source, including the payload. Output order and
 distinctness remain checked, and `source[target[i]] <= i` retains the first matching
-payload. Closed graph-profile scans use their existing separate relation.
+payload. Zero-capacity library output tables accept only scans without matches;
+generated programs continue to use positive capacity buckets. Closed graph-profile
+scans use their existing separate relation.
 
 The host compiler modules and presentation values build for WebAssembly; the
 native `method::Compiler` alone owns subprocesses and temporary proof files.
