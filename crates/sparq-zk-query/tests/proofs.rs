@@ -581,9 +581,18 @@ fn stored_rdf_digest_covers_the_exact_query_key_challenge_and_bounds() {
         artifact: serde_json::Value::Null,
     };
     let request = |p: &Prepared, q: &str, c: u8, a: &str, b: Bounds| {
-        Request::new(stored(p, q, c, a, None), b, p.verification_key.clone()).unwrap()
+        Request::new_operator_fixture(stored(p, q, c, a, None), b, p.verification_key.clone())
+            .unwrap()
     };
     let base = request(&prepared, query, 7, "urn:verifier", B);
+    assert_eq!(
+        base.envelope_inputs().unwrap_err(),
+        Error::Unsupported("authenticated issuer policy required".into())
+    );
+    assert_eq!(
+        base.issuer_root().unwrap_err(),
+        Error::Unsupported("authenticated issuer policy required".into())
+    );
     assert_eq!(
         base.canonical_rdf(),
         sparq_canon::canonicalize_nquads(base.canonical_rdf()).unwrap()
@@ -712,14 +721,16 @@ fn draft_profile_refuses_unimplemented_request_obligations_by_name() {
         let mut spec = request_spec(&stored);
         spec.requirements = QueryRequirements::new(requirements).unwrap();
         assert_eq!(
-            Request::new(StoredRequest::new(spec).unwrap(), B, key.clone()).unwrap_err(),
+            Request::new_operator_fixture(StoredRequest::new(spec).unwrap(), B, key.clone())
+                .unwrap_err(),
             Error::Unsupported(name.into())
         );
     }
     let mut spec = request_spec(&stored);
     spec.base_iri = Some(BaseIri::new("urn:base").unwrap());
     assert_eq!(
-        Request::new(StoredRequest::new(spec).unwrap(), B, key.clone()).unwrap_err(),
+        Request::new_operator_fixture(StoredRequest::new(spec).unwrap(), B, key.clone())
+            .unwrap_err(),
         Error::Excluded("external base IRI".into())
     );
     let mut spec = request_spec(&stored);
@@ -728,18 +739,20 @@ fn draft_profile_refuses_unimplemented_request_obligations_by_name() {
     requirements.contract = ResultContract::SelectSequence;
     spec.requirements = QueryRequirements::new(requirements).unwrap();
     assert_eq!(
-        Request::new(StoredRequest::new(spec).unwrap(), B, key.clone()).unwrap_err(),
+        Request::new_operator_fixture(StoredRequest::new(spec).unwrap(), B, key.clone())
+            .unwrap_err(),
         Error::Invalid("query form and result contract".into())
     );
     let mut spec = request_spec(&stored);
     spec.not_before = u64::MAX - 2;
     spec.not_after = u64::MAX - 1;
     assert_eq!(
-        Request::new(StoredRequest::new(spec).unwrap(), B, key.clone()).unwrap_err(),
+        Request::new_operator_fixture(StoredRequest::new(spec).unwrap(), B, key.clone())
+            .unwrap_err(),
         Error::Invalid("request validity date".into())
     );
     assert_eq!(
-        Request::new(stored, B, vec![]).unwrap_err(),
+        Request::new_operator_fixture(stored, B, vec![]).unwrap_err(),
         Error::Invalid("verification key".into())
     );
 }

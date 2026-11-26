@@ -53,7 +53,7 @@ and `Request::new_authenticated_with_quad_bounds` select distinct ordered slot
 limits. `Compiler::prove` accepts complete `credential::Credential` inputs with
 private lexical, signature and membership material. Its encoder argument remains
 for compatibility; proof and verification use `credential::SuiteEncoder`.
-Structural requests created with `Request::new` cannot produce an authenticated proof.
+`Request::new_operator_fixture` creates unauthenticated operator fixtures and cannot produce authenticated proofs.
 Use `prepare_with_opening_profile` and
 `Request::new_authenticated_with_opening_profile` with the same profile for larger openings; `new_authenticated_with_envelope_and_profile` retains typed envelope
 properties as well. `prepare_with_envelope_features` selects the optional consumers required by the stored policy; ordinary preparation selects issuer authorization alone. Oversized lexical forms receive a capacity refusal.

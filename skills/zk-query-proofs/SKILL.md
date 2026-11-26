@@ -204,7 +204,9 @@ For distinct public quad limits per credential slot, use
 `Request::new_authenticated_with_quad_bounds`. The default-off `ordered-json` test feature exercises request canonicalization
 with the insertion-order JSON backend. The statement binds the issuer root
 and ordered quad limits as well as the request, commitment and result. Operator
-fixtures have a separate supplied-cell entry point. The statement lane supplies
+fixtures use `Request::new_operator_fixture`, an explicitly unauthenticated
+constructor that cannot produce an authenticated proof; the former `Request::new`
+constructor is removed. The statement lane supplies
 the protocol adapter and holder, status and validity envelope. Verification derives
 its plan and result encoding from the stored request and RDF answer and consumes
 the original challenge last. Toolchain pins and verifier target are independent
