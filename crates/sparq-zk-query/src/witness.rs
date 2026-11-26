@@ -23,7 +23,13 @@ pub fn prover_toml(
         trace,
         request_digest,
         presentation_salt,
-        None,
+        || {
+            let cap = plan.capacity();
+            Ok(padded_scan_dataset(
+                credentials,
+                std::iter::repeat_n(cap.quads_per_credential, cap.credentials as usize),
+            ))
+        },
     )
 }
 
@@ -34,7 +40,7 @@ fn prover_toml_with_scan_dataset(
     trace: &Trace,
     request_digest: [u8; 32],
     presentation_salt: [u8; 32],
-    scan_dataset: Option<&[Option<[Cell; 3]>]>,
+    scan_dataset: impl FnOnce() -> Result<Vec<Option<[Cell; 3]>>, Error>,
 ) -> Result<String, Error> {
     if trace.tables.len() != plan.nodes().len() {
         return Err(Error::Invalid("trace node count".into()));
@@ -160,28 +166,26 @@ fn prover_toml_with_scan_dataset(
     for (i, (t, node)) in trace.tables.iter().zip(plan.nodes()).enumerate() {
         writeln!(out, "t{i} = {}", table(&t.rows, &node.output)?).unwrap();
     }
-    let padded;
-    let dataset = if let Some(dataset) = scan_dataset {
-        dataset
-    } else {
-        padded = padded_scan_dataset(
-            credentials,
-            &vec![cap.quads_per_credential; cap.credentials as usize],
-        );
-        &padded
-    };
-    append_scan_hints(plan, encoder, trace, dataset, &mut out)?;
+    if plan
+        .nodes()
+        .iter()
+        .any(|node| matches!(node.operator, Operator::Scan(_)))
+    {
+        append_scan_hints(plan, encoder, trace, &scan_dataset()?, &mut out)?;
+    }
     Ok(out)
 }
 
 fn padded_scan_dataset(
     credentials: &[CredentialCells],
-    capacities: &[u32],
+    capacities: impl IntoIterator<Item = u32>,
 ) -> Vec<Option<[Cell; 3]>> {
+    #[cfg(test)]
+    SCAN_DATASET_BUILDS.set(SCAN_DATASET_BUILDS.get() + 1);
     capacities
-        .iter()
+        .into_iter()
         .enumerate()
-        .flat_map(|(c, &capacity)| {
+        .flat_map(|(c, capacity)| {
             (0..capacity as usize).map(move |q| {
                 credentials
                     .get(c)
@@ -190,6 +194,11 @@ fn padded_scan_dataset(
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+thread_local! {
+    static SCAN_DATASET_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 fn append_scan_hints(
@@ -501,26 +510,8 @@ fn prover_toml_authenticated_mode(
     } else {
         layout.reconstruct_authenticated_with_envelope(plan, &statement, envelope)?
     };
-    let mut scan_dataset = padded_scan_dataset(&cells, &plan.credential_quad_capacities());
-    if let Some(issuers) = canonical_issuers.filter(|_| {
-        plan.nodes()
-            .iter()
-            .any(|node| matches!(node.operator, Operator::Scan(_)))
-    }) {
-        let predicate = SuiteEncoder
-            .encode(&oxrdf::NamedNode::new_unchecked(crate::credential::VERIFIED_ISSUER).into())?;
-        for c in 0..plan.capacity().credentials as usize {
-            scan_dataset.push(if let Some(&issuer) = issuers.get(c) {
-                Some([
-                    crate::credential::credential_graph(request_digest, c as u32)?,
-                    predicate,
-                    issuer,
-                ])
-            } else {
-                None
-            });
-        }
-    }
+    let cap = plan.capacity();
+    let capacities = plan.credential_quad_capacities();
     let base = prover_toml_with_scan_dataset(
         plan,
         &cells,
@@ -528,13 +519,30 @@ fn prover_toml_authenticated_mode(
         trace,
         request_digest,
         presentation_salt,
-        Some(&scan_dataset),
+        || {
+            let mut scan_dataset = padded_scan_dataset(&cells, capacities.iter().copied());
+            if let Some(issuers) = canonical_issuers {
+                let predicate = SuiteEncoder.encode(
+                    &oxrdf::NamedNode::new_unchecked(crate::credential::VERIFIED_ISSUER).into(),
+                )?;
+                for c in 0..cap.credentials as usize {
+                    scan_dataset.push(if let Some(&issuer) = issuers.get(c) {
+                        Some([
+                            crate::credential::credential_graph(request_digest, c as u32)?,
+                            predicate,
+                            issuer,
+                        ])
+                    } else {
+                        None
+                    });
+                }
+            }
+            Ok(scan_dataset)
+        },
     )?;
-    let cap = plan.capacity();
     let opening = plan.opening_profile().limits();
     let mut raw = vec![];
     let mut proofs = vec![];
-    let capacities = plan.credential_quad_capacities();
     for (c, &capacity) in capacities.iter().enumerate() {
         let mut quads = vec![];
         if let Some(credential) = credentials.get(c) {
@@ -889,6 +897,34 @@ mod tests {
     use oxrdf::NamedNode;
 
     #[test]
+    fn operator_witness_without_a_scan_skips_dataset_build() {
+        let plan = lower(
+            "ASK {}",
+            Bounds {
+                credentials: 1,
+                quads_per_credential: 16,
+                rows_per_table: 2,
+            },
+        )
+        .unwrap();
+        let term = SuiteEncoder
+            .encode(&NamedNode::new_unchecked("urn:term").into())
+            .unwrap();
+        let credentials = [CredentialCells {
+            quads: vec![[term, term, term, Cell::default()]],
+        }];
+        let trace = evaluate(&plan, &credentials, &SuiteEncoder).unwrap();
+        let before = SCAN_DATASET_BUILDS.get();
+        let input =
+            prover_toml(&plan, &credentials, &SuiteEncoder, &trace, [7; 32], [3; 32]).unwrap();
+        assert_eq!(SCAN_DATASET_BUILDS.get(), before);
+        assert!(input.lines().any(|line| line == "result = true"));
+        assert!(!input
+            .lines()
+            .any(|line| line.starts_with("target_") || line.starts_with("source_")));
+    }
+
+    #[test]
     fn distinct_scan_bindings_only_compare_the_pattern_for_each_triple() {
         let plan = lower(
             "SELECT ?s ?o WHERE {?s <urn:p> ?o}",
@@ -914,7 +950,7 @@ mod tests {
         }
         quads.push(quads[0]);
         let credentials = [CredentialCells { quads }];
-        let dataset = padded_scan_dataset(&credentials, &[64]);
+        let dataset = padded_scan_dataset(&credentials, [64]);
         let trace = evaluate(&plan, &credentials, &SuiteEncoder).unwrap();
         let mut hints = String::new();
         let before = SAME_TERM_CHECKS.get();

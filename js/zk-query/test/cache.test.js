@@ -6,31 +6,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { catalogueBuildDigest, stageSource } from '../scripts/cache.mjs';
 
-test('a warm catalogue cache is reused only for identical build inputs', () => {
-  const directory = mkdtempSync(join(tmpdir(), 'sparq-query-cache-test-'));
-  const packageName = 'query_same_plan';
+test('the build digest covers each declared input in a stable file order', () => {
   const files = { 'Nargo.toml': 'manifest', 'src/main.nr': 'fn main() {}' };
-  const work = (files, bundle, toolchain) => join(directory, catalogueBuildDigest(files, bundle, toolchain));
-  const program = work => join(work, 'target', `${packageName}.json`);
-  const old = work(files, 'old bundle', 'pinned toolchain');
-  try {
-    mkdirSync(join(old, 'target'), { recursive: true });
-    writeFileSync(program(old), 'previous program');
-    writeFileSync(join(old, 'vk'), 'previous key');
-
-    const reordered = { 'src/main.nr': files['src/main.nr'], 'Nargo.toml': files['Nargo.toml'] };
-    assert.equal(work(reordered, 'old bundle', 'pinned toolchain'), old);
-    const revised = { ...files, 'src/main.nr': 'fn main(target: [u32; 4]) {}' };
-    for (const changed of [
-      work(revised, 'old bundle', 'pinned toolchain'),
-      work(files, 'indexed scan bundle', 'pinned toolchain'),
-      work(files, 'old bundle', 'new toolchain'),
-    ]) {
-      assert.notEqual(changed, old);
-      assert.equal(existsSync(program(changed)), false);
-      assert.equal(existsSync(join(changed, 'vk')), false);
-    }
-  } finally { rmSync(directory, { recursive: true, force: true }); }
+  const reordered = { 'src/main.nr': files['src/main.nr'], 'Nargo.toml': files['Nargo.toml'] };
+  const original = catalogueBuildDigest(files, 'bundle', 'toolchain');
+  assert.equal(catalogueBuildDigest(reordered, 'bundle', 'toolchain'), original);
+  assert.notEqual(catalogueBuildDigest({ ...files, 'src/main.nr': 'updated main' }, 'bundle', 'toolchain'), original);
+  assert.notEqual(catalogueBuildDigest(files, 'updated bundle', 'toolchain'), original);
+  assert.notEqual(catalogueBuildDigest(files, 'bundle', 'updated toolchain'), original);
 });
 
 test('catalogue staging cannot follow cached source links or escape its directory', () => {

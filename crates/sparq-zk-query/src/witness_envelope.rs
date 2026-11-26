@@ -358,8 +358,7 @@ mod tests {
         lower::lower,
     };
 
-    #[test]
-    fn canonical_scan_reuses_the_issuer_from_membership_verification() {
+    fn canonical_fixture() -> ([Credential; 1], PolicyInput) {
         let key = sig::SecretKey::from_seed(19);
         let data = [Credential {
             credential: sparq_merkle_suite::poseidon::issue(
@@ -384,6 +383,51 @@ mod tests {
             trust_members: vec![data[0].trust_member().unwrap()],
             ..Default::default()
         };
+        (data, policy)
+    }
+
+    #[test]
+    fn canonical_witness_without_a_scan_skips_dataset_build() {
+        use crate::witness::SCAN_DATASET_BUILDS;
+
+        let (data, policy) = canonical_fixture();
+        let plan = lower(
+            "ASK {}",
+            Bounds {
+                credentials: 1,
+                quads_per_credential: 16,
+                rows_per_table: 2,
+            },
+        )
+        .unwrap();
+        let digest = [7; 32];
+        let dataset = assemble_issuer_dataset(&data, &policy.trust_members, digest).unwrap();
+        let trace = evaluate_dataset(&plan, &dataset, &SuiteEncoder).unwrap();
+        let before = SCAN_DATASET_BUILDS.get();
+        let input = prover_toml_enveloped(
+            &plan,
+            &data,
+            &trace,
+            digest,
+            [3; 32],
+            EnvelopeInput {
+                policy: &policy,
+                evidence: &EnvelopeWitness::default(),
+                revealed: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(SCAN_DATASET_BUILDS.get(), before);
+        assert!(input.lines().any(|line| line == "result = true"));
+        assert!(input.lines().any(|line| line.starts_with("envelope_0 = ")));
+        assert!(!input
+            .lines()
+            .any(|line| line.starts_with("target_") || line.starts_with("source_")));
+    }
+
+    #[test]
+    fn canonical_scan_reuses_the_issuer_from_membership_verification() {
+        let (data, policy) = canonical_fixture();
         let digest = [7; 32];
         let salt = [3; 32];
         let plan = lower(

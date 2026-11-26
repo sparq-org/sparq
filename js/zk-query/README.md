@@ -197,6 +197,10 @@ The offline wrapper also works before a build, directly from a source checkout.
 `build-circuits.mjs` regenerates missing catalogue artifacts and checks their pins.
 Its `--cache` directory retains completed native compilations; `--cases` accepts
 query/bounds profiles and `--write-pins` explicitly updates maintainer pins.
+When the source bundle changes, a pin update must include every catalogue plan.
+The builder stages the bundle, rebuilt programs and keys, and new catalogue.
+It publishes these files after every selected build succeeds. `sources.mjs`
+regenerates the bundle only when it matches the existing catalogue pin.
 `CARGO_BUILD_JOBS` also bounds concurrent catalogue builds, defaulting to serial
 when unset. Duplicate plan hashes share a build and must generate identical sources.
 The build-input pin covers the generated files, the library bundle and the

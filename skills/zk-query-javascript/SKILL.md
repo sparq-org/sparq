@@ -95,7 +95,9 @@ A source checkout builds bindings and pinned CRS with
 `CARGO_BUILD_JOBS` also limits concurrent native catalogue compilations; unset
 means serial. Generated sources, the library bundle and the toolchain pins
 together select the cache entry. Rebuilt programs and keys are checked against
-the committed pins.
+the committed pins. A changed source bundle requires a full catalogue selection
+for `--write-pins`. The builder publishes the bundle, programs, keys and catalogue
+after every selected build succeeds.
 After rebuilding, regenerate every plan, key and fixture together; the catalogue
 test rejects stale assets and examples whose Rust-derived plan differs.
 The toolchain workflow's package job rebuilds the catalogue, runs the offline
