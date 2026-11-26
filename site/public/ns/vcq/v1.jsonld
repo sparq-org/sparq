@@ -10,6 +10,7 @@
     "QueryRequest": "vcq:QueryRequest",
     "QueryAnswerPresentation": "vcq:QueryAnswerPresentation",
     "QueryAnswerProof": "vcq:QueryAnswerProof",
+    "CoverageCredential": "vcq:CoverageCredential",
     "IssuerKeys": "vcq:IssuerKeys",
     "Multikey": "sec:Multikey",
     "hidden": "vcq:hidden",
@@ -19,6 +20,51 @@
     "inputCommitment": {
       "@id": "vcq:inputCommitment",
       "@type": "sec:multibase"
+    },
+    "coverageDigest": {
+      "@id": "vcq:coverageDigest",
+      "@type": "sec:multibase"
+    },
+    "coverageAuthority": {
+      "@id": "vcq:coverageAuthority",
+      "@type": "@id"
+    },
+    "coverageRegistry": {
+      "@id": "vcq:coverageRegistry",
+      "@type": "@id"
+    },
+    "coverageSubject": {
+      "@id": "vcq:coverageSubject",
+      "@type": "@id"
+    },
+    "coverageClaimType": {
+      "@id": "vcq:coverageClaimType",
+      "@type": "@id",
+      "@container": "@set"
+    },
+    "coverageMethod": {
+      "@id": "vcq:coverageMethod",
+      "@type": "@id"
+    },
+    "coverageProfile": {
+      "@id": "vcq:coverageProfile",
+      "@type": "@id"
+    },
+    "coveragePeriodStart": {
+      "@id": "vcq:coveragePeriodStart",
+      "@type": "xsd:nonNegativeInteger"
+    },
+    "coveragePeriodEnd": {
+      "@id": "vcq:coveragePeriodEnd",
+      "@type": "xsd:nonNegativeInteger"
+    },
+    "coverageAsOf": {
+      "@id": "vcq:coverageAsOf",
+      "@type": "xsd:nonNegativeInteger"
+    },
+    "coverageExpiresAt": {
+      "@id": "vcq:coverageExpiresAt",
+      "@type": "xsd:nonNegativeInteger"
     },
     "trustedIssuers": {
       "@id": "vcq:trustedIssuers",

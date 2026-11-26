@@ -58,6 +58,15 @@ pub(crate) fn prepare(input: &str) -> Result<Value> {
             issuer_siblings: vec![],
         });
     }
+    let salt = if let Some(salt) = input.presentation_salt_hex {
+        crate::codec::word(&salt)?
+    } else {
+        let mut salt = [0; 32];
+        getrandom_latest::fill(&mut salt).map_err(err)?;
+        salt
+    };
+    let commitment = sparq_zk_query::credential::dataset_commitment(&data, salt).map_err(err)?;
+    request.check_dataset_agreement(commitment).map_err(err)?;
     let dataset = sparq_zk_query::credential::assemble_issuer_dataset(
         &data,
         &policy.trust_members,
@@ -79,15 +88,6 @@ pub(crate) fn prepare(input: &str) -> Result<Value> {
     vocabulary
         .push(oxrdf::NamedNode::new_unchecked(sparq_zk_query::credential::VERIFIED_ISSUER).into());
     let result = Answer::release(&trace.result, &plan, &vocabulary, &SuiteEncoder).map_err(err)?;
-    let salt = if let Some(salt) = input.presentation_salt_hex {
-        crate::codec::word(&salt)?
-    } else {
-        let mut salt = [0; 32];
-        getrandom_latest::fill(&mut salt).map_err(err)?;
-        salt
-    };
-    let commitment = sparq_zk_query::credential::dataset_commitment(&data, salt).map_err(err)?;
-    request::agreement(&request, commitment)?;
     let statement = Statement {
         request_digest: request.digest(),
         input_commitment: commitment,
@@ -136,7 +136,7 @@ pub(crate) fn bind(input: &str) -> Result<Value> {
     let input: Input = crate::codec::parse(input)?;
     let request = request::restore(&input.request)?;
     request::freshness(&request, input.clock)?;
-    let expected = crate::verification::statement(&input.request, &input.presentation)?;
+    let expected = crate::verification::statement(&request, &input.presentation)?;
     if expected["publicInputs"] != value!(input.public_inputs) {
         return Err("prover public-input mismatch".into());
     }

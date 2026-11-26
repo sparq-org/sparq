@@ -34,7 +34,7 @@ struct IssueInput {
     status: Option<Configuration>,
     seed_hex: Option<String>,
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct Credential {
     pub graph_n_quads: String,
@@ -46,9 +46,8 @@ pub(crate) struct Credential {
     pub signature_hex: String,
 }
 impl Credential {
-    pub(crate) fn open(&self) -> Result<(suite::Credential, sig::PublicKey)> {
-        let pk = sig::public_key_from_hex(&self.issuer).ok_or("issuer key rejected")?;
-        let credential = suite::Credential {
+    pub(crate) fn decode(&self) -> Result<suite::Credential> {
+        Ok(suite::Credential {
             document: self.graph_n_quads.clone(),
             proof_config: self.proof_config_n_quads.clone(),
             salt: field(&self.salt_hex)?,
@@ -56,7 +55,11 @@ impl Credential {
             count: self.count,
             signature: sig::signature_from_hex(&self.signature_hex)
                 .ok_or("signature encoding rejected")?,
-        };
+        })
+    }
+    pub(crate) fn open(&self) -> Result<(suite::Credential, sig::PublicKey)> {
+        let pk = sig::public_key_from_hex(&self.issuer).ok_or("issuer key rejected")?;
+        let credential = self.decode()?;
         if !suite::verify(&credential, &pk) {
             return Err("credential suite signature or opening rejected".into());
         }

@@ -69,6 +69,7 @@ export function testHolderKeygen(seedHex) { return call('testHolderKeygen', seed
 export function statusSnapshot({ list, purpose, bits }) { return call('statusSnapshot', { list, purpose, bits }); }
 export function issue(input) { return call('issue', input); }
 export function testIssue(input) { return call('testIssue', input); }
+export function coverageDocument(claims) { return call('coverageDocument', claims); }
 export function request({ query, policy, nonce }) {
   const plan = call('plan', { query, policy });
   const entry = member(plan.planHash);

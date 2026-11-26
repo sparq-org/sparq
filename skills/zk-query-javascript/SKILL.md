@@ -57,6 +57,25 @@ Optional
 `notBefore` and `notAfter` in Unix seconds, defaulting to creation and an hour
 later. `maxResultSize` defaults to the table bound; `maxPresentationBytes` defaults
 to sixteen mebibytes. `inputCommitment` names an agreed salted dataset commitment.
+
+Optional `policy.coverage: { authority, scope, credential }` requires an explicit
+`inputCommitment`. Choose the authority's issuer IRI, verification-method IRI and
+public key independently for this scope. The scope names `registry`, `subject`,
+`claimTypes` (an IRI set), `method` and `profile` as IRIs, and `periodStart` and
+`periodEnd` as a half-open historical interval in Unix seconds. The signer can
+call `coverageDocument({ issuer, verificationMethod, scope, inputCommitment, asOf,
+expiresAt })` and pass the returned fields to `issue({ issuer: signingKey, ...fields })`.
+The interval ends at or before `asOf`. The request must be created in
+`[asOf, expiresAt)`, and its validity window must fit within that interval.
+When `notAfter` is omitted, its default is capped at `expiresAt`.
+The profile accepts one to 64 distinct claim types and up to 64 KiB each for the
+signed claims document and proof configuration.
+
+Keep the detached credential in the stored request. The holder passes only the
+dataset's ordered source credentials to `prove`, with the original presentation
+salt as `backend.presentationSaltHex`. The request digest includes the SHA-256 of
+the RDFC-1.0 canonical signed coverage claims.
+
 Optional envelope policy, each a distinct compiled program:
 `holderBinding: { issuers? }` (holder signs the request digest with the
 credential's `confidenceMethod` Multikey; needs `openingProfile: 'long-objects'`),
@@ -86,6 +105,18 @@ and keys. The membership proof does not identify each hidden signer.
 Do not interpret the trust list as evidence that every member contributed.
 `status`, `validityTime`, `earliestCreated` and `tableRowBounds` appear only when
 enforced.
+
+`report.exactness` is `presented-dataset` without an anchor and `agreed-dataset`
+with one. `report.coverage` appears after successful verification of a covered
+request and gives the signed authority, verification method, scope, timestamps,
+dataset commitment and digest. Use that signed scope when relying on coverage.
+
+In Rust, `CoverageClaims::issuance_documents` builds suite inputs and
+`Coverage::verify` checks the detached credential against the chosen authority,
+scope and anchor. `Request::with_coverage` checks the window and binds the verified
+evidence. `StoredRequest::coverage_digest` exposes the protocol binding, and
+`stored_request_encoding_profile` identifies the local byte encoding. The query
+request retains the credential through `Request::coverage`.
 
 Read the [package API and generated public-input layout](../../js/zk-query/README.md)
 and the [Rust host adapter](../../crates/sparq-zk-query-wasm/README.md).

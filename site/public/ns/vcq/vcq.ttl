@@ -22,6 +22,8 @@ vcq:QueryAnswerPresentation a rdfs:Class ; rdfs:subClassOf cred:VerifiablePresen
   rdfs:comment "A verifiable presentation carrying the result of a query request and a proof that it is correct."@en .
 vcq:QueryAnswerProof a rdfs:Class ; rdfs:label "Query answer proof"@en ;
   rdfs:comment "The proof of a query answer presentation, made by a proof method."@en .
+vcq:CoverageCredential a rdfs:Class ; rdfs:label "Coverage credential"@en ;
+  rdfs:comment "A detached authority-signed claim of complete coverage within a defined scope for a committed dataset."@en .
 vcq:TrustRequirement a rdfs:Class ; rdfs:label "Trust requirement"@en ;
   rdfs:comment "A way of identifying the issuers a verifier trusts."@en .
 vcq:IssuerKeys a rdfs:Class ; rdfs:subClassOf vcq:TrustRequirement ; rdfs:label "Issuer keys"@en ;
@@ -47,6 +49,28 @@ vcq:query a rdf:Property ; rdfs:domain vcq:QueryRequest ; rdfs:range xsd:string 
   rdfs:comment "The SPARQL 1.2 query text."@en .
 vcq:inputCommitment a rdf:Property ; rdfs:range sec:multibase ; rdfs:label "input commitment"@en ;
   rdfs:comment "A multibase-encoded dataset commitment."@en .
+vcq:coverageDigest a rdf:Property ; rdfs:domain vcq:QueryRequest ; rdfs:range sec:multibase ;
+  rdfs:comment "SHA-256 of the RDFC-1.0 canonical N-Quads of verified detached coverage claims."@en .
+vcq:coverageAuthority a rdf:Property ; rdfs:domain vcq:CoverageCredential ;
+  rdfs:comment "The IRI of the authority attesting to dataset coverage."@en .
+vcq:coverageRegistry a rdf:Property ; rdfs:domain vcq:CoverageCredential ;
+  rdfs:comment "The IRI of the registry the authority claims to cover."@en .
+vcq:coverageSubject a rdf:Property ; rdfs:domain vcq:CoverageCredential ;
+  rdfs:comment "The IRI of the subject whose claims are covered."@en .
+vcq:coverageClaimType a rdf:Property ; rdfs:domain vcq:CoverageCredential ;
+  rdfs:comment "An IRI identifying a claim type within the attested scope."@en .
+vcq:coverageMethod a rdf:Property ; rdfs:domain vcq:CoverageCredential ;
+  rdfs:comment "The IRI of the collection method used by the coverage authority."@en .
+vcq:coverageProfile a rdf:Property ; rdfs:domain vcq:CoverageCredential ;
+  rdfs:comment "The IRI of the profile used by the coverage authority."@en .
+vcq:coveragePeriodStart a rdf:Property ; rdfs:domain vcq:CoverageCredential ; rdfs:range xsd:nonNegativeInteger ;
+  rdfs:comment "Inclusive start of the covered historical interval, in Unix seconds."@en .
+vcq:coveragePeriodEnd a rdf:Property ; rdfs:domain vcq:CoverageCredential ; rdfs:range xsd:nonNegativeInteger ;
+  rdfs:comment "Exclusive end of the covered historical interval, in Unix seconds."@en .
+vcq:coverageAsOf a rdf:Property ; rdfs:domain vcq:CoverageCredential ; rdfs:range xsd:nonNegativeInteger ;
+  rdfs:comment "Instant the coverage claim was determined, in Unix seconds."@en .
+vcq:coverageExpiresAt a rdf:Property ; rdfs:domain vcq:CoverageCredential ; rdfs:range xsd:nonNegativeInteger ;
+  rdfs:comment "Exclusive expiry instant of the coverage claim, in Unix seconds."@en .
 vcq:trustedIssuers a rdf:Property ; rdfs:domain vcq:QueryRequest ; rdfs:range vcq:TrustRequirement ; rdfs:label "trusted issuers"@en ;
   rdfs:comment "A trust requirement; an issuer is trusted if it meets at least one."@en .
 vcq:issuer a rdf:Property ; rdfs:domain vcq:TrustRequirement ; rdfs:label "issuer"@en ;

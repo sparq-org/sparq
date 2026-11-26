@@ -1,6 +1,7 @@
 # Credential evidence for Solid query answers
 
-Status at `e626490` on `main`. The authenticated Noir query method already implements
+Baseline at `e626490` on `main`, with the signed coverage implementation recorded below.
+The authenticated Noir query method already implements
 the three relations required by DER-13. Whether a particular answer qualifies depends on
 the verifier's query and policy. Both Node proof methods are research grade and externally
 unaudited. [Issue #7379](https://github.com/sparq-org/sparq/issues/7379)
@@ -53,29 +54,22 @@ work. [Implementation snapshot](../site/specs/zksparql-answers-implementation.ty
 
 ## Dataset agreement and repeated questions
 
-**A5 · Signed completeness — partial.** A verifier can already store an `inputCommitment`.
-The query proof covers all quads of the ordered signed credentials committed with the
-presentation salt. Without an anchor the holder chooses the credentials. The insurance
-count query can require a register's signed `five-year-complete` fact. There is no generic
-signed agreement linking an authority's coverage claim to the chosen dataset.
-[Commitment](../crates/sparq-zk-query/src/credential.rs) ·
-[Agreement check](../crates/sparq-zk-query/src/driver.rs) ·
-[Insurance count query](../crates/sparq-zk-query/tests/fixtures/solid_paths/insurance-count.rq)
+**A5 · Signed completeness — implemented in the authenticated query method.** A verifier
+can attach a detached coverage credential to an agreed `inputCommitment`. The authority
+attests coverage for the registry, subject, claim types and historical interval. The
+request builder checks the selected authority and its signature, the signed scope and
+collection method, the dataset commitment and the request window. It keeps the coverage
+credential with the request, outside the query input.
 
-Choose a detached, signed coverage credential from an authority the verifier accepts for
-the specified registry, subject, claim types and coverage interval. The authority determines
-the complete set within that scope and signs its method/profile, `inputCommitment`, scope,
-as-of instant and expiry. Keeping this credential outside the selected dataset avoids a
-self-referential commitment. Before issuing the request, the verifier checks the signature
-and scope, and limits its request window to the attestation's validity. It stores the
-credential and binds the SHA-256 digest of its RDFC-1.0 canonical signed claims, including
-the authority IRI, alongside the exact anchor in the request. The public statement then
-binds the coverage digest via the request digest and
-the dataset via the existing commitment. Report the named authority and scope separately
-from query exactness. Test a matching attestation and answer. Omitting a credential must
-fail agreement even when the query result stays equal. Vary the authority, scope and expiry
-independently. Each mismatch must preclude a coverage claim.
-An ordinary unanchored request can still yield an exact answer over the presented roots.
+The proof binds the SHA-256 digest of the canonical signed coverage claims via the
+request digest, and binds the ordered signed source credentials via the existing
+dataset commitment. Verification reports the authority and scope alongside the
+basis for query exactness. Unanchored requests continue to prove exact answers over
+the presented roots.
+[Coverage validation](../crates/sparq-zk-query/src/coverage.rs) ·
+[Request binding](../crates/sparq-zk-query/src/request.rs) ·
+[Usage](../skills/zk-query-javascript/SKILL.md) ·
+[Agreement tests](../js/zk-query/test/coverage.test.js)
 
 **A6 · Repeated queries — partial.** The Answers draft describes cumulative disclosure.
 Both APIs expose verifier-side nonce handling. Neither prover accepts a holder consent or

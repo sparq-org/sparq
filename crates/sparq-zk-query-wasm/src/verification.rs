@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 use sparq_query_protocol::{consume_challenge, ChallengeStore};
 use sparq_zk_query::{
     credential::SuiteEncoder,
+    request::Request,
     statement::{Layout, Statement},
 };
 
@@ -18,13 +19,12 @@ pub(crate) struct Input {
     pub presentation: PresentationWire,
 }
 
-pub(crate) fn statement(wire: &RequestWire, presentation: &PresentationWire) -> Result<Value> {
-    let request = request::restore(wire)?;
+pub(crate) fn statement(request: &Request, presentation: &PresentationWire) -> Result<Value> {
     let p = presentation.native()?;
     if p.request_digest != request.digest() {
         return Err("request digest".into());
     }
-    request::agreement(&request, p.input_commitment)?;
+    request.check_dataset_agreement(p.input_commitment).map_err(err)?;
     let limits = request.stored().requirements().resources();
     if let sparq_zk_query::answer::Answer::Select { rows, .. } = &p.result {
         if rows.len() > limits.released_rows() as usize {
@@ -65,7 +65,7 @@ pub(crate) fn verify(
 ) -> Result<Value> {
     let request = request::restore(&input.request)?;
     request::freshness(&request, clock()?)?;
-    let statement = statement(&input.request, &input.presentation)?;
+    let statement = statement(&request, &input.presentation)?;
     if input.presentation.proof.is_empty() {
         return Err("missing proof".into());
     }
@@ -88,10 +88,18 @@ pub(crate) fn verify(
             all
         }),
     };
+    let exactness = if request.stored().requirements().anchor().is_some() {
+        "agreed-dataset"
+    } else {
+        "presented-dataset"
+    };
     let mut report = json!({"rule":{"query":request.stored().query(),"planHash":hex(&plan.hash())},
         "issuers":policy.trusted_issuers,"subject":subject,"fresh":hex(request.stored().challenge().as_bytes()),"complete":true,
         "trustMembers":policy.trust_members,
-        "issuerRoot":hex(&request.issuer_root().map_err(err)?)});
+        "issuerRoot":hex(&request.issuer_root().map_err(err)?),"exactness":exactness});
+    if let Some(evidence) = request.coverage() {
+        report["coverage"] = crate::coverage::report(evidence);
+    }
     // Only enforced envelope properties are reported.
     if let Some(snapshots) = &policy.accepted_snapshots {
         report["status"] =

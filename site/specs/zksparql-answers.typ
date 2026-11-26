@@ -185,6 +185,9 @@ A query request is a resource of type `vcq:QueryRequest`. Its properties, by JSO
     exactly as given.],
   [`inputCommitment`], [byte string], [OPTIONAL. A dataset commitment the verifier agreed in
     advance (@sec-input). If present, the answer MUST be over the dataset it fixes.],
+  [`coverageDigest`], [byte string], [OPTIONAL. SHA-256 of the canonical claims of a
+    detached coverage credential validated by the verifier. Requires `inputCommitment` and
+    a method that supports detached coverage (@sec-input).],
   [`trustedIssuers`], [list of trust requirements], [OPTIONAL; non-empty if present. Which
     issuers the verifier trusts (@sec-trust). If absent, the credentials in the input dataset
     are not checked against any issuer.],
@@ -307,9 +310,33 @@ equal it. Where a proof method computes the commitment differently in each signa
 request with an `inputCommitment` MUST list only the mode it was computed under.
 
 The authenticated Noir query method commits to the ordered signed credential messages with a
-private presentation salt. Its verifier can check a pre-agreed commitment. The Node report's
-`complete` describes evaluation over those presented credentials. A claim that a registry
-supplied every relevant credential for a subject and period requires separate evidence.
+private presentation salt. Its verifier can check a pre-agreed commitment. An authority can
+attest that the committed dataset contains every credential within a specified registry,
+subject, set of claim types and historical interval. The verifier authorizes the signer for
+that scope and chooses the collection method and profile before issuing a covered request.
+
+The detached credential signs a single default-graph resource of type `vcq:CoverageCredential`.
+It names the authority (`vcq:coverageAuthority`), verification method
+(`sec:verificationMethod`), registry (`vcq:coverageRegistry`), subject
+(`vcq:coverageSubject`), one or more distinct `vcq:coverageClaimType` IRIs, and the
+`vcq:coverageMethod` and `vcq:coverageProfile` IRIs. It also signs the same
+`vcq:inputCommitment` as the request. `vcq:coveragePeriodStart` and
+`vcq:coveragePeriodEnd` delimit a half-open interval. `vcq:coverageAsOf` is at or after the
+interval end and precedes `vcq:coverageExpiresAt`. These four values are Unix seconds
+encoded as canonical `xsd:nonNegativeInteger` literals. The Noir query profile uses
+`schnorr-poseidon2-merkle-2026` to sign the claims.
+
+The verifier MUST check the signature, signer, scope, period, method, profile and dataset
+commitment before storing the request. The attestation MUST be valid when the request is
+created, and the request window MUST fit within the attestation's half-open validity
+window. The verifier stores the credential separately from the query input dataset.
+`vcq:coverageDigest` contains SHA-256 over the RDFC-1.0 canonical N-Quads of the signed
+claims, including the authority and verification-method IRIs. The proof binds the coverage
+digest via the request digest and binds the dataset via the existing commitment.
+
+The Node report's `complete` describes exact evaluation over the presented credentials.
+`exactness` distinguishes `presented-dataset` from `agreed-dataset`. A verified
+`coverage` report separately names the authority, scope, validity and coverage digest.
 
 == Trust requirements <sec-trust>
 
@@ -472,6 +499,8 @@ order, and rejects it at the first check that fails:
 + Reject it unless the proof's `proofMethod` is the `method` of one of the request's proof
   method entries, and verify with that entry's `verificationKey` and `parameters`.
 + If the request has an `inputCommitment`, reject it unless the presentation's equals it.
+  If the request has a `coverageDigest`, the stored detached credential MUST validate and
+  its canonical claims digest MUST equal the one bound to the request.
 + If the request has `trustedIssuers`, reject it unless `signatureMode` is one of the request's
   modes. In the revealed mode, reject it unless every entry of `revealedSignature` verifies
   under its cryptosuite, the cryptosuite is one of the request's, and the verification method

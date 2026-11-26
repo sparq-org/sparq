@@ -184,7 +184,8 @@ mod request;
 
 pub use challenge::{consume_challenge, ChallengeOutcome, ChallengeStore, ChallengeStoreError};
 pub use encoding::{
-    encode_method_descriptor, encode_stored_request, LOCAL_ENCODING_PROFILE,
+    encode_method_descriptor, encode_stored_request, stored_request_encoding_profile,
+    COVERAGE_ENCODING_PROFILE, COVERAGE_REQUEST_DOMAIN, LOCAL_ENCODING_PROFILE,
     METHOD_DESCRIPTOR_DOMAIN, STORED_REQUEST_DOMAIN,
 };
 pub use request::{

@@ -8,10 +8,29 @@ export interface Credential {
 }
 export interface Bounds { credentials: number; quadsPerCredential: number; rowsPerTable: number }
 export interface TrustMember { issuer: string; verificationMethod: string; publicKey: string }
+export interface CoverageScope {
+  registry: string; subject: string; claimTypes: string[];
+  /** Half-open historical interval in Unix seconds. */
+  periodStart: number; periodEnd: number;
+  method: string; profile: string;
+}
+export interface CoverageClaims {
+  issuer: string; verificationMethod: string; scope: CoverageScope; inputCommitment: string;
+  /** Unix seconds. The credential is valid from asOf until expiresAt, exclusive. */
+  asOf: number; expiresAt: number;
+}
+export interface CoveragePolicy {
+  /** Authority independently authorized by the verifier for this scope. */
+  authority: TrustMember;
+  scope: CoverageScope;
+  credential: Credential;
+}
 export interface Policy {
   bounds: Bounds; trustedIssuers: string[]; trustMembers: TrustMember[]; audience: string;
   notBefore?: number; notAfter?: number; credentialQuadBounds?: number[];
   inputCommitment?: string; maxPresentationBytes?: number; maxResultSize?: number;
+  /** Detached coverage evidence for the explicit inputCommitment. */
+  coverage?: CoveragePolicy;
   /** Holder binding: omit `issuers` to bind every credential; a present list is nonempty. */
   holderBinding?: { issuers?: string[] };
   /** Snapshot digests from `statusSnapshot`; every credential status entry must open in one. */
@@ -48,6 +67,8 @@ export interface VerificationReport {
   fresh: string;
   /** Complete relative to the presented signed roots only (closed world). */
   complete: true;
+  exactness: 'presented-dataset' | 'agreed-dataset';
+  coverage?: CoverageClaims & { digest: string };
   issuerRoot: string; trustMembers: TrustMember[];
   /** Present only when enforced. */
   status?: { acceptedSnapshots: string[]; allowMissing: boolean };
@@ -65,6 +86,7 @@ export function testHolderKeygen(seedHex: string): HolderKey;
 export function statusSnapshot(list: StatusList): { digest: string; root: string; depth: number; bitLength: number };
 export function issue(input: { issuer: ProductionIssuer | TestIssuer; graphNQuads: string; status?: ProofConfiguration }): Credential;
 export function testIssue(input: { issuer: TestIssuer; graphNQuads: string; status?: ProofConfiguration; seedHex: string }): Credential;
+export function coverageDocument(claims: CoverageClaims): { graphNQuads: string; status: ProofConfiguration };
 export function request(input: { query: string; policy: Policy; nonce: string }): Request;
 export function prove(input: { request: Request; credentials: Credential[]; holder?: { secretKeyHex: string }; statusLists?: StatusList[]; backend?: Backend }): Promise<{ presentation: Presentation; result: QueryResult }>;
 export function verify(input: { request: Request; presentation: Presentation; seenNonces: ChallengeStore | Set<string> }): Promise<Verification>;

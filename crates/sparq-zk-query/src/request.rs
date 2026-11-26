@@ -10,6 +10,7 @@ use sparq_query_protocol::{
 
 use crate::{
     capacity::{Bounds, OpeningProfile},
+    coverage::Coverage,
     lower::lower,
     plan::{EnvelopeFeatures, Plan, ResultForm},
     Error,
@@ -33,6 +34,7 @@ pub struct Request {
     envelope: Option<crate::statement::EnvelopeInputs>,
     envelope_policy: Option<crate::envelope_policy::PolicyInput>,
     credential_quad_bounds: Vec<u32>,
+    coverage: Option<Coverage>,
     table_row_bounds: Option<Vec<u32>>,
     opening_profile: OpeningProfile,
     envelope_features: EnvelopeFeatures,
@@ -235,6 +237,9 @@ impl Request {
         if key.is_empty() {
             return Err(Error::Invalid("verification key".into()));
         }
+        if stored.coverage_digest().is_some() {
+            return Err(Error::Invalid("coverage credential required".into()));
+        }
         let envelope_features = envelope
             .as_ref()
             .map(EnvelopeFeatures::from_policy)
@@ -321,6 +326,7 @@ impl Request {
             envelope,
             envelope_policy: None,
             credential_quad_bounds,
+            coverage: None,
             table_row_bounds: table_rows.map(<[u32]>::to_vec),
             opening_profile,
             envelope_features,
@@ -347,6 +353,48 @@ impl Request {
     }
     pub fn stored(&self) -> &StoredRequest {
         &self.stored
+    }
+    /// Binds verified coverage for the request's exact dataset and validity window.
+    pub fn with_coverage(mut self, coverage: Coverage) -> Result<Self, Error> {
+        let claims = coverage.claims();
+        if self.stored.requirements().anchor() != Some(&claims.input_commitment) {
+            return Err(Error::Invalid("coverage dataset commitment".into()));
+        }
+        if self.stored.not_before() < claims.as_of || self.stored.not_after() > claims.expires_at {
+            return Err(Error::Invalid("coverage validity window".into()));
+        }
+        let plan = self.plan()?;
+        self.stored = self
+            .stored
+            .with_coverage_digest(coverage.digest())
+            .map_err(Error::Protocol)?;
+        self.canonical_rdf = canonical_request(
+            &self.stored,
+            self.bounds,
+            &plan,
+            &self.key,
+            self.envelope.as_ref(),
+            self.table_row_bounds.as_deref(),
+        )?;
+        self.digest = Sha256::digest(self.canonical_rdf.as_bytes()).into();
+        self.coverage = Some(coverage);
+        Ok(self)
+    }
+    /// Returns the verified coverage evidence stored with this request.
+    pub fn coverage(&self) -> Option<&Coverage> {
+        self.coverage.as_ref()
+    }
+    /// Checks the request's agreed dataset commitment, when present.
+    pub fn check_dataset_agreement(&self, commitment: [u8; 32]) -> Result<(), Error> {
+        if self
+            .stored
+            .requirements()
+            .anchor()
+            .is_some_and(|anchor| anchor.as_bytes() != &commitment)
+        {
+            return Err(Error::Invalid("dataset commitment agreement".into()));
+        }
+        Ok(())
     }
     pub fn bounds(&self) -> Bounds {
         self.bounds
@@ -428,7 +476,7 @@ fn canonical_request(
         "credentialQuadBounds":plan.credential_quad_bounds(),
         "openingProfile":plan.opening_profile().name(),
         "envelopeFeatures":plan.envelope_features().mask(),
-        "storedRequestEncoding":sparq_query_protocol::LOCAL_ENCODING_PROFILE,
+        "storedRequestEncoding":sparq_query_protocol::stored_request_encoding_profile(stored),
         "storedRequest":URL_SAFE_NO_PAD.encode(sparq_query_protocol::encode_stored_request(stored)),
     });
     if let Some(rows) = table_rows {
@@ -502,6 +550,13 @@ fn canonical_request(
             "_:r",
             &format!("{VCQ}inputCommitment"),
             bytes(anchor.as_bytes()),
+        );
+    }
+    if let Some(digest) = stored.coverage_digest() {
+        triple(
+            "_:r",
+            &format!("{VCQ}coverageDigest"),
+            bytes(digest.as_bytes()),
         );
     }
     sparq_canon::canonicalize_nquads(&rdf).map_err(|e| Error::Invalid(format!("request RDF: {e}")))

@@ -3,6 +3,7 @@
 //! Research grade and not externally audited. Witness outputs contain secrets.
 
 mod codec;
+mod coverage;
 mod envelope;
 mod fixtures;
 mod issuance;
@@ -51,6 +52,7 @@ pub fn host_call(operation: &str, input: &str) -> std::result::Result<String, St
             serde_json::to_value(envelope::test_holder_keygen(&seed)?).map_err(err)?
         }
         "statusSnapshot" => envelope::status_snapshot(input)?,
+        "coverageDocument" => coverage::document(input)?,
         "plan" => request::plan_info(input)?,
         "testOperatorFixture" => fixtures::operator(input)?,
         "layout" => {
@@ -79,7 +81,8 @@ pub fn host_call(operation: &str, input: &str) -> std::result::Result<String, St
         "bindProof" => prover::bind(input)?,
         "statement" => {
             let input: verification::Input = codec::parse(input)?;
-            verification::statement(&input.request, &input.presentation)?
+            let request = request::restore(&input.request)?;
+            verification::statement(&request, &input.presentation)?
         }
         "auditArtifact" => {
             let input: Value = codec::parse(input)?;

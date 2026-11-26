@@ -1,7 +1,9 @@
 //! Versioned, deterministic LOCAL byte encoding of stored requests and descriptors.
 //!
 //! Profile [`LOCAL_ENCODING_PROFILE`] (`local-struct-v1`) maps a
-//! [`StoredRequest`] or a [`MethodDescriptor`] to exact bytes. It is a
+//! [`StoredRequest`] or a [`MethodDescriptor`] to exact bytes. For a request
+//! with detached coverage, [`COVERAGE_ENCODING_PROFILE`] uses its own domain
+//! and appends tag `0x19`. This is a
 //! STRUCTURAL encoding of this crate's typed values: it is not RDF or SPARQL
 //! canonicalization, not the draft §7.2 wire profile, not an interoperable
 //! transport format, and there is no decoder. The encoder computes no digest;
@@ -10,8 +12,7 @@
 //!
 //! # Schema
 //!
-//! Each object starts with its domain separator ([`STORED_REQUEST_DOMAIN`] or
-//! [`METHOD_DESCRIPTOR_DOMAIN`], each ending in a zero byte), then every field
+//! Each object starts with its domain separator, ending in a zero byte, then every field
 //! as a one-byte tag followed by its value, in ascending tag order. Values:
 //!
 //! - `bytes`: u64 big-endian length, then the exact bytes;
@@ -49,6 +50,7 @@
 //! | `0x16` | released-row bound | `u32` |
 //! | `0x17` | presentation-byte bound | `u32` |
 //! | `0x18` | methods, preference order | `list<bytes>`, each a full descriptor encoding |
+//! | `0x19` | detached coverage digest | `fixed32` (coverage profile only) |
 //!
 //! Method descriptor:
 //!
@@ -86,8 +88,24 @@ use crate::request::{QueryForm, StoredRequest};
 /// Name of this local encoding profile.
 pub const LOCAL_ENCODING_PROFILE: &str = "local-struct-v1";
 
-/// Domain separator that starts every stored-request encoding.
+/// Domain separator for stored requests without detached coverage.
 pub const STORED_REQUEST_DOMAIN: &[u8] = b"sparq:vcq:stored-request:local-struct-v1\0";
+
+/// Encoding profile for stored requests with a detached coverage digest.
+pub const COVERAGE_ENCODING_PROFILE: &str = "local-struct-v2";
+
+/// Domain separator for stored requests with detached coverage.
+pub const COVERAGE_REQUEST_DOMAIN: &[u8] = b"sparq:vcq:stored-request:local-struct-v2\0";
+
+/// Reports the profile used by [`encode_stored_request`] for this request.
+#[must_use]
+pub fn stored_request_encoding_profile(request: &StoredRequest) -> &'static str {
+    if request.coverage_digest().is_some() {
+        COVERAGE_ENCODING_PROFILE
+    } else {
+        LOCAL_ENCODING_PROFILE
+    }
+}
 
 /// Domain separator that starts every method-descriptor encoding.
 pub const METHOD_DESCRIPTOR_DOMAIN: &[u8] = b"sparq:vcq:method-descriptor:local-struct-v1\0";
@@ -147,7 +165,7 @@ impl Writer {
     }
 }
 
-/// Encodes `request` under [`LOCAL_ENCODING_PROFILE`].
+/// Encodes `request` under its [`stored_request_encoding_profile`].
 ///
 /// Every field of the stored request, its requirements and each nested
 /// descriptor is bound, in the order and form of the module schema. Equal
@@ -169,6 +187,7 @@ pub fn encode_stored_request(request: &StoredRequest) -> Vec<u8> {
         form,
         base_iri,
         describe_policy,
+        coverage_digest,
     } = request;
     let QueryRequirements {
         contract,
@@ -190,7 +209,12 @@ pub fn encode_stored_request(request: &StoredRequest) -> Vec<u8> {
             },
         methods,
     } = requirements;
-    let mut w = Writer(STORED_REQUEST_DOMAIN.to_vec());
+    let domain = if coverage_digest.is_some() {
+        COVERAGE_REQUEST_DOMAIN
+    } else {
+        STORED_REQUEST_DOMAIN
+    };
+    let mut w = Writer(domain.to_vec());
     w.field(0x01).bytes(query.as_bytes());
     w.field(0x02).opt_bytes(base_iri.as_ref().map(|base| base.as_str().as_bytes()));
     w.field(0x03).fixed(challenge.as_bytes());
@@ -223,6 +247,9 @@ pub fn encode_stored_request(request: &StoredRequest) -> Vec<u8> {
     w.field(0x18).len(methods.len());
     for method in methods {
         w.bytes(&encode_method_descriptor(method));
+    }
+    if let Some(digest) = coverage_digest {
+        w.field(0x19).fixed(digest.as_bytes());
     }
     w.0
 }

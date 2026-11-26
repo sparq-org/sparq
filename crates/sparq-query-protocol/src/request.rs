@@ -20,9 +20,9 @@
 
 use core::fmt;
 
-use crate::descriptor::ResultContract;
+use crate::descriptor::{EvaluationMode, ResultContract};
 use crate::error::{ErrorCode, FailureClass, Phase, ProtocolError};
-use crate::ids::Identifier;
+use crate::ids::{Digest32, Identifier};
 use crate::negotiate::QueryRequirements;
 
 /// Longest accepted query text, in bytes (1 MiB).
@@ -188,6 +188,7 @@ pub struct StoredRequest {
     pub(crate) form: QueryForm,
     pub(crate) base_iri: Option<BaseIri>,
     pub(crate) describe_policy: Option<Identifier>,
+    pub(crate) coverage_digest: Option<Digest32>,
 }
 
 impl StoredRequest {
@@ -228,7 +229,29 @@ impl StoredRequest {
             form: spec.form,
             base_iri: spec.base_iri,
             describe_policy: spec.describe_policy,
+            coverage_digest: None,
         })
+    }
+
+    /// Binds the digest of detached coverage claims validated by the method adapter.
+    ///
+    /// Returns `CoverageRequiresAnchor` unless the request has an agreed anchor
+    /// and uses exact evaluation. The adapter verifies the credential, policy
+    /// and window before calling this method.
+    pub fn with_coverage_digest(mut self, digest: Digest32) -> Result<Self, ProtocolError> {
+        if self.requirements.anchor().is_none()
+            || self.requirements.mode() != EvaluationMode::ExactBounded
+        {
+            return Err(invalid(ErrorCode::CoverageRequiresAnchor));
+        }
+        self.coverage_digest = Some(digest);
+        Ok(self)
+    }
+
+    /// Returns the digest of detached claims bound to this request.
+    #[must_use]
+    pub fn coverage_digest(&self) -> Option<&Digest32> {
+        self.coverage_digest.as_ref()
     }
 
     /// Returns the negotiation requirements.

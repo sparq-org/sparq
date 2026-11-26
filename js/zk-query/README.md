@@ -122,6 +122,38 @@ WebAssembly option). The salt is a full hexadecimal byte string, goes only into
 private witness inputs, and is checked against the stored commitment in Rust.
 Omitting this prover option draws a fresh random presentation salt.
 
+### Signed dataset coverage
+
+For a coverage claim, authorize a signer for the registry, subject, claim types,
+historical interval, collection method and profile. The verifier sets both
+`policy.inputCommitment` and `policy.coverage: { authority, scope, credential }`.
+Use the detached credential only in the request's coverage policy.
+
+```js
+import { coverageDocument, issue, request } from '@sparq-org/zk-query';
+
+const scope = {
+  registry, subject, claimTypes, periodStart, periodEnd, method, profile,
+};
+const fields = coverageDocument({
+  issuer: authority.issuer,
+  verificationMethod: authority.verificationMethod,
+  scope, asOf, expiresAt, inputCommitment,
+});
+const credential = issue({ issuer: authoritySigningKey, ...fields });
+const stored = request({
+  query, nonce,
+  policy: { ...policy, inputCommitment, coverage: { authority, scope, credential } },
+});
+```
+
+The authority independently determines and signs the committed dataset's
+coverage. The period is half-open, ends by `asOf`, and uses Unix seconds, as
+do `asOf` and `expiresAt`. The request window must fit within
+`[asOf, expiresAt)`. A default `notAfter` is shortened to expiry when necessary.
+`report.exactness` gives the basis for query exactness. On a covered request,
+`report.coverage` also identifies the authority, scope and canonical claims digest.
+
 ## Prover backends and catalogue
 
 The default `native` backend executes pinned native binaries on the holder's

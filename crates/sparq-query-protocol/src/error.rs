@@ -106,6 +106,8 @@ pub enum ErrorCode {
     EmptyAcceptedSet,
     /// A dataset anchor is present without anchor authority, or missing with it.
     AnchorMismatch,
+    /// Detached coverage claims require an agreed anchor and exact evaluation.
+    CoverageRequiresAnchor,
     /// The result contract is not defined under the evaluation mode (§5.2).
     ContractModeMismatch,
     /// A method's capability declaration violates a structural rule.

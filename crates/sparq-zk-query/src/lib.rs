@@ -3,6 +3,7 @@
 pub mod answer;
 pub mod capacity;
 pub mod codegen;
+pub mod coverage;
 pub mod credential;
 pub mod credential_graphs;
 pub mod witness_closed;

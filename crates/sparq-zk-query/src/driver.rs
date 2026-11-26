@@ -236,6 +236,8 @@ impl Compiler {
                 return Err(Error::Invalid("issuer membership root".into()));
             }
         }
+        let input_commitment = crate::credential::dataset_commitment(credentials, salt)?;
+        request.check_dataset_agreement(input_commitment)?;
         let encoder = &SuiteEncoder;
         let cells = credentials
             .iter()
@@ -251,8 +253,6 @@ impl Compiler {
         let dataset = crate::credential::assemble_dataset(&cells, &issuers, request.digest())?;
         let trace = interp::evaluate_dataset(&plan, &dataset, encoder)?;
         let result = Answer::release(&trace.result, &plan, &vocabulary, encoder)?;
-        let input_commitment = crate::credential::dataset_commitment(credentials, salt)?;
-        agreement(request, input_commitment)?;
         let statement = Statement {
             request_digest: request.digest(),
             input_commitment,
@@ -321,7 +321,7 @@ impl Compiler {
         if presentation.request_digest != request.digest() {
             return Err(Error::Invalid("request digest".into()));
         }
-        agreement(request, presentation.input_commitment)?;
+        request.check_dataset_agreement(presentation.input_commitment)?;
         resource_bounds(request, presentation)?;
         let plan = request.plan()?;
         let compiled = self.checked_key(request, &plan)?;
@@ -374,17 +374,6 @@ fn release_vocabulary(credentials: &[Credential], vocabulary: &[Term]) -> Result
 fn freshness(request: &Request, now: u64) -> Result<(), Error> {
     if now < request.stored().not_before() || now >= request.stored().not_after() {
         return Err(Error::Invalid("request validity window".into()));
-    }
-    Ok(())
-}
-fn agreement(request: &Request, commitment: [u8; 32]) -> Result<(), Error> {
-    if request
-        .stored()
-        .requirements()
-        .anchor()
-        .is_some_and(|anchor| anchor.as_bytes() != &commitment)
-    {
-        return Err(Error::Invalid("dataset commitment agreement".into()));
     }
     Ok(())
 }

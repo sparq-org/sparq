@@ -179,6 +179,64 @@ fn stored_request_matches_golden_bytes() {
     assert_eq!(LOCAL_ENCODING_PROFILE, "local-struct-v1");
 }
 
+#[test]
+fn detached_coverage_has_a_distinct_encoding_and_requires_exact_anchor() {
+    use sparq_query_protocol::{
+        stored_request_encoding_profile, COVERAGE_ENCODING_PROFILE, COVERAGE_REQUEST_DOMAIN,
+    };
+
+    assert_eq!(
+        golden_request()
+            .with_coverage_digest(digest(4))
+            .unwrap_err()
+            .code(),
+        ErrorCode::CoverageRequiresAnchor,
+    );
+    let anchored = build(
+        |spec| {
+            spec.authority = ScopeAuthority::VerifierAgreedAnchor;
+            spec.anchor = Some(digest(3));
+        },
+        |_| {},
+    );
+    let anchored = anchored.unwrap();
+    let covered = anchored.clone().with_coverage_digest(digest(4)).unwrap();
+    assert_eq!(covered.coverage_digest(), Some(&digest(4)));
+    assert_eq!(
+        stored_request_encoding_profile(&covered),
+        COVERAGE_ENCODING_PROFILE
+    );
+    assert_eq!(
+        stored_request_encoding_profile(&anchored),
+        LOCAL_ENCODING_PROFILE
+    );
+    let mut expected = COVERAGE_REQUEST_DOMAIN.to_vec();
+    expected.extend_from_slice(&encode_stored_request(&anchored)[STORED_REQUEST_DOMAIN.len()..]);
+    expected.push(0x19);
+    expected.extend_from_slice(&[4; 32]);
+    assert_eq!(encode_stored_request(&covered), expected);
+    assert_ne!(
+        encode_stored_request(&covered),
+        encode_stored_request(&anchored.with_coverage_digest(digest(5)).unwrap()),
+    );
+    let support = build(
+        |spec| {
+            spec.authority = ScopeAuthority::VerifierAgreedAnchor;
+            spec.anchor = Some(digest(3));
+            spec.mode = EvaluationMode::SelectedSupport;
+        },
+        |_| {},
+    );
+    assert_eq!(
+        support
+            .unwrap()
+            .with_coverage_digest(digest(4))
+            .unwrap_err()
+            .code(),
+        ErrorCode::CoverageRequiresAnchor,
+    );
+}
+
 // ---- sensitivity ----------------------------------------------------------
 
 fn method_a() -> MethodDescriptor {

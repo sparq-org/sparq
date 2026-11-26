@@ -1,4 +1,5 @@
 use crate::codec::{bytes, digest, err, hex, word, Result};
+use crate::coverage::CoverageWire;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sparq_query_protocol::*;
@@ -6,6 +7,7 @@ use sparq_zk::sig;
 use sparq_zk_query::{
     capacity::Bounds,
     capacity::OpeningProfile,
+    coverage::Coverage,
     envelope_policy::{AcceptedSnapshots, HolderBinding, PolicyInput, TrustMember},
     lower::lower,
     plan::{EnvelopeFeatures, Plan, ResultForm},
@@ -68,6 +70,8 @@ pub(crate) struct Policy {
     pub credential_quad_bounds: Option<Vec<u32>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_commitment: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coverage: Option<CoverageWire>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_presentation_bytes: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -132,7 +136,25 @@ impl Policy {
         if !p.trust_members.is_empty() {
             p.envelope_policy()?;
         }
+        if let Some(coverage) = &mut p.coverage {
+            coverage.normalize()?;
+        }
         Ok(p)
+    }
+    fn anchor(&self) -> Result<Option<Digest32>> {
+        self.input_commitment
+            .as_deref()
+            .map(word)
+            .transpose()?
+            .map(Digest32::new)
+            .transpose()
+            .map_err(err)
+    }
+    fn validated_coverage(&self) -> Result<Option<Coverage>> {
+        self.coverage
+            .as_ref()
+            .map(|coverage| coverage.validate(self.anchor()?))
+            .transpose()
     }
     pub fn envelope_policy(&self) -> Result<PolicyInput> {
         if self.trust_members.is_empty() {
@@ -257,17 +279,16 @@ pub(crate) struct RequestWire {
 fn id(s: &str) -> Result<Identifier> {
     Identifier::new(s).map_err(err)
 }
-fn native(query: &str, p: &Policy, nonce: &str, key: &[u8]) -> Result<Request> {
+fn native(
+    query: &str,
+    p: &Policy,
+    nonce: &str,
+    key: &[u8],
+    coverage: Option<Coverage>,
+) -> Result<Request> {
     let plan = p.plan(query)?;
     let envelope = p.envelope_policy()?;
-    let anchor = p
-        .input_commitment
-        .as_deref()
-        .map(word)
-        .transpose()?
-        .map(Digest32::new)
-        .transpose()
-        .map_err(err)?;
+    let anchor = p.anchor()?;
     let is_ask = plan.form() == ResultForm::Ask;
     let requirements = QueryRequirements::new(RequirementsSpec {
         contract: if is_ask {
@@ -327,7 +348,7 @@ fn native(query: &str, p: &Policy, nonce: &str, key: &[u8]) -> Result<Request> {
         describe_policy: None,
     })
     .map_err(err)?;
-    Request::new_authenticated_with_envelope_profile_and_table_rows(
+    let request = Request::new_authenticated_with_envelope_profile_and_table_rows(
         stored,
         p.bounds.bounds(),
         key.to_vec(),
@@ -336,7 +357,11 @@ fn native(query: &str, p: &Policy, nonce: &str, key: &[u8]) -> Result<Request> {
         p.profile()?,
         p.table_row_bounds.as_deref(),
     )
-    .map_err(err)
+    .map_err(err)?;
+    match coverage {
+        Some(coverage) => request.with_coverage(coverage).map_err(err),
+        None => Ok(request),
+    }
 }
 pub(crate) fn checked_key(plan: &Plan, key: &[u8]) -> Result<()> {
     let table: Value = serde_json::from_str(crate::CATALOGUE).map_err(err)?;
@@ -364,18 +389,25 @@ pub(crate) fn create(input: &str) -> Result<RequestWire> {
     }
     let input: Input = crate::codec::parse(input)?;
     let mut policy = input.policy.normalize()?;
+    let coverage = policy.validated_coverage()?;
+    let mut default_end = input
+        .clock
+        .checked_add(3600)
+        .ok_or("request time overflow")?;
+    if let Some(evidence) = &coverage {
+        let claims = evidence.claims();
+        if input.clock < claims.as_of || input.clock >= claims.expires_at {
+            return Err("coverage validity at request creation".into());
+        }
+        default_end = default_end.min(claims.expires_at);
+    }
     policy.not_before.get_or_insert(input.clock);
-    policy.not_after.get_or_insert(
-        input
-            .clock
-            .checked_add(3600)
-            .ok_or("request time overflow")?,
-    );
+    policy.not_after.get_or_insert(default_end);
     let key = bytes(&input.verification_key)?;
     let plan = policy.plan(&input.query)?;
     checked_key(&plan, &key)?;
     let nonce = hex(&word(&input.nonce)?);
-    let request = native(&input.query, &policy, &nonce, &key)?;
+    let request = native(&input.query, &policy, &nonce, &key, coverage)?;
     Ok(RequestWire {
         query: input.query,
         policy,
@@ -392,7 +424,7 @@ pub(crate) fn restore(wire: &RequestWire) -> Result<Request> {
         return Err("noncanonical stored policy".into());
     }
     let key = bytes(&wire.verification_key)?;
-    let request = native(&wire.query, &policy, &wire.nonce, &key)?;
+    let request = native(&wire.query, &policy, &wire.nonce, &key, policy.validated_coverage()?)?;
     if wire.plan_hash != hex(&request.plan().map_err(err)?.hash())
         || wire.digest != hex(&request.digest())
         || wire.request_rdf != request.canonical_rdf()
@@ -428,15 +460,92 @@ pub(crate) fn freshness(request: &Request, clock: u64) -> Result<()> {
         Ok(())
     }
 }
-pub(crate) fn agreement(request: &Request, commitment: [u8; 32]) -> Result<()> {
-    if request
-        .stored()
-        .requirements()
-        .anchor()
-        .is_some_and(|a| a.as_bytes() != &commitment)
-    {
-        Err("dataset commitment agreement".into())
-    } else {
-        Ok(())
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+
+    fn fixture() -> RequestWire {
+        let input: Value = serde_json::from_str(include_str!(
+            "../../../js/zk-query/test/fixtures/authenticated.json"
+        ))
+        .unwrap();
+        serde_json::from_value(input["request"].clone()).unwrap()
+    }
+
+    fn policy(wire: &RequestWire, signing_seed: u8) -> Policy {
+        let mut policy = serde_json::to_value(&wire.policy).unwrap();
+        let anchor = hex(&[8; 32]);
+        let member = json!({
+            "issuer": "urn:authority",
+            "verificationMethod": "urn:authority:key",
+            "publicKey": crate::issuance::test_keygen(&hex(&[1; 32])).unwrap().public_key
+        });
+        let scope = json!({
+            "subject": "urn:subject", "registry": "urn:registry", "claimTypes": ["urn:claim"],
+            "periodStart": 1, "periodEnd": 2, "method": "urn:method", "profile": "urn:profile"
+        });
+        let signing_key = crate::issuance::test_keygen(&hex(&[signing_seed; 32])).unwrap();
+        let mut documents = crate::coverage::document(
+            &json!({
+                "issuer": member["issuer"], "verificationMethod": member["verificationMethod"],
+                "scope": scope, "asOf": 2, "expiresAt": 6, "inputCommitment": anchor
+            })
+            .to_string(),
+        )
+        .unwrap();
+        documents["issuer"] = json!(signing_key);
+        documents["seedHex"] = json!(hex(&[3; 32]));
+        let credential = crate::issuance::issue(&documents.to_string(), true).unwrap();
+        let mut credential = serde_json::to_value(credential).unwrap();
+        credential["issuer"] = member["publicKey"].clone();
+        policy["coverage"] = json!({"authority": member, "scope": scope, "credential": credential});
+        policy["inputCommitment"] = json!(anchor);
+        policy["notBefore"] = json!(2);
+        policy["notAfter"] = json!(6);
+        serde_json::from_value(policy).unwrap()
+    }
+
+    #[test]
+    fn coverage_request_rejects_wrong_signature_before_storage() {
+        let fixture = fixture();
+        let input = |signer| {
+            json!({
+                "query": fixture.query, "nonce": fixture.nonce, "clock": 2,
+                "policy": policy(&fixture, signer), "verificationKey": fixture.verification_key
+            })
+            .to_string()
+        };
+        let stored = create(&input(1)).unwrap();
+        let request = restore(&stored).unwrap();
+        let attestation = request.coverage().unwrap();
+        assert_eq!(attestation.claims().issuer.as_str(), "urn:authority");
+        assert_eq!(
+            request.stored().coverage_digest(),
+            Some(&attestation.digest())
+        );
+        assert!(request.check_dataset_agreement([8; 32]).is_ok());
+        assert!(request.check_dataset_agreement([9; 32]).is_err());
+        assert!(create(&input(2))
+            .err()
+            .unwrap()
+            .contains("coverage signature"));
+    }
+
+    #[test]
+    fn coverage_cannot_be_attached_to_a_different_anchor() {
+        let fixture = fixture();
+        let policy = policy(&fixture, 1).normalize().unwrap();
+        let coverage = policy.validated_coverage().unwrap().unwrap();
+        let mut plain = policy;
+        plain.coverage = None;
+        plain.input_commitment = Some(hex(&[7; 32]));
+        let key = bytes(&fixture.verification_key).unwrap();
+        let request = native(&fixture.query, &plain, &fixture.nonce, &key, None).unwrap();
+        assert!(request
+            .with_coverage(coverage)
+            .unwrap_err()
+            .to_string()
+            .contains("coverage dataset commitment"));
     }
 }
