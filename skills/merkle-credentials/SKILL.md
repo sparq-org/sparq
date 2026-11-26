@@ -69,7 +69,8 @@ Call `sha256_salted::issue(document, proof_config, &signing_key, salt)` with a f
 uniformly random `[u8; 32]` from a cryptographic random source. The proof
 configuration must contain one cryptosuite statement naming
 `eddsa-sha256-merkle-salted-2026` as an `xsd:string` or an
-`https://w3id.org/security#cryptosuiteString` literal. The issuer
+`https://w3id.org/security#cryptosuiteString` literal. Omit
+`https://w3id.org/security#proofValue` from the configuration. The issuer
 canonicalizes the RDF dataset and sorts its quads by unsigned digest. It derives
 private leaf salts by HMAC-SHA-256 over the suite's leaf-salt domain and each
 zero-based index. Treat the resulting `SignedCredential`, including
@@ -77,8 +78,15 @@ zero-based index. Treat the resulting `SignedCredential`, including
 and issuer key to `sha256_salted::verify(&credential, &verifying_key)`. Each SHA
 verifier accepts only its declared suite.
 
+Successor issuance and verification set independent limits for the document and
+configuration. For each input, the raw text and canonical text have a 4 MiB
+limit. Each input allows up to 16,384 quads, 4,000 Hash N-Degree Quads calls and
+20,000 permutation steps. Verification checks the 96-byte proof value and the
+canonical Ed25519 public key encoding before canonicalization.
+
 For private tree reconstruction, `sha256_salted::quad_hash` hashes a canonical
-RDFC-1.0 quad. It refuses triple terms and directional language-tagged literals.
+RDFC-1.0 quad. It refuses triple terms, directional language-tagged literals and
+components whose UTF-8 byte length exceeds `u32::MAX`.
 `sha256_salted::root` takes the strictly increasing digests and issuance salt.
 `leaf_salt` and `leaf` derive the salt and leaf at a given index.
 `signed_message` binds the suite, issuance salt, exact count, root and canonical
@@ -97,7 +105,8 @@ subtypes cannot be inferred from an IRI alone and get no key.
 Poseidon2 and the SHA successor use the shared extended profile. Timezone-free
 `xsd:date` with a year from `0001` through `9999` uses the calendar-day class.
 Valid dates with a timezone or a year outside that range get
-`UNREPRESENTABLE`. Invalid literals get `NONE`. Neither class
+`UNREPRESENTABLE`. The extended profile accepts timezone suffixes of `Z` or
+signed `HH:MM` on dates and date-times. Invalid literals get `NONE`. Neither class
 can establish an order. Prefix keys establish an order only when prefixes differ.
 RDF term identity is key-independent: use `TermCell::identity()` in Noir and
 `poseidon::term_identity(&term)` in Rust. Scan, join, DISTINCT, sameTerm,

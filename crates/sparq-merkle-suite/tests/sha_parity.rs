@@ -169,6 +169,30 @@ fn existing_sha_vectors_are_byte_identical() {
         .unwrap();
 }
 
+#[test]
+fn frozen_sha_pins_legacy_timezone_spellings() {
+    let mut date_time_key = [0; 31];
+    date_time_key[..9].copy_from_slice(&[0x03, 0x80, 0, 0, 0xdd, 0x99, 0x78, 0xc0, 0x40]);
+    for (datatype, lexical, expected) in [
+        ("date", "2000-02-29Z05:30", [0; 31]),
+        ("dateTime", "2000-02-29T00:00:00Z05:30", date_time_key),
+    ] {
+        let literal = Literal::new_typed_literal(
+            lexical,
+            NamedNode::new(format!("http://www.w3.org/2001/XMLSchema#{datatype}")).unwrap(),
+        );
+        assert_eq!(frozen::comparison_key(&literal), expected);
+        assert_eq!(current::comparison_key(&literal), expected);
+        let mut frozen_bytes = Vec::new();
+        let mut current_bytes = Vec::new();
+        let term = Term::Literal(literal);
+        frozen::encode_term(&term, &mut frozen_bytes);
+        current::encode_term(&term, &mut current_bytes);
+        assert_eq!(current_bytes, frozen_bytes);
+        assert!(current_bytes.ends_with(&expected));
+    }
+}
+
 fn vector_key() -> ed25519_dalek::SigningKey {
     let seed = "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60";
     let bytes = std::array::from_fn(|i| u8::from_str_radix(&seed[2 * i..2 * i + 2], 16).unwrap());

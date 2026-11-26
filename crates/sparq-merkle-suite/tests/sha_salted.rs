@@ -87,10 +87,25 @@ fn successor_commits_checked_calendar_keys() {
         "2000-02-29+01:60",
         "2000-02-29+1:00",
         "2000-02-29z",
+        "2000-02-29Z05:30",
         "2000-02-29T00:00:00Z",
     ] {
         assert_committed_key(&typed(lexical, "date"), [0; 31]);
     }
+}
+
+#[test]
+fn successor_commits_checked_date_time_timezones() {
+    let mut expected = [0; 31];
+    expected[..9].copy_from_slice(&[0x03, 0x80, 0, 0, 0xdd, 0x99, 0x78, 0xc0, 0x40]);
+    for lexical in [
+        "2000-02-28T18:30:00Z",
+        "2000-02-29T00:00:00+05:30",
+        "2000-02-28T13:00:00-05:30",
+    ] {
+        assert_committed_key(&typed(lexical, "dateTime"), expected);
+    }
+    assert_committed_key(&typed("2000-02-29T00:00:00Z05:30", "dateTime"), [0; 31]);
 }
 
 fn decimal_key(value: i128) -> [u8; 31] {
@@ -348,6 +363,29 @@ fn successor_checks_cryptosuite_literal_type() {
             "{suffix}"
         );
     }
+}
+
+#[test]
+fn successor_refuses_a_configuration_with_proof_value_even_when_signed() {
+    let key = signing_key();
+    let pk = key.verifying_key();
+    let salt = [7; 32];
+    let proof_config = format!(
+        "{}<urn:p> <https://w3id.org/security#proofValue> \"z123\" .\n",
+        using_suite(SUITE)
+    );
+    let root = salted::root(&hashes(DATE), &salt).unwrap();
+    let digest = Sha256::digest(proof_config.as_bytes()).into();
+    let message = salted::signed_message(&salt, 1, &root, &digest);
+    let signature = key.sign(&message);
+    assert!(pk.verify_strict(&message, &signature).is_ok());
+    let credential = SignedCredential {
+        document: DATE.to_owned(),
+        proof_config,
+        signature: [signature.to_bytes().as_slice(), salt.as_slice()].concat(),
+    };
+    assert!(salted::issue(DATE, &credential.proof_config, &key, salt).is_err());
+    assert!(!salted::verify(&credential, &pk));
 }
 
 #[test]

@@ -104,6 +104,7 @@ and directional language-tagged literals.
 == Term encoding
 
 All lengths are 32-bit unsigned big-endian integers, and strings are UTF-8.
+The SHA-256 successor rejects components whose byte length exceeds that range.
 The #dfn[term encoding] `enc(t)` of a term `t` is:
 
 - an IRI: byte `0x01`, then the length and bytes of the IRI;
@@ -136,7 +137,9 @@ In every other case, a proof uses the lexical form.
 The SHA-256 successor and the Poseidon2 member use the checked date and derived-integer
 entries below. The original SHA-256 tree profile gives every `xsd:date` and every
 built-in integer subtype other than `xsd:integer` the all-zero key. Base
-`xsd:integer`, `xsd:decimal` and `xsd:dateTime` share the same classes across editions.
+`xsd:integer`, `xsd:decimal` and valid `xsd:dateTime` values share the same classes
+across editions. The extended profile validates timezone suffixes for `xsd:date`
+and `xsd:dateTime` as a standalone `Z` or a signed `HH:MM` offset.
 Each example gives the first byte of the key.
 
 #table(
@@ -261,6 +264,11 @@ small-order keys.
 
 For the SHA-256 successor, the object of the cryptosuite statement MUST be a
 literal of datatype `xsd:string` or `https://w3id.org/security#cryptosuiteString`.
+The successor's N-Quads issuance and verification interfaces MUST reject proof
+configurations containing a `sec:proofValue` predicate. A whole-credential
+verifier checks the decoded 96-byte proof value length before canonicalization.
+The native implementation applies independent size and RDFC-1.0 work limits to
+the document and configuration.
 
 == Use in proofs of query answers
 

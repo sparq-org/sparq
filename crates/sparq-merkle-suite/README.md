@@ -15,9 +15,14 @@ Enable the default-off `sha256-salted` feature and use
 `sha256_salted::{issue, verify}` for the native Ed25519/SHA-256 successor.
 Its proof configuration names `eddsa-sha256-merkle-salted-2026` under the
 same predicate with an `xsd:string` or `sec:cryptosuiteString` literal.
+Omit `https://w3id.org/security#proofValue` from the proof configuration.
 Supply a fresh, uniformly random 32-byte salt at issuance
 and treat the resulting `signature || salt` bytes as private credential
-material. Each verifier accepts its own edition.
+material. The successor checks the 96-byte proof value and canonical Ed25519
+public key encoding before canonicalizing either input. Issuance and verification
+bound the document and configuration independently by size and RDFC-1.0 work.
+The limits are listed in the
+[Merkle credentials skill](../../skills/merkle-credentials/SKILL.md).
 
 Run `cargo test -p sparq-merkle-suite` for native compatibility and constant pins.
 Run `cargo test -p sparq-merkle-suite --features sha256-salted --test sha_salted`

@@ -33,6 +33,14 @@ const DECIMAL_SCALE: usize = 18;
 /// The 31-byte comparison key of `literal`.
 #[must_use]
 pub fn comparison_key(literal: &Literal) -> [u8; KEY_BYTES] {
+    comparison_key_for(literal, false)
+}
+
+pub(crate) fn legacy_comparison_key(literal: &Literal) -> [u8; KEY_BYTES] {
+    comparison_key_for(literal, true)
+}
+
+fn comparison_key_for(literal: &Literal, legacy_timezone: bool) -> [u8; KEY_BYTES] {
     let datatype = literal.datatype().as_str();
     let lexical = literal.value();
     let mut out = [0; KEY_BYTES];
@@ -44,7 +52,7 @@ pub fn comparison_key(literal: &Literal) -> [u8; KEY_BYTES] {
         Some("decimal") if is_decimal(lexical) => decimal_key(lexical, &mut out),
         Some("double") => double_key(lexical, false, &mut out),
         Some("float") => double_key(lexical, true, &mut out),
-        Some("dateTime") => date_time_key(lexical, &mut out),
+        Some("dateTime") => date_time_key(lexical, &mut out, legacy_timezone),
         Some("date") => date_key(lexical, &mut out),
         Some("boolean") => match lexical {
             "true" | "1" => {
@@ -227,8 +235,8 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     era * 146_097 + doe - 719_468
 }
 
-fn date_time_key(lexical: &str, out: &mut [u8; KEY_BYTES]) -> u8 {
-    match date_time_millis(lexical) {
+fn date_time_key(lexical: &str, out: &mut [u8; KEY_BYTES], legacy_timezone: bool) -> u8 {
+    match date_time_millis(lexical, legacy_timezone) {
         Ok((class, millis)) => {
             let key = (millis as u64) ^ (1 << 63);
             out[1..9].copy_from_slice(&key.to_be_bytes());
@@ -241,7 +249,7 @@ fn date_time_key(lexical: &str, out: &mut [u8; KEY_BYTES]) -> u8 {
 // Parses an XSD 1.1 dateTime. Ill-typed input is `Err(NONE)`; a valid value
 // outside the four-digit-year, millisecond, before-24:00 profile is
 // `Err(UNREPRESENTABLE)`.
-fn date_time_millis(lexical: &str) -> Result<(u8, i64), u8> {
+fn date_time_millis(lexical: &str, legacy_timezone: bool) -> Result<(u8, i64), u8> {
     let invalid = key_class::NONE;
     let (date, time) = lexical.split_once('T').ok_or(invalid)?;
     let (negative, date) = match date.strip_prefix('-') {
@@ -317,7 +325,7 @@ fn date_time_millis(lexical: &str) -> Result<(u8, i64), u8> {
     }
     let offset_minutes = match zone {
         None | Some("Z") => 0,
-        Some(zone) => {
+        Some(zone) if legacy_timezone || zone.starts_with(['+', '-']) => {
             let sign = if zone.starts_with('-') { -1 } else { 1 };
             let (h, m) = zone[1..].split_once(':').ok_or(invalid)?;
             let (h, m) = (number(h, 2).ok_or(invalid)?, number(m, 2).ok_or(invalid)?);
@@ -326,6 +334,7 @@ fn date_time_millis(lexical: &str) -> Result<(u8, i64), u8> {
             }
             sign * (h * 60 + m)
         }
+        Some(_) => return Err(invalid),
     };
     if negative || year == 0 || end_of_day || fraction.len() > 3 {
         return Err(key_class::UNREPRESENTABLE);
@@ -419,7 +428,7 @@ fn date_key(text: &str, out: &mut [u8; KEY_BYTES]) -> u8 {
         .map(|(i, _)| i)
         .or_else(|| text.find(['Z', '+']));
     let (date, zone) = zone_at.map_or((text, ""), |i| (&text[..i], &text[i..]));
-    match date_time_millis(&format!("{date}T00:00:00{zone}")) {
+    match date_time_millis(&format!("{date}T00:00:00{zone}"), false) {
         Ok((_, millis)) if zone.is_empty() => {
             let days = millis / 86_400_000;
             let key = (days as u64) ^ (1 << 63);
