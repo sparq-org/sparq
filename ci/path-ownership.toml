@@ -535,7 +535,12 @@ crates = ["sparq-merkle-suite"]
 pattern = "zk/compose/compose_core"
 crates = ["sparq-zk-query", "sparq-merkle-suite"]
 
-# The query adapter embeds catalogue and binary pins for independent validation.
+# The native holder and query adapter both embed the published catalogue.
+[[map]]
+pattern = "js/zk-query/assets/catalogue.json"
+crates = ["sparq-zk-query", "sparq-zk-query-wasm"]
+
+# The query adapter embeds binary pins for independent validation.
 [[map]]
 pattern = "js/zk-query/**"
 crates = ["sparq-zk-query-wasm"]

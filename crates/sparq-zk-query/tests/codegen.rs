@@ -389,10 +389,10 @@ fn status_slot_count_matches_the_noir_consumer() {
     assert!(source.contains(&expected), "{expected}");
 }
 
-/// The plan hash names exactly one program: every admitted corpus plan, in every
-/// generation mode, generates the same source as every other plan with that name.
+/// Admitted corpus plans with the same hash and exact row limit generate identical
+/// source in every generation mode.
 #[test]
-fn equal_plan_hashes_generate_identical_programs() {
+fn equal_plan_hashes_and_row_limits_generate_identical_programs() {
     use sparq_zk_query::codegen::{generate_operator_fixture, generate_suite_fixture};
     let cases = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../zk/sparql-evaluator/fixtures/conformance/cases.json");
@@ -412,26 +412,37 @@ fn equal_plan_hashes_generate_identical_programs() {
         ));
     }
     let mut programs = std::collections::BTreeMap::new();
-    let mut plans = 0;
-    for query in &queries {
-        let Ok(plan) = lower(query, B) else { continue };
-        plans += 1;
-        let packages = [
-            generate(&plan),
-            generate_suite_fixture(&plan),
-            generate_operator_fixture(&plan),
-        ];
-        for package in packages.into_iter().flatten() {
-            let (first, files) = programs
-                .entry(package.name.clone())
-                .or_insert_with(|| (query.clone(), package.files.clone()));
-            assert_eq!(
-                *files, package.files,
-                "{first} and {query} share a plan hash"
-            );
+    for rows_per_table in [3, B.rows_per_table] {
+        let bounds = Bounds {
+            rows_per_table,
+            ..B
+        };
+        let mut plans = 0;
+        for query in &queries {
+            let Ok(plan) = lower(query, bounds) else {
+                continue;
+            };
+            plans += 1;
+            let packages = [
+                generate(&plan),
+                generate_suite_fixture(&plan),
+                generate_operator_fixture(&plan),
+            ];
+            for package in packages.into_iter().flatten() {
+                let (first, files) = programs
+                    .entry((package.name, rows_per_table))
+                    .or_insert_with(|| (query, package.files.clone()));
+                assert_eq!(
+                    *files, package.files,
+                    "{first} and {query} share a plan hash and row limit {rows_per_table}"
+                );
+            }
         }
+        assert!(
+            plans > 50,
+            "only {plans} corpus plans lowered for row limit {rows_per_table}"
+        );
     }
-    assert!(plans > 50, "only {plans} corpus plans lowered");
 }
 
 /// Compared constants, each with the class the generator reads from it.

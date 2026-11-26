@@ -1,6 +1,6 @@
-//! Typed, bounded algebra. The shape encoding excludes parameter values and variable names,
-//! but includes every property of a parameter that the generator reads (its [`ConstantClass`])
-//! and the [`GenerationMode`], so the plan hash names exactly one program.
+//! Typed, bounded algebra. The shape encoding includes parameter [`ConstantClass`] and
+//! [`GenerationMode`] and omits parameter values and variable names. Generated programs
+//! are identified by the plan hash together with the exact public row limit.
 
 use crate::capacity::{Bounds, Capacity, OpeningProfile};
 use oxrdf::Term;
@@ -93,8 +93,8 @@ pub(crate) fn class_byte(parameters: &[Parameter], p: ParameterId) -> u8 {
     }
 }
 
-/// Which program the generator emits for a plan. Each mode hashes differently, so one
-/// hash never names two programs. Production preparation uses `CanonicalEnvelope`.
+/// Which program the generator emits for a plan. Each mode contributes a distinct
+/// tag to the plan hash. Production preparation uses `CanonicalEnvelope`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GenerationMode {
     /// Operator relation over supplied cells; authenticates nothing.
@@ -328,6 +328,8 @@ impl Plan {
     /// constant an expression reads are encoded; parameter values are not, and neither are
     /// the classes of public list members or pattern constants, which the generator never
     /// reads.
+    /// Row capacities are encoded as buckets. The exact public row limit is supplied
+    /// separately by [`Self::bounds`].
     pub fn canonical_bytes_for(&self, mode: GenerationMode) -> Vec<u8> {
         let mut w = Encoding(b"sparq.noir-query.plan\0\x05".to_vec(), &self.parameters);
         w.u8(mode as u8);
@@ -444,11 +446,29 @@ impl Plan {
     }
 
     /// The plan hash in production (canonical envelope) mode.
+    ///
+    /// Include `bounds().rows_per_table` when caching generated files. Different exact
+    /// limits can share a capacity bucket and plan hash and generate different row checks.
+    ///
+    /// ```
+    /// use sparq_zk_query::{capacity::Bounds, codegen::generate, lower::lower, plan::Plan};
+    ///
+    /// let plan = |rows_per_table| {
+    ///     let bounds = Bounds { credentials: 1, quads_per_credential: 8, rows_per_table };
+    ///     lower("ASK { ?s <urn:p> ?o }", bounds).unwrap()
+    /// };
+    /// let (three, four) = (plan(3), plan(4));
+    /// assert_eq!(three.hash(), four.hash());
+    /// let cache_key = |p: &Plan| (p.hash(), p.bounds().rows_per_table);
+    /// assert_ne!(cache_key(&three), cache_key(&four));
+    /// assert_ne!(generate(&three).unwrap().files, generate(&four).unwrap().files);
+    /// ```
     pub fn hash(&self) -> [u8; 32] {
         self.hash_for(GenerationMode::CanonicalEnvelope)
     }
 
-    /// The hash that names the program generated in `mode`.
+    /// The plan hash in `mode`. Pair it with `bounds().rows_per_table` for the
+    /// generated program's identity, as in [`Self::hash`].
     pub fn hash_for(&self, mode: GenerationMode) -> [u8; 32] {
         *blake3::hash(&self.canonical_bytes_for(mode)).as_bytes()
     }

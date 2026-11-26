@@ -148,6 +148,17 @@ class MapValidityTests(unittest.TestCase):
             for c in e.get("crates", []) or []:
                 self.assertIn(c, members, f"map references unknown crate {c!r}")
 
+    def test_query_catalogue_change_is_attributed_to_both_readers(self):
+        entries = _real_map_entries()
+        self.assertEqual(
+            cs.apply_ownership_map("js/zk-query/assets/catalogue.json", entries),
+            ("crates", ["sparq-zk-query", "sparq-zk-query-wasm"]),
+        )
+        self.assertEqual(
+            cs.apply_ownership_map("js/zk-query/index.js", entries),
+            ("crates", ["sparq-zk-query-wasm"]),
+        )
+
 
 class TriggerMirrorTests(unittest.TestCase):
     """The informational [triggers] table must not drift from _FULL_TRIGGERS."""

@@ -16,6 +16,20 @@ sys.modules[spec.name] = gate
 spec.loader.exec_module(gate)
 
 
+class QueryPrivacyDocs(unittest.TestCase):
+    def test_native_readme_keeps_answer_and_row_bound_disclosures(self):
+        readme = ROOT / "crates/sparq-zk-query/README.md"
+        paragraphs = readme.read_text().split("\n\n")
+        policy = next((p for p in paragraphs if "`Compiler::with_bucket_policy`" in p), "")
+        self.assertIn(
+            "Successive answers can reveal additional information even with one approved bucket vector",
+            " ".join(policy.split()),
+        )
+        target = "../../skills/zk-query-proofs/references/query-method-contracts.md"
+        self.assertIn(f"]({target}#holder-row-bucket-policy)", policy)
+        self.assertIn("### Holder row bucket policy", (readme.parent / target).read_text().splitlines())
+
+
 class QueryProfiles(unittest.TestCase):
     def test_hosted_keeps_agreement_authentication_and_native_verification(self):
         required = {

@@ -105,9 +105,10 @@ fixtures; authenticated altered-witness controls run separately.
 `SPARQ_NOIR_QUERY_EVIDENCE`, unset by default, accepts an external JSONL output path
 for native proof-test plans and measurements. Keep the output outside the repository.
 
-A complete answer is relative to the opened dataset. Without a verifier-agreed
-commitment the holder chooses that dataset. `Compiler::with_bucket_policy` replaces
-the default Node catalogue allow-list. A row policy miss returns `Error::RowBucketsNotAllowed` before proving.
+A complete answer covers the opened dataset, which the holder chooses in the absence of a verifier-agreed commitment.
+`Compiler::with_bucket_policy` replaces the Node catalogue default. A policy miss returns `Error::RowBucketsNotAllowed` before proving.
+Successive answers can reveal additional information even with one approved bucket vector.
+The method contract describes what [public row bounds disclose](../../skills/zk-query-proofs/references/query-method-contracts.md#holder-row-bucket-policy).
 
 ## 📚 Architecture
 
